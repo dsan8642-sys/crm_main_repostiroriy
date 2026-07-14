@@ -13,7 +13,10 @@ function Add-BlockedPath {
         [string]$Path,
         [string]$Reason
     )
-    $relative = [System.IO.Path]::GetRelativePath($RepoRoot, $Path)
+    $rootWithSlash = $RepoRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $rootUri = [System.Uri]::new($rootWithSlash)
+    $pathUri = [System.Uri]::new($Path)
+    $relative = [System.Uri]::UnescapeDataString($rootUri.MakeRelativeUri($pathUri).ToString()).Replace("/", [System.IO.Path]::DirectorySeparatorChar)
     $blocked.Add("$relative ($Reason)")
 }
 
@@ -87,4 +90,3 @@ if ($blocked.Count -gt 0) {
 }
 
 Write-Host "Release tree artifact scan passed."
-

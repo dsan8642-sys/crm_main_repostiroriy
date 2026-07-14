@@ -1,7 +1,8 @@
 from .support import *
 from .admin_support import _admin_required
 from notifications.models import (DeliveryStatus, EventType, NotificationLog,
-                                  NotificationRule, NotificationTemplate)
+                                  NotificationRule, NotificationTemplate,
+                                  SUPPORTED_NOTIFICATION_CHANNELS)
 from notifications.services import deliver, deliver_pending
 
 
@@ -56,7 +57,7 @@ def _apply_template_data(template, data):
             setattr(template, field, data.get(field, "") or "")
     if template.event_type not in EventType.values:
         raise ValidationError("invalid event_type")
-    if template.channel not in Channel.values:
+    if template.channel not in SUPPORTED_NOTIFICATION_CHANNELS:
         raise ValidationError("invalid channel")
     if not template.body:
         raise ValidationError("body is required")
@@ -81,7 +82,7 @@ def _apply_rule_data(rule, data):
         rule.is_active = _bool_value(data.get("is_active"), True)
     if rule.event_type not in EventType.values:
         raise ValidationError("invalid event_type")
-    if rule.channel not in Channel.values:
+    if rule.channel not in SUPPORTED_NOTIFICATION_CHANNELS:
         raise ValidationError("invalid channel")
     if not rule.template_id:
         raise ValidationError("template_id is required")
@@ -191,7 +192,7 @@ def admin_mass_mail(request):
     if client_ids is None:
         client_ids = data.get("parent_ids") or []
     channel = data.get("channel")
-    if channel not in Channel.values:
+    if channel not in SUPPORTED_NOTIFICATION_CHANNELS:
         raise ValidationError("invalid mailing channel")
     if not data.get("body"):
         raise ValidationError("body is required")

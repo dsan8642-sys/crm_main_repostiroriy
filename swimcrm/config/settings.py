@@ -7,6 +7,7 @@ production (set DATABASE_URL or the POSTGRES_* env vars) and is required for the
 trainer double-booking exclusion constraint (see scheduling migration).
 """
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -112,10 +113,11 @@ if os.environ.get("POSTGRES_DB"):
         }
     }
 else:
+    sqlite_name = ":memory:" if "test" in sys.argv else BASE_DIR / "db.sqlite3"
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": sqlite_name,
         }
     }
 

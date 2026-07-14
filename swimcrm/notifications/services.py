@@ -16,7 +16,8 @@ from subscriptions.models import Subscription, SubscriptionStatus
 
 from .backends import BACKENDS, DeliveryError
 from .models import (Channel, DeliveryStatus, EventType, NotificationLog,
-                     NotificationRule, NotificationTemplate)
+                     NotificationRule, NotificationTemplate,
+                     SUPPORTED_NOTIFICATION_CHANNELS)
 
 MAX_RETRIES = 3
 
@@ -30,9 +31,9 @@ CONSENT_FOR_CHANNEL = {
 def channel_allowed(parent, channel) -> bool:
     """RODO: Email & SMS require an active consent. Telegram requires an active
     consent OR an implicit opt-in (chat_id present and not explicitly revoked)."""
+    if channel not in SUPPORTED_NOTIFICATION_CHANNELS:
+        return False
     ctype = CONSENT_FOR_CHANNEL.get(channel)
-    if ctype is None:
-        return True  # push handled elsewhere
     consent = parent.consents.filter(type=ctype).first()
     if channel == Channel.TELEGRAM:
         revoked = consent is not None and not consent.is_active
@@ -127,7 +128,14 @@ def enqueue(*, parent, event_type, channel, template, context, dedup_key):
 
 
 def deliver(log: NotificationLog, template: NotificationTemplate):
-    backend = BACKENDS[log.channel]
+    backend = BACKENDS.get(log.channel)
+    if backend is None:
+        log.retries += 1
+        log.error = f"Unsupported notification channel: {log.channel}"
+        log.status = DeliveryStatus.FAILED
+        log.last_attempt_at = timezone.now()
+        log.save(update_fields=["status", "last_attempt_at", "error", "retries"])
+        return log
     if log.event_type == EventType.MASS_MAILING and "body" in log.payload:
         subject = log.payload.get("subject", "")
         body = log.payload["body"]

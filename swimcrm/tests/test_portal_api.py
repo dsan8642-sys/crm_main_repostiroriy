@@ -989,6 +989,11 @@ class AdminPortalApiRule(TestCase):
             data=json.dumps({"channel": "paper-plane", "body": "hello"}),
             content_type="application/json",
         )
+        unsupported_channel = self.client.post(
+            "/api/admin/notifications/mass-mail/",
+            data=json.dumps({"channel": "push", "body": "hello"}),
+            content_type="application/json",
+        )
         missing_body = self.client.post(
             "/api/admin/notifications/mass-mail/",
             data=json.dumps({"channel": Channel.EMAIL}),
@@ -996,7 +1001,39 @@ class AdminPortalApiRule(TestCase):
         )
 
         self.assertEqual(bad_channel.status_code, 400)
+        self.assertEqual(unsupported_channel.status_code, 400)
         self.assertEqual(missing_body.status_code, 400)
+
+    def test_admin_notification_config_rejects_unsupported_push_channel(self):
+        template = self.client.post(
+            "/api/admin/notifications/templates/",
+            data=json.dumps({
+                "event_type": EventType.PAYMENT_REMINDER,
+                "channel": "push",
+                "subject": "Payment",
+                "body": "Pay now",
+            }),
+            content_type="application/json",
+        )
+        valid_template = NotificationTemplate.objects.create(
+            event_type=EventType.PAYMENT_REMINDER,
+            channel=Channel.EMAIL,
+            subject="Payment",
+            body="Pay now",
+        )
+        rule = self.client.post(
+            "/api/admin/notifications/rules/",
+            data=json.dumps({
+                "event_type": EventType.PAYMENT_REMINDER,
+                "channel": "push",
+                "template_id": valid_template.id,
+                "offset_minutes": 0,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(template.status_code, 400)
+        self.assertEqual(rule.status_code, 400)
 
     def test_admin_debtors_endpoint_exposes_debt_reason(self):
         response = self.client.get("/api/admin/debtors/")

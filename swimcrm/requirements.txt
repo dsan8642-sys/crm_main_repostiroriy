@@ -7,3 +7,5 @@ redis>=5.0
 django-axes>=8,<9           # lockout after repeated failed logins (brute-force)
 # --- reports / import-export (Phase 2, module 5.9/5.10) ---
 openpyxl>=3.1
+Pillow>=10.0
+python-pptx>=0.6.23

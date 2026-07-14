@@ -24,7 +24,9 @@ class Channel(models.TextChoices):
     EMAIL = "email", "Email"
     TELEGRAM = "telegram", "Telegram"
     SMS = "sms", "SMS"
-    PUSH = "push", "Push"
+
+
+SUPPORTED_NOTIFICATION_CHANNELS = frozenset(Channel.values)
 
 
 class NotificationTemplate(models.Model):

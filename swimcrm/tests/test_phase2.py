@@ -233,6 +233,23 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(log.status, DeliveryStatus.FAILED)
         self.assertEqual(log.retries, 3)
 
+    def test_unsupported_legacy_channel_is_failed_without_crashing_delivery(self):
+        parent = f.make_parent()
+        log = NotificationLog.objects.create(
+            recipient=parent,
+            event_type=EventType.MASS_MAILING,
+            channel="push",
+            status=DeliveryStatus.QUEUED,
+            payload={"body": "hello"},
+        )
+
+        result = deliver_pending()
+        log.refresh_from_db()
+
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(log.status, DeliveryStatus.FAILED)
+        self.assertIn("Unsupported notification channel", log.error)
+
     def test_sms_channel_gated_by_sms_consent(self):
         parent = f.make_parent(); parent.phone = "+48500"; parent.save()
         # only email consent -> sms not allowed

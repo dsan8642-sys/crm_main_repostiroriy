@@ -96,13 +96,6 @@ class SmsBackend(BaseBackend):
         return {"provider_message_id": str(message_id), "raw": response}
 
 
-class PushBackend(BaseBackend):
-    channel = Channel.PUSH
-
-    def send(self, *, parent, subject, body):
-        raise DeliveryError("push channel is not implemented")
-
-
 def _post_json(url, payload, headers=None):
     req = request.Request(
         url,
@@ -129,5 +122,4 @@ BACKENDS = {
     Channel.EMAIL: EmailBackend(),
     Channel.TELEGRAM: TelegramBackend(),
     Channel.SMS: SmsBackend(),
-    Channel.PUSH: PushBackend(),
 }
