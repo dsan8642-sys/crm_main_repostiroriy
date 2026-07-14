@@ -105,11 +105,11 @@ exclusion-constraint против гонок в расписании.
     python manage.py purge_receipts      # авто-удаление чеков (правило 10, ночью)
 
 Экспорт/импорт и отчёты вызываются из кода (`analytics.reports`, `dataio.exports`,
-`dataio.importer`) — готовы к тому, чтобы навесить админ-экшены или REST-эндпоинты.
+`dataio.importer`) и доступны через админ/API-контуры, покрытые общим backend suite.
 
-## Остаётся на Фазу 3 (раздел 9 ТЗ)
+## Production-настройки
 
 - Продакшн-ключи Telegram-бота и SMS-провайдера задаются через env; SMS-канал уже подчиняется правилам 5.6 (без диакритиков, < 160 символов).
-- Массовые рассылки (5.7) — сегментация получателей и персонализация поверх этого движка.
-- Запуск планировщика/очередей на Celery+Redis (BullMQ) — команды готовы к постановке в beat.
-- SPA-порталы и REST/GraphQL API поверх готового сервисного слоя.
+- Массовые рассылки (5.7) поддерживают сегментацию получателей и персонализацию поверх notification engine.
+- Планировщик/очереди запускаются через Celery/Redis или cron по инструкциям `docs/OPERATIONS.md`.
+- Перед выкладкой запускаются `scripts\release-check-backend.cmd -Postgres`, `npm.cmd run test:smoke`, `scripts\check-production-env.cmd` и backup/restore drill.

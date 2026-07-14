@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.util import Inches, Pt
 
 
@@ -203,8 +203,11 @@ def create_visuals():
         for y, txt in [(520, "17:00  Группа A  |  Pool 1"), (585, "18:00  Индивидуально  |  Coach Anna"), (650, "19:00  Группа B  |  Pool 2")]:
             draw_round_rect(draw, (925, y, 1415, y + 44), 12, (255, 255, 255), (216, 226, 232), 1)
             draw.text((950, y + 10), txt, font=small, fill=(25, 38, 52))
-        draw.text((100, 180), "SwimCRM", font=title, fill=(0, 91, 106))
-        draw_text_box(draw, (105, 260), "Единая система для управления школой плавания: клиенты, расписание, абонементы, оплаты и коммуникации.", body, (73, 84, 97), 620)
+        draw_round_rect(draw, (100, 170, 690, 610), 32, (226, 247, 250), None)
+        draw.arc((155, 245, 355, 445), 200, 340, fill=(0, 129, 146), width=14)
+        draw.arc((285, 310, 535, 560), 200, 340, fill=(54, 113, 222), width=14)
+        draw.ellipse((185, 365, 230, 410), fill=(0, 129, 146))
+        draw.ellipse((445, 465, 490, 510), fill=(54, 113, 222))
 
     def about(draw):
         roles = [("Админ", "управляет клиентами, оплатами и расписанием"), ("Тренер", "видит занятия и отмечает посещаемость"), ("Родитель", "контролирует абонемент и платежи")]
@@ -325,6 +328,8 @@ def add_textbox(slide, left, top, width, height, text, size=18, color=BODY, bold
     frame.margin_top = Inches(0.02)
     frame.margin_bottom = Inches(0.02)
     frame.vertical_anchor = MSO_ANCHOR.TOP
+    frame.word_wrap = True
+    frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     paragraph = frame.paragraphs[0]
     paragraph.text = text
     if align:
@@ -351,8 +356,8 @@ def add_card(slide, left, top, width, height, title, body, fill=TEAL_SOFT):
     shape.fill.solid()
     shape.fill.fore_color.rgb = fill
     shape.line.color.rgb = LINE
-    add_textbox(slide, left + Inches(0.22), top + Inches(0.18), width - Inches(0.44), Inches(0.35), title, 15, NAVY, True)
-    add_textbox(slide, left + Inches(0.22), top + Inches(0.62), width - Inches(0.44), height - Inches(0.75), body, 11, BODY)
+    add_textbox(slide, left + Inches(0.24), top + Inches(0.16), width - Inches(0.48), Inches(0.32), title, 13, NAVY, True)
+    add_textbox(slide, left + Inches(0.24), top + Inches(0.54), width - Inches(0.48), height - Inches(0.66), body, 9, BODY)
 
 
 def add_bullets(slide, left, top, width, items, size=15):
@@ -362,8 +367,8 @@ def add_bullets(slide, left, top, width, items, size=15):
         dot.fill.solid()
         dot.fill.fore_color.rgb = TEAL
         dot.line.fill.background()
-        add_textbox(slide, left + Inches(0.25), y, width - Inches(0.25), Inches(0.58), item, size, BODY)
-        y += Inches(0.68)
+        add_textbox(slide, left + Inches(0.25), y, width - Inches(0.25), Inches(0.72), item, size, BODY)
+        y += Inches(0.88)
 
 
 def build_deck(visuals):
@@ -386,16 +391,16 @@ def build_deck(visuals):
         add_header(slide, idx, data["title"])
 
         if data.get("image"):
-            slide.shapes.add_picture(str(visuals[data["image"]]), Inches(6.75), Inches(1.25), Inches(5.85), Inches(3.30))
+            slide.shapes.add_picture(str(visuals[data["image"]]), Inches(6.85), Inches(1.18), Inches(5.55), Inches(3.12))
 
         if "body" in data:
-            add_bullets(slide, Inches(0.80), Inches(1.35), Inches(5.45), data["body"], 14)
+            add_bullets(slide, Inches(0.80), Inches(1.25), Inches(5.55), data["body"], 12)
         if "cards" in data:
             fills = [TEAL_SOFT, BLUE_SOFT, GREEN_SOFT, AMBER_SOFT]
             for card_idx, (card_title, card_body) in enumerate(data["cards"]):
-                left = Inches(0.75 + (card_idx % 2) * 2.95)
-                top = Inches(1.35 + (card_idx // 2) * 1.45)
-                add_card(slide, left, top, Inches(2.62), Inches(1.18), card_title, card_body, fills[card_idx % len(fills)])
+                left = Inches(0.75)
+                top = Inches(1.18 + card_idx * 1.25)
+                add_card(slide, left, top, Inches(5.55), Inches(1.03), card_title, card_body, fills[card_idx % len(fills)])
 
         footer = add_textbox(slide, Inches(0.70), Inches(6.93), Inches(3.2), Inches(0.25), "SwimCRM | client presentation", 8, MUTED)
         footer.text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
