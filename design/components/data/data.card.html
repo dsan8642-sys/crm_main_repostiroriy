@@ -1,0 +1,79 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Data display" subtitle="Table, status pills, money, badges & avatars" -->
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  body { margin: 0; padding: 18px; background: var(--surface-card); }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .lbl { font-size: var(--fs-2xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 7px; }
+  .sep { height: 1px; background: var(--border-subtle); margin: 6px 0 16px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel" data-presets="react">
+const { Table, StatusPill, Money, Badge, Avatar } = window.SwimCRMDesignSystem_546643;
+const rows = [
+  { id: 1, name: 'Zofia Kowalska', group: 'Delfiny', bal: -240, st: 'active' },
+  { id: 2, name: 'Jan Nowak', group: 'Rekiny', bal: 0, st: 'active' },
+  { id: 3, name: 'Lena Wiśniewska', group: 'Foki', bal: 80, st: 'frozen' },
+];
+function Demo() {
+  const [sel, setSel] = React.useState([1]);
+  return (
+    <div>
+      <div className="row" style={{gap:14}}>
+        <div>
+          <p className="lbl">Frekwencja</p>
+          <div className="row">
+            <StatusPill status="present" showConsumes/>
+            <StatusPill status="absent" showConsumes/>
+            <StatusPill status="excused" showConsumes/>
+            <StatusPill status="moved" showConsumes/>
+          </div>
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <p className="lbl">Płatności / abonament</p>
+          <div className="row">
+            <StatusPill status="paid"/><StatusPill status="pending"/><StatusPill status="overdue"/>
+            <StatusPill status="frozen"/><StatusPill status="expired"/>
+          </div>
+        </div>
+      </div>
+      <div className="row" style={{gap:18}}>
+        <span><span className="swim-eyebrow">Saldo&nbsp;</span> <Money amount={-240} signed/></span>
+        <span><span className="swim-eyebrow">Nadpłata&nbsp;</span> <Money amount={80} signed/></span>
+        <span><span className="swim-eyebrow">Cena&nbsp;</span> <Money amount={240}/></span>
+        <Badge tone="danger" dot>3 długi</Badge>
+        <Badge tone="warning">na weryfikacji</Badge>
+        <Badge tone="primary" solid>12</Badge>
+      </div>
+      <div className="sep"></div>
+      <Table
+        columns={[
+          { key: 'name', header: 'Dziecko', render: r => <span style={{display:'inline-flex',alignItems:'center',gap:8}}><Avatar name={r.name} size={26}/> <strong style={{fontWeight:600,color:'var(--text-strong)'}}>{r.name}</strong></span> },
+          { key: 'group', header: 'Grupa', muted: true },
+          { key: 'bal', header: 'Saldo', align: 'right', render: r => <Money amount={r.bal} signed/> },
+          { key: 'st', header: 'Status', render: r => <StatusPill status={r.st} size="sm"/> },
+        ]}
+        rows={rows}
+        selectable
+        selectedIds={sel}
+        onToggleRow={id => setSel(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id])}
+        onToggleAll={() => setSel(s => s.length === rows.length ? [] : rows.map(r=>r.id))}
+      />
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script>
+</body>
+</html>

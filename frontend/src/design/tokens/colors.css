@@ -1,0 +1,134 @@
+/* SwimCRM — Color tokens
+ * A calm "clear water" palette: cool pool blues + deep slate neutrals.
+ * Semantic status colors are load-bearing in a CRM (debt, overdue, on-review,
+ * cancelled) so they are defined explicitly and reused everywhere.
+ */
+:root {
+  /* ---- Base neutral ramp (cool slate) ---- */
+  --slate-50:  #f6f8fa;
+  --slate-100: #eef1f5;
+  --slate-200: #e0e5ec;
+  --slate-300: #cbd3dd;
+  --slate-400: #9aa6b4;
+  --slate-500: #6b7787;
+  --slate-600: #4d5967;
+  --slate-700: #3a444f;
+  --slate-800: #27303a;
+  --slate-900: #1a2129;
+  --white:     #ffffff;
+
+  /* ---- Primary: pool blue ---- */
+  --blue-50:   #eef6fd;
+  --blue-100:  #d6ecfb;
+  --blue-200:  #aed7f5;
+  --blue-300:  #78bdec;
+  --blue-400:  #3f9bdd;
+  --blue-500:  #1a7dc4;   /* primary */
+  --blue-600:  #1364a3;
+  --blue-700:  #0f5285;
+  --blue-800:  #0e4269;
+
+  /* ---- Accent: lane teal ---- */
+  --teal-50:   #e8f8f6;
+  --teal-100:  #c7efe9;
+  --teal-300:  #6fd4c7;
+  --teal-500:  #17a597;
+  --teal-600:  #0f867a;
+
+  /* ---- Semantic families ---- */
+  --green-50:  #e9f7ee;
+  --green-100: #cdecd7;
+  --green-500: #1f9d55;
+  --green-600: #178245;
+  --green-700: #116a38;
+
+  --amber-50:  #fdf4e3;
+  --amber-100: #f9e6bd;
+  --amber-500: #cf8a12;
+  --amber-600: #a86e08;
+  --amber-700: #855708;
+
+  --red-50:    #fdeeed;
+  --red-100:   #f9d5d2;
+  --red-500:   #d63f36;
+  --red-600:   #b62d25;
+  --red-700:   #93231d;
+
+  --violet-50: #f2eefb;
+  --violet-100:#e0d5f6;
+  --violet-500:#7a4fc4;
+  --violet-600:#6238a8;
+
+  /* =========================================================
+     SEMANTIC ALIASES — reference these in components, not raw ramps
+     ========================================================= */
+
+  /* Text */
+  --text-strong:   var(--slate-900);
+  --text-body:     var(--slate-700);
+  --text-muted:    var(--slate-500);
+  --text-faint:    var(--slate-400);
+  --text-on-solid: var(--white);
+  --text-link:     var(--blue-600);
+
+  /* Surfaces */
+  --surface-page:    var(--slate-50);
+  --surface-card:    var(--white);
+  --surface-sunken:  var(--slate-100);
+  --surface-hover:   var(--slate-100);
+  --surface-active:  var(--slate-200);
+  --surface-inverse: var(--slate-900);
+
+  /* Borders */
+  --border-subtle:  var(--slate-200);
+  --border-default: var(--slate-300);
+  --border-strong:  var(--slate-400);
+  --border-focus:   var(--blue-500);
+
+  /* Brand / primary action */
+  --primary:        var(--blue-500);
+  --primary-hover:  var(--blue-600);
+  --primary-active: var(--blue-700);
+  --primary-soft:   var(--blue-50);
+  --primary-soft-border: var(--blue-200);
+  --accent:         var(--teal-500);
+
+  /* Focus ring */
+  --ring: 0 0 0 3px rgba(26, 125, 196, 0.28);
+
+  /* ---- Status: attendance ---- */
+  --status-present-fg:  var(--green-700);
+  --status-present-bg:  var(--green-50);
+  --status-present-bd:  var(--green-100);
+  --status-absent-fg:   var(--red-700);
+  --status-absent-bg:   var(--red-50);
+  --status-absent-bd:   var(--red-100);
+  --status-excused-fg:  var(--amber-700);
+  --status-excused-bg:  var(--amber-50);
+  --status-excused-bd:  var(--amber-100);
+  --status-moved-fg:    var(--violet-600);
+  --status-moved-bg:    var(--violet-50);
+  --status-moved-bd:    var(--violet-100);
+
+  /* ---- Status: money / general ---- */
+  --status-paid-fg:     var(--green-700);
+  --status-paid-bg:     var(--green-50);
+  --status-paid-bd:     var(--green-100);
+  --status-pending-fg:  var(--amber-700);
+  --status-pending-bg:  var(--amber-50);
+  --status-pending-bd:  var(--amber-100);
+  --status-overdue-fg:  var(--red-700);
+  --status-overdue-bg:  var(--red-50);
+  --status-overdue-bd:  var(--red-100);
+  --status-neutral-fg:  var(--slate-600);
+  --status-neutral-bg:  var(--slate-100);
+  --status-neutral-bd:  var(--slate-200);
+  --status-info-fg:     var(--blue-700);
+  --status-info-bg:     var(--blue-50);
+  --status-info-bd:     var(--blue-100);
+
+  /* Money semantics */
+  --money-debt:    var(--red-600);
+  --money-credit:  var(--green-600);
+  --money-zero:    var(--slate-500);
+}

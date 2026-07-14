@@ -1,0 +1,26 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Status — money & lifecycle" subtitle="Payment, subscription and session states" -->
+<!DOCTYPE html>
+<html lang="pl"><head><meta charset="utf-8"/><link rel="stylesheet" href="../styles.css"/>
+<style>
+  body{margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans);}
+  .row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+  .pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;}
+  .dot{width:6px;height:6px;border-radius:50%;}
+  .lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);margin:0 0 8px;}
+</style></head>
+<body>
+  <p class="lbl">Płatności / naliczenia</p>
+  <div class="row">
+    <span class="pill" style="background:var(--status-paid-bg);color:var(--status-paid-fg);border:1px solid var(--status-paid-bd)"><span class="dot" style="background:var(--status-paid-fg)"></span>Zapłacone</span>
+    <span class="pill" style="background:var(--status-pending-bg);color:var(--status-pending-fg);border:1px solid var(--status-pending-bd)"><span class="dot" style="background:var(--status-pending-fg)"></span>Na weryfikacji</span>
+    <span class="pill" style="background:var(--status-overdue-bg);color:var(--status-overdue-fg);border:1px solid var(--status-overdue-bd)"><span class="dot" style="background:var(--status-overdue-fg)"></span>Po terminie</span>
+    <span class="pill" style="background:var(--status-overdue-bg);color:var(--status-overdue-fg);border:1px solid var(--status-overdue-bd)"><span class="dot" style="background:var(--status-overdue-fg)"></span>Odrzucone</span>
+  </div>
+  <p class="lbl">Abonament / zajęcie</p>
+  <div class="row">
+    <span class="pill" style="background:var(--status-paid-bg);color:var(--status-paid-fg);border:1px solid var(--status-paid-bd)"><span class="dot" style="background:var(--status-paid-fg)"></span>Aktywny</span>
+    <span class="pill" style="background:var(--status-info-bg);color:var(--status-info-fg);border:1px solid var(--status-info-bd)"><span class="dot" style="background:var(--status-info-fg)"></span>Zamrożony</span>
+    <span class="pill" style="background:var(--status-overdue-bg);color:var(--status-overdue-fg);border:1px solid var(--status-overdue-bd)"><span class="dot" style="background:var(--status-overdue-fg)"></span>Wygasł</span>
+    <span class="pill" style="background:var(--status-neutral-bg);color:var(--status-neutral-fg);border:1px solid var(--status-neutral-bd)"><span class="dot" style="background:var(--status-neutral-fg)"></span>Anulowane</span>
+  </div>
+</body></html>

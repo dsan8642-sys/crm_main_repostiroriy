@@ -1,0 +1,55 @@
+<!-- @dsCard group="Parent" viewport="1100x760" name="Parent — SwimCRM" subtitle="Parent view: children, schedule, subscription ledger, payments + receipt upload, consents" -->
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SwimCRM · Rodzic</title>
+<link rel="stylesheet" href="../../styles.css" />
+<link rel="stylesheet" href="../shared/kit.css" />
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel" data-presets="react" src="../../assets/icons.jsx"></script>
+<script type="text/babel" data-presets="react" src="./data.jsx"></script>
+<script type="text/babel" data-presets="react" src="./screens.jsx"></script>
+<script type="text/babel" data-presets="react">
+const { SidebarNav, Avatar, IconButton } = window.SwimCRMDesignSystem_546643;
+const I = window.SwimIcons;
+const S = window.ParentScreens;
+const TITLE = { home: 'Główna', schedule: 'Rozkład', subscription: 'Abonament', payments: 'Płatności', consents: 'Zgody' };
+
+function App() {
+  const [view, setView] = React.useState('home');
+  const [kid, setKid] = React.useState('k1');
+  const NAV = [
+    { key: 'home', label: 'Główna', icon: <I.Home size={17} />, section: '' },
+    { key: 'schedule', label: 'Rozkład', icon: <I.Calendar size={17} />, section: '' },
+    { key: 'subscription', label: 'Abonament', icon: <I.Layers size={17} />, section: '' },
+    { key: 'payments', label: 'Płatności', icon: <I.Wallet size={17} />, count: 2, section: '' },
+    { key: 'consents', label: 'Zgody', icon: <I.Shield size={17} />, section: '' },
+  ];
+  const Screen = S[view.charAt(0).toUpperCase() + view.slice(1)];
+  return (
+    <div className="app">
+      <SidebarNav items={NAV} active={view} onSelect={setView} brand="H2O" product="SwimCRM" roleLabel="Rodzic"
+        footer={<div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <Avatar name="Ewa Kowalska" size={30} kind="p" />
+          <div style={{ flex: 1, minWidth: 0, lineHeight: 1.2 }}><div className="strong" style={{ fontSize: 'var(--fs-xs)' }}>Ewa Kowalska</div><div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>2 dzieci</div></div>
+          <IconButton label="Wyloguj"><I.Logout size={16} /></IconButton>
+        </div>} />
+      <div className="main">
+        <header className="topbar"><h1>{TITLE[view]}</h1><span className="spacer" /><IconButton label="Powiadomienia"><I.Bell size={18} /></IconButton></header>
+        <div className="scroll"><Screen kid={kid} setKid={setKid} go={setView} /></div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

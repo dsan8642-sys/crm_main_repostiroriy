@@ -1,0 +1,41 @@
+/* SwimCRM — Spacing & layout tokens
+ * 4px base grid. Compact defaults for data-dense screens.
+ */
+:root {
+  --space-0:  0;
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  20px;
+  --space-8:  24px;
+  --space-9:  32px;
+  --space-10: 40px;
+  --space-11: 48px;
+  --space-12: 64px;
+
+  /* Component sizing */
+  --control-h-sm: 28px;
+  --control-h-md: 34px;   /* default input/button height */
+  --control-h-lg: 40px;
+
+  --row-h-compact: 40px;  /* dense table row */
+  --row-h-default: 48px;
+
+  --sidebar-w: 232px;
+  --topbar-h:  56px;
+
+  /* Container widths */
+  --content-max: 1200px;
+
+  /* Radii */
+  --radius-xs:  3px;
+  --radius-sm:  5px;
+  --radius-md:  7px;   /* default: cards, inputs, buttons */
+  --radius-lg:  10px;
+  --radius-xl:  14px;
+  --radius-pill: 999px;
+  --radius-full: 50%;
+}

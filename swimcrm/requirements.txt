@@ -1,0 +1,9 @@
+Django>=5.0,<5.2
+psycopg[binary]>=3.1        # PostgreSQL driver (production)
+# --- background tasks (wire in Phase 2/3) ---
+celery>=5.3
+redis>=5.0
+# --- security hardening (section 6) ---
+django-axes>=8,<9           # lockout after repeated failed logins (brute-force)
+# --- reports / import-export (Phase 2, module 5.9/5.10) ---
+openpyxl>=3.1

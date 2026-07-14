@@ -1,0 +1,43 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Feedback" subtitle="Banners, dialog, toasts & empty states" -->
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  body { margin: 0; padding: 18px; background: var(--surface-page); }
+  .col { display: flex; flex-direction: column; gap: 10px; }
+  .split { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; align-items: start; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel" data-presets="react">
+const { Banner, Toast, EmptyState, Button } = window.SwimCRMDesignSystem_546643;
+const Cal = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.8"/><path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
+function Demo() {
+  return (
+    <div className="split">
+      <div className="col">
+        <Banner tone="warning" title="Konflikt w grafiku">Trener Marek ma już zajęcia o 17:00 w tym dniu.</Banner>
+        <Banner tone="danger" title="Płatność odrzucona" onClose={()=>{}}>Kwota na czeku nie zgadza się z naliczeniem.</Banner>
+        <Banner tone="success">Zmiany zostały zapisane.</Banner>
+        <Banner tone="info">Płatność oczekuje na weryfikację administratora.</Banner>
+        <div style={{display:'flex',gap:10,marginTop:2}}>
+          <Toast tone="success" title="Zapisano" onClose={()=>{}} />
+        </div>
+      </div>
+      <div style={{background:'var(--surface-card)',border:'1px solid var(--border-subtle)',borderRadius:'var(--radius-lg)'}}>
+        <EmptyState icon={<Cal/>} title="Brak zajęć w tym dniu" description="Wygeneruj zajęcia z szablonu grafiku, aby zobaczyć je tutaj." action={<Button variant="subtle">Nowy szablon</Button>} />
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+/* SwimCRM — base element defaults & small utilities.
+ * Light-touch reset so specimen cards, components and kits share a baseline.
+ */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: var(--text-body-font);
+  color: var(--text-body);
+  background: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular numerals everywhere numbers live */
+.swim-tnum, table { font-variant-numeric: tabular-nums; }
+
+/* Money / numeric mono helper */
+.swim-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Uppercase eyebrow label */
+.swim-eyebrow {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+::selection { background: var(--blue-100); }
+
+/* ---- Component interaction states ----
+ * Components render inline styles for their base look and emit stable class
+ * names so hover/active/focus (which inline styles can't express) live here.
+ */
+@keyframes swim-spin { to { transform: rotate(360deg); } }
+@keyframes swim-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes swim-pop { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes swim-toast { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.swim-btn { position: relative; }
+.swim-btn--primary:not(:disabled):hover   { background: var(--primary-hover) !important; border-color: var(--primary-hover) !important; }
+.swim-btn--primary:not(:disabled):active  { background: var(--primary-active) !important; border-color: var(--primary-active) !important; }
+.swim-btn--secondary:not(:disabled):hover { background: var(--surface-hover) !important; border-color: var(--border-strong) !important; }
+.swim-btn--secondary:not(:disabled):active{ background: var(--surface-active) !important; }
+.swim-btn--ghost:not(:disabled):hover     { background: var(--surface-hover) !important; }
+.swim-btn--ghost:not(:disabled):active    { background: var(--surface-active) !important; }
+.swim-btn--subtle:not(:disabled):hover    { background: var(--blue-100) !important; }
+.swim-btn--danger:not(:disabled):hover    { background: var(--red-600) !important; border-color: var(--red-600) !important; }
+.swim-btn--danger:not(:disabled):active   { background: var(--red-700) !important; border-color: var(--red-700) !important; }
+.swim-btn:focus-visible { box-shadow: var(--ring) !important; }
+
+.swim-iconbtn:not(:disabled):hover  { background: var(--surface-hover) !important; color: var(--text-body) !important; }
+.swim-iconbtn:not(:disabled):active { background: var(--surface-active) !important; }
+.swim-iconbtn.is-danger:not(:disabled):hover { background: var(--red-50) !important; color: var(--red-600) !important; }
+
+/* Inputs */
+.swim-input:hover:not(:disabled),
+.swim-textarea:hover:not(:disabled),
+.swim-select:hover:not(:disabled) { border-color: var(--border-strong) !important; }
+.swim-input:focus,
+.swim-textarea:focus,
+.swim-select:focus { border-color: var(--border-focus) !important; box-shadow: var(--ring) !important; outline: none; }
+.swim-input::placeholder, .swim-textarea::placeholder { color: var(--text-faint); }
+
+/* Table rows */
+.swim-tr-hover:hover { background: var(--surface-hover) !important; }
+
+/* Nav items */
+.swim-nav-item:hover { background: var(--surface-hover) !important; color: var(--text-strong) !important; }
+.swim-tab:hover { color: var(--text-strong) !important; }
+
+/* Focus-visible baseline for native interactive elements */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-sm);
+}

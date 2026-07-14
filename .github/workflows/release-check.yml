@@ -1,0 +1,60 @@
+name: Release check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  release-check:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify clean source tree
+        shell: pwsh
+        run: .\scripts\verify-release-tree.ps1 -Strict
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        shell: pwsh
+        run: |
+          python -m venv swimcrm\.venv
+          swimcrm\.venv\Scripts\python.exe -m pip install --upgrade pip
+          swimcrm\.venv\Scripts\python.exe -m pip install -r swimcrm\requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Backend release check
+        run: scripts\release-check-backend.cmd
+
+      - name: Frontend audit
+        working-directory: frontend
+        run: npm.cmd audit --audit-level=high
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install chromium
+
+      - name: Frontend build
+        working-directory: frontend
+        run: npm.cmd run build
+
+      - name: Frontend smoke
+        working-directory: frontend
+        run: npm.cmd run test:smoke

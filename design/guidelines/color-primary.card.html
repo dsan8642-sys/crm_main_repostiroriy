@@ -1,0 +1,25 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Primary — pool blue" subtitle="Brand action colour and its ramp" -->
+<!DOCTYPE html>
+<html lang="pl"><head><meta charset="utf-8"/><link rel="stylesheet" href="../styles.css"/>
+<style>
+  body{margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans);}
+  .ramp{display:flex;gap:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border-subtle);}
+  .sw{flex:1;height:64px;display:flex;align-items:flex-end;padding:5px 7px;}
+  .cap{font-size:10px;font-weight:600;color:rgba(255,255,255,.9);font-variant-numeric:tabular-nums;}
+  .cap.dark{color:var(--slate-700);}
+  .meta{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-muted);}
+</style></head>
+<body>
+  <div class="ramp">
+    <div class="sw" style="background:var(--blue-50)"><span class="cap dark">50</span></div>
+    <div class="sw" style="background:var(--blue-100)"><span class="cap dark">100</span></div>
+    <div class="sw" style="background:var(--blue-200)"><span class="cap dark">200</span></div>
+    <div class="sw" style="background:var(--blue-300)"><span class="cap dark">300</span></div>
+    <div class="sw" style="background:var(--blue-400)"><span class="cap">400</span></div>
+    <div class="sw" style="background:var(--blue-500)"><span class="cap">500 ·primary</span></div>
+    <div class="sw" style="background:var(--blue-600)"><span class="cap">600</span></div>
+    <div class="sw" style="background:var(--blue-700)"><span class="cap">700</span></div>
+    <div class="sw" style="background:var(--blue-800)"><span class="cap">800</span></div>
+  </div>
+  <div class="meta"><span>--primary · --blue-500 · #1a7dc4</span><span>hover 600 · active 700 · soft 50</span></div>
+</body></html>

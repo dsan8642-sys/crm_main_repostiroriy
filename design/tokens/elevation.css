@@ -1,0 +1,27 @@
+/* SwimCRM — Elevation, borders & motion tokens
+ * Low, calm elevation. The CRM leans on borders + subtle shadow, not big drops.
+ */
+:root {
+  /* Shadows — soft, cool-tinted */
+  --shadow-xs: 0 1px 1px rgba(26, 33, 41, 0.04);
+  --shadow-sm: 0 1px 2px rgba(26, 33, 41, 0.06), 0 1px 1px rgba(26, 33, 41, 0.04);
+  --shadow-md: 0 2px 4px rgba(26, 33, 41, 0.06), 0 4px 12px rgba(26, 33, 41, 0.07);
+  --shadow-lg: 0 8px 24px rgba(26, 33, 41, 0.10), 0 2px 6px rgba(26, 33, 41, 0.06);
+  --shadow-pop: 0 12px 32px rgba(26, 33, 41, 0.16);
+
+  /* Border widths */
+  --bw-hair: 1px;
+  --bw-thick: 1.5px;
+  --bw-accent: 3px;   /* left rail on active nav / selected row */
+
+  /* Motion — quick, no bounce. A working tool, not a toy. */
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1); /* @kind other */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --dur-fast:   120ms; /* @kind other */
+  --dur-normal: 180ms; /* @kind other */
+  --dur-slow:   260ms; /* @kind other */
+  --transition-control: color var(--dur-fast) var(--ease-standard),
+                        background-color var(--dur-fast) var(--ease-standard),
+                        border-color var(--dur-fast) var(--ease-standard),
+                        box-shadow var(--dur-fast) var(--ease-standard);
+}

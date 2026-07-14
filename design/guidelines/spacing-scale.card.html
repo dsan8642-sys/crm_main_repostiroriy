@@ -1,0 +1,25 @@
+<!-- @dsCard group="Spacing" viewport="700x150" name="Spacing scale" subtitle="4px base grid — compact for dense CRM" -->
+<!DOCTYPE html>
+<html lang="pl"><head><meta charset="utf-8"/><link rel="stylesheet" href="../styles.css"/>
+<style>
+  body{margin:0;padding:18px;background:var(--surface-card);font-family:var(--font-sans);}
+  .row{display:flex;align-items:flex-end;gap:14px;}
+  .item{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .bar{background:var(--primary);border-radius:2px;width:100%;}
+  .tok{font-family:var(--font-mono);font-size:10px;color:var(--text-muted);}
+  .px{font-size:11px;color:var(--text-strong);font-weight:600;}
+</style></head>
+<body>
+  <div class="row">
+    <div class="item" style="width:24px"><div class="bar" style="height:4px"></div><span class="px">4</span><span class="tok">2</span></div>
+    <div class="item" style="width:24px"><div class="bar" style="height:8px"></div><span class="px">8</span><span class="tok">4</span></div>
+    <div class="item" style="width:28px"><div class="bar" style="height:12px"></div><span class="px">12</span><span class="tok">5</span></div>
+    <div class="item" style="width:32px"><div class="bar" style="height:16px"></div><span class="px">16</span><span class="tok">6</span></div>
+    <div class="item" style="width:36px"><div class="bar" style="height:20px"></div><span class="px">20</span><span class="tok">7</span></div>
+    <div class="item" style="width:40px"><div class="bar" style="height:24px"></div><span class="px">24</span><span class="tok">8</span></div>
+    <div class="item" style="width:48px"><div class="bar" style="height:32px"></div><span class="px">32</span><span class="tok">9</span></div>
+    <div class="item" style="width:56px"><div class="bar" style="height:40px"></div><span class="px">40</span><span class="tok">10</span></div>
+    <div class="item" style="width:64px"><div class="bar" style="height:48px"></div><span class="px">48</span><span class="tok">11</span></div>
+  </div>
+  <p style="font-size:11px;color:var(--text-muted);margin:16px 0 0">--space-N · row height 40px compact · sidebar 232px · topbar 56px</p>
+</body></html>

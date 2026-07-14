@@ -1,0 +1,31 @@
+# Python / Django runtime
+__pycache__/
+*.py[cod]
+.codebase-memory/
+*.sqlite3
+*.sqlite3-journal
+*.dump
+db.sqlite3
+.venv/
+swimcrm/.venv/
+venv/
+.runtime/
+.env
+
+# Django generated/runtime files
+media/
+staticfiles/
+receipts/
+swimcrm/receipts/
+backups/
+
+# Frontend generated/runtime files
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# Local release/archive artifacts
+*.zip

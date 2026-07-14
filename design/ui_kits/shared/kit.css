@@ -1,0 +1,97 @@
+/* SwimCRM UI-kit layout helpers — shared chrome for the three product kits.
+ * Components own their look via tokens; these classes are just page scaffolding.
+ */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; font-family: var(--font-sans); background: var(--surface-page); color: var(--text-body); }
+
+.app { display: flex; height: 100vh; overflow: hidden; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* Topbar */
+.topbar {
+  height: var(--topbar-h); flex-shrink: 0;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px;
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.topbar h1 { margin: 0; font-size: var(--fs-lg); font-weight: 600; color: var(--text-strong); letter-spacing: -0.01em; }
+.topbar .sub { font-size: var(--fs-xs); color: var(--text-muted); }
+.topbar .spacer { flex: 1; }
+
+.searchbox {
+  display: flex; align-items: center; gap: 8px;
+  height: var(--control-h-md); width: 280px; max-width: 34vw;
+  padding: 0 11px;
+  background: var(--surface-page);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-muted); font-size: var(--fs-sm);
+}
+.searchbox input { border: none; background: none; outline: none; flex: 1; min-width: 0; font: inherit; color: var(--text-strong); }
+
+/* Scroll area / page */
+.scroll { flex: 1; overflow-y: auto; }
+.page { padding: 20px; max-width: var(--content-max); margin: 0 auto; }
+.page-wide { max-width: 100%; }
+
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.page-title { margin: 0; font-size: var(--fs-2xl); font-weight: 600; color: var(--text-strong); letter-spacing: -0.01em; }
+.page-desc { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* Cards */
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-pad { padding: 16px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--border-subtle); }
+.card-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-strong); }
+
+/* Toolbar (filters row above tables) */
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.toolbar .spacer { flex: 1; }
+
+/* KPI grid */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.kpi {
+  background: var(--surface-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); padding: 14px 16px; box-shadow: var(--shadow-xs);
+}
+.kpi-label { display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--text-muted); font-weight: 500; margin-bottom: 9px; }
+.kpi-value { font-family: var(--font-mono); font-size: var(--fs-3xl); font-weight: 600; color: var(--text-strong); letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.kpi-sub { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 7px; }
+.kpi-ico { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius-sm); background: var(--primary-soft); color: var(--primary); }
+
+/* Definition list (detail panels) */
+.dl { display: grid; grid-template-columns: 118px 1fr; gap: 9px 12px; font-size: var(--fs-sm); align-items: baseline; }
+.dl dt { color: var(--text-muted); }
+.dl dd { margin: 0; color: var(--text-strong); font-weight: 500; }
+
+/* Section label */
+.eyebrow { font-size: var(--fs-2xs); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--text-faint); }
+
+/* Drawer */
+.drawer-scrim { position: absolute; inset: 0; background: rgba(26,33,41,0.36); z-index: 40; animation: swim-fade var(--dur-normal) var(--ease-standard); }
+.drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 480px; max-width: 92%;
+  background: var(--surface-card); border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-lg); z-index: 41; display: flex; flex-direction: column;
+  animation: swim-drawer var(--dur-slow) var(--ease-out);
+}
+@keyframes swim-drawer { from { transform: translateX(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+.drawer-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); }
+.drawer-body { flex: 1; overflow-y: auto; padding: 18px; }
+
+/* Chip / segmented filter */
+.seg { display: inline-flex; background: var(--surface-sunken); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 2px; gap: 2px; }
+.seg button { border: none; background: none; cursor: pointer; font: inherit; font-size: var(--fs-xs); font-weight: 500; padding: 5px 10px; border-radius: var(--radius-sm); color: var(--text-muted); }
+.seg button.on { background: var(--surface-card); color: var(--text-strong); box-shadow: var(--shadow-xs); font-weight: 600; }
+
+.row-actions { display: flex; align-items: center; gap: 2px; }
+.muted { color: var(--text-muted); }
+.strong { color: var(--text-strong); font-weight: 600; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

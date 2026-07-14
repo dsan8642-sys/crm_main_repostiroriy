@@ -1,0 +1,19 @@
+<!-- @dsCard group="Colors" viewport="700x140" name="Accent & semantics" subtitle="Teal accent + green / amber / red / violet" -->
+<!DOCTYPE html>
+<html lang="pl"><head><meta charset="utf-8"/><link rel="stylesheet" href="../styles.css"/>
+<style>
+  body{margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans);}
+  .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+  .swatch{height:52px;border-radius:var(--radius-md);display:flex;align-items:flex-end;padding:5px 7px;}
+  .cap{font-size:10px;font-weight:600;color:#fff;}
+  .n{font-size:11px;color:var(--text-muted);margin-top:6px;}
+</style></head>
+<body>
+  <div class="grid">
+    <div><div class="swatch" style="background:var(--teal-500)"><span class="cap">teal 500</span></div><div class="n">--accent · #17a597</div></div>
+    <div><div class="swatch" style="background:var(--green-500)"><span class="cap">green 500</span></div><div class="n">obecność / zapłacone</div></div>
+    <div><div class="swatch" style="background:var(--amber-500)"><span class="cap">amber 500</span></div><div class="n">na weryfikacji</div></div>
+    <div><div class="swatch" style="background:var(--red-500)"><span class="cap">red 500</span></div><div class="n">dług / błąd</div></div>
+    <div><div class="swatch" style="background:var(--violet-500)"><span class="cap">violet 500</span></div><div class="n">przełożone</div></div>
+  </div>
+</body></html>

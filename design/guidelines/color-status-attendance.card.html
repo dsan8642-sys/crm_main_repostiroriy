@@ -1,0 +1,36 @@
+<!-- @dsCard group="Colors" viewport="700x170" name="Status — attendance" subtitle="Four attendance states; two consume a lesson" -->
+<!DOCTYPE html>
+<html lang="pl"><head><meta charset="utf-8"/><link rel="stylesheet" href="../styles.css"/>
+<style>
+  body{margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans);}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .cell{border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:11px;}
+  .pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;}
+  .dot{width:6px;height:6px;border-radius:50%;}
+  .con{font-family:var(--font-mono);font-size:11px;font-weight:600;margin-top:9px;}
+  .name{font-size:11px;color:var(--text-muted);margin-top:7px;}
+</style></head>
+<body>
+  <div class="grid">
+    <div class="cell">
+      <span class="pill" style="background:var(--status-present-bg);color:var(--status-present-fg);border:1px solid var(--status-present-bd)"><span class="dot" style="background:var(--status-present-fg)"></span>Obecny</span>
+      <div class="con" style="color:var(--money-debt)">−1 &nbsp;spisuje</div>
+      <div class="name">present</div>
+    </div>
+    <div class="cell">
+      <span class="pill" style="background:var(--status-absent-bg);color:var(--status-absent-fg);border:1px solid var(--status-absent-bd)"><span class="dot" style="background:var(--status-absent-fg)"></span>Nieobecny</span>
+      <div class="con" style="color:var(--money-debt)">−1 &nbsp;spisuje</div>
+      <div class="name">absent</div>
+    </div>
+    <div class="cell">
+      <span class="pill" style="background:var(--status-excused-bg);color:var(--status-excused-fg);border:1px solid var(--status-excused-bd)"><span class="dot" style="background:var(--status-excused-fg)"></span>Nieob. uspr.</span>
+      <div class="con" style="color:var(--text-faint)">0 &nbsp;nie spisuje</div>
+      <div class="name">excused</div>
+    </div>
+    <div class="cell">
+      <span class="pill" style="background:var(--status-moved-bg);color:var(--status-moved-fg);border:1px solid var(--status-moved-bd)"><span class="dot" style="background:var(--status-moved-fg)"></span>Przełożone</span>
+      <div class="con" style="color:var(--text-faint)">0 &nbsp;nie spisuje</div>
+      <div class="name">moved</div>
+    </div>
+  </div>
+</body></html>

@@ -1,0 +1,46 @@
+/* SwimCRM — Typography tokens
+ * IBM Plex Sans for everything UI; IBM Plex Mono for numeric / tabular data.
+ * Compact scale tuned for a dense operational CRM.
+ */
+:root {
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* Weights */
+  --fw-regular:  400; /* @kind other */
+  --fw-medium:   500; /* @kind other */
+  --fw-semibold: 600; /* @kind other */
+  --fw-bold:     700; /* @kind other */
+
+  /* Font sizes — compact CRM scale */
+  --fs-2xs:  11px;   /* micro labels, table meta */
+  --fs-xs:   12px;   /* dense table cells, captions */
+  --fs-sm:   13px;   /* default table / control text */
+  --fs-base: 14px;   /* body */
+  --fs-md:   15px;   /* emphasised body */
+  --fs-lg:   17px;   /* card titles */
+  --fs-xl:   20px;   /* section headings */
+  --fs-2xl:  25px;   /* page titles */
+  --fs-3xl:  32px;   /* KPI numbers, hero figures */
+  --fs-4xl:  40px;   /* big stat display */
+
+  /* Line heights */
+  --lh-tight:   1.15; /* @kind other */
+  --lh-snug:    1.3; /* @kind other */
+  --lh-normal:  1.45; /* @kind other */
+  --lh-relaxed: 1.6; /* @kind other */
+
+  /* Letter spacing */
+  --ls-tight:  -0.01em; /* @kind other */
+  --ls-normal: 0; /* @kind other */
+  --ls-wide:   0.02em; /* @kind other */
+  --ls-caps:   0.06em; /* @kind other */
+
+  /* ---- Semantic text roles ---- */
+  --text-page-title:  var(--fw-semibold) var(--fs-2xl)/var(--lh-tight) var(--font-sans);
+  --text-section:     var(--fw-semibold) var(--fs-xl)/var(--lh-snug) var(--font-sans);
+  --text-card-title:  var(--fw-semibold) var(--fs-lg)/var(--lh-snug) var(--font-sans);
+  --text-body-font:   var(--fw-regular) var(--fs-base)/var(--lh-normal) var(--font-sans);
+  --text-label:       var(--fw-medium) var(--fs-sm)/var(--lh-snug) var(--font-sans);
+  --text-caption:     var(--fw-regular) var(--fs-xs)/var(--lh-snug) var(--font-sans);
+}

@@ -1,0 +1,92 @@
+<!-- @dsCard group="Admin" viewport="1280x760" name="Admin — SwimCRM" subtitle="School-wide CRM: overview, clients, schedule, attendance, payments, debtors" -->
+<!-- @startingPoint section="SwimCRM" subtitle="Full admin CRM shell (sidebar + 6 screens)" viewport="1280x800" -->
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SwimCRM · Administrator</title>
+<link rel="stylesheet" href="../../styles.css" />
+<link rel="stylesheet" href="../shared/kit.css" />
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel" data-presets="react" src="../../assets/icons.jsx"></script>
+<script type="text/babel" data-presets="react" src="./data.jsx"></script>
+<script type="text/babel" data-presets="react" src="./Overview.jsx"></script>
+<script type="text/babel" data-presets="react" src="./Clients.jsx"></script>
+<script type="text/babel" data-presets="react" src="./Schedule.jsx"></script>
+<script type="text/babel" data-presets="react" src="./Attendance.jsx"></script>
+<script type="text/babel" data-presets="react" src="./Payments.jsx"></script>
+<script type="text/babel" data-presets="react" src="./Debtors.jsx"></script>
+<script type="text/babel" data-presets="react">
+const { SidebarNav, Avatar, IconButton } = window.SwimCRMDesignSystem_546643;
+const I = window.SwimIcons;
+const S = window.AdminScreens;
+
+const TITLES = {
+  overview: ['Przegląd', 'Panel administratora'],
+  clients: ['Klienci', 'Baza rodzin i uczniów'],
+  schedule: ['Grafik', 'Zajęcia i szablony'],
+  attendance: ['Frekwencja', 'Odznaczanie obecności'],
+  payments: ['Płatności', 'Naliczenia i weryfikacja'],
+  debtors: ['Dłużnicy', 'Zaległości i przypomnienia'],
+};
+
+function App() {
+  const [view, setView] = React.useState('overview');
+  const NAV = [
+    { key: 'overview', label: 'Przegląd', icon: <I.Home size={17} />, section: '' },
+    { key: 'clients', label: 'Klienci', icon: <I.Users size={17} />, count: window.AdminData.clients.length, section: '' },
+    { key: 'schedule', label: 'Grafik', icon: <I.Calendar size={17} />, section: 'Operacje' },
+    { key: 'attendance', label: 'Obecność', icon: <I.Check size={17} />, section: 'Operacje' },
+    { key: 'payments', label: 'Płatności', icon: <I.Cash size={17} />, count: 4, section: 'Finanse' },
+    { key: 'debtors', label: 'Dłużnicy', icon: <I.Alert size={17} />, count: window.AdminData.debtors.length, countTone: 'danger', section: 'Finanse' },
+  ];
+  const Screen = S[view.charAt(0).toUpperCase() + view.slice(1)] || S.Overview;
+  const [t, sub] = TITLES[view];
+
+  return (
+    <div className="app">
+      <SidebarNav
+        items={NAV} active={view} onSelect={setView}
+        brand="H2O" product="SwimCRM" roleLabel="Administrator"
+        footer={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Avatar name="Katarzyna Admin" size={30} />
+            <div style={{ flex: 1, minWidth: 0, lineHeight: 1.2 }}>
+              <div className="strong" style={{ fontSize: 'var(--fs-xs)' }}>Katarzyna Admin</div>
+              <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>Szkoła H2O</div>
+            </div>
+            <IconButton label="Wyloguj"><I.Logout size={16} /></IconButton>
+          </div>
+        }
+      />
+      <div className="main">
+        <header className="topbar">
+          <div>
+            <h1>{t}</h1>
+          </div>
+          <span className="spacer" />
+          <div className="searchbox">
+            <I.Search size={15} />
+            <input placeholder="Szukaj w całej szkole…" />
+          </div>
+          <IconButton label="Powiadomienia"><I.Bell size={18} /></IconButton>
+          <IconButton label="Ustawienia"><I.Settings size={18} /></IconButton>
+        </header>
+        <div className="scroll">
+          <Screen go={setView} />
+        </div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

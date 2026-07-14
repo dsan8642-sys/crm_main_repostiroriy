@@ -1,0 +1,24 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Neutrals — cool slate" subtitle="Text, surfaces and borders" -->
+<!DOCTYPE html>
+<html lang="pl"><head><meta charset="utf-8"/><link rel="stylesheet" href="../styles.css"/>
+<style>
+  body{margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans);}
+  .ramp{display:flex;gap:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border-subtle);}
+  .sw{flex:1;height:64px;display:flex;align-items:flex-end;padding:5px 7px;}
+  .cap{font-size:10px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .meta{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-muted);}
+</style></head>
+<body>
+  <div class="ramp">
+    <div class="sw" style="background:var(--slate-50)"><span class="cap" style="color:var(--slate-600)">50</span></div>
+    <div class="sw" style="background:var(--slate-100)"><span class="cap" style="color:var(--slate-600)">100</span></div>
+    <div class="sw" style="background:var(--slate-200)"><span class="cap" style="color:var(--slate-600)">200</span></div>
+    <div class="sw" style="background:var(--slate-300)"><span class="cap" style="color:var(--slate-700)">300</span></div>
+    <div class="sw" style="background:var(--slate-400)"><span class="cap" style="color:#fff">400</span></div>
+    <div class="sw" style="background:var(--slate-500)"><span class="cap" style="color:#fff">500</span></div>
+    <div class="sw" style="background:var(--slate-600)"><span class="cap" style="color:#fff">600</span></div>
+    <div class="sw" style="background:var(--slate-700)"><span class="cap" style="color:#fff">700</span></div>
+    <div class="sw" style="background:var(--slate-900)"><span class="cap" style="color:#fff">900</span></div>
+  </div>
+  <div class="meta"><span>text: 900 strong · 700 body · 500 muted · 400 faint</span><span>surface 50 · card #fff · border 200/300</span></div>
+</body></html>
