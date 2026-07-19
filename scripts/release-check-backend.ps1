@@ -31,6 +31,11 @@ if (-not (Test-Path -LiteralPath $Python)) {
     throw "Backend venv not found at $Python. Run task 1 setup first."
 }
 
+$SavedAuditLogLevel = [Environment]::GetEnvironmentVariable("AUDIT_LOG_LEVEL", "Process")
+if ([string]::IsNullOrWhiteSpace($SavedAuditLogLevel)) {
+    $env:AUDIT_LOG_LEVEL = "WARNING"
+}
+
 function Invoke-NativeStep {
     param(
         [string]$Name,
@@ -205,6 +210,12 @@ try {
 }
 finally {
     Pop-Location
+    if ($null -eq $SavedAuditLogLevel) {
+        [Environment]::SetEnvironmentVariable("AUDIT_LOG_LEVEL", $null, "Process")
+    }
+    else {
+        [Environment]::SetEnvironmentVariable("AUDIT_LOG_LEVEL", $SavedAuditLogLevel, "Process")
+    }
 }
 
 Write-Host ""

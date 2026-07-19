@@ -262,6 +262,7 @@ Production can tune verbosity with:
 
 ```powershell
 LOG_LEVEL=INFO
+AUDIT_LOG_LEVEL=INFO
 AXES_LOG_LEVEL=WARNING
 ```
 
@@ -270,6 +271,11 @@ Important loggers:
 - `django.request`: unhandled request errors;
 - `django.security`: Django security events;
 - `audit`: domain audit events mirrored from `AuditLogEntry`.
+
+Local release checks set `AUDIT_LOG_LEVEL=WARNING` when it is not already set,
+so the gate output stays readable while database audit records and explicit
+`assertLogs` checks remain covered. Production should normally keep
+`AUDIT_LOG_LEVEL=INFO` unless log volume requires a deliberate override.
 
 Keep application logs together with reverse-proxy logs. During an incident,
 preserve both logs and `AuditLogEntry` rows before remediation.

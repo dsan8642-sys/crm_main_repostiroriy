@@ -212,6 +212,7 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@swimcrm.local
 
 # ---- Observability ----
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+AUDIT_LOG_LEVEL = os.environ.get("AUDIT_LOG_LEVEL", "INFO")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -244,7 +245,7 @@ LOGGING = {
         },
         "audit": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": AUDIT_LOG_LEVEL,
             "propagate": False,
         },
         "axes": {

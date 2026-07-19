@@ -114,7 +114,7 @@ class ObservabilitySettingsRule(SimpleTestCase):
         self.assertEqual(logging["handlers"]["console"]["formatter"], "structured")
         self.assertIn("level=%(levelname)s", logging["formatters"]["structured"]["format"])
         self.assertEqual(logging["loggers"]["django.request"]["level"], "ERROR")
-        self.assertEqual(logging["loggers"]["audit"]["level"], "INFO")
+        self.assertEqual(logging["loggers"]["audit"]["level"], os.environ.get("AUDIT_LOG_LEVEL", "INFO"))
 
 
 class ReceiptFileValidationRule(TestCase):
