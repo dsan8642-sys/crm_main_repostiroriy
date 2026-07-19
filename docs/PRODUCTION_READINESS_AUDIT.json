@@ -1082,6 +1082,11 @@
             "expected_evidence",
             "stop_if_missing",
             "HTTPS reverse-proxy settings passed",
+            "real https:// Django production URL",
+            "real https:// NocoBase production URL",
+            "64-character SHA256",
+            "Rollback plan reviewed",
+            "migrate --check",
             "check-hybrid-health.cmd -RequireHttps",
             "HTTPS live endpoint requirement passed"
           ]
@@ -1100,7 +1105,11 @@
             "pending_external_actions",
             "operator_checklist",
             "is missing expected_evidence",
-            "must stop if evidence is missing"
+            "must stop if evidence is missing",
+            "Assert-ChecklistEvidenceContains",
+            "real https:// Django production URL",
+            "64-character SHA256",
+            "stop writers"
           ]
         },
         {

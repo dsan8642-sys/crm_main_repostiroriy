@@ -118,6 +118,42 @@ foreach ($item in $operatorChecklist) {
     }
 }
 
+function Assert-ChecklistEvidenceContains {
+    param(
+        [object[]]$Checklist,
+        [string]$Id,
+        [string[]]$Fragments
+    )
+
+    $item = $Checklist | Where-Object { $_.id -eq $Id } | Select-Object -First 1
+    if (-not $item) {
+        throw "Release handoff operator_checklist is missing action: $Id"
+    }
+    $text = [string]$item.expected_evidence
+    foreach ($fragment in $Fragments) {
+        if ($text -notmatch [regex]::Escape($fragment)) {
+            throw "Release handoff operator_checklist item '$Id' expected_evidence must include: $fragment"
+        }
+    }
+}
+
+Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_live_hybrid_health" -Fragments @(
+    "real https:// Django production URL",
+    "real https:// NocoBase production URL"
+)
+Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_hybrid_backup_restore_drill" -Fragments @(
+    "64-character SHA256",
+    "Django dump list OK",
+    "NocoBase dump list OK"
+)
+Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
+    "Rollback plan reviewed",
+    "stop writers",
+    "verified backup",
+    "migrate --check",
+    "live smoke"
+)
+
 $handoffBlockerIds = @($handoffData.release_blockers | ForEach-Object { $_.id } | Sort-Object)
 $planBlockerIds = @($releasePlan.release_blockers | ForEach-Object { $_.id } | Sort-Object)
 $handoffBlockerText = $handoffBlockerIds -join "|"

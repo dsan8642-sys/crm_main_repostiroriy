@@ -92,21 +92,21 @@ $operatorChecklist = @(
         id = "run_target_host_live_hybrid_health"
         title = "Run target-host live hybrid health."
         command = "scripts\check-hybrid-health.cmd -RequireHttps"
-        expected_evidence = "Hybrid health check passed; HTTPS live endpoint requirement passed; nocobase_config_health; /api/nocobase/config/languages/."
+        expected_evidence = "Hybrid health check passed; HTTPS live endpoint requirement passed; real https:// Django production URL; real https:// NocoBase production URL; nocobase_config_health; /api/nocobase/config/languages/."
         stop_if_missing = $true
     },
     [ordered]@{
         id = "run_target_host_hybrid_backup_restore_drill"
         title = "Run target-host backup, restore-plan, and backup-set verification drill."
         command = "scripts\backup-hybrid.ps1; scripts\restore-hybrid.ps1 -PlanOnly; scripts\verify-hybrid-backup-set.cmd"
-        expected_evidence = "Hybrid backup set written; Django dump sha256 OK; NocoBase dump sha256 OK; Restore verification OK; Hybrid backup set verification OK."
+        expected_evidence = "Hybrid backup set written; Django dump sha256 OK with 64-character SHA256; NocoBase dump sha256 OK with 64-character SHA256; Django dump list OK; NocoBase dump list OK; Restore verification OK; Hybrid backup set verification OK."
         stop_if_missing = $true
     },
     [ordered]@{
         id = "fill_docs_production_cutover_evidence_json"
         title = "Fill the production cutover evidence manifest with real evidence."
         command = "Copy docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json to docs\PRODUCTION_CUTOVER_EVIDENCE.json and replace pending placeholders."
-        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256)."
+        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256), including complete rollback acknowledgement: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke."
         stop_if_missing = $true
     },
     [ordered]@{

@@ -681,6 +681,11 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("expected_evidence", script)
         self.assertIn("stop_if_missing", script)
         self.assertIn("HTTPS reverse-proxy settings passed", script)
+        self.assertIn("real https:// Django production URL", script)
+        self.assertIn("real https:// NocoBase production URL", script)
+        self.assertIn("64-character SHA256", script)
+        self.assertIn("Rollback plan reviewed", script)
+        self.assertIn("migrate --check", script)
 
     def test_release_handoff_verifier_catches_stale_archive_and_blocker_drift(self):
         script = (REPO_ROOT / "scripts" / "verify-release-handoff.ps1").read_text(encoding="utf-8-sig")
@@ -696,6 +701,10 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("operator_checklist", script)
         self.assertIn("is missing expected_evidence", script)
         self.assertIn("must stop if evidence is missing", script)
+        self.assertIn("Assert-ChecklistEvidenceContains", script)
+        self.assertIn("real https:// Django production URL", script)
+        self.assertIn("64-character SHA256", script)
+        self.assertIn("stop writers", script)
 
     def test_operational_wrapper_guard_includes_standalone_postgres_backup_cmd(self):
         verifier = (REPO_ROOT / "scripts" / "verify-operational-wrappers.ps1").read_text(encoding="utf-8-sig")
