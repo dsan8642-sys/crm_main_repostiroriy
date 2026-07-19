@@ -193,8 +193,9 @@ The verifier intentionally rejects placeholders and requires the live hybrid
 health evidence to include the guarded config API check
 `/api/nocobase/config/languages/`. External CI evidence must use GitHub
 Actions run URLs and mention the exact `release_candidate.commit_sha`. For final
-approval, run it with `-RequireCurrentHead` so stale evidence for an older commit
-cannot approve the current release candidate.
+approval, run it with `-RequireCurrentHead` so stale evidence for an older
+commit or release archive checksum cannot approve the current release
+candidate.
 
 The manifest must also include the critical pass fragments from each command,
 not just `status=passed`:

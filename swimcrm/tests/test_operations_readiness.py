@@ -87,6 +87,21 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_can_be_required_to_match_current_archive_sha256(self):
+        payload = self._example_payload()
+        expected_sha = "b" * 64
+
+        errors = self.verifier.validate(
+            self._write_manifest(payload),
+            allow_example=True,
+            expected_archive_sha256=expected_sha,
+        )
+
+        self.assertIn(
+            f"release_source_archive: evidence must include current release archive sha256 ({expected_sha})",
+            errors,
+        )
+
     def test_cutover_evidence_requires_tracked_release_source_guard(self):
         payload = self._example_payload()
         payload["required_evidence"] = [

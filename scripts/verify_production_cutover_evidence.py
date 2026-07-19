@@ -151,7 +151,7 @@ def _combined_item_text(item):
     )
 
 
-def _validate_item(item, errors, release_commit_sha=""):
+def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=""):
     evidence_id = item.get("id", "")
     if evidence_id not in REQUIRED_EVIDENCE_IDS:
         errors.append(f"unexpected evidence id: {evidence_id or '<missing>'}")
@@ -173,6 +173,11 @@ def _validate_item(item, errors, release_commit_sha=""):
             errors.append(f"{evidence_id}: evidence must mention release_candidate.commit_sha")
         if not re.search(r"sha256[:=\s]+[0-9a-f]{64}\b", combined, flags=re.IGNORECASE):
             errors.append(f"{evidence_id}: evidence must include archive sha256")
+        if expected_archive_sha256 and expected_archive_sha256 not in combined.lower():
+            errors.append(
+                f"{evidence_id}: evidence must include current release archive sha256 "
+                f"({expected_archive_sha256})"
+            )
     elif evidence_id != "rollback_plan_acknowledged" and not item.get("command"):
         errors.append(f"{evidence_id}: command is required")
 
@@ -186,7 +191,13 @@ def _validate_item(item, errors, release_commit_sha=""):
             errors.append(f"{evidence_id}: missing evidence fragment: {fragment}")
 
 
-def validate(path=DEFAULT_EVIDENCE, allow_example=False, allow_staging=False, expected_commit_sha=""):
+def validate(
+    path=DEFAULT_EVIDENCE,
+    allow_example=False,
+    allow_staging=False,
+    expected_commit_sha="",
+    expected_archive_sha256="",
+):
     errors = []
     if not path.exists():
         return [f"production cutover evidence file does not exist: {path}"]
@@ -224,7 +235,12 @@ def validate(path=DEFAULT_EVIDENCE, allow_example=False, allow_staging=False, ex
         if evidence_id in seen:
             errors.append(f"duplicate evidence id: {evidence_id}")
         seen.add(evidence_id)
-        _validate_item(item, errors, release_commit_sha=release_commit_sha)
+        _validate_item(
+            item,
+            errors,
+            release_commit_sha=release_commit_sha,
+            expected_archive_sha256=expected_archive_sha256,
+        )
 
     missing = sorted(REQUIRED_EVIDENCE_IDS - seen)
     for evidence_id in missing:
@@ -238,6 +254,7 @@ def main():
     allow_example = False
     allow_staging = False
     expected_commit_sha = ""
+    expected_archive_sha256 = ""
     if "--allow-example" in args:
         allow_example = True
         args.remove("--allow-example")
@@ -255,12 +272,24 @@ def main():
         if not re.fullmatch(r"[0-9a-f]{40}", expected_commit_sha):
             print("--expected-commit-sha must be a 40-character lowercase git SHA", file=sys.stderr)
             return 2
+    if "--expected-archive-sha256" in args:
+        index = args.index("--expected-archive-sha256")
+        try:
+            expected_archive_sha256 = args[index + 1].lower()
+        except IndexError:
+            print("--expected-archive-sha256 requires a value", file=sys.stderr)
+            return 2
+        del args[index:index + 2]
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_archive_sha256):
+            print("--expected-archive-sha256 must be a 64-character lowercase SHA256", file=sys.stderr)
+            return 2
     path = Path(args[0]) if args else DEFAULT_EVIDENCE
     errors = validate(
         path,
         allow_example=allow_example,
         allow_staging=allow_staging,
         expected_commit_sha=expected_commit_sha,
+        expected_archive_sha256=expected_archive_sha256,
     )
     if errors:
         print("Production cutover evidence verification failed:", file=sys.stderr)
