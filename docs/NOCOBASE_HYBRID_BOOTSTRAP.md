@@ -200,12 +200,13 @@ $env:NOCOBASE_ROOT_PASSWORD="<strong initial/root password>"
 $env:NOCOBASE_STORAGE_DIR="C:\SwimCRMRuntime\nocobase-storage"
 ```
 
-The runtime script refuses production startup with missing secrets, development
-database/root passwords, weak or placeholder `NOCOBASE_APP_KEY` values,
-source-tree app roots, or source-tree storage. In production,
-`NOCOBASE_APP_KEY` must be a real secret at least 32 characters long and must
-not be copied from examples or release-check placeholders. Use `-PlanOnly` to
-inspect the effective configuration without starting Node/NocoBase.
+The runtime script refuses production startup with missing secrets, weak or
+placeholder NocoBase app/database/root secrets, source-tree app roots, or
+source-tree storage. In production, `NOCOBASE_APP_KEY`,
+`NOCOBASE_DB_PASSWORD`, and `NOCOBASE_ROOT_PASSWORD` must be real secrets at
+least 32 characters long and must not be copied from examples or release-check
+placeholders. Use `-PlanOnly` to inspect the effective configuration without
+starting Node/NocoBase.
 
 The plan also fingerprints the local NocoBase runtime when it is present:
 

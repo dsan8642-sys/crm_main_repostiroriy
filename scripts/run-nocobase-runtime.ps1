@@ -78,12 +78,8 @@ if ($isProduction) {
         }
     }
     Assert-ProductionSecret -Name "NOCOBASE_APP_KEY" -Value $AppKey -MinLength 32
-    if ($DbPassword -eq "postgres") {
-        throw "NOCOBASE_DB_PASSWORD must not use the development default in production."
-    }
-    if ($RootPassword -eq "Admin!2026pass") {
-        throw "NOCOBASE_ROOT_PASSWORD must not use the development default in production."
-    }
+    Assert-ProductionSecret -Name "NOCOBASE_DB_PASSWORD" -Value $DbPassword -MinLength 32
+    Assert-ProductionSecret -Name "NOCOBASE_ROOT_PASSWORD" -Value $RootPassword -MinLength 32
     if (Test-PathInside -Child $AppRoot -Parent $RepoRoot) {
         throw "NOCOBASE_APP_ROOT must be outside the source tree in production."
     }

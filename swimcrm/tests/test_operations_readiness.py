@@ -761,10 +761,14 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
 
         self.assertIn("Assert-ProductionSecret", runtime)
         self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_APP_KEY\"", runtime)
+        self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_DB_PASSWORD\"", runtime)
+        self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_ROOT_PASSWORD\"", runtime)
         self.assertIn("must be a real production secret at least 32 characters long", runtime)
         self.assertIn("release-check", runtime)
         self.assertIn("short-key", verifier)
         self.assertIn("NocoBase production app key strength guard passed", verifier)
+        self.assertIn("short-root-password", verifier)
+        self.assertIn("NocoBase production root password strength guard passed", verifier)
 
     def test_production_env_preflight_requires_strong_nocobase_secrets(self):
         preflight = (REPO_ROOT / "scripts" / "check-production-env.ps1").read_text(encoding="utf-8-sig")

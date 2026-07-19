@@ -119,8 +119,8 @@ $weakAppKey = Invoke-NocoBasePlan -Env @{
     NOCOBASE_DB_PORT = "5432"
     NOCOBASE_DB_DATABASE = "nocobase_hybrid"
     NOCOBASE_DB_USER = "nocobase"
-    NOCOBASE_DB_PASSWORD = "release-check-db-password"
-    NOCOBASE_ROOT_PASSWORD = "not-the-dev-root-password"
+    NOCOBASE_DB_PASSWORD = "NocoBaseProductionDbPasswordForGuardChecks1234567890"
+    NOCOBASE_ROOT_PASSWORD = "NocoBaseProductionRootPasswordForGuardChecks1234567890"
     NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
 }
 if ($weakAppKey.exit_code -eq 0 -or $weakAppKey.output -notmatch "NOCOBASE_APP_KEY must be a real production secret at least 32 characters long") {
@@ -140,10 +140,27 @@ $defaultPassword = Invoke-NocoBasePlan -Env @{
     NOCOBASE_ROOT_PASSWORD = "not-the-dev-root-password"
     NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
 }
-if ($defaultPassword.exit_code -eq 0 -or $defaultPassword.output -notmatch "development default") {
+if ($defaultPassword.exit_code -eq 0 -or $defaultPassword.output -notmatch "NOCOBASE_DB_PASSWORD must be a real production secret at least 32 characters long") {
     throw "NocoBase production plan did not reject default DB password. Output: $($defaultPassword.output)"
 }
 Write-Host "NocoBase production DB password guard passed."
+
+$weakRootPassword = Invoke-NocoBasePlan -Env @{
+    NOCOBASE_APP_ENV = "production"
+    NOCOBASE_APP_KEY = "NocoBaseProductionAppKeyForGuardChecks1234567890"
+    NOCOBASE_APP_ROOT = "C:\SwimCRMRuntime\nocobase-app"
+    NOCOBASE_DB_HOST = "127.0.0.1"
+    NOCOBASE_DB_PORT = "5432"
+    NOCOBASE_DB_DATABASE = "nocobase_hybrid"
+    NOCOBASE_DB_USER = "nocobase"
+    NOCOBASE_DB_PASSWORD = "NocoBaseProductionDbPasswordForGuardChecks1234567890"
+    NOCOBASE_ROOT_PASSWORD = "short-root-password"
+    NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
+}
+if ($weakRootPassword.exit_code -eq 0 -or $weakRootPassword.output -notmatch "NOCOBASE_ROOT_PASSWORD must be a real production secret at least 32 characters long") {
+    throw "NocoBase production plan did not reject a weak NOCOBASE_ROOT_PASSWORD. Output: $($weakRootPassword.output)"
+}
+Write-Host "NocoBase production root password strength guard passed."
 
 $insideAppRoot = Invoke-NocoBasePlan -Env @{
     NOCOBASE_APP_ENV = "production"
@@ -153,8 +170,8 @@ $insideAppRoot = Invoke-NocoBasePlan -Env @{
     NOCOBASE_DB_PORT = "5432"
     NOCOBASE_DB_DATABASE = "nocobase_hybrid"
     NOCOBASE_DB_USER = "nocobase"
-    NOCOBASE_DB_PASSWORD = "release-check-db-password"
-    NOCOBASE_ROOT_PASSWORD = "not-the-dev-root-password"
+    NOCOBASE_DB_PASSWORD = "NocoBaseProductionDbPasswordForGuardChecks1234567890"
+    NOCOBASE_ROOT_PASSWORD = "NocoBaseProductionRootPasswordForGuardChecks1234567890"
     NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
 }
 if ($insideAppRoot.exit_code -eq 0 -or $insideAppRoot.output -notmatch "outside the source tree") {
@@ -170,8 +187,8 @@ $insideStorage = Invoke-NocoBasePlan -Env @{
     NOCOBASE_DB_PORT = "5432"
     NOCOBASE_DB_DATABASE = "nocobase_hybrid"
     NOCOBASE_DB_USER = "nocobase"
-    NOCOBASE_DB_PASSWORD = "release-check-db-password"
-    NOCOBASE_ROOT_PASSWORD = "not-the-dev-root-password"
+    NOCOBASE_DB_PASSWORD = "NocoBaseProductionDbPasswordForGuardChecks1234567890"
+    NOCOBASE_ROOT_PASSWORD = "NocoBaseProductionRootPasswordForGuardChecks1234567890"
     NOCOBASE_STORAGE_DIR = (Join-Path $RepoRoot "swimcrm-hybrid\source\storage")
 }
 if ($insideStorage.exit_code -eq 0 -or $insideStorage.output -notmatch "outside the source tree") {
@@ -187,8 +204,8 @@ $production = Invoke-NocoBasePlan -Env @{
     NOCOBASE_DB_PORT = "5432"
     NOCOBASE_DB_DATABASE = "nocobase_hybrid"
     NOCOBASE_DB_USER = "nocobase"
-    NOCOBASE_DB_PASSWORD = "release-check-db-password"
-    NOCOBASE_ROOT_PASSWORD = "not-the-dev-root-password"
+    NOCOBASE_DB_PASSWORD = "NocoBaseProductionDbPasswordForGuardChecks1234567890"
+    NOCOBASE_ROOT_PASSWORD = "NocoBaseProductionRootPasswordForGuardChecks1234567890"
     NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
 }
 if ($production.exit_code -ne 0) {
