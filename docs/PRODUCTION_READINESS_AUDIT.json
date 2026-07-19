@@ -1070,10 +1070,16 @@
             "Get-ReleaseReviewCategory",
             "Get-ReleaseBlockers",
             "planned_release_candidate_steps",
+            "configure_git_remote",
+            "push_release_branch",
+            "capture_github_actions_release_check_url",
+            "capture_github_actions_postgres_backend_check_url",
             "install_release_archive_on_target_host",
             "run_target_host_production_env_preflight",
             "run_target_host_live_hybrid_health",
-            "run_target_host_hybrid_backup_restore_drill"
+            "run_target_host_hybrid_backup_restore_drill",
+            "fill_docs_production_cutover_evidence_json",
+            "run_scripts_verify_production_cutover_evidence_cmd"
           ]
         },
         {

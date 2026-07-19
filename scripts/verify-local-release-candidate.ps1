@@ -223,12 +223,16 @@ if ($PlanOnly) {
             "commit_or_stash_local_changes_until_git_status_is_clean",
             "run_scripts_verify_local_release_candidate_cmd",
             "build_and_verify_release_source_archive",
-            "push_release_commit_and_verify_github_actions",
+            "configure_git_remote",
+            "push_release_branch",
+            "capture_github_actions_release_check_url",
+            "capture_github_actions_postgres_backend_check_url",
             "install_release_archive_on_target_host",
             "run_target_host_production_env_preflight",
             "run_target_host_live_hybrid_health",
             "run_target_host_hybrid_backup_restore_drill",
-            "fill_and_verify_docs_production_cutover_evidence_json"
+            "fill_docs_production_cutover_evidence_json",
+            "run_scripts_verify_production_cutover_evidence_cmd"
         )
     } | ConvertTo-Json -Depth 8
     exit 0
