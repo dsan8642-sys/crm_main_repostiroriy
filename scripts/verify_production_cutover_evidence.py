@@ -70,6 +70,9 @@ REQUIRED_OUTPUT_FRAGMENTS = {
     "github_full_stack_release_job": [
         "swimcrm-release-source-",
     ],
+    "github_postgres_backend_job": [
+        "postgres-backend-check",
+    ],
     "production_env_preflight": [
         "Production environment check passed",
         "Runtime path settings passed",

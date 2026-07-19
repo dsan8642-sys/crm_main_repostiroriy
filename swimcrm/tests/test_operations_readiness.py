@@ -221,6 +221,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_postgres_backend_job_name_in_github_evidence(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "github_postgres_backend_job"
+        )
+        item["summary"] = item["summary"].replace(
+            "postgres-backend-check",
+            "backend",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "github_postgres_backend_job: missing evidence fragment: postgres-backend-check",
+            errors,
+        )
+
     def test_cutover_evidence_requires_frontend_audit_pass_fragment(self):
         payload = self._example_payload()
         item = next(
@@ -283,6 +301,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("Release source archive manifest verified", generator)
         self.assertIn("Tracked release-source guard passed", generator)
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
+        self.assertIn("postgres-backend-check", generator)
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
 
 

@@ -41,7 +41,7 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "github_postgres_backend_job",
-        "summary": "Paste the GitHub Actions postgres-backend-check job URL, pass summary, and release commit SHA here.",
+        "summary": "Paste the GitHub Actions postgres-backend-check job URL, pass summary, job name postgres-backend-check, and release commit SHA here.",
         "evidence_url": "",
     },
     {
