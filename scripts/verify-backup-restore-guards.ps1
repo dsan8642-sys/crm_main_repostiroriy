@@ -9,6 +9,7 @@ $RestoreHybrid = Join-Path $RepoRoot "scripts\restore-hybrid.ps1"
 $VerifyHybridBackupSet = Join-Path $RepoRoot "scripts\verify-hybrid-backup-set.ps1"
 $BackupPg = Join-Path $RepoRoot "scripts\backup-pg.ps1"
 $TempBackupSet = Join-Path $env:TEMP ("swimcrm-guard-empty-backup-{0}" -f ([guid]::NewGuid().ToString("N")))
+$TempCorruptBackupSet = Join-Path $env:TEMP ("swimcrm-guard-corrupt-backup-{0}" -f ([guid]::NewGuid().ToString("N")))
 $EnvNames = @(
     "DJANGO_ENV",
     "BACKUP_DIR",
@@ -169,6 +170,28 @@ if ($hybridBackupSet.exit_code -ne 0 -or $hybridBackupSet.output -notmatch "noco
 }
 Write-Host "Hybrid backup set verification plan check passed."
 
+if (Test-Path -LiteralPath $TempCorruptBackupSet) {
+    Remove-Item -LiteralPath $TempCorruptBackupSet -Recurse -Force
+}
+Copy-Item -LiteralPath $TempBackupSet -Destination $TempCorruptBackupSet -Recurse
+Add-Content -LiteralPath (Join-Path $TempCorruptBackupSet "django-swimcrm.dump") -Value "tampered"
+$restoreCorruptDump = Invoke-WithCleanEnv -Env @{
+    DJANGO_ENV = "production"
+    POSTGRES_DB = "swimcrm"
+    POSTGRES_USER = "swimcrm"
+    POSTGRES_PASSWORD = "release-check-db-password"
+    MEDIA_ROOT = "C:\SwimCRMRuntime\uploads"
+    NOCOBASE_DB_DATABASE = "nocobase_hybrid"
+    NOCOBASE_DB_USER = "nocobase"
+    NOCOBASE_DB_PASSWORD = "release-check-nocobase-password"
+    NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
+} -Command {
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RestoreHybrid `
+        -BackupSetDir $TempCorruptBackupSet
+}
+Assert-FailsWith -Result $restoreCorruptDump -Pattern "Django dump sha256 mismatch" -Label "Hybrid restore backup-set checksum guard"
+Write-Host "Hybrid restore backup-set checksum guard passed."
+
 $restoreWithoutConfirm = Invoke-WithCleanEnv -Env @{
     DJANGO_ENV = "production"
     POSTGRES_DB = "swimcrm"
@@ -196,4 +219,5 @@ Assert-FailsWith -Result $pgMissing -Pattern "BACKUP_DIR.*outside the source tre
 Write-Host "PostgreSQL backup default BACKUP_DIR guard passed."
 
 Remove-Item -LiteralPath $TempBackupSet -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $TempCorruptBackupSet -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Backup/restore guard checks passed."

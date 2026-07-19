@@ -623,6 +623,13 @@ Inspect the restore plan:
 .\scripts\restore-hybrid.ps1 -BackupSetDir C:\SwimCRMRuntime\backups\hybrid-YYYYMMDD-HHMMSS -PlanOnly
 ```
 
+Before any real restore, verify the backup set manifest and dump/archive
+checksums:
+
+```powershell
+.\scripts\verify-hybrid-backup-set.ps1 -BackupSetDir C:\SwimCRMRuntime\backups\hybrid-YYYYMMDD-HHMMSS
+```
+
 Run the restore only after confirming the target databases and storage
 directories are correct:
 

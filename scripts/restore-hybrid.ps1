@@ -34,6 +34,53 @@ function Assert-Tool {
     }
 }
 
+function Assert-File {
+    param([string]$Path, [string]$Label)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "$Label not found: $Path"
+    }
+}
+
+function Assert-FileSha256 {
+    param(
+        [string]$Path,
+        [string]$ExpectedHash,
+        [string]$Label
+    )
+    if (-not ($ExpectedHash -match "^[0-9a-f]{64}$")) {
+        throw "$Label sha256 is missing or invalid in hybrid backup manifest."
+    }
+    $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $ExpectedHash.ToLowerInvariant()) {
+        throw "$Label sha256 mismatch. Expected $ExpectedHash but got $actualHash."
+    }
+    Write-Host "$Label sha256 OK: $actualHash"
+}
+
+function Assert-BackupSetIntegrity {
+    Assert-File -Path $manifestPath -Label "Hybrid backup manifest"
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+    if (-not $SkipDjangoDb) {
+        Assert-File -Path $djangoDump.FullName -Label "Django database dump"
+        Assert-FileSha256 -Path $djangoDump.FullName -ExpectedHash $manifest.django_dump_sha256 -Label "Django dump"
+    }
+    if (-not $SkipNocoBaseDb) {
+        Assert-File -Path $nocobaseDump.FullName -Label "NocoBase database dump"
+        Assert-FileSha256 -Path $nocobaseDump.FullName -ExpectedHash $manifest.nocobase_dump_sha256 -Label "NocoBase dump"
+    }
+    if (-not $SkipMedia -and $manifest.media_archive_created -eq $true) {
+        $mediaArchive = Join-Path $resolvedBackup.Path "django-media.zip"
+        Assert-File -Path $mediaArchive -Label "Django media archive"
+        Assert-FileSha256 -Path $mediaArchive -ExpectedHash $manifest.media_archive_sha256 -Label "Django media archive"
+    }
+    if (-not $SkipNocoBaseStorage -and $manifest.nocobase_storage_archive_created -eq $true) {
+        $storageArchive = Join-Path $resolvedBackup.Path "nocobase-storage.zip"
+        Assert-File -Path $storageArchive -Label "NocoBase storage archive"
+        Assert-FileSha256 -Path $storageArchive -ExpectedHash $manifest.nocobase_storage_archive_sha256 -Label "NocoBase storage archive"
+    }
+}
+
 function Invoke-RestoreDb {
     param(
         [string]$DumpFile,
@@ -111,6 +158,8 @@ if ($PlanOnly) {
     $plan | ConvertTo-Json -Depth 5
     exit 0
 }
+
+Assert-BackupSetIntegrity
 
 if (-not $ConfirmRestore) {
     throw "Restore is destructive. Re-run with -ConfirmRestore after stopping Django, workers, schedulers, and NocoBase."

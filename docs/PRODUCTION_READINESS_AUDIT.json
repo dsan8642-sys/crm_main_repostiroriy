@@ -1159,8 +1159,8 @@
     {
       "id": "operations.backup_restore_health",
       "category": "operations",
-      "statement": "Production operations include hybrid backup, restore, and live health checks for Django, NocoBase bridge/config APIs, and the NocoBase process.",
-      "source_refs": ["docs/OPERATIONS.md", "scripts/backup-hybrid.ps1", "scripts/restore-hybrid.ps1", "docs/PRODUCTION_CUTOVER_EVIDENCE.example.json"],
+      "statement": "Production operations include hybrid backup, checksum-guarded restore, and live health checks for Django, NocoBase bridge/config APIs, and the NocoBase process.",
+      "source_refs": ["docs/OPERATIONS.md", "scripts/backup-hybrid.ps1", "scripts/restore-hybrid.ps1", "scripts/verify-hybrid-backup-set.ps1", "docs/PRODUCTION_CUTOVER_EVIDENCE.example.json"],
       "evidence": [
         {
           "type": "command_exists",
@@ -1195,6 +1195,24 @@
             "nocobase_dump_sha256",
             "media_archive_sha256",
             "nocobase_storage_archive_sha256"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/restore-hybrid.ps1",
+          "patterns": [
+            "Assert-BackupSetIntegrity",
+            "Assert-FileSha256",
+            "sha256 mismatch",
+            "Restore is destructive"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "docs/OPERATIONS.md",
+          "patterns": [
+            "Before any real restore",
+            "verify-hybrid-backup-set.ps1 -BackupSetDir"
           ]
         },
         {
@@ -1233,6 +1251,8 @@
             "NewGuid",
             "swimcrm-guard-empty-backup",
             "ErrorAction SilentlyContinue",
+            "Hybrid restore backup-set checksum guard",
+            "Django dump sha256 mismatch",
             "Hybrid restore confirmation guard",
             "Restore is destructive.*-ConfirmRestore"
           ]
