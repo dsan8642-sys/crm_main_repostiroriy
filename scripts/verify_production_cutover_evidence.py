@@ -67,6 +67,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "Release source archive written",
         "Release source manifest written",
         "Release source archive manifest verified",
+        "Release source archive contents verified",
         "sha256",
     ],
     "tracked_release_source_guard": [

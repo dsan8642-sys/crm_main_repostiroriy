@@ -221,7 +221,8 @@ not just `status=passed`:
   vulnerabilities`, `Frontend production build`, `Frontend Playwright smoke
   tests`;
 - release source archive: `Release source archive written`, `Release source
-  manifest written`, `Release source archive manifest verified`, exact
+  manifest written`, `Release source archive manifest verified`, `Release
+  source archive contents verified`, exact
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
 - production preflight: `Production environment check passed`, `Runtime path
@@ -428,8 +429,9 @@ Before creating a production package:
   `releases\swimcrm-release-<sha>.zip`;
 - verify the produced archive manifest with
   `scripts\verify-release-source-archive.cmd releases\swimcrm-release-<sha>.manifest.json`
-  and paste `Release source archive manifest verified`, `commit_sha`, and
-  `archive_sha256` into the cutover evidence;
+  and paste `Release source archive manifest verified`, `Release source archive
+  contents verified`, `commit_sha`, and `archive_sha256` into the cutover
+  evidence;
 - use `scripts\verify-release-tree.cmd -Strict` only as a clean checkout guard
   before dependencies and runtime assets are generated;
 - on the production host, run `scripts\check-production-env.cmd` with real environment variables;

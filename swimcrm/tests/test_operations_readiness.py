@@ -183,6 +183,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_source_archive_content_verification(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "release_source_archive"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "Release source archive contents verified. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "release_source_archive: missing evidence fragment: Release source archive contents verified",
+            errors,
+        )
+
     def test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -413,6 +431,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("release_archive_passed", generator)
         self.assertIn("archive_sha256", generator)
         self.assertIn("Release source archive manifest verified", generator)
+        self.assertIn("Release source archive contents verified", generator)
         self.assertIn("Tracked release-source guard passed", generator)
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)

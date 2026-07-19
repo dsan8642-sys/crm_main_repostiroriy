@@ -26,7 +26,7 @@ EVIDENCE_ITEMS = [
         "id": "release_source_archive",
         "command": "scripts\\build-release-source.cmd",
         "summary": "Run the release source archive builder from the clean release commit, verify the manifest/checksum, and paste the pass summary plus the release commit SHA here.",
-        "output_excerpt": "Must include: Release source archive written; Release source manifest written; Release source archive manifest verified; release_candidate.commit_sha; sha256.",
+        "output_excerpt": "Must include: Release source archive written; Release source manifest written; Release source archive manifest verified; Release source archive contents verified; release_candidate.commit_sha; sha256.",
     },
     {
         "id": "tracked_release_source_guard",
@@ -121,6 +121,7 @@ def _evidence_items(
                 f"{manifest_fragment} "
                 f"Release source archive sha256: {archive_sha256}. "
                 "Release source archive manifest verified. "
+                "Release source archive contents verified. "
                 f"commit_sha: {release_commit_sha}. "
                 f"archive_sha256: {archive_sha256}."
             )
