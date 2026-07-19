@@ -57,17 +57,25 @@ $data = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $currentCommit = ""
 $currentShortSha = ""
+$expectedTrackedEntries = @()
 
 try {
     & git -C $RepoRoot rev-parse --is-inside-work-tree | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $currentCommit = (& git -C $RepoRoot rev-parse HEAD).Trim()
         $currentShortSha = (& git -C $RepoRoot rev-parse --short=12 HEAD).Trim()
+        $expectedTrackedEntries = @(
+            & git -C $RepoRoot -c core.quotepath=false ls-tree -r --name-only HEAD |
+                ForEach-Object { $_.Replace("\", "/") } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Sort-Object
+        )
     }
 }
 catch {
     $currentCommit = ""
     $currentShortSha = ""
+    $expectedTrackedEntries = @()
 }
 
 if (-not ($data.commit_sha -match "^[0-9a-f]{40}$")) {
@@ -110,6 +118,12 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
     $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
+    $fileEntries = @(
+        $zip.Entries |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.Name) } |
+            ForEach-Object { $_.FullName.Replace("\", "/") } |
+            Sort-Object
+    )
     foreach ($requiredEntry in $requiredArchiveEntries) {
         if ($entries -notcontains $requiredEntry) {
             throw "Release source archive is missing required entry: $requiredEntry"
@@ -132,6 +146,20 @@ try {
             }
         }
     }
+    if ($expectedTrackedEntries.Count -gt 0) {
+        $missingTrackedEntries = @($expectedTrackedEntries | Where-Object { $fileEntries -notcontains $_ })
+        $unexpectedArchiveEntries = @($fileEntries | Where-Object { $expectedTrackedEntries -notcontains $_ })
+        if ($missingTrackedEntries.Count -gt 0 -or $unexpectedArchiveEntries.Count -gt 0) {
+            $details = @()
+            if ($missingTrackedEntries.Count -gt 0) {
+                $details += "missing tracked entries: " + (($missingTrackedEntries | Select-Object -First 20) -join ", ")
+            }
+            if ($unexpectedArchiveEntries.Count -gt 0) {
+                $details += "unexpected archive entries: " + (($unexpectedArchiveEntries | Select-Object -First 20) -join ", ")
+            }
+            throw "Release source archive file list must match git ls-tree HEAD. $($details -join "; ")"
+        }
+    }
 }
 finally {
     $zip.Dispose()
@@ -139,5 +167,6 @@ finally {
 
 Write-Host "Release source archive manifest verified."
 Write-Host "Release source archive contents verified."
+Write-Host "Release source archive tracked file list verified."
 Write-Host "commit_sha: $($data.commit_sha)"
 Write-Host "archive_sha256: $actualHash"

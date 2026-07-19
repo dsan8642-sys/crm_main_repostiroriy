@@ -30,7 +30,7 @@
       "command": "scripts\\build-release-source.cmd",
       "captured_at": "2026-07-16T12:06:00+02:00",
       "summary": "Release source archive was built from clean release commit 0123456789abcdef0123456789abcdef01234567, the manifest was written for audit, and the archive checksum was verified.",
-      "output_excerpt": "Release source archive written: releases\\swimcrm-release-0123456789ab.zip. Release source manifest written: releases\\swimcrm-release-0123456789ab.manifest.json. Release source archive sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. Release source archive manifest verified. Release source archive contents verified. commit_sha: 0123456789abcdef0123456789abcdef01234567. archive_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+      "output_excerpt": "Release source archive written: releases\\swimcrm-release-0123456789ab.zip. Release source manifest written: releases\\swimcrm-release-0123456789ab.manifest.json. Release source archive sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. Release source archive manifest verified. Release source archive contents verified. Release source archive tracked file list verified. commit_sha: 0123456789abcdef0123456789abcdef01234567. archive_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
     },
     {
       "id": "tracked_release_source_guard",

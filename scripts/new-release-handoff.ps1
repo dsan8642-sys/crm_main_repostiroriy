@@ -106,7 +106,7 @@ $operatorChecklist = @(
         id = "fill_docs_production_cutover_evidence_json"
         title = "Fill the production cutover evidence manifest with real evidence."
         command = "Copy docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json to docs\PRODUCTION_CUTOVER_EVIDENCE.json and replace pending placeholders."
-        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256), including Release source archive contents verified and complete rollback acknowledgement: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke."
+        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256), including Release source archive contents verified, Release source archive tracked file list verified, and complete rollback acknowledgement: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke."
         stop_if_missing = $true
     },
     [ordered]@{

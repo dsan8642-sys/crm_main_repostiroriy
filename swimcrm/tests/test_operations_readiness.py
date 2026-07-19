@@ -201,6 +201,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_source_archive_tracked_file_list_verification(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "release_source_archive"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "Release source archive tracked file list verified. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "release_source_archive: missing evidence fragment: Release source archive tracked file list verified",
+            errors,
+        )
+
     def test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -432,6 +450,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("archive_sha256", generator)
         self.assertIn("Release source archive manifest verified", generator)
         self.assertIn("Release source archive contents verified", generator)
+        self.assertIn("Release source archive tracked file list verified", generator)
         self.assertIn("Tracked release-source guard passed", generator)
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)
@@ -671,6 +690,9 @@ class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
         self.assertIn("short_sha must match current HEAD", script)
         self.assertIn("ZipFile", script)
         self.assertIn("Release source archive contents verified", script)
+        self.assertIn("Release source archive tracked file list verified", script)
+        self.assertIn("ls-tree -r --name-only HEAD", script)
+        self.assertIn("Release source archive file list must match git ls-tree HEAD", script)
         self.assertIn("blocked runtime/generated entry", script)
         self.assertIn("frontend/package-lock.json", script)
 
@@ -739,6 +761,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("64-character SHA256", script)
         self.assertIn("Rollback plan reviewed", script)
         self.assertIn("Release source archive contents verified", script)
+        self.assertIn("Release source archive tracked file list verified", script)
         self.assertIn("migrate --check", script)
 
     def test_release_handoff_verifier_catches_stale_archive_and_blocker_drift(self):
@@ -760,6 +783,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("64-character SHA256", script)
         self.assertIn("stop writers", script)
         self.assertIn("Release source archive contents verified", script)
+        self.assertIn("Release source archive tracked file list verified", script)
 
     def test_operational_wrapper_guard_includes_standalone_postgres_backup_cmd(self):
         verifier = (REPO_ROOT / "scripts" / "verify-operational-wrappers.ps1").read_text(encoding="utf-8-sig")

@@ -149,6 +149,7 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
     "Release source archive contents verified",
+    "Release source archive tracked file list verified",
     "Rollback plan reviewed",
     "stop writers",
     "verified backup",
