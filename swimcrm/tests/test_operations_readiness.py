@@ -293,6 +293,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_https_live_health_fragment(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "live_hybrid_health"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "HTTPS live endpoint requirement passed. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "live_hybrid_health: missing evidence fragment: HTTPS live endpoint requirement passed",
+            errors,
+        )
+
     def test_cutover_evidence_generator_can_prefill_local_archive_evidence(self):
         generator = (REPO_ROOT / "scripts" / "new_production_cutover_evidence.py").read_text(encoding="utf-8-sig")
 
@@ -303,6 +321,8 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
+        self.assertIn("check-hybrid-health.cmd -RequireHttps", generator)
+        self.assertIn("HTTPS live endpoint requirement passed", generator)
 
 
 class ReleaseSourceManifestVerifierRule(SimpleTestCase):
@@ -601,6 +621,16 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("backup-pg.cmd", verifier)
         self.assertIn("POSTGRES_PASSWORD must not use the development default", wrapper)
         self.assertIn("backup-pg.ps1", wrapper)
+
+    def test_live_hybrid_health_supports_https_required_release_mode(self):
+        script = (REPO_ROOT / "scripts" / "check-hybrid-health.ps1").read_text(encoding="utf-8-sig")
+        handoff = (REPO_ROOT / "scripts" / "new-release-handoff.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("RequireHttps", script)
+        self.assertIn("DJANGO_BASE_URL must use https://", script)
+        self.assertIn("NOCOBASE_BASE_URL must use https://", script)
+        self.assertIn("HTTPS live endpoint requirement passed", script)
+        self.assertIn("check-hybrid-health.cmd -RequireHttps", handoff)
 
 
 class HealthAndReadinessRule(TestCase):

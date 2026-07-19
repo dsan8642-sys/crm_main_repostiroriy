@@ -136,7 +136,7 @@ $env:DJANGO_BASE_URL="https://crm.example.com"
 $env:NOCOBASE_BASE_URL="https://nocobase.example.com"
 $env:NOCOBASE_BRIDGE_TOKEN="<production bridge token>"
 $env:NOCOBASE_CONFIG_TOKEN="<production config token>"
-scripts\check-hybrid-health.cmd
+scripts\check-hybrid-health.cmd -RequireHttps
 ```
 
 The script verifies:
@@ -171,7 +171,7 @@ release evidence:
   manifest;
 - GitHub Actions run URL proving `postgres-backend-check` passed on the release commit;
 - production environment preflight output;
-- live `scripts\check-hybrid-health.cmd` output from the target host;
+- live `scripts\check-hybrid-health.cmd -RequireHttps` output from the target host;
 - latest backup/restore drill evidence;
 - rollback plan acknowledgement.
 
@@ -221,7 +221,8 @@ not just `status=passed`:
   settings passed`, `PostgreSQL production settings passed`, `Celery
   production settings passed`, `NocoBase production settings passed`, `HTTPS
   reverse-proxy settings passed`;
-- live hybrid health: `Hybrid health check passed`, `nocobase_config_health`,
+- live hybrid health: `Hybrid health check passed`, `HTTPS live endpoint
+  requirement passed`, `nocobase_config_health`,
   `/api/nocobase/config/languages/`;
 - backup/restore drill: `Hybrid backup set written`, `backup_set_dir`,
   `nocobase_database`, `Django dump sha256 OK`, `NocoBase dump sha256 OK`,

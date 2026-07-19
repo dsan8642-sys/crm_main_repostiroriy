@@ -52,9 +52,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "live_hybrid_health",
-        "command": "scripts\\check-hybrid-health.cmd",
+        "command": "scripts\\check-hybrid-health.cmd -RequireHttps",
         "summary": "Run live hybrid health on the target host and paste the pass summary here.",
-        "output_excerpt": "Must include: Hybrid health check passed; nocobase_config_health; /api/nocobase/config/languages/",
+        "output_excerpt": "Must include: Hybrid health check passed; HTTPS live endpoint requirement passed; nocobase_config_health; /api/nocobase/config/languages/",
     },
     {
         "id": "hybrid_backup_restore_drill",

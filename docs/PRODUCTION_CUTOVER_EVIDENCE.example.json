@@ -65,10 +65,10 @@
     {
       "id": "live_hybrid_health",
       "status": "passed",
-      "command": "scripts\\check-hybrid-health.cmd",
+      "command": "scripts\\check-hybrid-health.cmd -RequireHttps",
       "captured_at": "2026-07-16T12:25:00+02:00",
       "summary": "Live Django health, NocoBase bridge health, guarded config health, ops status, and NocoBase process health passed.",
-      "output_excerpt": "Hybrid health check passed. nocobase_config_health /api/nocobase/config/languages/"
+      "output_excerpt": "HTTPS live endpoint requirement passed. Hybrid health check passed. nocobase_config_health /api/nocobase/config/languages/"
     },
     {
       "id": "hybrid_backup_restore_drill",

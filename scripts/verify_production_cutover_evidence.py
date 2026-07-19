@@ -40,7 +40,7 @@ EXPECTED_COMMANDS = {
     "release_source_archive": "scripts\\build-release-source.cmd",
     "tracked_release_source_guard": "scripts\\verify-release-source-manifests.cmd -RequireTracked",
     "production_env_preflight": "scripts\\check-production-env.cmd",
-    "live_hybrid_health": "scripts\\check-hybrid-health.cmd",
+    "live_hybrid_health": "scripts\\check-hybrid-health.cmd -RequireHttps",
     "hybrid_backup_restore_drill": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
 }
 
@@ -83,6 +83,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
     ],
     "live_hybrid_health": [
         "Hybrid health check passed",
+        "HTTPS live endpoint requirement passed",
         "nocobase_config_health",
         "/api/nocobase/config/languages/",
     ],

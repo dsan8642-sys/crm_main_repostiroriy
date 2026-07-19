@@ -1062,7 +1062,9 @@
             "operator_checklist",
             "expected_evidence",
             "stop_if_missing",
-            "HTTPS reverse-proxy settings passed"
+            "HTTPS reverse-proxy settings passed",
+            "check-hybrid-health.cmd -RequireHttps",
+            "HTTPS live endpoint requirement passed"
           ]
         },
         {
@@ -1264,6 +1266,10 @@
           "patterns": [
             "NOCOBASE_BRIDGE_TOKEN is required",
             "NOCOBASE_CONFIG_TOKEN is required",
+            "RequireHttps",
+            "DJANGO_BASE_URL must use https://",
+            "NOCOBASE_BASE_URL must use https://",
+            "HTTPS live endpoint requirement passed",
             "nocobase_config_health",
             "/api/nocobase/config/languages/",
             "Django NocoBase config health passed"
@@ -1360,7 +1366,9 @@
             "Tracked release source manifests",
             "tracked_release_source_guard",
             "github_postgres_backend_job",
-            "live_hybrid_health"
+            "live_hybrid_health",
+            "check-hybrid-health.cmd -RequireHttps",
+            "HTTPS live endpoint requirement passed"
           ]
         },
         {
@@ -1378,6 +1386,7 @@
             "test_cutover_evidence_requires_release_archive_artifact_name_in_github_evidence",
             "test_cutover_evidence_requires_postgres_backend_job_name_in_github_evidence",
             "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
+            "test_cutover_evidence_requires_https_live_health_fragment",
             "ReleaseSourceArchiveVerifierRule",
             "test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha",
             "test_release_source_manifests_fail_when_root_tooling_is_untracked",

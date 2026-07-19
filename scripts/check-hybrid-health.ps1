@@ -6,6 +6,7 @@ param(
     [string]$ConfigToken = $env:NOCOBASE_CONFIG_TOKEN,
     [int]$TimeoutSeconds = 10,
     [switch]$AllowOpsCritical,
+    [switch]$RequireHttps,
     [switch]$PlanOnly
 )
 
@@ -69,6 +70,7 @@ $plan = [ordered]@{
     nocobase_process_health = Join-Url $NocoBaseBaseUrl "/api/__health_check"
     requires_bridge_token = $true
     requires_config_token = $true
+    requires_https = [bool]$RequireHttps
     timeout_seconds = $TimeoutSeconds
 }
 
@@ -82,6 +84,14 @@ if ([string]::IsNullOrWhiteSpace($BridgeToken)) {
 }
 if ([string]::IsNullOrWhiteSpace($ConfigToken)) {
     throw "NOCOBASE_CONFIG_TOKEN is required. Pass -ConfigToken or set the environment variable."
+}
+if ($RequireHttps) {
+    if ($DjangoBaseUrl -notmatch "^https://") {
+        throw "DJANGO_BASE_URL must use https:// when -RequireHttps is set."
+    }
+    if ($NocoBaseBaseUrl -notmatch "^https://") {
+        throw "NOCOBASE_BASE_URL must use https:// when -RequireHttps is set."
+    }
 }
 
 $headers = @{ Authorization = "Bearer $BridgeToken" }
@@ -114,4 +124,7 @@ Write-Host "Django NocoBase config health passed: $($plan.nocobase_config_health
 Invoke-HttpOk -Url $plan.nocobase_process_health
 Write-Host "NocoBase process health check passed: $($plan.nocobase_process_health)"
 
+if ($RequireHttps) {
+    Write-Host "HTTPS live endpoint requirement passed."
+}
 Write-Host "Hybrid health check passed."
