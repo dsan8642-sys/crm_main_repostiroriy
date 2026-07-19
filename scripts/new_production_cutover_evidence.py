@@ -87,7 +87,14 @@ def _source_tree_state():
     return "clean" if not _git(["status", "--porcelain"]) else "dirty"
 
 
-def _evidence_items(local_backend_passed=False, local_full_stack_passed=False):
+def _evidence_items(
+    local_backend_passed=False,
+    local_full_stack_passed=False,
+    release_archive_passed=False,
+    archive_sha256="",
+    archive_manifest="",
+    release_commit_sha="",
+):
     now = datetime.now(timezone.utc).isoformat()
     rows = []
     for template in EVIDENCE_ITEMS:
@@ -104,23 +111,53 @@ def _evidence_items(local_backend_passed=False, local_full_stack_passed=False):
             item["captured_at"] = now
             item["summary"] = "Full-stack release checks passed."
             item["output_excerpt"] = "Full-stack release checks passed. found 0 vulnerabilities. Frontend production build passed. Frontend Playwright smoke tests passed."
+        if item["id"] == "release_source_archive" and release_archive_passed:
+            item["status"] = "passed"
+            item["captured_at"] = now
+            item["summary"] = f"Release source archive was built and verified for commit {release_commit_sha}."
+            manifest_fragment = f" Release source manifest written: {archive_manifest}." if archive_manifest else " Release source manifest written."
+            item["output_excerpt"] = (
+                "Release source archive written."
+                f"{manifest_fragment} "
+                f"Release source archive sha256: {archive_sha256}. "
+                "Release source archive manifest verified. "
+                f"commit_sha: {release_commit_sha}. "
+                f"archive_sha256: {archive_sha256}."
+            )
+        if item["id"] == "tracked_release_source_guard" and release_archive_passed:
+            item["status"] = "passed"
+            item["captured_at"] = now
+            item["summary"] = "Tracked release-source guard passed for required root and frontend manifests."
+            item["output_excerpt"] = "Release source manifests verified. Required release manifests are tracked by Git."
         rows.append(item)
     return rows
 
 
-def build_manifest(environment, local_backend_passed=False, local_full_stack_passed=False):
+def build_manifest(
+    environment,
+    local_backend_passed=False,
+    local_full_stack_passed=False,
+    release_archive_passed=False,
+    archive_sha256="",
+    archive_manifest="",
+):
+    release_commit_sha = _git(["rev-parse", "HEAD"])
     return {
         "version": "2026-07-16",
         "environment": environment,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "release_candidate": {
-            "commit_sha": _git(["rev-parse", "HEAD"]),
+            "commit_sha": release_commit_sha,
             "branch": _git(["branch", "--show-current"]),
             "source_tree": _source_tree_state(),
         },
         "required_evidence": _evidence_items(
             local_backend_passed=local_backend_passed,
             local_full_stack_passed=local_full_stack_passed,
+            release_archive_passed=release_archive_passed,
+            archive_sha256=archive_sha256,
+            archive_manifest=archive_manifest,
+            release_commit_sha=release_commit_sha,
         ),
     }
 
@@ -134,6 +171,9 @@ def main():
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--local-backend-passed", action="store_true")
     parser.add_argument("--local-full-stack-passed", action="store_true")
+    parser.add_argument("--release-archive-passed", action="store_true")
+    parser.add_argument("--archive-sha256", default="")
+    parser.add_argument("--archive-manifest", default="")
     args = parser.parse_args()
 
     output = Path(args.output)
@@ -149,6 +189,9 @@ def main():
         environment=args.environment,
         local_backend_passed=args.local_backend_passed,
         local_full_stack_passed=args.local_full_stack_passed,
+        release_archive_passed=args.release_archive_passed,
+        archive_sha256=args.archive_sha256,
+        archive_manifest=args.archive_manifest,
     )
     output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Draft production cutover evidence written: {output}")

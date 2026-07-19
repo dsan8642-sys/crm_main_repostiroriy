@@ -5,7 +5,10 @@ param(
     [string]$Environment = "production",
     [switch]$Force,
     [switch]$LocalBackendPassed,
-    [switch]$LocalFullStackPassed
+    [switch]$LocalFullStackPassed,
+    [switch]$ReleaseArchivePassed,
+    [string]$ArchiveSha256 = "",
+    [string]$ArchiveManifest = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +40,15 @@ if ($LocalBackendPassed) {
 }
 if ($LocalFullStackPassed) {
     $args += "--local-full-stack-passed"
+}
+if ($ReleaseArchivePassed) {
+    $args += "--release-archive-passed"
+}
+if (-not [string]::IsNullOrWhiteSpace($ArchiveSha256)) {
+    $args += @("--archive-sha256", $ArchiveSha256)
+}
+if (-not [string]::IsNullOrWhiteSpace($ArchiveManifest)) {
+    $args += @("--archive-manifest", $ArchiveManifest)
 }
 
 & $Python $Generator @args

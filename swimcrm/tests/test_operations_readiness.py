@@ -209,6 +209,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_generator_can_prefill_local_archive_evidence(self):
+        generator = (REPO_ROOT / "scripts" / "new_production_cutover_evidence.py").read_text(encoding="utf-8-sig")
+
+        self.assertIn("release_archive_passed", generator)
+        self.assertIn("archive_sha256", generator)
+        self.assertIn("Release source archive manifest verified", generator)
+        self.assertIn("Tracked release-source guard passed", generator)
+
 
 class ReleaseSourceManifestVerifierRule(SimpleTestCase):
     def setUp(self):

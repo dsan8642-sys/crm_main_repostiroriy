@@ -1204,6 +1204,8 @@
             "PRODUCTION_CUTOVER_EVIDENCE.draft.json",
             "local_backend_release_gate",
             "found 0 vulnerabilities",
+            "release_archive_passed",
+            "archive_sha256",
             "Tracked release source manifests",
             "tracked_release_source_guard",
             "github_postgres_backend_job",

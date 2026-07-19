@@ -371,6 +371,10 @@ Before creating a production package:
   `docs\PRODUCTION_CUTOVER_EVIDENCE.example.json`, or generate a draft with
   `scripts\new-production-cutover-evidence.cmd`, then run
   `scripts\verify-production-cutover-evidence.cmd`;
+- when local backend/full-stack/archive checks already passed, generate the
+  draft with `scripts\new-production-cutover-evidence.cmd -LocalBackendPassed
+  -LocalFullStackPassed -ReleaseArchivePassed -ArchiveSha256 <sha256>
+  -ArchiveManifest <manifest-path>` to reduce manual evidence-copy mistakes;
 - if running frontend commands manually instead of the wrapper, run
   `npm.cmd ci --cache ..\.npm-cache`, `npm.cmd run build`, and
   `npm.cmd run test:smoke` from `frontend\`;
