@@ -46,7 +46,7 @@ EXPECTED_COMMANDS = {
     "local_full_stack_release_gate": "scripts\\release-check-full.cmd",
     "release_source_archive": "scripts\\build-release-source.cmd",
     "tracked_release_source_guard": "scripts\\verify-release-source-manifests.cmd -RequireTracked",
-    "target_host_release_install": "manual target-host release install",
+    "target_host_release_install": "scripts\\install-release-on-target-host.cmd",
     "production_env_preflight": "scripts\\check-production-env.cmd",
     "live_hybrid_health": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
     "hybrid_backup_restore_drill": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
@@ -86,6 +86,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "postgres-backend-check",
     ],
     "target_host_release_install": [
+        "Target-host release install completed",
         "Release archive extracted on target host",
         "Release source archive manifest verified",
         "Release source archive contents verified",
@@ -247,8 +248,18 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
         errors.append(f"{evidence_id}: command is required")
 
     expected_command = EXPECTED_COMMANDS.get(evidence_id)
-    if expected_command and item.get("command") != expected_command:
-        errors.append(f"{evidence_id}: command must be {expected_command!r}")
+    if expected_command:
+        command = item.get("command", "")
+        if evidence_id == "target_host_release_install":
+            if not command.startswith(expected_command):
+                errors.append(f"{evidence_id}: command must start with {expected_command!r}")
+            for argument in ("-Manifest", "-NocoBaseAppRoot", "-NocoBaseStorageDir", "-RunInstall"):
+                if argument not in command:
+                    errors.append(f"{evidence_id}: command must include {argument}")
+            if "-InstallRoot" not in command and "-ReleaseDir" not in command:
+                errors.append(f"{evidence_id}: command must include -InstallRoot or -ReleaseDir")
+        elif command != expected_command:
+            errors.append(f"{evidence_id}: command must be {expected_command!r}")
 
     combined = _combined_item_text(item)
     if evidence_id == "live_hybrid_health":

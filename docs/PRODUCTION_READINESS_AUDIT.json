@@ -1001,6 +1001,10 @@
         },
         {
           "type": "command_exists",
+          "path": "scripts/install-release-on-target-host.cmd"
+        },
+        {
+          "type": "command_exists",
           "path": "scripts/verify-local-release-candidate.cmd"
         },
         {
@@ -1047,10 +1051,38 @@
             "tracked_file_list_sha256",
             "tracked file count mismatch",
             "tracked file list sha256 mismatch",
+            "siblingArchivePath",
+            "archive_path",
             "ls-tree -r --name-only HEAD",
             "Release source archive file list must match git ls-tree HEAD",
             "blocked runtime/generated entry",
             "frontend/package-lock.json"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/install-release-on-target-host.ps1",
+          "patterns": [
+            "RunInstall",
+            "Plan only",
+            "verify-release-source-archive.ps1",
+            "Expand-Archive",
+            "ReleaseDir must be empty before extraction",
+            "NOCOBASE_APP_ROOT must be outside the extracted release source tree",
+            "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree",
+            "-m venv",
+            "pip install -r",
+            "npm.cmd ci",
+            "manage.py",
+            "migrate",
+            "--check",
+            "Backend dependencies installed",
+            "Root Node tooling installed",
+            "Frontend dependencies installed",
+            "Django migrations check passed",
+            "Target-host release install completed",
+            "tracked_file_count",
+            "tracked_file_list_sha256"
           ]
         },
         {
@@ -1135,7 +1167,9 @@
             "expected_evidence",
             "stop_if_missing",
             "install_release_archive_on_target_host",
+            "install-release-on-target-host.cmd",
             "Release archive extracted on target host",
+            "Target-host release install completed",
             "Backend dependencies installed",
             "Root Node tooling installed",
             "Frontend dependencies installed",
@@ -1175,6 +1209,9 @@
             "must stop if evidence is missing",
             "Assert-ChecklistEvidenceContains",
             "install_release_archive_on_target_host",
+            "install-release-on-target-host.cmd",
+            "-RunInstall",
+            "Target-host release install completed",
             "Backend dependencies installed",
             "NocoBase storage outside source tree",
             "real https:// Django production URL",
@@ -1441,7 +1478,9 @@
             "swimcrm-release-source-",
             "postgres-backend-check",
             "target_host_release_install",
-            "manual target-host release install",
+            "install-release-on-target-host.cmd",
+            "-RunInstall",
+            "Target-host release install completed",
             "Release archive extracted on target host",
             "Backend dependencies installed",
             "Root Node tooling installed",
@@ -1497,7 +1536,9 @@
             "tracked_file_count",
             "tracked_file_list_sha256",
             "target_host_release_install",
-            "manual target-host release install",
+            "install-release-on-target-host.cmd",
+            "-RunInstall",
+            "Target-host release install completed",
             "NocoBase app root outside source tree",
             "swimcrm-release-source-<commit-sha>",
             "Tracked release source manifests",

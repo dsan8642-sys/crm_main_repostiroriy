@@ -155,6 +155,7 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
     "NocoBase dump list OK"
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_release_archive_on_target_host" -Fragments @(
+    "Target-host release install completed",
     "Release archive extracted on target host",
     "Release source archive tracked file list verified",
     "tracked_file_count",
@@ -166,6 +167,16 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_rele
     "NocoBase app root outside source tree",
     "NocoBase storage outside source tree"
 )
+
+$installItem = $operatorChecklist |
+    Where-Object { $_.id -eq "install_release_archive_on_target_host" } |
+    Select-Object -First 1
+if ([string]$installItem.command -notmatch "install-release-on-target-host\.cmd") {
+    throw "Release handoff install_release_archive_on_target_host must use install-release-on-target-host.cmd."
+}
+if ([string]$installItem.command -notmatch [regex]::Escape("-RunInstall")) {
+    throw "Release handoff install_release_archive_on_target_host command must include -RunInstall."
+}
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
     "Release source archive contents verified",
     "Release source archive tracked file list verified",

@@ -226,9 +226,10 @@ not just `status=passed`:
   verified`, `tracked_file_count`, `tracked_file_list_sha256`, exact
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
-- target-host release install: `Release archive extracted on target host`,
-  `Release source archive manifest verified`, `Release source archive contents
-  verified`, `Release source archive tracked file list verified`,
+- target-host release install: `Target-host release install completed`,
+  `Release archive extracted on target host`, `Release source archive manifest
+  verified`, `Release source archive contents verified`, `Release source
+  archive tracked file list verified`,
   `tracked_file_count`, `tracked_file_list_sha256`, `Backend dependencies
   installed`, `Root Node tooling installed`, `Frontend dependencies installed`,
   `Django migrations check passed`, `NocoBase app root outside source tree`,
@@ -442,6 +443,12 @@ Before creating a production package:
   contents verified`, `Release source archive tracked file list verified`,
   `tracked_file_count`, `tracked_file_list_sha256`, `commit_sha`, and
   `archive_sha256` into the cutover evidence;
+- on the target host, copy the release `.zip` and `.manifest.json` together and
+  install from the verified archive with
+  `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall`;
+- the target-host installer supports manifests created on another machine: if
+  the manifest contains the build machine's absolute archive path, the verifier
+  falls back to the sibling `.zip` next to the manifest;
 - use `scripts\verify-release-tree.cmd -Strict` only as a clean checkout guard
   before dependencies and runtime assets are generated;
 - on the production host, run `scripts\check-production-env.cmd` with real environment variables;

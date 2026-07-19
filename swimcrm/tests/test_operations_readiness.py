@@ -153,6 +153,33 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_target_host_installer_command(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "target_host_release_install"
+        )
+        item["command"] = "manual target-host release install"
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "Target-host release install completed. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "target_host_release_install: command must start with 'scripts\\\\install-release-on-target-host.cmd'",
+            errors,
+        )
+        self.assertIn(
+            "target_host_release_install: command must include -RunInstall",
+            errors,
+        )
+        self.assertIn(
+            "target_host_release_install: missing evidence fragment: Target-host release install completed",
+            errors,
+        )
+
     def test_cutover_evidence_requires_source_archive_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -555,7 +582,9 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
         self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", generator)
         self.assertIn("target_host_release_install", generator)
-        self.assertIn("manual target-host release install", generator)
+        self.assertIn("install-release-on-target-host.cmd", generator)
+        self.assertIn("-RunInstall", generator)
+        self.assertIn("Target-host release install completed", generator)
         self.assertIn("NocoBase app root outside source tree", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
         self.assertIn("Operations status ok requirement passed", generator)
@@ -799,10 +828,41 @@ class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
         self.assertIn("tracked_file_list_sha256", script)
         self.assertIn("tracked file count mismatch", script)
         self.assertIn("tracked file list sha256 mismatch", script)
+        self.assertIn("siblingArchivePath", script)
+        self.assertIn("archive_path", script)
         self.assertIn("ls-tree -r --name-only HEAD", script)
         self.assertIn("Release source archive file list must match git ls-tree HEAD", script)
         self.assertIn("blocked runtime/generated entry", script)
         self.assertIn("frontend/package-lock.json", script)
+
+
+class TargetHostReleaseInstallerRule(SimpleTestCase):
+    def test_target_host_release_installer_is_plan_first_and_guarded(self):
+        script = (REPO_ROOT / "scripts" / "install-release-on-target-host.ps1").read_text(encoding="utf-8-sig")
+        wrapper = (REPO_ROOT / "scripts" / "install-release-on-target-host.cmd").read_text(encoding="utf-8-sig")
+
+        self.assertIn("RunInstall", script)
+        self.assertIn("Plan only", script)
+        self.assertIn("verify-release-source-archive.ps1", script)
+        self.assertIn("Expand-Archive", script)
+        self.assertIn("ReleaseDir must be empty before extraction", script)
+        self.assertIn("NOCOBASE_APP_ROOT must be outside the extracted release source tree", script)
+        self.assertIn("NOCOBASE_STORAGE_DIR must be outside the extracted release source tree", script)
+        self.assertIn("python.exe", script)
+        self.assertIn("-m venv", script)
+        self.assertIn("pip install -r", script)
+        self.assertIn("npm.cmd ci", script)
+        self.assertIn("manage.py", script)
+        self.assertIn("migrate", script)
+        self.assertIn("--check", script)
+        self.assertIn("Backend dependencies installed", script)
+        self.assertIn("Root Node tooling installed", script)
+        self.assertIn("Frontend dependencies installed", script)
+        self.assertIn("Django migrations check passed", script)
+        self.assertIn("Target-host release install completed", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
+        self.assertIn("install-release-on-target-host.ps1", wrapper)
 
 
 class LocalReleaseCandidateVerifierRule(SimpleTestCase):
@@ -874,6 +934,9 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("pending_external_actions", script)
         self.assertIn("operator_checklist", script)
         self.assertIn("install_release_archive_on_target_host", script)
+        self.assertIn("install-release-on-target-host.cmd", script)
+        self.assertIn("-RunInstall", script)
+        self.assertIn("Target-host release install completed", script)
         self.assertIn("Release archive extracted on target host", script)
         self.assertIn("Backend dependencies installed", script)
         self.assertIn("NocoBase app root outside source tree", script)
@@ -905,6 +968,9 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("pending_external_actions", script)
         self.assertIn("operator_checklist", script)
         self.assertIn("install_release_archive_on_target_host", script)
+        self.assertIn("install-release-on-target-host.cmd", script)
+        self.assertIn("-RunInstall", script)
+        self.assertIn("Target-host release install completed", script)
         self.assertIn("Backend dependencies installed", script)
         self.assertIn("NocoBase storage outside source tree", script)
         self.assertIn("is missing expected_evidence", script)

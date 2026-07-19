@@ -53,6 +53,8 @@ $RequiredFiles = @(
     "scripts\build-release-source.cmd",
     "scripts\verify-release-source-archive.ps1",
     "scripts\verify-release-source-archive.cmd",
+    "scripts\install-release-on-target-host.ps1",
+    "scripts\install-release-on-target-host.cmd",
     "scripts\verify-local-release-candidate.ps1",
     "scripts\verify-local-release-candidate.cmd",
     "scripts\verify-production-cutover-evidence.ps1",

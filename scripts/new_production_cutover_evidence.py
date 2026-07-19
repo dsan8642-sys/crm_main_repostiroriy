@@ -46,9 +46,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "target_host_release_install",
-        "command": "manual target-host release install",
+        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall",
         "summary": "Extract the verified release archive on the target host, install backend/root/frontend dependencies, verify migrations, and prepare NocoBase app/storage roots outside the source tree.",
-        "output_excerpt": "Must include: Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree.",
+        "output_excerpt": "Must include: Target-host release install completed; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree.",
     },
     {
         "id": "production_env_preflight",

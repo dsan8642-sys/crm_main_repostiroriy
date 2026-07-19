@@ -124,6 +124,12 @@ $archivePath = [string]$data.archive
 if (-not [System.IO.Path]::IsPathRooted($archivePath)) {
     $archivePath = Join-Path $manifestDir $archivePath
 }
+elseif (-not (Test-Path -LiteralPath $archivePath)) {
+    $siblingArchivePath = Join-Path $manifestDir (Split-Path -Leaf $archivePath)
+    if (Test-Path -LiteralPath $siblingArchivePath) {
+        $archivePath = $siblingArchivePath
+    }
+}
 if (-not (Test-Path -LiteralPath $archivePath)) {
     throw "Release source archive file does not exist: $archivePath"
 }
@@ -197,6 +203,7 @@ Write-Host "Release source archive manifest verified."
 Write-Host "Release source archive contents verified."
 Write-Host "Release source archive tracked file list verified."
 Write-Host "commit_sha: $($data.commit_sha)"
+Write-Host "archive_path: $archivePath"
 Write-Host "archive_sha256: $actualHash"
 Write-Host "tracked_file_count: $($fileEntries.Count)"
 Write-Host "tracked_file_list_sha256: $actualFileListHash"
