@@ -196,7 +196,7 @@ if ($PlanOnly) {
         branch = $branch
         branch_state = if ([string]::IsNullOrWhiteSpace($branch)) { "detached_head" } else { "named_branch" }
         source_tree = if ($statusSummary.clean) { "clean" } else { "dirty" }
-        release_blockers = $releaseBlockers
+        release_blockers = @($releaseBlockers)
         git_status = $statusSummary
         release_review = $releaseReview
         production_cutover_evidence = [ordered]@{
