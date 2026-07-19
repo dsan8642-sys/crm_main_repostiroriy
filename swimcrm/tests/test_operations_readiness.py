@@ -553,6 +553,10 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("archive_sha256", script)
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
+        self.assertIn("operator_checklist", script)
+        self.assertIn("expected_evidence", script)
+        self.assertIn("stop_if_missing", script)
+        self.assertIn("HTTPS reverse-proxy settings passed", script)
 
     def test_release_handoff_verifier_catches_stale_archive_and_blocker_drift(self):
         script = (REPO_ROOT / "scripts" / "verify-release-handoff.ps1").read_text(encoding="utf-8-sig")
@@ -565,6 +569,9 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("archive_sha256", script)
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
+        self.assertIn("operator_checklist", script)
+        self.assertIn("is missing expected_evidence", script)
+        self.assertIn("must stop if evidence is missing", script)
 
 
 class HealthAndReadinessRule(TestCase):

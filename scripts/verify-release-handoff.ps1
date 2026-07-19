@@ -90,6 +90,34 @@ foreach ($action in $requiredActions) {
     }
 }
 
+$operatorChecklist = @($handoffData.operator_checklist)
+if ($operatorChecklist.Count -lt $requiredActions.Count) {
+    throw "Release handoff operator_checklist must include every pending external action."
+}
+foreach ($action in $requiredActions) {
+    $checklistItem = $operatorChecklist | Where-Object { $_.id -eq $action } | Select-Object -First 1
+    if (-not $checklistItem) {
+        throw "Release handoff operator_checklist is missing action: $action"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$checklistItem.title)) {
+        throw "Release handoff operator_checklist item '$action' is missing title."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$checklistItem.command)) {
+        throw "Release handoff operator_checklist item '$action' is missing command."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$checklistItem.expected_evidence)) {
+        throw "Release handoff operator_checklist item '$action' is missing expected_evidence."
+    }
+    if ($checklistItem.stop_if_missing -ne $true) {
+        throw "Release handoff operator_checklist item '$action' must stop if evidence is missing."
+    }
+}
+foreach ($item in $operatorChecklist) {
+    if ($pendingActions -notcontains $item.id) {
+        throw "Release handoff operator_checklist contains unknown pending action: $($item.id)"
+    }
+}
+
 $handoffBlockerIds = @($handoffData.release_blockers | ForEach-Object { $_.id } | Sort-Object)
 $planBlockerIds = @($releasePlan.release_blockers | ForEach-Object { $_.id } | Sort-Object)
 $handoffBlockerText = $handoffBlockerIds -join "|"

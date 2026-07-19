@@ -52,6 +52,72 @@ if (-not $releaseArchive) {
     }
 }
 
+$operatorChecklist = @(
+    [ordered]@{
+        id = "configure_git_remote"
+        title = "Configure the Git remote for the release repository."
+        command = "git remote add origin <repository-url>"
+        expected_evidence = "git remote -v shows the production release repository."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "push_release_branch"
+        title = "Push the release branch for CI."
+        command = "git push -u origin $branch"
+        expected_evidence = "The pushed branch contains commit $commitSha."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "capture_github_actions_release_check_url"
+        title = "Capture the GitHub Actions release-check run URL and artifact name."
+        command = "Open the release-check workflow run for commit $commitSha."
+        expected_evidence = "GitHub Actions run URL, passing release-check job, and artifact swimcrm-release-source-$commitSha."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "capture_github_actions_postgres_backend_check_url"
+        title = "Capture the GitHub Actions postgres-backend-check run URL."
+        command = "Open the postgres-backend-check job for commit $commitSha."
+        expected_evidence = "GitHub Actions run URL proving postgres-backend-check passed for commit $commitSha."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "run_target_host_production_env_preflight"
+        title = "Run target-host production environment preflight."
+        command = "scripts\check-production-env.cmd"
+        expected_evidence = "Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; NocoBase production settings passed; HTTPS reverse-proxy settings passed."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "run_target_host_live_hybrid_health"
+        title = "Run target-host live hybrid health."
+        command = "scripts\check-hybrid-health.cmd"
+        expected_evidence = "Hybrid health check passed; nocobase_config_health; /api/nocobase/config/languages/."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "run_target_host_hybrid_backup_restore_drill"
+        title = "Run target-host backup, restore-plan, and backup-set verification drill."
+        command = "scripts\backup-hybrid.ps1; scripts\restore-hybrid.ps1 -PlanOnly; scripts\verify-hybrid-backup-set.cmd"
+        expected_evidence = "Hybrid backup set written; Django dump sha256 OK; NocoBase dump sha256 OK; Restore verification OK; Hybrid backup set verification OK."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "fill_docs_production_cutover_evidence_json"
+        title = "Fill the production cutover evidence manifest with real evidence."
+        command = "Copy docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json to docs\PRODUCTION_CUTOVER_EVIDENCE.json and replace pending placeholders."
+        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256)."
+        stop_if_missing = $true
+    },
+    [ordered]@{
+        id = "run_scripts_verify_production_cutover_evidence_cmd"
+        title = "Verify the final production cutover evidence."
+        command = "scripts\verify-production-cutover-evidence.cmd -RequireCurrentHead"
+        expected_evidence = "Production cutover evidence verified."
+        stop_if_missing = $true
+    }
+)
+
 $handoff = [ordered]@{
     generated_at = (Get-Date).ToString("o")
     release_candidate = [ordered]@{
@@ -78,6 +144,7 @@ $handoff = [ordered]@{
         draft_exists = Test-Path -LiteralPath (Join-Path $RepoRoot "docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json")
     }
     release_blockers = @($handoffBlockers)
+    operator_checklist = @($operatorChecklist)
     pending_external_actions = @(
         "configure_git_remote",
         "push_release_branch",

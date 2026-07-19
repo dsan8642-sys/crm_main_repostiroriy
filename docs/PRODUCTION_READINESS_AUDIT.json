@@ -1040,7 +1040,11 @@
             "release_source_archive",
             "archive_sha256",
             "repository_remote",
-            "pending_external_actions"
+            "pending_external_actions",
+            "operator_checklist",
+            "expected_evidence",
+            "stop_if_missing",
+            "HTTPS reverse-proxy settings passed"
           ]
         },
         {
@@ -1054,7 +1058,10 @@
             "Release handoff blockers drifted",
             "archive_sha256",
             "repository_remote",
-            "pending_external_actions"
+            "pending_external_actions",
+            "operator_checklist",
+            "is missing expected_evidence",
+            "must stop if evidence is missing"
           ]
         },
         {
