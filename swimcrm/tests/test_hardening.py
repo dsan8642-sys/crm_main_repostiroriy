@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from datetime import date
+from pathlib import Path
 
 from django.contrib.auth import authenticate
 from django.conf import settings
@@ -18,6 +19,7 @@ from . import factories as f
 
 PDF = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n"
 PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 class ProductionSettingsRule(SimpleTestCase):
@@ -32,7 +34,7 @@ class ProductionSettingsRule(SimpleTestCase):
         env.update(env_updates)
         return subprocess.run(
             [sys.executable, "-c", "import config.settings"],
-            cwd=os.getcwd(),
+            cwd=BACKEND_DIR,
             env=env,
             text=True,
             capture_output=True,
@@ -105,6 +107,46 @@ class ProductionSettingsRule(SimpleTestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("source tree", result.stderr)
+
+    def test_production_urlconf_does_not_register_dev_login_routes(self):
+        env = os.environ.copy()
+        for key in [
+            "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_ENV",
+            "SWIMCRM_RUNTIME_DIR", "STATIC_ROOT", "MEDIA_ROOT",
+            "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT",
+        ]:
+            env.pop(key, None)
+        env.update({
+            "DJANGO_ENV": "production",
+            "DEBUG": "0",
+            "SECRET_KEY": "release-secret-key-abcdefghijklmnopqrstuvwxyz-0123456789",
+            "ALLOWED_HOSTS": "crm.example.com",
+            "POSTGRES_DB": "swimcrm",
+            "POSTGRES_USER": "swimcrm",
+            "POSTGRES_PASSWORD": "release-db-password",
+            "POSTGRES_HOST": "db.example.internal",
+            "POSTGRES_PORT": "5432",
+        })
+        code = (
+            "import os; "
+            "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); "
+            "import django; "
+            "django.setup(); "
+            "import portal.urls; "
+            "routes = [str(pattern.pattern) for pattern in portal.urls.urlpatterns]; "
+            "assert not any('dev-login' in route or 'dev-logout' in route for route in routes), routes"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=BACKEND_DIR,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class ObservabilitySettingsRule(SimpleTestCase):

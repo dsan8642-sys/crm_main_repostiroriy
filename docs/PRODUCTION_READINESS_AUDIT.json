@@ -844,7 +844,8 @@
             "test_production_rejects_wildcard_allowed_hosts",
             "test_production_environment_rejects_debug_enabled",
             "test_production_rejects_sqlite_fallback",
-            "test_production_rejects_media_or_static_inside_source_tree"
+            "test_production_rejects_media_or_static_inside_source_tree",
+            "test_production_urlconf_does_not_register_dev_login_routes"
           ]
         },
         {
@@ -859,6 +860,15 @@
             "SQLite is development-only",
             "TRUST_PROXY_SSL_HEADER",
             "SECURE_SSL_REDIRECT"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "swimcrm/portal/urls.py",
+          "patterns": [
+            "if settings.DEBUG",
+            "dev-login",
+            "dev-logout"
           ]
         },
         {

@@ -1,3 +1,6 @@
+import sys
+
+from django.conf import settings
 from django.urls import path
 
 from . import views
@@ -6,8 +9,6 @@ urlpatterns = [
     path("csrf/", views.csrf, name="api-csrf"),
     path("auth/login/", views.auth_login, name="api-auth-login"),
     path("auth/logout/", views.auth_logout, name="api-auth-logout"),
-    path("dev-login/<str:role>/", views.dev_login, name="api-dev-login"),
-    path("dev-logout/", views.dev_logout, name="api-dev-logout"),
     path("me/", views.me, name="api-me"),
 
     path("nocobase/health/", views.nocobase_health, name="api-nocobase-health"),
@@ -185,3 +186,9 @@ urlpatterns = [
     path("admin/privacy/clients/<int:client_id>/export/", views.admin_export_client_data,
          name="api-admin-export-client-data"),
 ]
+
+if settings.DEBUG or any("test" in arg for arg in sys.argv):
+    urlpatterns += [
+        path("dev-login/<str:role>/", views.dev_login, name="api-dev-login"),
+        path("dev-logout/", views.dev_logout, name="api-dev-logout"),
+    ]
