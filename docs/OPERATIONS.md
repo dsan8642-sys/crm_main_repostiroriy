@@ -232,6 +232,7 @@ not just `status=passed`:
   `nocobase_config_health`, `/api/nocobase/config/languages/`;
 - backup/restore drill: `Hybrid backup set written`, `backup_set_dir`,
   `nocobase_database`, `Django dump sha256 OK`, `NocoBase dump sha256 OK`,
+  the actual 64-character Django and NocoBase dump SHA256 values,
   `Django dump list OK`, `NocoBase dump list OK`, `Restore verification OK`,
   `Hybrid backup set verification OK`;
 - rollback acknowledgement: `Rollback plan reviewed`, `stop writers`,

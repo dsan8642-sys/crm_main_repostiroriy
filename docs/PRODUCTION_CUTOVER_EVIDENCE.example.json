@@ -76,7 +76,7 @@
       "command": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
       "captured_at": "2026-07-16T12:35:00+02:00",
       "summary": "Latest production backup was created, the hybrid restore plan was inspected, Django and NocoBase dumps were structurally verified, and restore verification completed for the Django PostgreSQL database.",
-      "output_excerpt": "Hybrid backup set written. backup_set_dir nocobase_database. Django dump sha256 OK. NocoBase dump sha256 OK. Django dump list OK. NocoBase dump list OK. Restore verification OK. Hybrid backup set verification OK."
+      "output_excerpt": "Hybrid backup set written. backup_set_dir nocobase_database. Django dump sha256 OK: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. NocoBase dump sha256 OK: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc. Django dump list OK. NocoBase dump list OK. Restore verification OK. Hybrid backup set verification OK."
     },
     {
       "id": "rollback_plan_acknowledged",

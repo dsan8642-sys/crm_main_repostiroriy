@@ -59,8 +59,8 @@ EVIDENCE_ITEMS = [
     {
         "id": "hybrid_backup_restore_drill",
         "command": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
-        "summary": "Paste latest backup, hybrid restore plan, hybrid backup-set verification, and PostgreSQL restore drill evidence here.",
-        "output_excerpt": "Must include: Hybrid backup set written; backup_set_dir; nocobase_database; Django dump sha256 OK; NocoBase dump sha256 OK; Django dump list OK; NocoBase dump list OK; Restore verification OK; Hybrid backup set verification OK.",
+        "summary": "Paste latest backup, hybrid restore plan, hybrid backup-set verification, PostgreSQL restore drill evidence, and the Django/NocoBase dump SHA256 values here.",
+        "output_excerpt": "Must include: Hybrid backup set written; backup_set_dir; nocobase_database; Django dump sha256 OK: <64-hex-sha256>; NocoBase dump sha256 OK: <64-hex-sha256>; Django dump list OK; NocoBase dump list OK; Restore verification OK; Hybrid backup set verification OK.",
     },
     {
         "id": "rollback_plan_acknowledged",

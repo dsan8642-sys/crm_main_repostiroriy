@@ -264,7 +264,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "hybrid_backup_restore_drill"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Django dump sha256 OK. ",
+            "Django dump sha256 OK: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. ",
             "",
         )
 
@@ -272,6 +272,26 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
 
         self.assertIn(
             "hybrid_backup_restore_drill: missing evidence fragment: Django dump sha256 OK",
+            errors,
+        )
+
+    def test_cutover_evidence_requires_hybrid_backup_sha256_values(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "hybrid_backup_restore_drill"
+        )
+        item["output_excerpt"] = (
+            "Hybrid backup set written. backup_set_dir nocobase_database. "
+            "Django dump sha256 OK. NocoBase dump sha256 OK. "
+            "Django dump list OK. NocoBase dump list OK. Restore verification OK. "
+            "Hybrid backup set verification OK."
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "hybrid_backup_restore_drill: evidence must include Django and NocoBase dump SHA256 values",
             errors,
         )
 
@@ -383,6 +403,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("HTTPS live endpoint requirement passed", generator)
         self.assertIn("production-django-host", generator)
         self.assertIn("production-nocobase-host", generator)
+        self.assertIn("<64-hex-sha256>", generator)
         self.assertIn("stop writers", generator)
         self.assertIn("migrate --check", generator)
 

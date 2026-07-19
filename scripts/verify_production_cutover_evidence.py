@@ -20,6 +20,7 @@ NON_PRODUCTION_HOST_PATTERN = re.compile(
     r"(localhost|127\.0\.0\.1|\[::1\]|\.example\b|example\.|\.invalid\b|\.test\b)",
     re.IGNORECASE,
 )
+SHA256_PATTERN = re.compile(r"\b[0-9a-f]{64}\b", re.IGNORECASE)
 
 REQUIRED_EVIDENCE_IDS = {
     "local_backend_release_gate",
@@ -180,6 +181,12 @@ def _validate_live_health_urls(evidence_id, combined, errors):
             errors.append(f"{evidence_id}: evidence URL must be a real production host, not {url}")
 
 
+def _validate_backup_restore_hashes(evidence_id, combined, errors):
+    hashes = SHA256_PATTERN.findall(combined)
+    if len(set(hash_value.lower() for hash_value in hashes)) < 2:
+        errors.append(f"{evidence_id}: evidence must include Django and NocoBase dump SHA256 values")
+
+
 def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=""):
     evidence_id = item.get("id", "")
     if evidence_id not in REQUIRED_EVIDENCE_IDS:
@@ -217,6 +224,8 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
     combined = _combined_item_text(item)
     if evidence_id == "live_hybrid_health":
         _validate_live_health_urls(evidence_id, combined, errors)
+    if evidence_id == "hybrid_backup_restore_drill":
+        _validate_backup_restore_hashes(evidence_id, combined, errors)
     for fragment in REQUIRED_OUTPUT_FRAGMENTS.get(evidence_id, []):
         if fragment not in combined:
             errors.append(f"{evidence_id}: missing evidence fragment: {fragment}")

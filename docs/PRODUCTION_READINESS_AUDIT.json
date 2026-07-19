@@ -1343,7 +1343,9 @@
             "GITHUB_ACTIONS_RUN_PATTERN",
             "HTTPS_URL_PATTERN",
             "NON_PRODUCTION_HOST_PATTERN",
+            "SHA256_PATTERN",
             "evidence must include Django and NocoBase https:// production URLs",
+            "evidence must include Django and NocoBase dump SHA256 values",
             "release_candidate.commit_sha",
             "expected_commit_sha",
             "expected_archive_sha256",
@@ -1398,6 +1400,7 @@
             "HTTPS live endpoint requirement passed",
             "production-django-host",
             "production-nocobase-host",
+            "<64-hex-sha256>",
             "stop writers",
             "migrate --check"
           ]
@@ -1416,6 +1419,7 @@
             "test_cutover_evidence_requires_source_archive_manifest_verification",
             "test_cutover_evidence_requires_release_archive_artifact_name_in_github_evidence",
             "test_cutover_evidence_requires_postgres_backend_job_name_in_github_evidence",
+            "test_cutover_evidence_requires_hybrid_backup_sha256_values",
             "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
             "test_cutover_evidence_requires_https_live_health_fragment",
             "test_cutover_evidence_requires_live_health_production_urls",
