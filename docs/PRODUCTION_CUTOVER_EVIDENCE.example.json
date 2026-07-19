@@ -82,7 +82,7 @@
       "id": "rollback_plan_acknowledged",
       "status": "passed",
       "captured_at": "2026-07-16T12:40:00+02:00",
-      "summary": "Rollback plan reviewed: stop writers, restore Django/NocoBase databases and storage, migrate/check, restart services, run live smoke."
+      "summary": "Rollback plan reviewed: stop writers, verified backup, restore Django/NocoBase databases and storage, migrate --check, restart services, live smoke."
     }
   ]
 }

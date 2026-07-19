@@ -275,6 +275,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_complete_rollback_acknowledgement(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "rollback_plan_acknowledged"
+        )
+        item["summary"] = item["summary"].replace(
+            "stop writers, ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "rollback_plan_acknowledged: missing evidence fragment: stop writers",
+            errors,
+        )
+
     def test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment(self):
         payload = self._example_payload()
         item = next(
@@ -323,6 +341,8 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
         self.assertIn("check-hybrid-health.cmd -RequireHttps", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
+        self.assertIn("stop writers", generator)
+        self.assertIn("migrate --check", generator)
 
 
 class ReleaseSourceManifestVerifierRule(SimpleTestCase):

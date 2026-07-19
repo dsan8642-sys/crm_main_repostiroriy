@@ -1272,7 +1272,12 @@
           "path": "docs/OPERATIONS.md",
           "patterns": [
             "Before any real restore",
-            "verify-hybrid-backup-set.ps1 -BackupSetDir"
+            "verify-hybrid-backup-set.ps1 -BackupSetDir",
+            "Rollback plan reviewed",
+            "stop writers",
+            "verified backup",
+            "migrate --check",
+            "live smoke"
           ]
         },
         {
@@ -1387,7 +1392,9 @@
             "github_postgres_backend_job",
             "live_hybrid_health",
             "check-hybrid-health.cmd -RequireHttps",
-            "HTTPS live endpoint requirement passed"
+            "HTTPS live endpoint requirement passed",
+            "stop writers",
+            "migrate --check"
           ]
         },
         {
@@ -1406,6 +1413,7 @@
             "test_cutover_evidence_requires_postgres_backend_job_name_in_github_evidence",
             "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
             "test_cutover_evidence_requires_https_live_health_fragment",
+            "test_cutover_evidence_requires_complete_rollback_acknowledgement",
             "ReleaseSourceArchiveVerifierRule",
             "test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha",
             "test_release_source_manifests_fail_when_root_tooling_is_untracked",

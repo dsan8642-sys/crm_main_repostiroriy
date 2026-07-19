@@ -100,8 +100,12 @@ REQUIRED_OUTPUT_FRAGMENTS = {
     ],
     "rollback_plan_acknowledged": [
         "Rollback plan reviewed",
+        "stop writers",
+        "verified backup",
         "restore",
+        "migrate --check",
         "restart services",
+        "live smoke",
     ],
 }
 

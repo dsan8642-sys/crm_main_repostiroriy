@@ -64,7 +64,7 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "rollback_plan_acknowledged",
-        "summary": "Confirm rollback plan was reviewed before cutover approval. Must include: Rollback plan reviewed; restore; restart services.",
+        "summary": "Confirm rollback plan was reviewed before cutover approval. Must include: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke.",
     },
 ]
 

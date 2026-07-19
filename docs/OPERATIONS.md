@@ -234,8 +234,9 @@ not just `status=passed`:
   `nocobase_database`, `Django dump sha256 OK`, `NocoBase dump sha256 OK`,
   `Django dump list OK`, `NocoBase dump list OK`, `Restore verification OK`,
   `Hybrid backup set verification OK`;
-- rollback acknowledgement: `Rollback plan reviewed`, `restore`, `restart
-  services`.
+- rollback acknowledgement: `Rollback plan reviewed`, `stop writers`,
+  `verified backup`, `restore`, `migrate --check`, `restart services`,
+  `live smoke`.
 
 ## NocoBase runtime
 
