@@ -909,6 +909,7 @@
             "verify-operational-wrappers.ps1",
             "AllowMissingLocalNocoBaseRuntime",
             "Hybrid cutover readiness audit",
+            "-RequireHttps -RequireOpsOk -PlanOnly",
             "AUDIT_LOG_LEVEL",
             "WARNING"
           ]

@@ -209,7 +209,7 @@ try {
     }
 
     Invoke-NativeStep "Hybrid health plan check" {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HybridHealth -PlanOnly
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HybridHealth -RequireHttps -RequireOpsOk -PlanOnly
     }
 }
 finally {
