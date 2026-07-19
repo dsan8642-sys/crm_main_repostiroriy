@@ -399,6 +399,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("production_critical_changes", script)
         self.assertIn("release_blockers", script)
         self.assertIn("branch_state", script)
+        self.assertIn("repository_remote", script)
+        self.assertIn("missing_git_remote", script)
         self.assertIn("detached_head", script)
         self.assertIn("Get-ReleaseReviewCategory", script)
         self.assertIn("Get-ReleaseBlockers", script)

@@ -348,8 +348,8 @@ Before creating a production package:
   `scripts\verify-local-release-candidate.cmd -PlanOnly` to print a JSON
   release-candidate plan showing dirty/staged/untracked file counts, grouped
   release-review domains, production-critical changed paths, branch state,
-  explicit release blockers, and the remaining production evidence gap without
-  running long checks;
+  Git remote state, explicit release blockers, and the remaining production
+  evidence gap without running long checks;
 - run `scripts\verify-frontend-release.cmd` when validating only the React/Vite
   frontend dependency audit, build, browser install, and Playwright smoke tests;
 - run `scripts\verify-hybrid-cutover-readiness.cmd` when you need the

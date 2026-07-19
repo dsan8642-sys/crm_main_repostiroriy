@@ -951,6 +951,8 @@
             "production_critical_changes",
             "release_blockers",
             "branch_state",
+            "repository_remote",
+            "missing_git_remote",
             "detached_head",
             "Get-ReleaseReviewCategory",
             "Get-ReleaseBlockers",

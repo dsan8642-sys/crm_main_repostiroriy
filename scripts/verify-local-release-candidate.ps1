@@ -147,7 +147,8 @@ function Get-ReleaseBlockers {
     param(
         [object]$StatusSummary,
         [bool]$CutoverEvidenceExists,
-        [string]$Branch
+        [string]$Branch,
+        [bool]$RemoteConfigured
     )
 
     $blockers = @()
@@ -172,6 +173,13 @@ function Get-ReleaseBlockers {
             message = "Fill docs/PRODUCTION_CUTOVER_EVIDENCE.json with real CI and target-host evidence."
         }
     }
+    if (-not $RemoteConfigured) {
+        $blockers += [ordered]@{
+            id = "missing_git_remote"
+            severity = "ci_evidence_blocker"
+            message = "Configure a Git remote and push the release branch to collect GitHub Actions evidence."
+        }
+    }
     return $blockers
 }
 
@@ -183,10 +191,12 @@ if ($LASTEXITCODE -ne 0) {
 $status = @(& git -C $RepoRoot status --porcelain | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $commitSha = ((& git -C $RepoRoot rev-parse HEAD) -join "").Trim()
 $branch = ((& git -C $RepoRoot branch --show-current) -join "").Trim()
+$remotes = @(& git -C $RepoRoot remote | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$remoteConfigured = ($remotes.Count -gt 0)
 $statusSummary = Get-GitStatusSummary -Lines $status
 $releaseReview = Get-ReleaseReviewReport -StatusSummary $statusSummary
 $cutoverEvidenceExists = Test-Path -LiteralPath $CutoverEvidence
-$releaseBlockers = Get-ReleaseBlockers -StatusSummary $statusSummary -CutoverEvidenceExists $cutoverEvidenceExists -Branch $branch
+$releaseBlockers = Get-ReleaseBlockers -StatusSummary $statusSummary -CutoverEvidenceExists $cutoverEvidenceExists -Branch $branch -RemoteConfigured $remoteConfigured
 
 if ($PlanOnly) {
     [ordered]@{
@@ -195,6 +205,11 @@ if ($PlanOnly) {
         commit_sha = $commitSha
         branch = $branch
         branch_state = if ([string]::IsNullOrWhiteSpace($branch)) { "detached_head" } else { "named_branch" }
+        repository_remote = [ordered]@{
+            configured = $remoteConfigured
+            remotes = $remotes
+            required_for_ci_evidence = $true
+        }
         source_tree = if ($statusSummary.clean) { "clean" } else { "dirty" }
         release_blockers = @($releaseBlockers)
         git_status = $statusSummary

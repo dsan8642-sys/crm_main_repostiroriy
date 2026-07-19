@@ -59,8 +59,8 @@ production cutover evidence can reference one immutable source state.
 4. Before the release commit exists, run
    `scripts\verify-local-release-candidate.cmd -PlanOnly` to inspect dirty
    tree counts, grouped release-review domains, production-critical changed
-   paths, branch state, explicit release blockers, and remaining production
-   evidence gaps.
+   paths, branch state, Git remote state, explicit release blockers, and
+   remaining production evidence gaps.
 5. If diagnosing manually, run `scripts\build-release-source.cmd` and then
    `scripts\verify-release-source-archive.cmd <manifest-path>`.
 6. Push the release commit and verify GitHub Actions `release-check` and
