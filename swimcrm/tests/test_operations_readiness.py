@@ -257,6 +257,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "production_env_preflight"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "HTTPS reverse-proxy settings passed. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "production_env_preflight: missing evidence fragment: HTTPS reverse-proxy settings passed",
+            errors,
+        )
+
     def test_cutover_evidence_generator_can_prefill_local_archive_evidence(self):
         generator = (REPO_ROOT / "scripts" / "new_production_cutover_evidence.py").read_text(encoding="utf-8-sig")
 
@@ -265,6 +283,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("Release source archive manifest verified", generator)
         self.assertIn("Tracked release-source guard passed", generator)
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
+        self.assertIn("HTTPS reverse-proxy settings passed", generator)
 
 
 class ReleaseSourceManifestVerifierRule(SimpleTestCase):

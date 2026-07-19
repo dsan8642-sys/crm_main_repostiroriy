@@ -72,8 +72,11 @@ REQUIRED_OUTPUT_FRAGMENTS = {
     ],
     "production_env_preflight": [
         "Production environment check passed",
-        "PostgreSQL",
-        "NocoBase",
+        "Runtime path settings passed",
+        "PostgreSQL production settings passed",
+        "Celery production settings passed",
+        "NocoBase production settings passed",
+        "HTTPS reverse-proxy settings passed",
     ],
     "live_hybrid_health": [
         "Hybrid health check passed",

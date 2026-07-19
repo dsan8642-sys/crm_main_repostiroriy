@@ -48,7 +48,7 @@ EVIDENCE_ITEMS = [
         "id": "production_env_preflight",
         "command": "scripts\\check-production-env.cmd",
         "summary": "Run the production preflight on the target host and paste the pass summary here.",
-        "output_excerpt": "Must include: Production environment check passed; PostgreSQL; NocoBase.",
+        "output_excerpt": "Must include: Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; NocoBase production settings passed; HTTPS reverse-proxy settings passed.",
     },
     {
         "id": "live_hybrid_health",

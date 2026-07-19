@@ -37,6 +37,9 @@ NOCOBASE_ROOT_USERNAME=<admin username>
 NOCOBASE_ROOT_EMAIL=<admin email>
 NOCOBASE_ROOT_PASSWORD=<strong initial/root password>
 NOCOBASE_STORAGE_DIR=C:\SwimCRMRuntime\nocobase-storage
+SECURE_SSL_REDIRECT=1
+TRUST_PROXY_SSL_HEADER=1
+CSRF_TRUSTED_ORIGINS=https://crm.example.com
 ```
 
 Production wrappers fail fast when required PostgreSQL/Celery variables are
@@ -214,8 +217,10 @@ not just `status=passed`:
   manifest written`, `Release source archive manifest verified`, exact
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
-- production preflight: `Production environment check passed`, `PostgreSQL`,
-  `NocoBase`;
+- production preflight: `Production environment check passed`, `Runtime path
+  settings passed`, `PostgreSQL production settings passed`, `Celery
+  production settings passed`, `NocoBase production settings passed`, `HTTPS
+  reverse-proxy settings passed`;
 - live hybrid health: `Hybrid health check passed`, `nocobase_config_health`,
   `/api/nocobase/config/languages/`;
 - backup/restore drill: `Hybrid backup set written`, `backup_set_dir`,
@@ -437,9 +442,9 @@ Before creating a production package:
 - keep `docs\RODO_GDPR.md` aligned with the actual retention and incident process.
 
 `scripts\check-production-env.cmd` is the host-level hybrid preflight. It
-validates Django security settings, PostgreSQL credentials, Celery URLs,
-NocoBase runtime secrets, bridge/config tokens, and runtime/backup paths before
-running `manage.py check --deploy`.
+validates Django security settings, HTTPS reverse-proxy settings, PostgreSQL
+credentials, Celery URLs, NocoBase runtime secrets, bridge/config tokens, and
+runtime/backup paths before running `manage.py check --deploy`.
 
 ## Admin 2FA
 

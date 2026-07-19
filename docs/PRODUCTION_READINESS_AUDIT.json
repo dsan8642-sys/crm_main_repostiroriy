@@ -819,7 +819,7 @@
     {
       "id": "security.production_hardening",
       "category": "security",
-      "statement": "Production rejects unsafe settings such as DEBUG enabled, wildcard hosts, weak secrets, and source-tree runtime paths.",
+      "statement": "Production rejects unsafe settings such as DEBUG enabled, wildcard hosts, weak secrets, source-tree runtime paths, and missing HTTPS reverse-proxy settings.",
       "source_refs": ["swimcrm/tests/test_hardening.py", "scripts/check-production-env.ps1"],
       "evidence": [
         {
@@ -842,7 +842,21 @@
           "path": "swimcrm/config/settings.py",
           "patterns": [
             "Production environment requires POSTGRES_DB",
-            "SQLite is development-only"
+            "SQLite is development-only",
+            "TRUST_PROXY_SSL_HEADER",
+            "SECURE_SSL_REDIRECT"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/check-production-env.ps1",
+          "patterns": [
+            "SECURE_SSL_REDIRECT must be 1 in production",
+            "TRUST_PROXY_SSL_HEADER must be 1",
+            "CSRF_TRUSTED_ORIGINS",
+            "HTTPS reverse-proxy settings passed",
+            "PostgreSQL production settings passed",
+            "NocoBase production settings passed"
           ]
         }
       ]
@@ -1336,6 +1350,7 @@
             "test_cutover_evidence_requires_source_archive_sha256",
             "test_cutover_evidence_requires_source_archive_manifest_verification",
             "test_cutover_evidence_requires_release_archive_artifact_name_in_github_evidence",
+            "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
             "ReleaseSourceArchiveVerifierRule",
             "test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha",
             "test_release_source_manifests_fail_when_root_tooling_is_untracked",

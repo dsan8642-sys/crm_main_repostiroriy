@@ -28,6 +28,24 @@ function Reject-PlaceholderSecret {
     }
 }
 
+function Require-HttpsOriginList {
+    param([string]$Name)
+    $value = Require-Env $Name
+    $origins = $value.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    if (-not $origins -or $origins.Count -eq 0) {
+        throw "$Name must contain at least one HTTPS production origin."
+    }
+    foreach ($origin in $origins) {
+        if ($origin -notmatch "^https://") {
+            throw "$Name must contain HTTPS origins only: $origin"
+        }
+        if ($origin -match "\*|localhost|127\.0\.0\.1|\[::1\]") {
+            throw "$Name must contain explicit production origins only: $origin"
+        }
+    }
+    return $origins
+}
+
 $envName = Require-Env "DJANGO_ENV"
 if ($envName -notin @("prod", "production")) {
     throw "DJANGO_ENV must be production or prod."
@@ -48,6 +66,21 @@ if ($allowedHosts -match "\*" -or $allowedHosts -match "localhost|127\.0\.0\.1")
     throw "ALLOWED_HOSTS must contain explicit production hostnames only."
 }
 
+$secureSslRedirect = [Environment]::GetEnvironmentVariable("SECURE_SSL_REDIRECT", "Process")
+if ([string]::IsNullOrWhiteSpace($secureSslRedirect)) {
+    $secureSslRedirect = "1"
+}
+if ($secureSslRedirect -ne "1") {
+    throw "SECURE_SSL_REDIRECT must be 1 in production."
+}
+
+$trustProxyHeader = Require-Env "TRUST_PROXY_SSL_HEADER"
+if ($trustProxyHeader -ne "1") {
+    throw "TRUST_PROXY_SSL_HEADER must be 1 behind the production HTTPS reverse proxy."
+}
+
+Require-HttpsOriginList -Name "CSRF_TRUSTED_ORIGINS" | Out-Null
+
 Require-Env "SWIMCRM_RUNTIME_DIR" | Out-Null
 Assert-ProductionPathOutsideRepo -Name "SWIMCRM_RUNTIME_DIR" `
     -Value ([Environment]::GetEnvironmentVariable("SWIMCRM_RUNTIME_DIR", "Process")) -RepoRoot $RepoRoot
@@ -59,16 +92,19 @@ if ([Environment]::GetEnvironmentVariable("MEDIA_ROOT", "Process")) {
     Assert-ProductionPathOutsideRepo -Name "MEDIA_ROOT" `
         -Value ([Environment]::GetEnvironmentVariable("MEDIA_ROOT", "Process")) -RepoRoot $RepoRoot
 }
+Write-Host "Runtime path settings passed."
 
 Assert-ProductionValue -Name "POSTGRES_DB" -Value (Require-Env "POSTGRES_DB")
 Assert-ProductionValue -Name "POSTGRES_USER" -Value (Require-Env "POSTGRES_USER")
 Assert-ProductionPassword -Name "POSTGRES_PASSWORD" -Value (Require-Env "POSTGRES_PASSWORD")
 Require-Env "POSTGRES_HOST" | Out-Null
 Require-Env "POSTGRES_PORT" | Out-Null
+Write-Host "PostgreSQL production settings passed."
 
 Assert-ProductionPathOutsideRepo -Name "BACKUP_DIR" -Value (Require-Env "BACKUP_DIR") -RepoRoot $RepoRoot
 Require-Env "CELERY_BROKER_URL" | Out-Null
 Require-Env "CELERY_RESULT_BACKEND" | Out-Null
+Write-Host "Celery production settings passed."
 
 $bridgeToken = Require-Env "NOCOBASE_BRIDGE_TOKEN"
 $configToken = Require-Env "NOCOBASE_CONFIG_TOKEN"
@@ -92,6 +128,8 @@ Require-Env "NOCOBASE_ROOT_EMAIL" | Out-Null
 $nocobaseRootPassword = Require-Env "NOCOBASE_ROOT_PASSWORD"
 Reject-PlaceholderSecret -Name "NOCOBASE_ROOT_PASSWORD" -Value $nocobaseRootPassword
 Assert-ProductionPathOutsideRepo -Name "NOCOBASE_STORAGE_DIR" -Value (Require-Env "NOCOBASE_STORAGE_DIR") -RepoRoot $RepoRoot
+Write-Host "NocoBase production settings passed."
+Write-Host "HTTPS reverse-proxy settings passed."
 
 Push-Location $BackendDir
 try {

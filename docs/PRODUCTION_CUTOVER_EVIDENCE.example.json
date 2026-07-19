@@ -59,8 +59,8 @@
       "status": "passed",
       "command": "scripts\\check-production-env.cmd",
       "captured_at": "2026-07-16T12:20:00+02:00",
-      "summary": "Production environment check passed with real secrets, PostgreSQL, Celery, NocoBase, and runtime paths.",
-      "output_excerpt": "Production environment check passed. PostgreSQL configured. NocoBase runtime paths configured."
+      "summary": "Production environment check passed with real secrets, runtime paths, PostgreSQL, Celery, NocoBase, and HTTPS reverse-proxy settings.",
+      "output_excerpt": "Runtime path settings passed. PostgreSQL production settings passed. Celery production settings passed. NocoBase production settings passed. HTTPS reverse-proxy settings passed. Production environment check passed."
     },
     {
       "id": "live_hybrid_health",

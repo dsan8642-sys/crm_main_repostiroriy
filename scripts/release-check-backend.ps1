@@ -59,7 +59,8 @@ try {
     $SavedEnv = @{}
     foreach ($Name in @(
         "DJANGO_ENV", "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "SWIMCRM_RUNTIME_DIR",
-        "STATIC_ROOT", "MEDIA_ROOT", "BACKUP_DIR",
+        "STATIC_ROOT", "MEDIA_ROOT", "BACKUP_DIR", "SECURE_SSL_REDIRECT",
+        "TRUST_PROXY_SSL_HEADER", "CSRF_TRUSTED_ORIGINS",
         "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT",
         "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND",
         "NOCOBASE_BRIDGE_TOKEN", "NOCOBASE_CONFIG_TOKEN",
@@ -93,6 +94,9 @@ try {
         $env:STATIC_ROOT = "C:\SwimCRMRuntime\staticfiles"
         $env:MEDIA_ROOT = "C:\SwimCRMRuntime\uploads"
         $env:BACKUP_DIR = "C:\SwimCRMRuntime\backups"
+        $env:SECURE_SSL_REDIRECT = "1"
+        $env:TRUST_PROXY_SSL_HEADER = "1"
+        $env:CSRF_TRUSTED_ORIGINS = "https://crm.example.com"
         $env:POSTGRES_DB = "swimcrm"
         $env:POSTGRES_USER = "swimcrm"
         $env:POSTGRES_PASSWORD = "prodpreflightdbpassword"
