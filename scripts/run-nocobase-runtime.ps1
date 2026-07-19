@@ -47,10 +47,24 @@ function Get-NocoBasePackageInfo {
     }
 }
 
+function Assert-ProductionSecret {
+    param(
+        [string]$Name,
+        [string]$Value,
+        [int]$MinLength = 32
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw "$Name is required when NocoBase runs in production."
+    }
+    if ($Value.Length -lt $MinLength -or $Value -match "dev-insecure|release-check|change-me|example|Admin!2026pass") {
+        throw "$Name must be a real production secret at least 32 characters long, not a placeholder."
+    }
+}
+
 $isProduction = $AppEnv -in @("prod", "production") -or $env:DJANGO_ENV -in @("prod", "production")
 if ($isProduction) {
     foreach ($required in @(
-            @{ Name = "NOCOBASE_APP_KEY"; Value = $AppKey },
             @{ Name = "NOCOBASE_APP_ROOT"; Value = $AppRoot },
             @{ Name = "NOCOBASE_DB_HOST"; Value = $DbHost },
             @{ Name = "NOCOBASE_DB_PORT"; Value = $DbPort },
@@ -63,6 +77,7 @@ if ($isProduction) {
             throw "$($required.Name) is required when NocoBase runs in production."
         }
     }
+    Assert-ProductionSecret -Name "NOCOBASE_APP_KEY" -Value $AppKey -MinLength 32
     if ($DbPassword -eq "postgres") {
         throw "NOCOBASE_DB_PASSWORD must not use the development default in production."
     }

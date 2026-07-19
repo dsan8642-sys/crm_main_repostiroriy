@@ -111,9 +111,26 @@ if ($missing.exit_code -eq 0 -or $missing.output -notmatch "NOCOBASE_APP_KEY is 
 }
 Write-Host "NocoBase production missing-secret guard passed."
 
+$weakAppKey = Invoke-NocoBasePlan -Env @{
+    NOCOBASE_APP_ENV = "production"
+    NOCOBASE_APP_KEY = "short-key"
+    NOCOBASE_APP_ROOT = "C:\SwimCRMRuntime\nocobase-app"
+    NOCOBASE_DB_HOST = "127.0.0.1"
+    NOCOBASE_DB_PORT = "5432"
+    NOCOBASE_DB_DATABASE = "nocobase_hybrid"
+    NOCOBASE_DB_USER = "nocobase"
+    NOCOBASE_DB_PASSWORD = "release-check-db-password"
+    NOCOBASE_ROOT_PASSWORD = "not-the-dev-root-password"
+    NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
+}
+if ($weakAppKey.exit_code -eq 0 -or $weakAppKey.output -notmatch "NOCOBASE_APP_KEY must be a real production secret at least 32 characters long") {
+    throw "NocoBase production plan did not reject a weak NOCOBASE_APP_KEY. Output: $($weakAppKey.output)"
+}
+Write-Host "NocoBase production app key strength guard passed."
+
 $defaultPassword = Invoke-NocoBasePlan -Env @{
     NOCOBASE_APP_ENV = "production"
-    NOCOBASE_APP_KEY = "release-check-nocobase-app-key"
+    NOCOBASE_APP_KEY = "NocoBaseProductionAppKeyForGuardChecks1234567890"
     NOCOBASE_APP_ROOT = "C:\SwimCRMRuntime\nocobase-app"
     NOCOBASE_DB_HOST = "127.0.0.1"
     NOCOBASE_DB_PORT = "5432"
@@ -130,7 +147,7 @@ Write-Host "NocoBase production DB password guard passed."
 
 $insideAppRoot = Invoke-NocoBasePlan -Env @{
     NOCOBASE_APP_ENV = "production"
-    NOCOBASE_APP_KEY = "release-check-nocobase-app-key"
+    NOCOBASE_APP_KEY = "NocoBaseProductionAppKeyForGuardChecks1234567890"
     NOCOBASE_APP_ROOT = (Join-Path $RepoRoot "swimcrm-hybrid\source")
     NOCOBASE_DB_HOST = "127.0.0.1"
     NOCOBASE_DB_PORT = "5432"
@@ -147,7 +164,7 @@ Write-Host "NocoBase production app root guard passed."
 
 $insideStorage = Invoke-NocoBasePlan -Env @{
     NOCOBASE_APP_ENV = "production"
-    NOCOBASE_APP_KEY = "release-check-nocobase-app-key"
+    NOCOBASE_APP_KEY = "NocoBaseProductionAppKeyForGuardChecks1234567890"
     NOCOBASE_APP_ROOT = "C:\SwimCRMRuntime\nocobase-app"
     NOCOBASE_DB_HOST = "127.0.0.1"
     NOCOBASE_DB_PORT = "5432"
@@ -164,7 +181,7 @@ Write-Host "NocoBase production storage guard passed."
 
 $production = Invoke-NocoBasePlan -Env @{
     NOCOBASE_APP_ENV = "production"
-    NOCOBASE_APP_KEY = "release-check-nocobase-app-key"
+    NOCOBASE_APP_KEY = "NocoBaseProductionAppKeyForGuardChecks1234567890"
     NOCOBASE_APP_ROOT = "C:\SwimCRMRuntime\nocobase-app"
     NOCOBASE_DB_HOST = "127.0.0.1"
     NOCOBASE_DB_PORT = "5432"

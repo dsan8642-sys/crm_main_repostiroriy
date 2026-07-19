@@ -230,10 +230,21 @@
           "path": "scripts/run-nocobase-runtime.ps1",
           "patterns": [
             "NOCOBASE_APP_KEY",
+            "Assert-ProductionSecret",
             "is required when NocoBase runs in production",
+            "at least 32 characters long",
             "NOCOBASE_DB_PASSWORD must not use the development default",
             "NOCOBASE_APP_ROOT must be outside the source tree",
             "NOCOBASE_STORAGE_DIR must be outside the source tree"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/verify-nocobase-runtime.ps1",
+          "patterns": [
+            "short-key",
+            "NOCOBASE_APP_KEY must be a real production secret at least 32 characters long",
+            "NocoBase production app key strength guard passed"
           ]
         },
         {

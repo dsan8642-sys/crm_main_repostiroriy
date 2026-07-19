@@ -632,6 +632,17 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("HTTPS live endpoint requirement passed", script)
         self.assertIn("check-hybrid-health.cmd -RequireHttps", handoff)
 
+    def test_nocobase_runtime_requires_strong_production_app_key(self):
+        runtime = (REPO_ROOT / "scripts" / "run-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")
+        verifier = (REPO_ROOT / "scripts" / "verify-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("Assert-ProductionSecret", runtime)
+        self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_APP_KEY\"", runtime)
+        self.assertIn("must be a real production secret at least 32 characters long", runtime)
+        self.assertIn("release-check", runtime)
+        self.assertIn("short-key", verifier)
+        self.assertIn("NocoBase production app key strength guard passed", verifier)
+
 
 class HealthAndReadinessRule(TestCase):
     def setUp(self):
