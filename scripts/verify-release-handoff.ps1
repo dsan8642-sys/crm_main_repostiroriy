@@ -148,6 +148,7 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
     "NocoBase dump list OK"
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
+    "Release source archive contents verified",
     "Rollback plan reviewed",
     "stop writers",
     "verified backup",

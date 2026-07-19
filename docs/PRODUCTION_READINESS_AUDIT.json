@@ -1109,6 +1109,7 @@
             "real https:// NocoBase production URL",
             "64-character SHA256",
             "Rollback plan reviewed",
+            "Release source archive contents verified",
             "migrate --check",
             "check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
             "HTTPS live endpoint requirement passed",
@@ -1133,7 +1134,8 @@
             "Assert-ChecklistEvidenceContains",
             "real https:// Django production URL",
             "64-character SHA256",
-            "stop writers"
+            "stop writers",
+            "Release source archive contents verified"
           ]
         },
         {

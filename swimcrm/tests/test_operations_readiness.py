@@ -730,6 +730,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("real https:// NocoBase production URL", script)
         self.assertIn("64-character SHA256", script)
         self.assertIn("Rollback plan reviewed", script)
+        self.assertIn("Release source archive contents verified", script)
         self.assertIn("migrate --check", script)
 
     def test_release_handoff_verifier_catches_stale_archive_and_blocker_drift(self):
@@ -750,6 +751,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("real https:// Django production URL", script)
         self.assertIn("64-character SHA256", script)
         self.assertIn("stop writers", script)
+        self.assertIn("Release source archive contents verified", script)
 
     def test_operational_wrapper_guard_includes_standalone_postgres_backup_cmd(self):
         verifier = (REPO_ROOT / "scripts" / "verify-operational-wrappers.ps1").read_text(encoding="utf-8-sig")
