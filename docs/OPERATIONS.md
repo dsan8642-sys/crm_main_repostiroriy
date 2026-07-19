@@ -384,7 +384,9 @@ Before creating a production package:
 - when handing the release candidate to whoever owns GitHub/production access,
   run `scripts\new-release-handoff.cmd -Force` to write the ignored
   `docs\RELEASE_HANDOFF.json` with current commit, archive checksum, draft
-  evidence path, remote state, blockers, and pending external actions;
+  evidence path, remote state, blockers, and pending external actions, then run
+  `scripts\verify-release-handoff.cmd` to catch stale handoff files or archive
+  checksum mismatches before transfer;
 - if running frontend commands manually instead of the wrapper, run
   `npm.cmd ci --cache ..\.npm-cache`, `npm.cmd run build`, and
   `npm.cmd run test:smoke` from `frontend\`;

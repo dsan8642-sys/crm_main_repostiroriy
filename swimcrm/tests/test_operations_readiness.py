@@ -424,6 +424,18 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
 
+    def test_release_handoff_verifier_catches_stale_archive_and_blocker_drift(self):
+        script = (REPO_ROOT / "scripts" / "verify-release-handoff.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("RELEASE_HANDOFF.json", script)
+        self.assertIn("verify-release-source-archive.ps1", script)
+        self.assertIn("verify-local-release-candidate.ps1", script)
+        self.assertIn("Release handoff is stale", script)
+        self.assertIn("Release handoff blockers drifted", script)
+        self.assertIn("archive_sha256", script)
+        self.assertIn("repository_remote", script)
+        self.assertIn("pending_external_actions", script)
+
 
 class HealthAndReadinessRule(TestCase):
     def setUp(self):
