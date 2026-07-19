@@ -926,9 +926,11 @@
           "path": "scripts/verify-operational-wrappers.ps1",
           "patterns": [
             "backup-pg.cmd",
+            "verify-pg-restore.cmd",
             "backup-postgres-django.cmd",
             "POSTGRES_DB is required",
-            "development default"
+            "development default",
+            "verify-pg-restore.ps1"
           ]
         },
         {

@@ -269,9 +269,8 @@ The runtime script supports a non-starting plan check:
 ```
 
 When `NOCOBASE_APP_ENV=production` or `DJANGO_ENV=production`, the script fails
-fast if required secrets are missing, if `NOCOBASE_DB_PASSWORD=postgres`, if the
-development root password is used, or if `NOCOBASE_STORAGE_DIR` points inside
-the source tree.
+fast if required secrets are missing, if NocoBase app/database/root secrets are
+weak or copied from examples, or if runtime paths point inside the source tree.
 
 ## Observability
 
@@ -547,7 +546,8 @@ Verify restore into a temporary database:
 .\scripts\verify-pg-restore.ps1 -BackupFile C:\SwimCRMRuntime\backups\swimcrm-YYYYMMDD-HHMMSS.dump
 ```
 
-Or with the cmd wrapper:
+Or with the guarded cmd wrapper. It delegates to `verify-pg-restore.ps1` and
+does not set database password defaults itself:
 
 ```bat
 scripts\verify-pg-restore.cmd C:\SwimCRMRuntime\backups\swimcrm-YYYYMMDD-HHMMSS.dump

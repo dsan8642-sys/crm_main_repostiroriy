@@ -96,4 +96,14 @@ foreach ($wrapper in $Wrappers) {
     Write-Host "Production guard check passed: $wrapper"
 }
 
+$restoreWrapper = Join-Path $RepoRoot "scripts\verify-pg-restore.cmd"
+$restoreText = Get-Content -LiteralPath $restoreWrapper -Raw
+if ($restoreText -notmatch "verify-pg-restore\.ps1") {
+    throw "verify-pg-restore.cmd must delegate to verify-pg-restore.ps1 so production guards cannot drift."
+}
+if ($restoreText -match "POSTGRES_PASSWORD=postgres" -or $restoreText -match "PGPASSWORD" -or $restoreText -match "pg_restore\.exe") {
+    throw "verify-pg-restore.cmd must not set development passwords or bypass the guarded PowerShell restore verifier."
+}
+Write-Host "Production guard check passed: verify-pg-restore.cmd"
+
 Write-Host "Operational wrapper checks passed."

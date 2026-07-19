@@ -728,10 +728,16 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
     def test_operational_wrapper_guard_includes_standalone_postgres_backup_cmd(self):
         verifier = (REPO_ROOT / "scripts" / "verify-operational-wrappers.ps1").read_text(encoding="utf-8-sig")
         wrapper = (REPO_ROOT / "scripts" / "backup-pg.cmd").read_text(encoding="utf-8-sig")
+        restore_wrapper = (REPO_ROOT / "scripts" / "verify-pg-restore.cmd").read_text(encoding="utf-8-sig")
 
         self.assertIn("backup-pg.cmd", verifier)
+        self.assertIn("verify-pg-restore.cmd", verifier)
+        self.assertIn("verify-pg-restore.ps1", verifier)
         self.assertIn("POSTGRES_PASSWORD must not use the development default", wrapper)
         self.assertIn("backup-pg.ps1", wrapper)
+        self.assertIn("verify-pg-restore.ps1", restore_wrapper)
+        self.assertNotIn("POSTGRES_PASSWORD=postgres", restore_wrapper)
+        self.assertNotIn("pg_restore.exe", restore_wrapper)
 
     def test_live_hybrid_health_supports_https_required_release_mode(self):
         script = (REPO_ROOT / "scripts" / "check-hybrid-health.ps1").read_text(encoding="utf-8-sig")
