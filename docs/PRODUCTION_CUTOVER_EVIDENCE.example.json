@@ -65,10 +65,10 @@
     {
       "id": "live_hybrid_health",
       "status": "passed",
-      "command": "scripts\\check-hybrid-health.cmd -RequireHttps",
+      "command": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
       "captured_at": "2026-07-16T12:25:00+02:00",
       "summary": "Live Django health, NocoBase bridge health, guarded config health, ops status, and NocoBase process health passed on https://crm.swimclub.pl and https://nocobase.swimclub.pl.",
-      "output_excerpt": "Django health check passed: https://crm.swimclub.pl/api/health/. NocoBase process health check passed: https://nocobase.swimclub.pl/api/__health_check. HTTPS live endpoint requirement passed. Hybrid health check passed. nocobase_config_health /api/nocobase/config/languages/"
+      "output_excerpt": "Django health check passed: https://crm.swimclub.pl/api/health/. Django operations status: ok. Operations status ok requirement passed. NocoBase process health check passed: https://nocobase.swimclub.pl/api/__health_check. HTTPS live endpoint requirement passed. Hybrid health check passed. nocobase_config_health /api/nocobase/config/languages/"
     },
     {
       "id": "hybrid_backup_restore_drill",

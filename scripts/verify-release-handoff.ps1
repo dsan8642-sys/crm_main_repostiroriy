@@ -138,6 +138,7 @@ function Assert-ChecklistEvidenceContains {
 }
 
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_live_hybrid_health" -Fragments @(
+    "Operations status ok requirement passed",
     "real https:// Django production URL",
     "real https:// NocoBase production URL"
 )

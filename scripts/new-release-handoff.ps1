@@ -91,8 +91,8 @@ $operatorChecklist = @(
     [ordered]@{
         id = "run_target_host_live_hybrid_health"
         title = "Run target-host live hybrid health."
-        command = "scripts\check-hybrid-health.cmd -RequireHttps"
-        expected_evidence = "Hybrid health check passed; HTTPS live endpoint requirement passed; real https:// Django production URL; real https:// NocoBase production URL; nocobase_config_health; /api/nocobase/config/languages/."
+        command = "scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk"
+        expected_evidence = "Hybrid health check passed; HTTPS live endpoint requirement passed; Operations status ok requirement passed; real https:// Django production URL; real https:// NocoBase production URL; nocobase_config_health; /api/nocobase/config/languages/."
         stop_if_missing = $true
     },
     [ordered]@{

@@ -1087,8 +1087,9 @@
             "64-character SHA256",
             "Rollback plan reviewed",
             "migrate --check",
-            "check-hybrid-health.cmd -RequireHttps",
-            "HTTPS live endpoint requirement passed"
+            "check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
+            "HTTPS live endpoint requirement passed",
+            "Operations status ok requirement passed"
           ]
         },
         {
@@ -1300,8 +1301,11 @@
             "NOCOBASE_BRIDGE_TOKEN is required",
             "NOCOBASE_CONFIG_TOKEN is required",
             "RequireHttps",
+            "RequireOpsOk",
             "DJANGO_BASE_URL must use https://",
             "NOCOBASE_BASE_URL must use https://",
+            "Operations status must be ok when -RequireOpsOk is set",
+            "Operations status ok requirement passed",
             "HTTPS live endpoint requirement passed",
             "nocobase_config_health",
             "/api/nocobase/config/languages/",
@@ -1405,8 +1409,9 @@
             "tracked_release_source_guard",
             "github_postgres_backend_job",
             "live_hybrid_health",
-            "check-hybrid-health.cmd -RequireHttps",
+            "check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
             "HTTPS live endpoint requirement passed",
+            "Operations status ok requirement passed",
             "production-django-host",
             "production-nocobase-host",
             "<64-hex-sha256>",
@@ -1431,6 +1436,7 @@
             "test_cutover_evidence_requires_hybrid_backup_sha256_values",
             "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
             "test_cutover_evidence_requires_https_live_health_fragment",
+            "test_cutover_evidence_requires_live_ops_ok_fragment",
             "test_cutover_evidence_requires_live_health_production_urls",
             "test_cutover_evidence_rejects_localhost_live_health_urls",
             "test_cutover_evidence_requires_complete_rollback_acknowledgement",

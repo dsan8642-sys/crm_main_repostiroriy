@@ -7,6 +7,7 @@ param(
     [int]$TimeoutSeconds = 10,
     [switch]$AllowOpsCritical,
     [switch]$RequireHttps,
+    [switch]$RequireOpsOk,
     [switch]$PlanOnly
 )
 
@@ -71,6 +72,7 @@ $plan = [ordered]@{
     requires_bridge_token = $true
     requires_config_token = $true
     requires_https = [bool]$RequireHttps
+    requires_ops_ok = [bool]$RequireOpsOk
     timeout_seconds = $TimeoutSeconds
 }
 
@@ -110,10 +112,16 @@ if (-not $bridgeHealth.ok) {
 Write-Host "Django NocoBase bridge health passed: $($plan.nocobase_bridge_health)"
 
 $opsStatus = Invoke-JsonGet -Url $plan.nocobase_ops_status -Headers $headers
+if ($RequireOpsOk -and $opsStatus.status -ne "ok") {
+    throw "Operations status must be ok when -RequireOpsOk is set. Current status: $($opsStatus.status)."
+}
 if ($opsStatus.status -eq "critical" -and -not $AllowOpsCritical) {
     throw "Operations status is critical. Re-run with -AllowOpsCritical only for diagnostics, not for release approval."
 }
 Write-Host "Django operations status: $($opsStatus.status)"
+if ($RequireOpsOk) {
+    Write-Host "Operations status ok requirement passed."
+}
 
 $configHealth = Invoke-JsonGet -Url $plan.nocobase_config_health -Headers $configHeaders
 if ($null -eq $configHealth.languages) {

@@ -76,7 +76,8 @@ Production approval requires evidence that cannot be invented locally:
 - GitHub Actions `postgres-backend-check` run URL for the exact release commit;
 - target-host `scripts\check-production-env.cmd` output with real production
   environment variables;
-- target-host `scripts\check-hybrid-health.cmd` output proving Django,
+- target-host `scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk`
+  output proving Django,
   NocoBase bridge/config APIs, ops status, and NocoBase process health;
 - target-host hybrid backup/restore drill evidence with checksum-backed backup
   verification;

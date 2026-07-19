@@ -52,9 +52,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "live_hybrid_health",
-        "command": "scripts\\check-hybrid-health.cmd -RequireHttps",
+        "command": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
         "summary": "Run live hybrid health on the target host and paste the pass summary here, including the real Django and NocoBase https:// production URLs.",
-        "output_excerpt": "Must include: Django health check passed: https://<production-django-host>/api/health/; NocoBase process health check passed: https://<production-nocobase-host>/api/__health_check; Hybrid health check passed; HTTPS live endpoint requirement passed; nocobase_config_health; /api/nocobase/config/languages/",
+        "output_excerpt": "Must include: Django health check passed: https://<production-django-host>/api/health/; Django operations status: ok; Operations status ok requirement passed; NocoBase process health check passed: https://<production-nocobase-host>/api/__health_check; Hybrid health check passed; HTTPS live endpoint requirement passed; nocobase_config_health; /api/nocobase/config/languages/",
     },
     {
         "id": "hybrid_backup_restore_drill",

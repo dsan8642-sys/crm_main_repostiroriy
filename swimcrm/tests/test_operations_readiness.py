@@ -349,6 +349,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_live_ops_ok_fragment(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "live_hybrid_health"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "Operations status ok requirement passed. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "live_hybrid_health: missing evidence fragment: Operations status ok requirement passed",
+            errors,
+        )
+
     def test_cutover_evidence_requires_live_health_production_urls(self):
         payload = self._example_payload()
         item = next(
@@ -399,8 +417,9 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
-        self.assertIn("check-hybrid-health.cmd -RequireHttps", generator)
+        self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
+        self.assertIn("Operations status ok requirement passed", generator)
         self.assertIn("production-django-host", generator)
         self.assertIn("production-nocobase-host", generator)
         self.assertIn("<64-hex-sha256>", generator)
@@ -722,7 +741,10 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("DJANGO_BASE_URL must use https://", script)
         self.assertIn("NOCOBASE_BASE_URL must use https://", script)
         self.assertIn("HTTPS live endpoint requirement passed", script)
-        self.assertIn("check-hybrid-health.cmd -RequireHttps", handoff)
+        self.assertIn("RequireOpsOk", script)
+        self.assertIn("Operations status must be ok when -RequireOpsOk is set", script)
+        self.assertIn("Operations status ok requirement passed", script)
+        self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", handoff)
 
     def test_nocobase_runtime_requires_strong_production_app_key(self):
         runtime = (REPO_ROOT / "scripts" / "run-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")

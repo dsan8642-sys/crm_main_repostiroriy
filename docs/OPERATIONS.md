@@ -136,7 +136,7 @@ $env:DJANGO_BASE_URL="https://crm.example.com"
 $env:NOCOBASE_BASE_URL="https://nocobase.example.com"
 $env:NOCOBASE_BRIDGE_TOKEN="<production bridge token>"
 $env:NOCOBASE_CONFIG_TOKEN="<production config token>"
-scripts\check-hybrid-health.cmd -RequireHttps
+scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk
 ```
 
 The script verifies:
@@ -147,9 +147,10 @@ The script verifies:
 - Django's NocoBase guarded config API at `/api/nocobase/config/languages/`;
 - NocoBase process health at `/api/__health_check`.
 
-`status=critical` from the operations snapshot fails the smoke check by
-default. Use `-AllowOpsCritical` only when diagnosing an incident, not as a
-release approval shortcut.
+For release approval, `-RequireOpsOk` requires the operations snapshot to be
+exactly `status=ok`. Without that release flag, `status=critical` still fails
+the smoke check by default. Use `-AllowOpsCritical` only when diagnosing an
+incident, not as a release approval shortcut.
 
 ## Production cutover evidence
 
@@ -171,7 +172,7 @@ release evidence:
   manifest;
 - GitHub Actions run URL proving `postgres-backend-check` passed on the release commit;
 - production environment preflight output;
-- live `scripts\check-hybrid-health.cmd -RequireHttps` output from the target host;
+- live `scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk` output from the target host;
 - latest backup/restore drill evidence;
 - rollback plan acknowledgement.
 
@@ -228,8 +229,9 @@ not just `status=passed`:
   production settings passed`, `NocoBase production settings passed`, `HTTPS
   reverse-proxy settings passed`;
 - live hybrid health: `Hybrid health check passed`, `HTTPS live endpoint
-  requirement passed`, real `https://` Django and NocoBase production URLs,
-  `nocobase_config_health`, `/api/nocobase/config/languages/`;
+  requirement passed`, `Operations status ok requirement passed`, real
+  `https://` Django and NocoBase production URLs, `nocobase_config_health`,
+  `/api/nocobase/config/languages/`;
 - backup/restore drill: `Hybrid backup set written`, `backup_set_dir`,
   `nocobase_database`, `Django dump sha256 OK`, `NocoBase dump sha256 OK`,
   the actual 64-character Django and NocoBase dump SHA256 values,
