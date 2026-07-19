@@ -35,6 +35,16 @@ jobs:
           $shortSha = (git rev-parse --short=12 HEAD).Trim()
           .\scripts\verify-release-source-archive.ps1 "releases\swimcrm-release-$shortSha.manifest.json"
 
+      - name: Upload verified release source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: swimcrm-release-source-${{ github.sha }}
+          path: |
+            releases/swimcrm-release-*.zip
+            releases/swimcrm-release-*.manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:

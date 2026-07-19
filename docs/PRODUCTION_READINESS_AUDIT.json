@@ -1089,7 +1089,8 @@
             "release source archive verifier",
             "tracked manifest check before release source archive",
             "release source archive before archive verifier",
-            "verified release source archive before generated Node artifacts",
+            "verified release source archive before artifact upload",
+            "uploaded release source archive before generated Node artifacts",
             "PostgreSQL tracked release source manifest check",
             "PostgreSQL Python setup before tracked manifest check",
             "tracked release source manifest check",
@@ -1301,7 +1302,9 @@
             "test_release_workflow_requires_manifest_guard_after_python_setup",
             "test_release_workflow_requires_source_archive_builder_after_manifest_guard",
             "test_release_workflow_requires_source_archive_verifier",
-            "test_release_workflow_requires_verified_source_archive_before_node_artifacts"
+            "test_release_workflow_requires_verified_source_archive_before_node_artifacts",
+            "test_release_workflow_uploads_verified_source_archive_artifact",
+            "test_release_workflow_requires_artifact_upload_after_archive_verifier"
           ]
         }
       ]

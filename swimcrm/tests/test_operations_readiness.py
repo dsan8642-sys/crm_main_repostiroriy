@@ -390,8 +390,58 @@ class CiReleaseWorkflowVerifierRule(SimpleTestCase):
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            "invalid order for verified release source archive before generated Node artifacts: "
-            "expected 'verify-release-source-archive.ps1' before 'actions/setup-node@v4'",
+            "invalid order for verified release source archive before artifact upload: "
+            "expected 'verify-release-source-archive.ps1' before 'actions/upload-artifact@v4'",
+            errors,
+        )
+
+    def test_release_workflow_uploads_verified_source_archive_artifact(self):
+        text = self._workflow_text()
+        text = text.replace(
+            "\n      - name: Upload verified release source archive\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: swimcrm-release-source-${{ github.sha }}\n"
+            "          path: |\n"
+            "            releases/swimcrm-release-*.zip\n"
+            "            releases/swimcrm-release-*.manifest.json\n"
+            "          if-no-files-found: error\n"
+            "          retention-days: 14\n",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_workflow(text))
+
+        self.assertIn(
+            r"missing release source archive artifact upload: actions/upload-artifact@v4",
+            errors,
+        )
+
+    def test_release_workflow_requires_artifact_upload_after_archive_verifier(self):
+        text = self._workflow_text()
+        upload_step = (
+            "\n      - name: Upload verified release source archive\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: swimcrm-release-source-${{ github.sha }}\n"
+            "          path: |\n"
+            "            releases/swimcrm-release-*.zip\n"
+            "            releases/swimcrm-release-*.manifest.json\n"
+            "          if-no-files-found: error\n"
+            "          retention-days: 14\n"
+        )
+        text = text.replace(upload_step, "", 1)
+        text = text.replace(
+            "\n      - name: Verify release source archive\n",
+            upload_step + "\n      - name: Verify release source archive\n",
+            1,
+        )
+
+        errors = self.verifier.validate(self._write_workflow(text))
+
+        self.assertIn(
+            "invalid order for verified release source archive before artifact upload: "
+            "expected 'verify-release-source-archive.ps1' before 'actions/upload-artifact@v4'",
             errors,
         )
 

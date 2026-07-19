@@ -72,6 +72,36 @@ def validate(path=WORKFLOW):
             "release source archive verifier short SHA",
             errors,
         )
+        _require(
+            release,
+            r"actions/upload-artifact@v4",
+            "release source archive artifact upload",
+            errors,
+        )
+        _require(
+            release,
+            r"name:\s+swimcrm-release-source-\$\{\{\s*github\.sha\s*\}\}",
+            "release source archive artifact name",
+            errors,
+        )
+        _require(
+            release,
+            r"releases/swimcrm-release-\*\.zip",
+            "release source archive artifact zip path",
+            errors,
+        )
+        _require(
+            release,
+            r"releases/swimcrm-release-\*\.manifest\.json",
+            "release source archive artifact manifest path",
+            errors,
+        )
+        _require(
+            release,
+            r"if-no-files-found:\s+error",
+            "release source archive artifact missing-file guard",
+            errors,
+        )
         _require_order(
             release,
             "actions/setup-python@v5",
@@ -96,8 +126,15 @@ def validate(path=WORKFLOW):
         _require_order(
             release,
             "verify-release-source-archive.ps1",
+            "actions/upload-artifact@v4",
+            "verified release source archive before artifact upload",
+            errors,
+        )
+        _require_order(
+            release,
+            "actions/upload-artifact@v4",
             "actions/setup-node@v4",
-            "verified release source archive before generated Node artifacts",
+            "uploaded release source archive before generated Node artifacts",
             errors,
         )
         _require(release, r"verify-release-tree\.ps1 -Strict", "strict release tree check", errors)

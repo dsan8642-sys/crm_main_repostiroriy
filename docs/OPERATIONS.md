@@ -162,6 +162,9 @@ release evidence:
 - tracked release-source guard output proving required NocoBase and frontend
   manifests are Git-tracked;
 - GitHub Actions run URL proving `release-check` passed on the release commit;
+- GitHub Actions `release-check` run artifact named
+  `swimcrm-release-source-<commit-sha>` containing the verified source zip and
+  manifest;
 - GitHub Actions run URL proving `postgres-backend-check` passed on the release commit;
 - production environment preflight output;
 - live `scripts\check-hybrid-health.cmd` output from the target host;
