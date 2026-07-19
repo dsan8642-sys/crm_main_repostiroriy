@@ -203,6 +203,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_release_archive_artifact_name_in_github_evidence(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "github_full_stack_release_job"
+        )
+        item["summary"] = item["summary"].replace(
+            " and uploaded artifact swimcrm-release-source-0123456789abcdef0123456789abcdef01234567",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "github_full_stack_release_job: missing evidence fragment: swimcrm-release-source-",
+            errors,
+        )
+
     def test_cutover_evidence_requires_frontend_audit_pass_fragment(self):
         payload = self._example_payload()
         item = next(
@@ -246,6 +264,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("archive_sha256", generator)
         self.assertIn("Release source archive manifest verified", generator)
         self.assertIn("Tracked release-source guard passed", generator)
+        self.assertIn("swimcrm-release-source-<commit-sha>", generator)
 
 
 class ReleaseSourceManifestVerifierRule(SimpleTestCase):

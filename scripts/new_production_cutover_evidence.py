@@ -36,7 +36,7 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "github_full_stack_release_job",
-        "summary": "Paste the GitHub Actions release-check job URL, pass summary, and release commit SHA here.",
+        "summary": "Paste the GitHub Actions release-check job URL, pass summary, release commit SHA, and artifact name swimcrm-release-source-<commit-sha> here.",
         "evidence_url": "",
     },
     {

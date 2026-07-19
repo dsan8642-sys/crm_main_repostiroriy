@@ -161,7 +161,8 @@ release evidence:
   created from the clean release commit;
 - tracked release-source guard output proving required NocoBase and frontend
   manifests are Git-tracked;
-- GitHub Actions run URL proving `release-check` passed on the release commit;
+- GitHub Actions run URL proving `release-check` passed on the release commit
+  and evidence text naming `swimcrm-release-source-<commit-sha>`;
 - GitHub Actions `release-check` run artifact named
   `swimcrm-release-source-<commit-sha>` containing the verified source zip and
   manifest;

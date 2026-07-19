@@ -67,6 +67,9 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "Release source manifests verified",
         "tracked",
     ],
+    "github_full_stack_release_job": [
+        "swimcrm-release-source-",
+    ],
     "production_env_preflight": [
         "Production environment check passed",
         "PostgreSQL",
