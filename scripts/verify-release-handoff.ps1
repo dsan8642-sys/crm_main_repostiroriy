@@ -66,6 +66,12 @@ if ($manifest.commit_sha -ne $currentCommit) {
 if ($manifest.archive_sha256 -ne $handoffData.release_source_archive.archive_sha256) {
     throw "Release handoff archive_sha256 does not match the release archive manifest."
 }
+if ($manifest.tracked_file_count -ne $handoffData.release_source_archive.tracked_file_count) {
+    throw "Release handoff tracked_file_count does not match the release archive manifest."
+}
+if ([string]$manifest.tracked_file_list_sha256 -ne [string]$handoffData.release_source_archive.tracked_file_list_sha256) {
+    throw "Release handoff tracked_file_list_sha256 does not match the release archive manifest."
+}
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArchiveVerifier $manifestPath
 if ($LASTEXITCODE -ne 0) {
@@ -151,6 +157,8 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_release_archive_on_target_host" -Fragments @(
     "Release archive extracted on target host",
     "Release source archive tracked file list verified",
+    "tracked_file_count",
+    "tracked_file_list_sha256",
     "Backend dependencies installed",
     "Root Node tooling installed",
     "Frontend dependencies installed",
@@ -161,6 +169,8 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_rele
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
     "Release source archive contents verified",
     "Release source archive tracked file list verified",
+    "tracked_file_count",
+    "tracked_file_list_sha256",
     "Rollback plan reviewed",
     "stop writers",
     "verified backup",
@@ -189,3 +199,5 @@ foreach ($remote in @($releasePlan.repository_remote.remotes)) {
 Write-Host "Release handoff verified."
 Write-Host "commit_sha: $currentCommit"
 Write-Host "archive_sha256: $($handoffData.release_source_archive.archive_sha256)"
+Write-Host "tracked_file_count: $($handoffData.release_source_archive.tracked_file_count)"
+Write-Host "tracked_file_list_sha256: $($handoffData.release_source_archive.tracked_file_list_sha256)"

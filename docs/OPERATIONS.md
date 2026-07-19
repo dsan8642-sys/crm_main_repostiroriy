@@ -223,15 +223,16 @@ not just `status=passed`:
 - release source archive: `Release source archive written`, `Release source
   manifest written`, `Release source archive manifest verified`, `Release
   source archive contents verified`, `Release source archive tracked file list
-  verified`, exact
+  verified`, `tracked_file_count`, `tracked_file_list_sha256`, exact
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
 - target-host release install: `Release archive extracted on target host`,
   `Release source archive manifest verified`, `Release source archive contents
-  verified`, `Release source archive tracked file list verified`, `Backend
-  dependencies installed`, `Root Node tooling installed`, `Frontend
-  dependencies installed`, `Django migrations check passed`, `NocoBase app root
-  outside source tree`, `NocoBase storage outside source tree`;
+  verified`, `Release source archive tracked file list verified`,
+  `tracked_file_count`, `tracked_file_list_sha256`, `Backend dependencies
+  installed`, `Root Node tooling installed`, `Frontend dependencies installed`,
+  `Django migrations check passed`, `NocoBase app root outside source tree`,
+  `NocoBase storage outside source tree`;
 - production preflight: `Production environment check passed`, `Runtime path
   settings passed`, `PostgreSQL production settings passed`, `Celery
   production settings passed`, `NocoBase production settings passed`, `HTTPS
@@ -439,7 +440,8 @@ Before creating a production package:
   `scripts\verify-release-source-archive.cmd releases\swimcrm-release-<sha>.manifest.json`
   and paste `Release source archive manifest verified`, `Release source archive
   contents verified`, `Release source archive tracked file list verified`,
-  `commit_sha`, and `archive_sha256` into the cutover evidence;
+  `tracked_file_count`, `tracked_file_list_sha256`, `commit_sha`, and
+  `archive_sha256` into the cutover evidence;
 - use `scripts\verify-release-tree.cmd -Strict` only as a clean checkout guard
   before dependencies and runtime assets are generated;
 - on the production host, run `scripts\check-production-env.cmd` with real environment variables;

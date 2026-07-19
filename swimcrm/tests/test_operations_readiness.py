@@ -248,6 +248,72 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_source_archive_file_list_fingerprint(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "release_source_archive"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "tracked_file_count: 1234. ",
+            "",
+        ).replace(
+            "tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "release_source_archive: missing evidence fragment: tracked_file_count",
+            errors,
+        )
+        self.assertIn(
+            "release_source_archive: evidence must include tracked_file_count",
+            errors,
+        )
+        self.assertIn(
+            "release_source_archive: missing evidence fragment: tracked_file_list_sha256",
+            errors,
+        )
+        self.assertIn(
+            "release_source_archive: evidence must include tracked_file_list_sha256",
+            errors,
+        )
+
+    def test_cutover_evidence_requires_target_host_file_list_fingerprint(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "target_host_release_install"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "tracked_file_count: 1234. ",
+            "",
+        ).replace(
+            "tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "target_host_release_install: missing evidence fragment: tracked_file_count",
+            errors,
+        )
+        self.assertIn(
+            "target_host_release_install: evidence must include tracked_file_count",
+            errors,
+        )
+        self.assertIn(
+            "target_host_release_install: missing evidence fragment: tracked_file_list_sha256",
+            errors,
+        )
+        self.assertIn(
+            "target_host_release_install: evidence must include tracked_file_list_sha256",
+            errors,
+        )
+
     def test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -477,9 +543,12 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
 
         self.assertIn("release_archive_passed", generator)
         self.assertIn("archive_sha256", generator)
+        self.assertIn("_archive_manifest_data", generator)
         self.assertIn("Release source archive manifest verified", generator)
         self.assertIn("Release source archive contents verified", generator)
         self.assertIn("Release source archive tracked file list verified", generator)
+        self.assertIn("tracked_file_count", generator)
+        self.assertIn("tracked_file_list_sha256", generator)
         self.assertIn("Tracked release-source guard passed", generator)
         self.assertIn("swimcrm-release-source-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)
@@ -706,6 +775,9 @@ class ReleaseSourceArchiveBuilderRule(SimpleTestCase):
         self.assertIn("commit_sha", script)
         self.assertIn("Get-FileHash", script)
         self.assertIn("archive_sha256", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
+        self.assertIn("ls-tree -r --name-only HEAD", script)
 
 
 class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
@@ -723,6 +795,10 @@ class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
         self.assertIn("ZipFile", script)
         self.assertIn("Release source archive contents verified", script)
         self.assertIn("Release source archive tracked file list verified", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
+        self.assertIn("tracked file count mismatch", script)
+        self.assertIn("tracked file list sha256 mismatch", script)
         self.assertIn("ls-tree -r --name-only HEAD", script)
         self.assertIn("Release source archive file list must match git ls-tree HEAD", script)
         self.assertIn("blocked runtime/generated entry", script)
@@ -792,6 +868,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("verify-local-release-candidate.ps1", script)
         self.assertIn("release_source_archive", script)
         self.assertIn("archive_sha256", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
         self.assertIn("operator_checklist", script)
@@ -808,6 +886,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Rollback plan reviewed", script)
         self.assertIn("Release source archive contents verified", script)
         self.assertIn("Release source archive tracked file list verified", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
         self.assertIn("migrate --check", script)
 
     def test_release_handoff_verifier_catches_stale_archive_and_blocker_drift(self):
@@ -819,6 +899,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Release handoff is stale", script)
         self.assertIn("Release handoff blockers drifted", script)
         self.assertIn("archive_sha256", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
         self.assertIn("operator_checklist", script)
@@ -833,6 +915,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("stop writers", script)
         self.assertIn("Release source archive contents verified", script)
         self.assertIn("Release source archive tracked file list verified", script)
+        self.assertIn("tracked_file_count", script)
+        self.assertIn("tracked_file_list_sha256", script)
 
     def test_operational_wrapper_guard_includes_standalone_postgres_backup_cmd(self):
         verifier = (REPO_ROOT / "scripts" / "verify-operational-wrappers.ps1").read_text(encoding="utf-8-sig")

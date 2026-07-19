@@ -1022,7 +1022,10 @@
             "-SourceOnly",
             "-RequireTrackedReleaseFiles",
             "clean git work tree",
-            "commit_sha"
+            "commit_sha",
+            "tracked_file_count",
+            "tracked_file_list_sha256",
+            "ls-tree -r --name-only HEAD"
           ]
         },
         {
@@ -1040,6 +1043,10 @@
             "ZipFile",
             "Release source archive contents verified",
             "Release source archive tracked file list verified",
+            "tracked_file_count",
+            "tracked_file_list_sha256",
+            "tracked file count mismatch",
+            "tracked file list sha256 mismatch",
             "ls-tree -r --name-only HEAD",
             "Release source archive file list must match git ls-tree HEAD",
             "blocked runtime/generated entry",
@@ -1135,6 +1142,8 @@
             "Django migrations check passed",
             "NocoBase app root outside source tree",
             "HTTPS reverse-proxy settings passed",
+            "tracked_file_count",
+            "tracked_file_list_sha256",
             "real https:// Django production URL",
             "real https:// NocoBase production URL",
             "64-character SHA256",
@@ -1157,6 +1166,8 @@
             "Release handoff is stale",
             "Release handoff blockers drifted",
             "archive_sha256",
+            "tracked_file_count",
+            "tracked_file_list_sha256",
             "repository_remote",
             "pending_external_actions",
             "operator_checklist",
@@ -1170,7 +1181,9 @@
             "64-character SHA256",
             "stop writers",
             "Release source archive contents verified",
-            "Release source archive tracked file list verified"
+            "Release source archive tracked file list verified",
+            "tracked_file_count",
+            "tracked_file_list_sha256"
           ]
         },
         {
@@ -1442,6 +1455,8 @@
             "Release source archive manifest verified",
             "Release source archive contents verified",
             "Release source archive tracked file list verified",
+            "tracked_file_count",
+            "tracked_file_list_sha256",
             "sha256",
             "evidence must include archive sha256",
             "evidence_id == \"release_source_archive\"",
@@ -1476,8 +1491,11 @@
             "found 0 vulnerabilities",
             "release_archive_passed",
             "archive_sha256",
+            "_archive_manifest_data",
             "Release source archive contents verified",
             "Release source archive tracked file list verified",
+            "tracked_file_count",
+            "tracked_file_list_sha256",
             "target_host_release_install",
             "manual target-host release install",
             "NocoBase app root outside source tree",

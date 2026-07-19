@@ -85,7 +85,7 @@ $operatorChecklist = @(
         id = "install_release_archive_on_target_host"
         title = "Install the verified release archive on the target host."
         command = "Extract releases\swimcrm-release-$shortSha.zip on the target host, install backend/root/frontend dependencies, run Django migrations check, and prepare NocoBase app/storage roots outside the source tree."
-        expected_evidence = "Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree."
+        expected_evidence = "Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree."
         stop_if_missing = $true
     },
     [ordered]@{
@@ -113,7 +113,7 @@ $operatorChecklist = @(
         id = "fill_docs_production_cutover_evidence_json"
         title = "Fill the production cutover evidence manifest with real evidence."
         command = "Copy docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json to docs\PRODUCTION_CUTOVER_EVIDENCE.json and replace pending placeholders."
-        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256), including Release source archive contents verified, Release source archive tracked file list verified, and complete rollback acknowledgement: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke."
+        expected_evidence = "docs\PRODUCTION_CUTOVER_EVIDENCE.json contains only real production evidence for commit $commitSha and archive SHA256 $($releaseArchive.archive_sha256), including Release source archive contents verified, Release source archive tracked file list verified, tracked_file_count, tracked_file_list_sha256, and complete rollback acknowledgement: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke."
         stop_if_missing = $true
     },
     [ordered]@{
@@ -143,6 +143,8 @@ $handoff = [ordered]@{
         manifest_exists = [bool]$releaseArchive
         archive_path = if ($releaseArchive) { $releaseArchive.archive } else { $null }
         archive_sha256 = if ($releaseArchive) { $releaseArchive.archive_sha256 } else { $null }
+        tracked_file_count = if ($releaseArchive) { $releaseArchive.tracked_file_count } else { $null }
+        tracked_file_list_sha256 = if ($releaseArchive) { $releaseArchive.tracked_file_list_sha256 } else { $null }
     }
     production_cutover_evidence = [ordered]@{
         production_path = Join-Path $RepoRoot "docs\PRODUCTION_CUTOVER_EVIDENCE.json"

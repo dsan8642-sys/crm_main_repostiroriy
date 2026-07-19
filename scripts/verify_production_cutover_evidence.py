@@ -71,6 +71,8 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "Release source archive manifest verified",
         "Release source archive contents verified",
         "Release source archive tracked file list verified",
+        "tracked_file_count",
+        "tracked_file_list_sha256",
         "sha256",
     ],
     "tracked_release_source_guard": [
@@ -88,6 +90,8 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "Release source archive manifest verified",
         "Release source archive contents verified",
         "Release source archive tracked file list verified",
+        "tracked_file_count",
+        "tracked_file_list_sha256",
         "Backend dependencies installed",
         "Root Node tooling installed",
         "Frontend dependencies installed",
@@ -204,6 +208,13 @@ def _validate_backup_restore_hashes(evidence_id, combined, errors):
         errors.append(f"{evidence_id}: evidence must include Django and NocoBase dump SHA256 values")
 
 
+def _validate_release_archive_file_list_proof(evidence_id, combined, errors):
+    if not re.search(r"tracked_file_count[:=\s]+\d+\b", combined):
+        errors.append(f"{evidence_id}: evidence must include tracked_file_count")
+    if not re.search(r"tracked_file_list_sha256[:=\s]+[0-9a-f]{64}\b", combined, flags=re.IGNORECASE):
+        errors.append(f"{evidence_id}: evidence must include tracked_file_list_sha256")
+
+
 def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=""):
     evidence_id = item.get("id", "")
     if evidence_id not in REQUIRED_EVIDENCE_IDS:
@@ -231,6 +242,7 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
                 f"{evidence_id}: evidence must include current release archive sha256 "
                 f"({expected_archive_sha256})"
             )
+        _validate_release_archive_file_list_proof(evidence_id, combined, errors)
     elif evidence_id != "rollback_plan_acknowledged" and not item.get("command"):
         errors.append(f"{evidence_id}: command is required")
 
@@ -243,6 +255,8 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
         _validate_live_health_urls(evidence_id, combined, errors)
     if evidence_id == "hybrid_backup_restore_drill":
         _validate_backup_restore_hashes(evidence_id, combined, errors)
+    if evidence_id == "target_host_release_install":
+        _validate_release_archive_file_list_proof(evidence_id, combined, errors)
     for fragment in REQUIRED_OUTPUT_FRAGMENTS.get(evidence_id, []):
         if fragment not in combined:
             errors.append(f"{evidence_id}: missing evidence fragment: {fragment}")

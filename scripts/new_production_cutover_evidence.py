@@ -26,7 +26,7 @@ EVIDENCE_ITEMS = [
         "id": "release_source_archive",
         "command": "scripts\\build-release-source.cmd",
         "summary": "Run the release source archive builder from the clean release commit, verify the manifest/checksum, and paste the pass summary plus the release commit SHA here.",
-        "output_excerpt": "Must include: Release source archive written; Release source manifest written; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; release_candidate.commit_sha; sha256.",
+        "output_excerpt": "Must include: Release source archive written; Release source manifest written; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; release_candidate.commit_sha; sha256.",
     },
     {
         "id": "tracked_release_source_guard",
@@ -48,7 +48,7 @@ EVIDENCE_ITEMS = [
         "id": "target_host_release_install",
         "command": "manual target-host release install",
         "summary": "Extract the verified release archive on the target host, install backend/root/frontend dependencies, verify migrations, and prepare NocoBase app/storage roots outside the source tree.",
-        "output_excerpt": "Must include: Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree.",
+        "output_excerpt": "Must include: Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree.",
     },
     {
         "id": "production_env_preflight",
@@ -93,6 +93,20 @@ def _source_tree_state():
     return "clean" if not _git(["status", "--porcelain"]) else "dirty"
 
 
+def _archive_manifest_data(archive_manifest):
+    if not archive_manifest:
+        return {}
+    path = Path(archive_manifest)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def _evidence_items(
     local_backend_passed=False,
     local_full_stack_passed=False,
@@ -102,6 +116,11 @@ def _evidence_items(
     release_commit_sha="",
 ):
     now = datetime.now(timezone.utc).isoformat()
+    manifest_data = _archive_manifest_data(archive_manifest) if release_archive_passed else {}
+    if not archive_sha256:
+        archive_sha256 = manifest_data.get("archive_sha256", "")
+    tracked_file_count = manifest_data.get("tracked_file_count", "<tracked-file-count>")
+    tracked_file_list_sha256 = manifest_data.get("tracked_file_list_sha256", "<64-hex-sha256>")
     rows = []
     for template in EVIDENCE_ITEMS:
         item = dict(template)
@@ -129,6 +148,8 @@ def _evidence_items(
                 "Release source archive manifest verified. "
                 "Release source archive contents verified. "
                 "Release source archive tracked file list verified. "
+                f"tracked_file_count: {tracked_file_count}. "
+                f"tracked_file_list_sha256: {tracked_file_list_sha256}. "
                 f"commit_sha: {release_commit_sha}. "
                 f"archive_sha256: {archive_sha256}."
             )

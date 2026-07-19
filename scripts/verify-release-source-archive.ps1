@@ -47,6 +47,20 @@ $blockedArchiveExtensions = @(
     ".zip"
 )
 
+function Get-LineListSha256 {
+    param([string[]]$Lines)
+
+    $text = (($Lines | Sort-Object) -join "`n") + "`n"
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join "")
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 if (-not (Test-Path -LiteralPath $Manifest)) {
     throw "Release source archive manifest does not exist: $Manifest"
 }
@@ -99,6 +113,12 @@ if (-not $data.archive) {
 if (-not ($data.archive_sha256 -match "^[0-9a-f]{64}$")) {
     throw "Release source archive manifest archive_sha256 must be a lowercase SHA256 hash."
 }
+if (-not ($data.tracked_file_count -is [int]) -and -not ($data.tracked_file_count -is [long])) {
+    throw "Release source archive manifest tracked_file_count must be an integer."
+}
+if (-not ($data.tracked_file_list_sha256 -match "^[0-9a-f]{64}$")) {
+    throw "Release source archive manifest tracked_file_list_sha256 must be a lowercase SHA256 hash."
+}
 
 $archivePath = [string]$data.archive
 if (-not [System.IO.Path]::IsPathRooted($archivePath)) {
@@ -146,6 +166,14 @@ try {
             }
         }
     }
+    if ($fileEntries.Count -ne [int]$data.tracked_file_count) {
+        throw "Release source archive tracked file count mismatch. Expected $($data.tracked_file_count) but got $($fileEntries.Count)."
+    }
+    $actualFileListHash = Get-LineListSha256 -Lines $fileEntries
+    $expectedFileListHash = ([string]$data.tracked_file_list_sha256).ToLowerInvariant()
+    if ($actualFileListHash -ne $expectedFileListHash) {
+        throw "Release source archive tracked file list sha256 mismatch. Expected $expectedFileListHash but got $actualFileListHash."
+    }
     if ($expectedTrackedEntries.Count -gt 0) {
         $missingTrackedEntries = @($expectedTrackedEntries | Where-Object { $fileEntries -notcontains $_ })
         $unexpectedArchiveEntries = @($fileEntries | Where-Object { $expectedTrackedEntries -notcontains $_ })
@@ -170,3 +198,5 @@ Write-Host "Release source archive contents verified."
 Write-Host "Release source archive tracked file list verified."
 Write-Host "commit_sha: $($data.commit_sha)"
 Write-Host "archive_sha256: $actualHash"
+Write-Host "tracked_file_count: $($fileEntries.Count)"
+Write-Host "tracked_file_list_sha256: $actualFileListHash"
