@@ -391,6 +391,17 @@ class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
 
 
 class LocalReleaseCandidateVerifierRule(SimpleTestCase):
+    def test_release_candidate_readiness_doc_is_stable_not_a_stale_snapshot(self):
+        doc = (REPO_ROOT / "docs" / "RELEASE_CANDIDATE_READINESS.md").read_text(encoding="utf-8-sig")
+
+        self.assertIn("This document is the stable release-candidate procedure", doc)
+        self.assertIn("verify-local-release-candidate.cmd -ForceArtifactOverwrite", doc)
+        self.assertIn("verify-release-handoff.cmd", doc)
+        self.assertIn("verify-local-release-candidate.cmd -RequireProductionEvidence", doc)
+        self.assertNotIn("Generated:", doc)
+        self.assertNotIn("working tree is not clean, so a release source archive cannot be built", doc)
+        self.assertNotIn("231 tests", doc)
+
     def test_local_release_candidate_verifier_requires_clean_source_archive_and_optional_evidence(self):
         script = (REPO_ROOT / "scripts" / "verify-local-release-candidate.ps1").read_text(encoding="utf-8-sig")
 

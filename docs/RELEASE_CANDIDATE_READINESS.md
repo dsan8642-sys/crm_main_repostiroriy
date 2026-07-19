@@ -1,73 +1,115 @@
-# Release Candidate Readiness Snapshot
+# Release Candidate Readiness
 
-Generated: 2026-07-19T14:11:16+02:00
+This document is the stable release-candidate procedure. It intentionally does
+not contain a generated timestamp, commit SHA, archive name, archive checksum,
+or test count. Those values change on every release commit and must come from
+the generated handoff/evidence artifacts:
 
-## Current Verdict
+- `docs\RELEASE_HANDOFF.json`
+- `docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json`
+- `releases\swimcrm-release-<short-sha>.manifest.json`
 
-The project is locally release-candidate ready, but not yet production-ready.
+## Verdict
 
-Local backend, frontend, NocoBase hybrid, audit, and operational guard checks
-pass. The remaining blockers are release formalization and external production
-evidence:
+The project can be treated as a local release candidate only when all local
+gates below pass from a clean Git worktree.
 
-- the working tree is not clean, so a release source archive cannot be built;
-- there is no real `docs/PRODUCTION_CUTOVER_EVIDENCE.json`;
-- there is no verified GitHub Actions run URL for the final release commit;
-- there is no target-host production/staging preflight evidence;
-- there is no live hybrid health evidence from the target host;
-- there is no production/staging hybrid backup/restore drill evidence.
+It is production-ready only after the external evidence gates are also captured
+in `docs\PRODUCTION_CUTOVER_EVIDENCE.json` and verified.
 
-## Verified Local Gates
+## Local Release Candidate Gate
 
-- `scripts\verify-ci-release-workflow.cmd` passed.
-- `scripts\verify-release-tree.cmd` passed.
-- `scripts\verify-frontend-release.cmd` passed:
-  - dependency install passed;
-  - dependency audit reported `found 0 vulnerabilities`;
-  - Vite production build passed;
-  - Playwright smoke tests passed, 6/6.
-- `scripts\release-check-backend.cmd` passed:
-  - SQLite backend tests passed, 231 tests, 1 skipped;
-  - production deploy check passed;
-  - production environment preflight check passed;
-  - release artifact scan passed;
-  - API contract docs check passed;
-  - CI workflow check passed;
-  - operational wrapper guards passed;
-  - NocoBase prerequisite/runtime/blueprint/build-pack/API smoke checks passed;
-  - production readiness audit passed;
-  - hybrid cutover readiness audit passed;
-  - backup/restore guards passed.
+Run this from the repository root after committing the intended release state:
 
-## Confirmed Local Blocker
-
-`scripts\build-release-source.cmd` currently fails by design:
-
-```text
-Release source archive requires a clean git work tree. Commit or stash local changes first.
+```powershell
+.\scripts\verify-local-release-candidate.cmd -ForceArtifactOverwrite
 ```
 
-This is expected and correct. The release source archive must be built only from
-a clean release commit so the generated manifest, archive checksum, and
-production cutover evidence can reference one immutable source state.
+The local gate must:
 
-## Required Next Steps
+- require a clean Git worktree;
+- run backend tests and production deploy checks;
+- run production environment guard checks with safe synthetic values;
+- validate API contract docs and CI workflow structure;
+- validate operational wrappers;
+- validate NocoBase prerequisites, runtime guards, first-screen blueprint, and
+  screen build pack;
+- run the NocoBase API build-pack smoke suite;
+- run production readiness and hybrid cutover audits;
+- run backup/restore guard checks;
+- run frontend dependency install, dependency audit, production build, and
+  Playwright smoke tests;
+- build a source archive from `git archive HEAD`;
+- verify the release archive manifest and SHA256 checksum.
 
-1. Review and stage the intended release changes.
-2. Create a release commit from the clean source state.
-3. Run `scripts\verify-local-release-candidate.cmd`.
-4. Before the release commit exists, run
-   `scripts\verify-local-release-candidate.cmd -PlanOnly` to inspect dirty
-   tree counts, grouped release-review domains, production-critical changed
-   paths, branch state, Git remote state, explicit release blockers, and
-   remaining production evidence gaps.
-5. If diagnosing manually, run `scripts\build-release-source.cmd` and then
-   `scripts\verify-release-source-archive.cmd <manifest-path>`.
-6. Push the release commit and verify GitHub Actions `release-check` and
-   `postgres-backend-check` on that exact commit.
-7. Run target-host `scripts\check-production-env.cmd`.
-8. Run target-host `scripts\check-hybrid-health.cmd`.
-9. Run target-host hybrid backup/restore drill and verify checksum-backed backup
-   evidence.
-10. Fill `docs\PRODUCTION_CUTOVER_EVIDENCE.json`.
-11. Run `scripts\verify-production-cutover-evidence.cmd`.
+The command prints the current release commit SHA and archive SHA256. Do not
+copy older values from this document.
+
+## Handoff Gate
+
+After the local release candidate gate passes, create and verify the generated
+handoff:
+
+```powershell
+.\scripts\new-production-cutover-evidence.cmd -Force -LocalBackendPassed -LocalFullStackPassed -ReleaseArchivePassed -ArchiveSha256 <sha256> -ArchiveManifest releases\swimcrm-release-<short-sha>.manifest.json
+.\scripts\new-release-handoff.cmd -Force
+.\scripts\verify-release-handoff.cmd
+```
+
+The handoff verifier confirms that:
+
+- `docs\RELEASE_HANDOFF.json` matches the current `HEAD`;
+- the release archive manifest matches the current `HEAD`;
+- the handoff archive SHA256 matches the manifest and archive file;
+- release blockers and Git remote state match the current release plan;
+- the external cutover action list is still present.
+
+## External Production Evidence
+
+Production approval requires evidence that cannot be invented locally:
+
+- Git remote configured and release branch pushed;
+- GitHub Actions `release-check` run URL for the exact release commit;
+- GitHub Actions `postgres-backend-check` run URL for the exact release commit;
+- target-host `scripts\check-production-env.cmd` output with real production
+  environment variables;
+- target-host `scripts\check-hybrid-health.cmd` output proving Django,
+  NocoBase bridge/config APIs, ops status, and NocoBase process health;
+- target-host hybrid backup/restore drill evidence with checksum-backed backup
+  verification;
+- rollback plan acknowledgement.
+
+Fill `docs\PRODUCTION_CUTOVER_EVIDENCE.json` only after collecting real
+external evidence:
+
+```powershell
+.\scripts\verify-production-cutover-evidence.cmd
+.\scripts\verify-local-release-candidate.cmd -RequireProductionEvidence
+```
+
+## Plan-Only Check
+
+Use this when you need a fast status without long checks:
+
+```powershell
+.\scripts\verify-local-release-candidate.cmd -PlanOnly
+```
+
+The plan reports:
+
+- clean/dirty Git state;
+- branch and detached-HEAD state;
+- configured Git remotes;
+- grouped release-review domains;
+- production-critical changed paths;
+- whether production cutover evidence exists;
+- explicit remaining release blockers.
+
+## Rule Of Thumb
+
+- If `verify-local-release-candidate.cmd` passes without
+  `-RequireProductionEvidence`, the project is locally release-candidate ready.
+- If `verify-release-handoff.cmd` passes, the release handoff is fresh for the
+  current commit/archive.
+- If `verify-local-release-candidate.cmd -RequireProductionEvidence` passes,
+  the project has the repository evidence required for production approval.

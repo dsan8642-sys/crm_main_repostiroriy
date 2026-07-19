@@ -980,6 +980,25 @@
         },
         {
           "type": "file_contains",
+          "path": "docs/RELEASE_CANDIDATE_READINESS.md",
+          "patterns": [
+            "stable release-candidate procedure",
+            "verify-local-release-candidate\\.cmd -ForceArtifactOverwrite",
+            "verify-release-handoff\\.cmd",
+            "verify-local-release-candidate\\.cmd -RequireProductionEvidence"
+          ]
+        },
+        {
+          "type": "file_not_contains",
+          "path": "docs/RELEASE_CANDIDATE_READINESS.md",
+          "patterns": [
+            "Generated:",
+            "working tree is not clean, so a release source archive cannot be built",
+            "231 tests"
+          ]
+        },
+        {
+          "type": "file_contains",
           "path": "scripts/new-release-handoff.ps1",
           "patterns": [
             "RELEASE_HANDOFF.json",
