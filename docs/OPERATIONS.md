@@ -182,7 +182,7 @@ evidence. A draft generated from a dirty working tree records
 Validate the filled manifest:
 
 ```powershell
-scripts\verify-production-cutover-evidence.cmd
+scripts\verify-production-cutover-evidence.cmd -RequireCurrentHead
 ```
 
 By default, the verifier accepts only `environment=production`. Use
@@ -192,7 +192,9 @@ approval.
 The verifier intentionally rejects placeholders and requires the live hybrid
 health evidence to include the guarded config API check
 `/api/nocobase/config/languages/`. External CI evidence must use GitHub
-Actions run URLs and mention the exact `release_candidate.commit_sha`.
+Actions run URLs and mention the exact `release_candidate.commit_sha`. For final
+approval, run it with `-RequireCurrentHead` so stale evidence for an older commit
+cannot approve the current release candidate.
 
 The manifest must also include the critical pass fragments from each command,
 not just `status=passed`:

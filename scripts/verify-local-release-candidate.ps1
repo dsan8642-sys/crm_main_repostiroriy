@@ -280,7 +280,7 @@ Invoke-Step "Verify release source archive" {
 
 if (Test-Path -LiteralPath $CutoverEvidence) {
     Invoke-Step "Production cutover evidence" {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VerifyCutoverEvidence -Evidence $CutoverEvidence
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VerifyCutoverEvidence -Evidence $CutoverEvidence -RequireCurrentHead
     }
 }
 elseif ($RequireProductionEvidence) {

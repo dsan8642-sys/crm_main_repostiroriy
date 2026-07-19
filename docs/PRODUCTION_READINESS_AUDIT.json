@@ -964,6 +964,7 @@
             "verify-release-source-archive.ps1",
             "PRODUCTION_CUTOVER_EVIDENCE.json",
             "RequireProductionEvidence",
+            "RequireCurrentHead",
             "PlanOnly",
             "git_status",
             "release_review",
@@ -984,6 +985,7 @@
           "patterns": [
             "stable release-candidate procedure",
             "verify-local-release-candidate\\.cmd -ForceArtifactOverwrite",
+            "verify-production-cutover-evidence\\.cmd -RequireCurrentHead",
             "verify-release-handoff\\.cmd",
             "verify-local-release-candidate\\.cmd -RequireProductionEvidence"
           ]
@@ -1232,6 +1234,8 @@
             "--allow-staging",
             "GITHUB_ACTIONS_RUN_PATTERN",
             "release_candidate.commit_sha",
+            "expected_commit_sha",
+            "release_candidate.commit_sha must match current HEAD",
             "release_source_archive",
             "build-release-source.cmd",
             "Release source archive written",

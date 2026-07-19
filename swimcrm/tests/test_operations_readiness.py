@@ -72,6 +72,21 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
 
         self.assertEqual(errors, [])
 
+    def test_cutover_evidence_can_be_required_to_match_current_head(self):
+        payload = self._example_payload()
+        stale_sha = "fedcbafedcbafedcbafedcbafedcbafedcbafedc"
+
+        errors = self.verifier.validate(
+            self._write_manifest(payload),
+            allow_example=True,
+            expected_commit_sha=stale_sha,
+        )
+
+        self.assertIn(
+            f"release_candidate.commit_sha must match current HEAD ({stale_sha})",
+            errors,
+        )
+
     def test_cutover_evidence_requires_tracked_release_source_guard(self):
         payload = self._example_payload()
         payload["required_evidence"] = [
@@ -412,6 +427,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("verify-release-source-archive.ps1", script)
         self.assertIn("PRODUCTION_CUTOVER_EVIDENCE.json", script)
         self.assertIn("RequireProductionEvidence", script)
+        self.assertIn("RequireCurrentHead", script)
         self.assertIn("PlanOnly", script)
         self.assertIn("git_status", script)
         self.assertIn("release_review", script)

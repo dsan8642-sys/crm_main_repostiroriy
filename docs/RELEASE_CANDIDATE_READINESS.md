@@ -83,7 +83,7 @@ Fill `docs\PRODUCTION_CUTOVER_EVIDENCE.json` only after collecting real
 external evidence:
 
 ```powershell
-.\scripts\verify-production-cutover-evidence.cmd
+.\scripts\verify-production-cutover-evidence.cmd -RequireCurrentHead
 .\scripts\verify-local-release-candidate.cmd -RequireProductionEvidence
 ```
 

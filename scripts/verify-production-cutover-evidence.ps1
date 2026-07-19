@@ -2,7 +2,8 @@
 param(
     [string]$Evidence = "",
     [switch]$AllowExample,
-    [switch]$AllowStaging
+    [switch]$AllowStaging,
+    [switch]$RequireCurrentHead
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,14 @@ if ($AllowExample) {
 }
 if ($AllowStaging) {
     $args += "--allow-staging"
+}
+if ($RequireCurrentHead) {
+    $expectedCommit = ((& git -C $RepoRoot rev-parse HEAD) -join "").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not ($expectedCommit -match "^[0-9a-f]{40}$")) {
+        throw "RequireCurrentHead needs a valid git HEAD."
+    }
+    $args += "--expected-commit-sha"
+    $args += $expectedCommit
 }
 $args += $Evidence
 

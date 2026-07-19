@@ -113,13 +113,18 @@ def _has_placeholder(value):
     return False
 
 
-def _validate_release_candidate(candidate, errors):
+def _validate_release_candidate(candidate, errors, expected_commit_sha=""):
     if not isinstance(candidate, dict):
         errors.append("release_candidate must be an object")
         return
     commit_sha = candidate.get("commit_sha", "")
     if not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
         errors.append("release_candidate.commit_sha must be a 40-character git SHA")
+    elif expected_commit_sha and commit_sha != expected_commit_sha:
+        errors.append(
+            "release_candidate.commit_sha must match current HEAD "
+            f"({expected_commit_sha})"
+        )
     if candidate.get("source_tree") != "clean":
         errors.append("release_candidate.source_tree must be 'clean'")
     if not candidate.get("branch"):
@@ -181,7 +186,7 @@ def _validate_item(item, errors, release_commit_sha=""):
             errors.append(f"{evidence_id}: missing evidence fragment: {fragment}")
 
 
-def validate(path=DEFAULT_EVIDENCE, allow_example=False, allow_staging=False):
+def validate(path=DEFAULT_EVIDENCE, allow_example=False, allow_staging=False, expected_commit_sha=""):
     errors = []
     if not path.exists():
         return [f"production cutover evidence file does not exist: {path}"]
@@ -202,7 +207,7 @@ def validate(path=DEFAULT_EVIDENCE, allow_example=False, allow_staging=False):
             errors.append("environment must be 'production' for cutover approval; use --allow-staging only for rehearsal manifests")
     _validate_timestamp(data.get("generated_at"), "generated_at", errors)
     release_candidate = data.get("release_candidate")
-    _validate_release_candidate(release_candidate, errors)
+    _validate_release_candidate(release_candidate, errors, expected_commit_sha=expected_commit_sha)
     release_commit_sha = release_candidate.get("commit_sha", "") if isinstance(release_candidate, dict) else ""
 
     items = data.get("required_evidence") or []
@@ -232,14 +237,31 @@ def main():
     args = sys.argv[1:]
     allow_example = False
     allow_staging = False
+    expected_commit_sha = ""
     if "--allow-example" in args:
         allow_example = True
         args.remove("--allow-example")
     if "--allow-staging" in args:
         allow_staging = True
         args.remove("--allow-staging")
+    if "--expected-commit-sha" in args:
+        index = args.index("--expected-commit-sha")
+        try:
+            expected_commit_sha = args[index + 1]
+        except IndexError:
+            print("--expected-commit-sha requires a value", file=sys.stderr)
+            return 2
+        del args[index:index + 2]
+        if not re.fullmatch(r"[0-9a-f]{40}", expected_commit_sha):
+            print("--expected-commit-sha must be a 40-character lowercase git SHA", file=sys.stderr)
+            return 2
     path = Path(args[0]) if args else DEFAULT_EVIDENCE
-    errors = validate(path, allow_example=allow_example, allow_staging=allow_staging)
+    errors = validate(
+        path,
+        allow_example=allow_example,
+        allow_staging=allow_staging,
+        expected_commit_sha=expected_commit_sha,
+    )
     if errors:
         print("Production cutover evidence verification failed:", file=sys.stderr)
         for error in errors:
