@@ -77,6 +77,7 @@ $requiredActions = @(
     "push_release_branch",
     "capture_github_actions_release_check_url",
     "capture_github_actions_postgres_backend_check_url",
+    "install_release_archive_on_target_host",
     "run_target_host_production_env_preflight",
     "run_target_host_live_hybrid_health",
     "run_target_host_hybrid_backup_restore_drill",
@@ -146,6 +147,16 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
     "64-character SHA256",
     "Django dump list OK",
     "NocoBase dump list OK"
+)
+Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_release_archive_on_target_host" -Fragments @(
+    "Release archive extracted on target host",
+    "Release source archive tracked file list verified",
+    "Backend dependencies installed",
+    "Root Node tooling installed",
+    "Frontend dependencies installed",
+    "Django migrations check passed",
+    "NocoBase app root outside source tree",
+    "NocoBase storage outside source tree"
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
     "Release source archive contents verified",

@@ -226,6 +226,12 @@ not just `status=passed`:
   verified`, exact
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
+- target-host release install: `Release archive extracted on target host`,
+  `Release source archive manifest verified`, `Release source archive contents
+  verified`, `Release source archive tracked file list verified`, `Backend
+  dependencies installed`, `Root Node tooling installed`, `Frontend
+  dependencies installed`, `Django migrations check passed`, `NocoBase app root
+  outside source tree`, `NocoBase storage outside source tree`;
 - production preflight: `Production environment check passed`, `Runtime path
   settings passed`, `PostgreSQL production settings passed`, `Celery
   production settings passed`, `NocoBase production settings passed`, `HTTPS
@@ -408,11 +414,12 @@ Before creating a production package:
 - when handing the release candidate to whoever owns GitHub/production access,
   run `scripts\new-release-handoff.cmd -Force` to write the ignored
   `docs\RELEASE_HANDOFF.json` with current commit, archive checksum, draft
-  evidence path, remote state, blockers, pending external actions, and an
-  operator checklist with command/evidence/stop-if-missing instructions, then
-  run `scripts\verify-release-handoff.cmd` to catch stale handoff files,
-  incomplete operator checklist items, or archive checksum mismatches before
-  transfer;
+  evidence path, remote state, blockers, pending external actions, target-host
+  release install evidence, and an operator checklist with
+  command/evidence/stop-if-missing instructions, then run
+  `scripts\verify-release-handoff.cmd` to catch stale handoff files, incomplete
+  operator checklist items, missing install evidence requirements, or archive
+  checksum mismatches before transfer;
 - if running frontend commands manually instead of the wrapper, run
   `npm.cmd ci --cache ..\.npm-cache`, `npm.cmd run build`, and
   `npm.cmd run test:smoke` from `frontend\`;

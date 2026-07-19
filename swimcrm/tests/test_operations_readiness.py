@@ -124,6 +124,35 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
 
         self.assertIn("missing required evidence id: release_source_archive", errors)
 
+    def test_cutover_evidence_requires_target_host_release_install(self):
+        payload = self._example_payload()
+        payload["required_evidence"] = [
+            item for item in payload["required_evidence"]
+            if item["id"] != "target_host_release_install"
+        ]
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn("missing required evidence id: target_host_release_install", errors)
+
+    def test_cutover_evidence_requires_target_host_install_fragments(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "target_host_release_install"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "NocoBase app root outside source tree. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "target_host_release_install: missing evidence fragment: NocoBase app root outside source tree",
+            errors,
+        )
+
     def test_cutover_evidence_requires_source_archive_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -456,6 +485,9 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("postgres-backend-check", generator)
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
         self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", generator)
+        self.assertIn("target_host_release_install", generator)
+        self.assertIn("manual target-host release install", generator)
+        self.assertIn("NocoBase app root outside source tree", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
         self.assertIn("Operations status ok requirement passed", generator)
         self.assertIn("production-django-host", generator)
@@ -753,6 +785,10 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
         self.assertIn("operator_checklist", script)
+        self.assertIn("install_release_archive_on_target_host", script)
+        self.assertIn("Release archive extracted on target host", script)
+        self.assertIn("Backend dependencies installed", script)
+        self.assertIn("NocoBase app root outside source tree", script)
         self.assertIn("expected_evidence", script)
         self.assertIn("stop_if_missing", script)
         self.assertIn("HTTPS reverse-proxy settings passed", script)
@@ -776,6 +812,9 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("repository_remote", script)
         self.assertIn("pending_external_actions", script)
         self.assertIn("operator_checklist", script)
+        self.assertIn("install_release_archive_on_target_host", script)
+        self.assertIn("Backend dependencies installed", script)
+        self.assertIn("NocoBase storage outside source tree", script)
         self.assertIn("is missing expected_evidence", script)
         self.assertIn("must stop if evidence is missing", script)
         self.assertIn("Assert-ChecklistEvidenceContains", script)

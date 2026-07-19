@@ -55,6 +55,14 @@
       "summary": "GitHub Actions postgres-backend-check job passed against PostgreSQL 16 on release commit 0123456789abcdef0123456789abcdef01234567."
     },
     {
+      "id": "target_host_release_install",
+      "status": "passed",
+      "command": "manual target-host release install",
+      "captured_at": "2026-07-16T12:18:00+02:00",
+      "summary": "Release archive was extracted and installed on the target host from the verified archive SHA256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
+      "output_excerpt": "Release archive extracted on target host. Release source archive manifest verified. Release source archive contents verified. Release source archive tracked file list verified. Backend dependencies installed. Root Node tooling installed. Frontend dependencies installed. Django migrations check passed. NocoBase app root outside source tree. NocoBase storage outside source tree."
+    },
+    {
       "id": "production_env_preflight",
       "status": "passed",
       "command": "scripts\\check-production-env.cmd",

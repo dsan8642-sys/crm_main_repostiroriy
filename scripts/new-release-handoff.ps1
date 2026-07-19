@@ -82,6 +82,13 @@ $operatorChecklist = @(
         stop_if_missing = $true
     },
     [ordered]@{
+        id = "install_release_archive_on_target_host"
+        title = "Install the verified release archive on the target host."
+        command = "Extract releases\swimcrm-release-$shortSha.zip on the target host, install backend/root/frontend dependencies, run Django migrations check, and prepare NocoBase app/storage roots outside the source tree."
+        expected_evidence = "Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree."
+        stop_if_missing = $true
+    },
+    [ordered]@{
         id = "run_target_host_production_env_preflight"
         title = "Run target-host production environment preflight."
         command = "scripts\check-production-env.cmd"
@@ -150,6 +157,7 @@ $handoff = [ordered]@{
         "push_release_branch",
         "capture_github_actions_release_check_url",
         "capture_github_actions_postgres_backend_check_url",
+        "install_release_archive_on_target_host",
         "run_target_host_production_env_preflight",
         "run_target_host_live_hybrid_health",
         "run_target_host_hybrid_backup_restore_drill",
