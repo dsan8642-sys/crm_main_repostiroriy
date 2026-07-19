@@ -766,6 +766,10 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Get-ReleaseReviewCategory", script)
         self.assertIn("Get-ReleaseBlockers", script)
         self.assertIn("planned_release_candidate_steps", script)
+        self.assertIn("install_release_archive_on_target_host", script)
+        self.assertIn("run_target_host_production_env_preflight", script)
+        self.assertIn("run_target_host_live_hybrid_health", script)
+        self.assertIn("run_target_host_hybrid_backup_restore_drill", script)
 
     def test_cutover_evidence_wrapper_revalidates_current_release_archive(self):
         script = (REPO_ROOT / "scripts" / "verify-production-cutover-evidence.ps1").read_text(encoding="utf-8-sig")

@@ -224,7 +224,10 @@ if ($PlanOnly) {
             "run_scripts_verify_local_release_candidate_cmd",
             "build_and_verify_release_source_archive",
             "push_release_commit_and_verify_github_actions",
-            "run_target_host_preflight_health_and_backup_restore",
+            "install_release_archive_on_target_host",
+            "run_target_host_production_env_preflight",
+            "run_target_host_live_hybrid_health",
+            "run_target_host_hybrid_backup_restore_drill",
             "fill_and_verify_docs_production_cutover_evidence_json"
         )
     } | ConvertTo-Json -Depth 8

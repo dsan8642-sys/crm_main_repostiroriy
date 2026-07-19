@@ -1069,7 +1069,11 @@
             "detached_head",
             "Get-ReleaseReviewCategory",
             "Get-ReleaseBlockers",
-            "planned_release_candidate_steps"
+            "planned_release_candidate_steps",
+            "install_release_archive_on_target_host",
+            "run_target_host_production_env_preflight",
+            "run_target_host_live_hybrid_health",
+            "run_target_host_hybrid_backup_restore_drill"
           ]
         },
         {
