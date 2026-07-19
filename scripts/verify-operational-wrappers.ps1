@@ -8,7 +8,8 @@ $Wrappers = @(
     "celery-worker.cmd",
     "celery-beat.cmd",
     "run-due-jobs.cmd",
-    "backup-postgres-django.cmd"
+    "backup-postgres-django.cmd",
+    "backup-pg.cmd"
 )
 $EnvNames = @(
     "DJANGO_ENV",

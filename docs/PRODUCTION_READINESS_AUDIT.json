@@ -886,10 +886,26 @@
           "patterns": [
             "CI release workflow check",
             "verify-ci-release-workflow.ps1",
+            "Operational wrapper guard check",
+            "verify-operational-wrappers.ps1",
             "AllowMissingLocalNocoBaseRuntime",
             "Hybrid cutover readiness audit",
             "AUDIT_LOG_LEVEL",
             "WARNING"
+          ]
+        },
+        {
+          "type": "command_exists",
+          "path": "scripts/verify-operational-wrappers.cmd"
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/verify-operational-wrappers.ps1",
+          "patterns": [
+            "backup-pg.cmd",
+            "backup-postgres-django.cmd",
+            "POSTGRES_DB is required",
+            "development default"
           ]
         },
         {

@@ -594,6 +594,14 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("is missing expected_evidence", script)
         self.assertIn("must stop if evidence is missing", script)
 
+    def test_operational_wrapper_guard_includes_standalone_postgres_backup_cmd(self):
+        verifier = (REPO_ROOT / "scripts" / "verify-operational-wrappers.ps1").read_text(encoding="utf-8-sig")
+        wrapper = (REPO_ROOT / "scripts" / "backup-pg.cmd").read_text(encoding="utf-8-sig")
+
+        self.assertIn("backup-pg.cmd", verifier)
+        self.assertIn("POSTGRES_PASSWORD must not use the development default", wrapper)
+        self.assertIn("backup-pg.ps1", wrapper)
+
 
 class HealthAndReadinessRule(TestCase):
     def setUp(self):
