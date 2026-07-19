@@ -188,8 +188,8 @@
     {
       "id": "nocobase.runtime_production_guards",
       "category": "nocobase",
-      "statement": "NocoBase runtime startup has pinned tooling plus production guards for secrets, default passwords, app root, storage, runtime fingerprinting, and health-checked background startup.",
-      "source_refs": ["scripts/run-nocobase-runtime.ps1", "scripts/start-nocobase-runtime.ps1", "scripts/verify-nocobase-runtime.ps1"],
+      "statement": "NocoBase bootstrap and runtime startup use repository-pinned tooling plus production guards for secrets, default passwords, app root, storage, runtime fingerprinting, and health-checked background startup.",
+      "source_refs": ["scripts/init-nocobase-hybrid.ps1", "scripts/run-nocobase-runtime.ps1", "scripts/start-nocobase-runtime.ps1", "scripts/verify-nocobase-runtime.ps1", "docs/NOCOBASE_HYBRID_BOOTSTRAP.md"],
       "evidence": [
         {
           "type": "file_contains",
@@ -205,6 +205,24 @@
           "patterns": [
             "NocoBase tooling pins passed",
             "Assert-ExactPackageVersion"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/init-nocobase-hybrid.ps1",
+          "patterns": [
+            "node_modules\\\\.bin\\\\nb.cmd",
+            "npm install",
+            "LocalNb init --ui --env"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "docs/NOCOBASE_HYBRID_BOOTSTRAP.md",
+          "patterns": [
+            "repository-pinned `@nocobase/cli`",
+            ".\\\\node_modules\\\\.bin\\\\nb.cmd --version",
+            ".\\\\scripts\\\\init-nocobase-hybrid.cmd -RunInit"
           ]
         },
         {

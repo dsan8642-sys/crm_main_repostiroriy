@@ -28,7 +28,7 @@ This bootstrap is aligned with the official NocoBase documentation that states:
 
 - `Node.js >= 22`
 - `Yarn 1.x`
-- install `@nocobase/cli`
+- install the repository-pinned `@nocobase/cli`
 - initialize an app with `nb init --ui`
 - local default app access is typically `http://localhost:13000`
 - production deployment should be moved behind a reverse proxy with HTTPS
@@ -141,27 +141,27 @@ global `yarn.cmd` is not installed.
 
 ### 2. Install NocoBase CLI
 
-Official path:
+Project-supported path:
 
 ```powershell
-npm install -g @nocobase/cli@2.1.24
-nb --version
+npm install
+.\node_modules\.bin\nb.cmd --version
 ```
 
-The repository root also pins the local tooling used by release checks:
+The repository root pins the local tooling used by bootstrap and release checks:
 
 - `@nocobase/cli` `2.1.24`
 - `yarn` `1.22.22`
 
-Do not replace these with floating `latest`, `^`, or `~` ranges in production
-release preparation.
+Do not use a global `nb` binary or replace these with floating `latest`, `^`,
+or `~` ranges in production release preparation.
 
 ### 3. Initialize the NocoBase app
 
 Recommended command:
 
 ```powershell
-nb init --ui --env swimcrm-hybrid
+.\scripts\init-nocobase-hybrid.cmd -RunInit
 ```
 
 During the wizard, use:
@@ -176,9 +176,9 @@ During the wizard, use:
 Useful commands:
 
 ```powershell
-nb env list
-nb env info
-nb app logs
+.\node_modules\.bin\nb.cmd env list
+.\node_modules\.bin\nb.cmd env info
+.\node_modules\.bin\nb.cmd app logs
 ```
 
 Verified direct runtime command:

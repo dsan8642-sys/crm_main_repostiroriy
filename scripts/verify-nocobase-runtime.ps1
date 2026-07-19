@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+$InitScript = Join-Path $RepoRoot "scripts\init-nocobase-hybrid.ps1"
+$BootstrapDoc = Join-Path $RepoRoot "docs\NOCOBASE_HYBRID_BOOTSTRAP.md"
 $RunScript = Join-Path $RepoRoot "scripts\run-nocobase-runtime.ps1"
 $StartScript = Join-Path $RepoRoot "scripts\start-nocobase-runtime.ps1"
 $EnvNames = @(
@@ -188,5 +190,28 @@ Assert-FileContains -Path $StartScript -Label "NocoBase background startup helpe
     "did not become healthy"
 )
 Write-Host "NocoBase background startup helper check passed."
+
+Assert-FileContains -Path $InitScript -Label "NocoBase bootstrap helper" -Patterns @(
+    'node_modules\\\.bin\\nb\.cmd',
+    "npm install",
+    '\$LocalNb init --ui --env \$EnvName'
+)
+$initText = Get-Content -LiteralPath $InitScript -Raw
+if ($initText -match "npm install -g" -or $initText -match "&\s+nb\s+init") {
+    throw "NocoBase bootstrap helper must use the repository-local pinned CLI, not a global nb binary."
+}
+Write-Host "NocoBase bootstrap helper local CLI check passed."
+
+Assert-FileContains -Path $BootstrapDoc -Label "NocoBase bootstrap documentation" -Patterns @(
+    "repository-pinned ``@nocobase/cli``",
+    "npm install",
+    "\.\\node_modules\\\.bin\\nb\.cmd --version",
+    "\.\\scripts\\init-nocobase-hybrid\.cmd -RunInit"
+)
+$bootstrapDocText = Get-Content -LiteralPath $BootstrapDoc -Raw
+if ($bootstrapDocText -match "npm install -g" -or $bootstrapDocText -match "(?m)^nb ") {
+    throw "NocoBase bootstrap documentation must not direct operators to a global nb binary."
+}
+Write-Host "NocoBase bootstrap documentation local CLI check passed."
 
 Write-Host "NocoBase runtime checks passed."

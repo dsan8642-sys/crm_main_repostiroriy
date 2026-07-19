@@ -1,21 +1,47 @@
 param(
     [string]$EnvName = "swimcrm-hybrid",
-    [string]$AppDir = $(Join-Path (Split-Path -Parent $PSScriptRoot) "nocobase-app"),
+    [string]$AppDir = $(Join-Path (Split-Path -Parent $PSScriptRoot) "swimcrm-hybrid"),
     [int]$Port = 13000,
     [switch]$RunInit
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+$LocalNb = Join-Path $RepoRoot "node_modules\.bin\nb.cmd"
+
+function Format-DetectedVersion {
+    param(
+        [object]$Version,
+        [string]$Fallback
+    )
+
+    if ($null -eq $Version -or [string]::IsNullOrWhiteSpace([string]$Version)) {
+        return $Fallback
+    }
+    return $Version
+}
 
 function Get-CommandVersion {
-    param([string]$Name)
+    param(
+        [string]$Name,
+        [string]$Path = $null
+    )
+
+    if ($Path) {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            return $null
+        }
+        try {
+            return & $Path --version 2>$null
+        } catch {
+            return "<installed>"
+        }
+    }
 
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue
     if (-not $cmd) {
         return $null
     }
-
     try {
         return & $cmd.Source --version 2>$null
     } catch {
@@ -25,7 +51,7 @@ function Get-CommandVersion {
 
 $nodeVersion = Get-CommandVersion "node"
 $yarnVersion = Get-CommandVersion "yarn"
-$nbVersion = Get-CommandVersion "nb"
+$nbVersion = Get-CommandVersion "nb" -Path $LocalNb
 
 Write-Host "NocoBase hybrid bootstrap check"
 Write-Host "Repo root: $RepoRoot"
@@ -35,15 +61,15 @@ Write-Host "Port: $Port"
 Write-Host ""
 
 Write-Host "Detected tools:"
-Write-Host "  node: $($nodeVersion ?? '<missing>')"
-Write-Host "  yarn: $($yarnVersion ?? '<missing>')"
-Write-Host "  nb:   $($nbVersion ?? '<missing>')"
+Write-Host "  node: $(Format-DetectedVersion -Version $nodeVersion -Fallback '<missing>')"
+Write-Host "  yarn: $(Format-DetectedVersion -Version $yarnVersion -Fallback '<missing>')"
+Write-Host "  nb:   $(Format-DetectedVersion -Version $nbVersion -Fallback '<missing local CLI>')"
 Write-Host ""
 
 Write-Host "Official NocoBase prerequisites:"
 Write-Host "  - Node.js >= 22"
 Write-Host "  - Yarn 1.x"
-Write-Host "  - @nocobase/cli installed"
+Write-Host "  - repository-local @nocobase/cli 2.1.24 installed from package-lock.json"
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath $AppDir)) {
@@ -60,21 +86,21 @@ Write-Host ""
 if (-not $RunInit) {
     Write-Host "Dry run complete."
     Write-Host "Next manual steps:"
-    Write-Host "  1. npm install -g @nocobase/cli"
-    Write-Host "  2. nb init --ui --env $EnvName"
+    Write-Host "  1. npm install"
+    Write-Host "  2. .\scripts\init-nocobase-hybrid.cmd -RunInit"
     Write-Host "  3. Open http://localhost:$Port after startup"
     Write-Host ""
-    Write-Host "Run this script with -RunInit after the 'nb' command is available."
+    Write-Host "Run this script with -RunInit after the local NocoBase CLI is available."
     exit 0
 }
 
-if (-not (Get-Command "nb" -ErrorAction SilentlyContinue)) {
-    throw "The 'nb' command is not available. Install @nocobase/cli first."
+if (-not (Test-Path -LiteralPath $LocalNb)) {
+    throw "The repository-local NocoBase CLI was not found at $LocalNb. Run npm install from the repository root first."
 }
 
 Push-Location $AppDir
 try {
-    & nb init --ui --env $EnvName
+    & $LocalNb init --ui --env $EnvName
 } finally {
     Pop-Location
 }
