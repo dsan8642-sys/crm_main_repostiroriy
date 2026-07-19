@@ -104,10 +104,10 @@ try {
         $env:POSTGRES_PORT = "5432"
         $env:CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
         $env:CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/0"
-        $env:NOCOBASE_BRIDGE_TOKEN = "prodpreflightbridgeTOKEN123"
-        $env:NOCOBASE_CONFIG_TOKEN = "prodpreflightconfigTOKEN123"
+        $env:NOCOBASE_BRIDGE_TOKEN = "prodpreflightbridgeTOKEN123456789012"
+        $env:NOCOBASE_CONFIG_TOKEN = "prodpreflightconfigTOKEN123456789012"
         $env:NOCOBASE_APP_ENV = "production"
-        $env:NOCOBASE_APP_KEY = "prodpreflightnocobaseappkey123456"
+        $env:NOCOBASE_APP_KEY = "prodpreflightnocobaseappkey123456789012"
         $env:NOCOBASE_APP_ROOT = "C:\SwimCRMRuntime\nocobase-app"
         $env:NOCOBASE_APP_PORT = "13000"
         $env:NOCOBASE_DB_HOST = "127.0.0.1"
@@ -117,7 +117,7 @@ try {
         $env:NOCOBASE_DB_PASSWORD = "prodpreflightnocobasedbpassword"
         $env:NOCOBASE_ROOT_USERNAME = "admin"
         $env:NOCOBASE_ROOT_EMAIL = "admin@crm.example.com"
-        $env:NOCOBASE_ROOT_PASSWORD = "prodpreflightnocobaserootpassword"
+        $env:NOCOBASE_ROOT_PASSWORD = "prodpreflightnocobaserootpassword123456"
         $env:NOCOBASE_STORAGE_DIR = "C:\SwimCRMRuntime\nocobase-storage"
 
         Invoke-NativeStep "Production environment preflight check" {

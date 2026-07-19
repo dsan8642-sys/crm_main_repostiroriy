@@ -204,6 +204,12 @@ approval, run it with `-RequireCurrentHead` so stale evidence for an older
 commit or release archive checksum cannot approve the current release
 candidate.
 
+Production preflight also enforces minimum secret lengths: `SECRET_KEY` must be
+at least 50 characters, while `NOCOBASE_BRIDGE_TOKEN`,
+`NOCOBASE_CONFIG_TOKEN`, `NOCOBASE_APP_KEY`, and `NOCOBASE_ROOT_PASSWORD` must
+each be at least 32 characters and must not be copied from examples or
+release-check placeholders.
+
 The manifest must also include the critical pass fragments from each command,
 not just `status=passed`:
 

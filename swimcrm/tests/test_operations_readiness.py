@@ -643,6 +643,19 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("short-key", verifier)
         self.assertIn("NocoBase production app key strength guard passed", verifier)
 
+    def test_production_env_preflight_requires_strong_nocobase_secrets(self):
+        preflight = (REPO_ROOT / "scripts" / "check-production-env.ps1").read_text(encoding="utf-8-sig")
+        release_check = (REPO_ROOT / "scripts" / "release-check-backend.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("Assert-RealProductionSecret", preflight)
+        self.assertIn("SECRET_KEY\" -Value $secret -MinLength 50", preflight)
+        self.assertIn("NOCOBASE_BRIDGE_TOKEN\" -Value $bridgeToken -MinLength 32", preflight)
+        self.assertIn("NOCOBASE_CONFIG_TOKEN\" -Value $configToken -MinLength 32", preflight)
+        self.assertIn("NOCOBASE_APP_KEY\" -Value $nocobaseAppKey -MinLength 32", preflight)
+        self.assertIn("NOCOBASE_ROOT_PASSWORD\" -Value $nocobaseRootPassword -MinLength 32", preflight)
+        self.assertIn("prodpreflightbridgeTOKEN123456789012", release_check)
+        self.assertIn("prodpreflightnocobaseappkey123456789012", release_check)
+
 
 class HealthAndReadinessRule(TestCase):
     def setUp(self):

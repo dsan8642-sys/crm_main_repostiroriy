@@ -21,10 +21,14 @@ function Require-Env {
     return $value
 }
 
-function Reject-PlaceholderSecret {
-    param([string]$Name, [string]$Value)
-    if ($Value.Length -lt 16 -or $Value -match "dev-insecure|release-check|change-me|example|Admin!2026pass") {
-        throw "$Name must be a real production secret, not a placeholder."
+function Assert-RealProductionSecret {
+    param(
+        [string]$Name,
+        [string]$Value,
+        [int]$MinLength = 32
+    )
+    if ($Value.Length -lt $MinLength -or $Value -match "dev-insecure|release-check|change-me|example|Admin!2026pass") {
+        throw "$Name must be a real production secret at least $MinLength characters long, not a placeholder."
     }
 }
 
@@ -57,9 +61,7 @@ if ($debug -ne "0") {
 }
 
 $secret = Require-Env "SECRET_KEY"
-if ($secret.Length -lt 50 -or $secret -match "dev-insecure|release-check|change-me|example") {
-    throw "SECRET_KEY must be a real production secret, not a placeholder."
-}
+Assert-RealProductionSecret -Name "SECRET_KEY" -Value $secret -MinLength 50
 
 $allowedHosts = Require-Env "ALLOWED_HOSTS"
 if ($allowedHosts -match "\*" -or $allowedHosts -match "localhost|127\.0\.0\.1") {
@@ -108,14 +110,14 @@ Write-Host "Celery production settings passed."
 
 $bridgeToken = Require-Env "NOCOBASE_BRIDGE_TOKEN"
 $configToken = Require-Env "NOCOBASE_CONFIG_TOKEN"
-Reject-PlaceholderSecret -Name "NOCOBASE_BRIDGE_TOKEN" -Value $bridgeToken
-Reject-PlaceholderSecret -Name "NOCOBASE_CONFIG_TOKEN" -Value $configToken
+Assert-RealProductionSecret -Name "NOCOBASE_BRIDGE_TOKEN" -Value $bridgeToken -MinLength 32
+Assert-RealProductionSecret -Name "NOCOBASE_CONFIG_TOKEN" -Value $configToken -MinLength 32
 Require-Env "NOCOBASE_APP_ENV" | Out-Null
 if ([Environment]::GetEnvironmentVariable("NOCOBASE_APP_ENV", "Process") -notin @("prod", "production")) {
     throw "NOCOBASE_APP_ENV must be production or prod."
 }
 $nocobaseAppKey = Require-Env "NOCOBASE_APP_KEY"
-Reject-PlaceholderSecret -Name "NOCOBASE_APP_KEY" -Value $nocobaseAppKey
+Assert-RealProductionSecret -Name "NOCOBASE_APP_KEY" -Value $nocobaseAppKey -MinLength 32
 Assert-ProductionPathOutsideRepo -Name "NOCOBASE_APP_ROOT" -Value (Require-Env "NOCOBASE_APP_ROOT") -RepoRoot $RepoRoot
 Require-Env "NOCOBASE_APP_PORT" | Out-Null
 Require-Env "NOCOBASE_DB_HOST" | Out-Null
@@ -126,7 +128,7 @@ Assert-ProductionPassword -Name "NOCOBASE_DB_PASSWORD" -Value (Require-Env "NOCO
 Require-Env "NOCOBASE_ROOT_USERNAME" | Out-Null
 Require-Env "NOCOBASE_ROOT_EMAIL" | Out-Null
 $nocobaseRootPassword = Require-Env "NOCOBASE_ROOT_PASSWORD"
-Reject-PlaceholderSecret -Name "NOCOBASE_ROOT_PASSWORD" -Value $nocobaseRootPassword
+Assert-RealProductionSecret -Name "NOCOBASE_ROOT_PASSWORD" -Value $nocobaseRootPassword -MinLength 32
 Assert-ProductionPathOutsideRepo -Name "NOCOBASE_STORAGE_DIR" -Value (Require-Env "NOCOBASE_STORAGE_DIR") -RepoRoot $RepoRoot
 Write-Host "NocoBase production settings passed."
 Write-Host "HTTPS reverse-proxy settings passed."
