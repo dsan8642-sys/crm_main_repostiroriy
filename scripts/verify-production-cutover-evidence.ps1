@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepoRoot "swimcrm\.venv\Scripts\python.exe"
 $Verifier = Join-Path $RepoRoot "scripts\verify_production_cutover_evidence.py"
+$ArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
 if ([string]::IsNullOrWhiteSpace($Evidence)) {
     $Evidence = Join-Path $RepoRoot "docs\PRODUCTION_CUTOVER_EVIDENCE.json"
 }
@@ -20,6 +21,9 @@ if (-not (Test-Path -LiteralPath $Python)) {
 }
 if (-not (Test-Path -LiteralPath $Verifier)) {
     throw "Production cutover evidence verifier not found at $Verifier."
+}
+if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
+    throw "Release archive verifier not found at $ArchiveVerifier."
 }
 if (-not (Test-Path -LiteralPath $Evidence)) {
     throw "Production cutover evidence manifest not found at $Evidence."
@@ -52,6 +56,10 @@ if ($RequireCurrentHead) {
     $expectedArchiveSha256 = ([string]$manifest.archive_sha256).ToLowerInvariant()
     if (-not ($expectedArchiveSha256 -match "^[0-9a-f]{64}$")) {
         throw "Current release archive manifest archive_sha256 must be a 64-character lowercase SHA256."
+    }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArchiveVerifier $manifestPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Current release archive verification failed with exit code $LASTEXITCODE."
     }
     $args += "--expected-commit-sha"
     $args += $expectedCommit

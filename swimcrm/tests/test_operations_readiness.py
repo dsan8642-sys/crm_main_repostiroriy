@@ -713,6 +713,14 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Get-ReleaseBlockers", script)
         self.assertIn("planned_release_candidate_steps", script)
 
+    def test_cutover_evidence_wrapper_revalidates_current_release_archive(self):
+        script = (REPO_ROOT / "scripts" / "verify-production-cutover-evidence.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("RequireCurrentHead", script)
+        self.assertIn("verify-release-source-archive.ps1", script)
+        self.assertIn("Current release archive verification failed", script)
+        self.assertIn("--expected-archive-sha256", script)
+
     def test_release_handoff_generator_captures_archive_remote_and_pending_actions(self):
         script = (REPO_ROOT / "scripts" / "new-release-handoff.ps1").read_text(encoding="utf-8-sig")
 

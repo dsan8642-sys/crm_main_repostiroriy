@@ -1071,6 +1071,16 @@
         },
         {
           "type": "file_contains",
+          "path": "scripts/verify-production-cutover-evidence.ps1",
+          "patterns": [
+            "RequireCurrentHead",
+            "verify-release-source-archive.ps1",
+            "Current release archive verification failed",
+            "--expected-archive-sha256"
+          ]
+        },
+        {
+          "type": "file_contains",
           "path": "docs/RELEASE_CANDIDATE_READINESS.md",
           "patterns": [
             "stable release-candidate procedure",
