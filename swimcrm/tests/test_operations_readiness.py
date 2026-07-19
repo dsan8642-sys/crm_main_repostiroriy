@@ -414,6 +414,16 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Get-ReleaseBlockers", script)
         self.assertIn("planned_release_candidate_steps", script)
 
+    def test_release_handoff_generator_captures_archive_remote_and_pending_actions(self):
+        script = (REPO_ROOT / "scripts" / "new-release-handoff.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("RELEASE_HANDOFF.json", script)
+        self.assertIn("verify-local-release-candidate.ps1", script)
+        self.assertIn("release_source_archive", script)
+        self.assertIn("archive_sha256", script)
+        self.assertIn("repository_remote", script)
+        self.assertIn("pending_external_actions", script)
+
 
 class HealthAndReadinessRule(TestCase):
     def setUp(self):

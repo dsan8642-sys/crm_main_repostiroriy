@@ -375,6 +375,10 @@ Before creating a production package:
   draft with `scripts\new-production-cutover-evidence.cmd -LocalBackendPassed
   -LocalFullStackPassed -ReleaseArchivePassed -ArchiveSha256 <sha256>
   -ArchiveManifest <manifest-path>` to reduce manual evidence-copy mistakes;
+- when handing the release candidate to whoever owns GitHub/production access,
+  run `scripts\new-release-handoff.cmd -Force` to write the ignored
+  `docs\RELEASE_HANDOFF.json` with current commit, archive checksum, draft
+  evidence path, remote state, blockers, and pending external actions;
 - if running frontend commands manually instead of the wrapper, run
   `npm.cmd ci --cache ..\.npm-cache`, `npm.cmd run build`, and
   `npm.cmd run test:smoke` from `frontend\`;

@@ -41,3 +41,4 @@ releases/
 # Production cutover evidence is generated per release/host.
 docs/PRODUCTION_CUTOVER_EVIDENCE.json
 docs/PRODUCTION_CUTOVER_EVIDENCE.draft.json
+docs/RELEASE_HANDOFF.json

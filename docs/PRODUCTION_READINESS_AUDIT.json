@@ -910,6 +910,10 @@
           "path": "scripts/verify-local-release-candidate.cmd"
         },
         {
+          "type": "command_exists",
+          "path": "scripts/new-release-handoff.cmd"
+        },
+        {
           "type": "file_contains",
           "path": "scripts/build-release-source.ps1",
           "patterns": [
@@ -957,6 +961,18 @@
             "Get-ReleaseReviewCategory",
             "Get-ReleaseBlockers",
             "planned_release_candidate_steps"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/new-release-handoff.ps1",
+          "patterns": [
+            "RELEASE_HANDOFF.json",
+            "verify-local-release-candidate.ps1",
+            "release_source_archive",
+            "archive_sha256",
+            "repository_remote",
+            "pending_external_actions"
           ]
         },
         {
