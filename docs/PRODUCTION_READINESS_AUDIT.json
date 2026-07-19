@@ -1019,7 +1019,9 @@
             "verify-local-release-candidate\\.cmd -ForceArtifactOverwrite",
             "verify-production-cutover-evidence\\.cmd -RequireCurrentHead",
             "verify-release-handoff\\.cmd",
-            "verify-local-release-candidate\\.cmd -RequireProductionEvidence"
+            "verify-local-release-candidate\\.cmd -RequireProductionEvidence",
+            "operator checklist covers every external action",
+            "stop_if_missing=true"
           ]
         },
         {

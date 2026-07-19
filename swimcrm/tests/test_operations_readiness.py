@@ -516,6 +516,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("verify-local-release-candidate.cmd -ForceArtifactOverwrite", doc)
         self.assertIn("verify-release-handoff.cmd", doc)
         self.assertIn("verify-local-release-candidate.cmd -RequireProductionEvidence", doc)
+        self.assertIn("operator checklist covers every external action", doc)
+        self.assertIn("stop_if_missing=true", doc)
         self.assertNotIn("Generated:", doc)
         self.assertNotIn("working tree is not clean, so a release source archive cannot be built", doc)
         self.assertNotIn("231 tests", doc)

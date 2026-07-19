@@ -62,7 +62,10 @@ The handoff verifier confirms that:
 - the release archive manifest matches the current `HEAD`;
 - the handoff archive SHA256 matches the manifest and archive file;
 - release blockers and Git remote state match the current release plan;
-- the external cutover action list is still present.
+- the external cutover action list is still present;
+- the operator checklist covers every external action;
+- each operator checklist item has a command, expected evidence, and
+  `stop_if_missing=true`.
 
 ## External Production Evidence
 
@@ -110,6 +113,6 @@ The plan reports:
 - If `verify-local-release-candidate.cmd` passes without
   `-RequireProductionEvidence`, the project is locally release-candidate ready.
 - If `verify-release-handoff.cmd` passes, the release handoff is fresh for the
-  current commit/archive.
+  current commit/archive and contains the complete operator checklist.
 - If `verify-local-release-candidate.cmd -RequireProductionEvidence` passes,
   the project has the repository evidence required for production approval.
