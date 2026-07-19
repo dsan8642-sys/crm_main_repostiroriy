@@ -1036,7 +1036,11 @@
             "source_tree",
             "rev-parse HEAD",
             "commit_sha must match current HEAD",
-            "short_sha must match current HEAD"
+            "short_sha must match current HEAD",
+            "ZipFile",
+            "Release source archive contents verified",
+            "blocked runtime/generated entry",
+            "frontend/package-lock.json"
           ]
         },
         {

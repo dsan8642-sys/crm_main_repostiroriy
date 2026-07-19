@@ -6,6 +6,47 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$requiredArchiveEntries = @(
+    "package.json",
+    "package-lock.json",
+    "frontend/package.json",
+    "frontend/package-lock.json"
+)
+$blockedArchivePrefixes = @(
+    ".git/",
+    ".codebase-memory/",
+    ".runtime/",
+    ".nocobase/",
+    ".nocobase-logs/",
+    ".npm-cache/",
+    ".yarn-cache/",
+    "node_modules/",
+    "frontend/node_modules/",
+    "frontend/dist/",
+    "frontend/test-results/",
+    "frontend/playwright-report/",
+    "swimcrm/.venv/",
+    "swimcrm-hybrid/",
+    "backups/",
+    "releases/",
+    "dist/"
+)
+$blockedArchiveNames = @(
+    ".env",
+    "PRODUCTION_CUTOVER_EVIDENCE.json",
+    "PRODUCTION_CUTOVER_EVIDENCE.draft.json",
+    "RELEASE_HANDOFF.json",
+    "RELEASE_BACKLOG_TEMP.md",
+    "swimcrm.zip",
+    "db.sqlite3"
+)
+$blockedArchiveExtensions = @(
+    ".sqlite3",
+    ".sqlite3-journal",
+    ".dump",
+    ".zip"
+)
+
 if (-not (Test-Path -LiteralPath $Manifest)) {
     throw "Release source archive manifest does not exist: $Manifest"
 }
@@ -65,6 +106,38 @@ if ($actualHash -ne $expectedHash) {
     throw "Release source archive sha256 mismatch. Expected $expectedHash but got $actualHash."
 }
 
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
+try {
+    $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
+    foreach ($requiredEntry in $requiredArchiveEntries) {
+        if ($entries -notcontains $requiredEntry) {
+            throw "Release source archive is missing required entry: $requiredEntry"
+        }
+    }
+    foreach ($entry in $entries) {
+        foreach ($prefix in $blockedArchivePrefixes) {
+            if ($entry.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Release source archive contains blocked runtime/generated entry: $entry"
+            }
+        }
+
+        $entryName = Split-Path -Leaf $entry
+        if ($blockedArchiveNames -contains $entryName) {
+            throw "Release source archive contains blocked file: $entry"
+        }
+        foreach ($extension in $blockedArchiveExtensions) {
+            if ($entryName.EndsWith($extension, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Release source archive contains blocked file extension: $entry"
+            }
+        }
+    }
+}
+finally {
+    $zip.Dispose()
+}
+
 Write-Host "Release source archive manifest verified."
+Write-Host "Release source archive contents verified."
 Write-Host "commit_sha: $($data.commit_sha)"
 Write-Host "archive_sha256: $actualHash"

@@ -650,6 +650,10 @@ class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
         self.assertIn("rev-parse HEAD", script)
         self.assertIn("commit_sha must match current HEAD", script)
         self.assertIn("short_sha must match current HEAD", script)
+        self.assertIn("ZipFile", script)
+        self.assertIn("Release source archive contents verified", script)
+        self.assertIn("blocked runtime/generated entry", script)
+        self.assertIn("frontend/package-lock.json", script)
 
 
 class LocalReleaseCandidateVerifierRule(SimpleTestCase):
