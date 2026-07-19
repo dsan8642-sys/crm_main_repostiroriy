@@ -647,6 +647,9 @@ class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
         self.assertIn("Release source archive manifest verified", script)
         self.assertIn("commit_sha", script)
         self.assertIn("source_tree", script)
+        self.assertIn("rev-parse HEAD", script)
+        self.assertIn("commit_sha must match current HEAD", script)
+        self.assertIn("short_sha must match current HEAD", script)
 
 
 class LocalReleaseCandidateVerifierRule(SimpleTestCase):

@@ -13,12 +13,33 @@ if (-not (Test-Path -LiteralPath $Manifest)) {
 $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
 $manifestDir = Split-Path -Parent $manifestPath
 $data = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$currentCommit = ""
+$currentShortSha = ""
+
+try {
+    & git -C $RepoRoot rev-parse --is-inside-work-tree | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $currentCommit = (& git -C $RepoRoot rev-parse HEAD).Trim()
+        $currentShortSha = (& git -C $RepoRoot rev-parse --short=12 HEAD).Trim()
+    }
+}
+catch {
+    $currentCommit = ""
+    $currentShortSha = ""
+}
 
 if (-not ($data.commit_sha -match "^[0-9a-f]{40}$")) {
     throw "Release source archive manifest commit_sha must be a 40-character lowercase git SHA."
 }
 if (-not $data.short_sha) {
     throw "Release source archive manifest short_sha is required."
+}
+if ($currentCommit -and $data.commit_sha -ne $currentCommit) {
+    throw "Release source archive manifest commit_sha must match current HEAD."
+}
+if ($currentShortSha -and $data.short_sha -ne $currentShortSha) {
+    throw "Release source archive manifest short_sha must match current HEAD."
 }
 if ($data.source_tree -ne "clean") {
     throw "Release source archive manifest source_tree must be 'clean'."
