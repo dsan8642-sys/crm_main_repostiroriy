@@ -15,6 +15,11 @@ GITHUB_ACTIONS_RUN_PATTERN = re.compile(
     r"^https://github\.com/[^/\s]+/[^/\s]+/actions/runs/\d+(?:[/?#].*)?$",
     re.IGNORECASE,
 )
+HTTPS_URL_PATTERN = re.compile(r"https://[^\s,;]+", re.IGNORECASE)
+NON_PRODUCTION_HOST_PATTERN = re.compile(
+    r"(localhost|127\.0\.0\.1|\[::1\]|\.example\b|example\.|\.invalid\b|\.test\b)",
+    re.IGNORECASE,
+)
 
 REQUIRED_EVIDENCE_IDS = {
     "local_backend_release_gate",
@@ -165,6 +170,16 @@ def _combined_item_text(item):
     )
 
 
+def _validate_live_health_urls(evidence_id, combined, errors):
+    urls = HTTPS_URL_PATTERN.findall(combined)
+    if len(urls) < 2:
+        errors.append(f"{evidence_id}: evidence must include Django and NocoBase https:// production URLs")
+        return
+    for url in urls:
+        if NON_PRODUCTION_HOST_PATTERN.search(url):
+            errors.append(f"{evidence_id}: evidence URL must be a real production host, not {url}")
+
+
 def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=""):
     evidence_id = item.get("id", "")
     if evidence_id not in REQUIRED_EVIDENCE_IDS:
@@ -200,6 +215,8 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
         errors.append(f"{evidence_id}: command must be {expected_command!r}")
 
     combined = _combined_item_text(item)
+    if evidence_id == "live_hybrid_health":
+        _validate_live_health_urls(evidence_id, combined, errors)
     for fragment in REQUIRED_OUTPUT_FRAGMENTS.get(evidence_id, []):
         if fragment not in combined:
             errors.append(f"{evidence_id}: missing evidence fragment: {fragment}")

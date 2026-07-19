@@ -228,8 +228,8 @@ not just `status=passed`:
   production settings passed`, `NocoBase production settings passed`, `HTTPS
   reverse-proxy settings passed`;
 - live hybrid health: `Hybrid health check passed`, `HTTPS live endpoint
-  requirement passed`, `nocobase_config_health`,
-  `/api/nocobase/config/languages/`;
+  requirement passed`, real `https://` Django and NocoBase production URLs,
+  `nocobase_config_health`, `/api/nocobase/config/languages/`;
 - backup/restore drill: `Hybrid backup set written`, `backup_set_dir`,
   `nocobase_database`, `Django dump sha256 OK`, `NocoBase dump sha256 OK`,
   `Django dump list OK`, `NocoBase dump list OK`, `Restore verification OK`,

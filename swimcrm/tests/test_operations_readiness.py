@@ -329,6 +329,46 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_live_health_production_urls(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "live_hybrid_health"
+        )
+        item["summary"] = "Live Django and NocoBase health passed."
+        item["output_excerpt"] = (
+            "HTTPS live endpoint requirement passed. Hybrid health check passed. "
+            "nocobase_config_health /api/nocobase/config/languages/"
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "live_hybrid_health: evidence must include Django and NocoBase https:// production URLs",
+            errors,
+        )
+
+    def test_cutover_evidence_rejects_localhost_live_health_urls(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "live_hybrid_health"
+        )
+        item["summary"] = "Live health passed on https://localhost and https://127.0.0.1."
+        item["output_excerpt"] = (
+            "Django health check passed: https://localhost/api/health/. "
+            "NocoBase process health check passed: https://127.0.0.1/api/__health_check. "
+            "HTTPS live endpoint requirement passed. Hybrid health check passed. "
+            "nocobase_config_health /api/nocobase/config/languages/"
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertTrue(
+            any(error.startswith("live_hybrid_health: evidence URL must be a real production host") for error in errors),
+            errors,
+        )
+
     def test_cutover_evidence_generator_can_prefill_local_archive_evidence(self):
         generator = (REPO_ROOT / "scripts" / "new_production_cutover_evidence.py").read_text(encoding="utf-8-sig")
 
@@ -341,6 +381,8 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
         self.assertIn("check-hybrid-health.cmd -RequireHttps", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
+        self.assertIn("production-django-host", generator)
+        self.assertIn("production-nocobase-host", generator)
         self.assertIn("stop writers", generator)
         self.assertIn("migrate --check", generator)
 
