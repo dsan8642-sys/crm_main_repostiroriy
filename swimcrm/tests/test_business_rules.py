@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from common.money import Money
 from accounts.models import Consent, ConsentType
-from attendance.models import AttendanceStatus
+from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
 from billing.models import Charge, Payment, PaymentStatus, ReceiptFile
 from billing.services import (charge_statuses, confirm_payment,
@@ -17,7 +17,7 @@ from notifications.models import validate_sms_template
 from scheduling.models import Session
 from scheduling.services import (ScheduleConflict, create_session,
                                  generate_sessions)
-from subscriptions.models import LedgerReason, SessionLedgerEntry
+from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription
 from subscriptions.services import (create_subscription, freeze_subscription,
                                     manual_adjust)
 
@@ -56,6 +56,16 @@ class LedgerRule(TestCase):
         manual_adjust(subscription=sub, delta=+1, note="test")
         self.assertEqual(sub.remaining_sessions, 8 - 3 + 1)
 
+    def test_admin_manual_adjustment_can_move_balance_below_zero_without_note(self):
+        st = f.make_student()
+        sub = create_subscription(student=st, subscription_type=f.make_sub_type(sessions=2),
+                                  start_date=date(2026, 1, 1))
+        entry = manual_adjust(subscription=sub, delta=-3)
+
+        self.assertEqual(entry.reason, LedgerReason.MANUAL)
+        self.assertEqual(entry.note, "")
+        self.assertEqual(sub.remaining_sessions, -1)
+
     def test_ledger_is_immutable(self):
         st = f.make_student()
         sub = create_subscription(student=st, subscription_type=f.make_sub_type(sessions=8),
@@ -66,6 +76,43 @@ class LedgerRule(TestCase):
             entry.save()
         with self.assertRaises(ValidationError):
             entry.delete()
+        with self.assertRaises(ValidationError):
+            SessionLedgerEntry.objects.filter(pk=entry.pk).update(delta=999)
+        with self.assertRaises(ValidationError):
+            SessionLedgerEntry.objects.filter(pk=entry.pk).delete()
+        entry.refresh_from_db()
+        self.assertEqual(entry.delta, 8)
+        self.assertEqual(sub.remaining_sessions, 8)
+
+    def test_subscription_history_cannot_be_deleted(self):
+        st = f.make_student()
+        sub = create_subscription(student=st, subscription_type=f.make_sub_type(days=30, sessions=8),
+                                  start_date=date(2026, 1, 1))
+        freeze_subscription(subscription=sub, start_date=date(2026, 1, 10),
+                            end_date=date(2026, 1, 12))
+
+        with self.assertRaises(ValidationError):
+            sub.delete()
+        with self.assertRaises(ValidationError):
+            Subscription.objects.filter(pk=sub.pk).delete()
+        with self.assertRaises(ValidationError):
+            st.delete()
+        transaction.set_rollback(False)
+
+        self.assertTrue(Subscription.objects.filter(pk=sub.pk).exists())
+        self.assertEqual(sub.ledger_entries.count(), 1)
+        self.assertEqual(sub.freeze_periods.count(), 1)
+
+    def test_subscription_admin_disables_delete(self):
+        from django.contrib.admin.sites import AdminSite
+
+        from subscriptions.admin import SubscriptionAdmin
+
+        sub = create_subscription(student=f.make_student(), subscription_type=f.make_sub_type(sessions=8),
+                                  start_date=date(2026, 1, 1))
+        subscription_admin = SubscriptionAdmin(Subscription, AdminSite())
+
+        self.assertFalse(subscription_admin.has_delete_permission(request=None, obj=sub))
 
 
 class AttendanceDeductionRule(TestCase):
@@ -113,12 +160,66 @@ class AttendanceDeductionRule(TestCase):
         self.assertIn(LedgerReason.CORRECTION, reasons)
         self.assertEqual(len(reasons), 3)
 
+    def test_attendance_history_cannot_be_deleted(self):
+        record = set_attendance(
+            session_id=self.session.id,
+            student=self.student,
+            status=AttendanceStatus.PRESENT,
+        )
+        with self.assertRaises(ValidationError):
+            record.delete()
+        with self.assertRaises(ValidationError):
+            AttendanceRecord.objects.filter(pk=record.pk).delete()
+        transaction.set_rollback(False)
+        self.assertTrue(AttendanceRecord.objects.filter(pk=record.pk).exists())
+
+    def test_archived_student_cannot_have_attendance_marked(self):
+        self.student.is_active = False
+        self.student.save(update_fields=["is_active"])
+
+        with self.assertRaises(ValidationError):
+            set_attendance(
+                session_id=self.session.id,
+                student=self.student,
+                status=AttendanceStatus.PRESENT,
+            )
+
     def test_unlimited_subscription_never_deducts(self):
         st = f.make_student(first="Ева")
         create_subscription(student=st, subscription_type=f.make_unlimited_type(),
                             start_date=date.today() - timedelta(days=1))
         rec = set_attendance(session_id=self.session.id, student=st, status=AttendanceStatus.PRESENT)
         self.assertFalse(rec.ledger_entries.exists())
+
+    def test_participant_hard_delete_cannot_cascade_history(self):
+        payment = Payment.objects.create(
+            student=self.student,
+            amount_minor=1000,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.CONFIRMED,
+        )
+        charge = Charge.objects.create(
+            student=self.student,
+            description="History charge",
+            amount_minor=1000,
+            currency="PLN",
+            due_date=date.today(),
+        )
+        record = set_attendance(
+            session_id=self.session.id,
+            student=self.student,
+            status=AttendanceStatus.PRESENT,
+        )
+
+        with self.assertRaises(ValidationError):
+            self.student.delete()
+        transaction.set_rollback(False)
+
+        self.assertTrue(Payment.objects.filter(pk=payment.pk).exists())
+        self.assertTrue(Charge.objects.filter(pk=charge.pk).exists())
+        self.assertTrue(AttendanceRecord.objects.filter(pk=record.pk).exists())
+        self.assertTrue(self.student.__class__.objects.filter(pk=self.student.pk).exists())
 
 
 class FreezeRule(TestCase):
@@ -134,6 +235,14 @@ class FreezeRule(TestCase):
         self.assertEqual(sub.total_frozen_days, 7)
         self.assertEqual(sub.effective_end_date, base_end + timedelta(days=7))
 
+    def test_subscription_is_valid_through_grace_period(self):
+        st = f.make_student()
+        sub = create_subscription(student=st, subscription_type=f.make_sub_type(days=30),
+                                  start_date=date(2026, 1, 1))
+        self.assertEqual(sub.grace_end_date, sub.effective_end_date + timedelta(days=7))
+        self.assertTrue(sub.is_active_on(sub.effective_end_date + timedelta(days=7)))
+        self.assertFalse(sub.is_active_on(sub.effective_end_date + timedelta(days=8)))
+
     def test_multiple_freezes_accumulate_and_keep_history(self):
         st = f.make_student()
         sub = create_subscription(student=st, subscription_type=f.make_sub_type(days=30),
@@ -147,6 +256,28 @@ class FreezeRule(TestCase):
         self.assertEqual(sub.total_frozen_days, 8)
         self.assertEqual(sub.freeze_periods.count(), 2)  # history kept
         self.assertTrue(all(fp.created_by == admin for fp in sub.freeze_periods.all()))
+
+    def test_freeze_history_is_immutable(self):
+        st = f.make_student()
+        sub = create_subscription(student=st, subscription_type=f.make_sub_type(days=30),
+                                  start_date=date(2026, 1, 1))
+        freeze_subscription(subscription=sub, start_date=date(2026, 1, 10),
+                            end_date=date(2026, 1, 12))
+        fp = sub.freeze_periods.get()
+        expected_end_date = sub.effective_end_date
+
+        fp.end_date = date(2026, 1, 20)
+        with self.assertRaises(ValidationError):
+            fp.save()
+        with self.assertRaises(ValidationError):
+            fp.delete()
+        with self.assertRaises(ValidationError):
+            sub.freeze_periods.filter(pk=fp.pk).update(end_date=date(2026, 1, 20))
+        with self.assertRaises(ValidationError):
+            sub.freeze_periods.filter(pk=fp.pk).delete()
+        sub.refresh_from_db()
+        self.assertEqual(sub.freeze_periods.count(), 1)
+        self.assertEqual(sub.effective_end_date, expected_end_date)
 
 
 class ScheduleConflictRule(TestCase):
@@ -225,6 +356,23 @@ class FamilyAccountRule(TestCase):
         self.assertEqual(parent.students.count(), 2)
         self.assertEqual(a.parent, b.parent)
 
+    def test_identity_client_trainer_and_participant_admin_disable_hard_delete(self):
+        from django.contrib.admin.sites import AdminSite
+
+        from accounts.admin import ParentAccountAdmin, TrainerAdmin, UserAdmin
+        from accounts.models import ParentAccount, Trainer, User
+        from students.admin import StudentAdmin
+        from students.models import Student
+
+        parent = f.make_parent()
+        trainer = f.make_trainer()
+        student = f.make_student(parent=parent)
+
+        self.assertFalse(UserAdmin(User, AdminSite()).has_delete_permission(None, parent.user))
+        self.assertFalse(ParentAccountAdmin(ParentAccount, AdminSite()).has_delete_permission(None, parent))
+        self.assertFalse(TrainerAdmin(Trainer, AdminSite()).has_delete_permission(None, trainer))
+        self.assertFalse(StudentAdmin(Student, AdminSite()).has_delete_permission(None, student))
+
 
 class BillingRule(TestCase):
     """Rules 8 & 9: balance = charges - confirmed payments; pending doesn't count."""
@@ -246,6 +394,80 @@ class BillingRule(TestCase):
         self.assertEqual(student_balance(self.st).amount_minor, 0)
         self.assertEqual(p.confirmed_by, admin)
         self.assertIsNotNone(p.confirmed_at)
+
+    def test_payment_history_cannot_be_deleted(self):
+        payment = Payment.objects.create(
+            student=self.st,
+            amount_minor=1000,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.PENDING,
+        )
+        with self.assertRaises(ValidationError):
+            payment.delete()
+        with self.assertRaises(ValidationError):
+            Payment.objects.filter(pk=payment.pk).delete()
+        transaction.set_rollback(False)
+        self.assertTrue(Payment.objects.filter(pk=payment.pk).exists())
+
+    def test_charge_history_cannot_be_deleted(self):
+        charge = Charge.objects.create(
+            student=self.st,
+            description="Correction charge",
+            amount_minor=1000,
+            currency="PLN",
+            due_date=date.today(),
+        )
+        with self.assertRaises(ValidationError):
+            charge.delete()
+        with self.assertRaises(ValidationError):
+            Charge.objects.filter(pk=charge.pk).delete()
+        transaction.set_rollback(False)
+        self.assertTrue(Charge.objects.filter(pk=charge.pk).exists())
+
+    def test_payment_admin_locks_history_fields_and_delete(self):
+        from django.contrib.admin.sites import AdminSite
+
+        from billing.admin import PaymentAdmin
+
+        payment = Payment.objects.create(
+            student=self.st,
+            amount_minor=1000,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.PENDING,
+        )
+        payment_admin = PaymentAdmin(Payment, AdminSite())
+
+        readonly = set(payment_admin.get_readonly_fields(request=None, obj=payment))
+
+        self.assertFalse(payment_admin.has_delete_permission(request=None, obj=payment))
+        self.assertTrue({
+            "student", "amount_minor", "currency", "paid_at", "method", "status",
+            "created_by", "confirmed_by", "confirmed_at",
+        }.issubset(readonly))
+
+    def test_charge_admin_locks_history_fields_and_delete(self):
+        from django.contrib.admin.sites import AdminSite
+
+        from billing.admin import ChargeAdmin
+
+        charge = Charge.objects.create(
+            student=self.st,
+            description="Admin locked charge",
+            amount_minor=1000,
+            currency="PLN",
+            due_date=date.today(),
+        )
+        charge_admin = ChargeAdmin(Charge, AdminSite())
+
+        readonly = set(charge_admin.get_readonly_fields(request=None, obj=charge))
+
+        self.assertFalse(charge_admin.has_delete_permission(request=None, obj=charge))
+        self.assertTrue({
+            "student", "subscription", "description", "amount_minor", "currency",
+            "due_date", "created_by", "created_at",
+        }.issubset(readonly))
 
     def test_partial_and_overdue_status(self):
         admin = f.make_admin()

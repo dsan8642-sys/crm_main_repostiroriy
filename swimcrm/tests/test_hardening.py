@@ -26,6 +26,7 @@ class ProductionSettingsRule(SimpleTestCase):
         for key in [
             "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_ENV",
             "SWIMCRM_RUNTIME_DIR", "STATIC_ROOT", "MEDIA_ROOT",
+            "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT",
         ]:
             env.pop(key, None)
         env.update(env_updates)
@@ -66,9 +67,25 @@ class ProductionSettingsRule(SimpleTestCase):
             DEBUG="0",
             SECRET_KEY="release-secret-key-abcdefghijklmnopqrstuvwxyz-0123456789",
             ALLOWED_HOSTS="crm.example.com",
+            POSTGRES_DB="swimcrm",
+            POSTGRES_USER="swimcrm",
+            POSTGRES_PASSWORD="release-db-password",
+            POSTGRES_HOST="db.example.internal",
+            POSTGRES_PORT="5432",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_rejects_sqlite_fallback(self):
+        result = self._import_settings(
+            DJANGO_ENV="production",
+            DEBUG="0",
+            SECRET_KEY="release-secret-key-abcdefghijklmnopqrstuvwxyz-0123456789",
+            ALLOWED_HOSTS="crm.example.com",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("POSTGRES_DB", result.stderr)
 
     def test_production_rejects_media_or_static_inside_source_tree(self):
         source_tree_path = os.getcwd()
@@ -77,6 +94,11 @@ class ProductionSettingsRule(SimpleTestCase):
             DEBUG="0",
             SECRET_KEY="release-secret-key-abcdefghijklmnopqrstuvwxyz-0123456789",
             ALLOWED_HOSTS="crm.example.com",
+            POSTGRES_DB="swimcrm",
+            POSTGRES_USER="swimcrm",
+            POSTGRES_PASSWORD="release-db-password",
+            POSTGRES_HOST="db.example.internal",
+            POSTGRES_PORT="5432",
             STATIC_ROOT=source_tree_path,
             MEDIA_ROOT=source_tree_path,
         )

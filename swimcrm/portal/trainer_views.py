@@ -1,4 +1,9 @@
-﻿from .support import *
+from .support import *
+
+
+def _effective_trainer_filter(trainer):
+    return Q(trainer=trainer, substitute_trainer__isnull=True) | Q(substitute_trainer=trainer)
+
 
 @require_GET
 def trainer_sessions(request):
@@ -6,8 +11,8 @@ def trainer_sessions(request):
     history = request.GET.get("history") in {"1", "true", "yes"}
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
-    qs = Session.objects.filter(trainer=trainer).select_related(
-        "group", "trainer__user", "individual_student")
+    qs = Session.objects.filter(_effective_trainer_filter(trainer)).select_related(
+        "group", "trainer__user", "substitute_trainer__user", "individual_student")
     if history:
         qs = qs.filter(start_at__date__lt=timezone.localdate()).order_by("-start_at", "-id")
     else:
@@ -33,7 +38,7 @@ def trainer_groups(request):
     payload = []
     for group in groups:
         next_session = Session.objects.filter(
-            trainer=trainer,
+            _effective_trainer_filter(trainer),
             group=group,
             is_cancelled=False,
             start_at__date__gte=today,
@@ -52,8 +57,11 @@ def trainer_groups(request):
 @require_GET
 def trainer_history(request):
     trainer = _trainer_from_request(request)
-    qs = Session.objects.filter(trainer=trainer, start_at__date__lt=timezone.localdate()).select_related(
-        "group", "trainer__user", "individual_student").order_by("-start_at", "-id")
+    qs = Session.objects.filter(
+        _effective_trainer_filter(trainer), start_at__date__lt=timezone.localdate()
+    ).select_related(
+        "group", "trainer__user", "substitute_trainer__user", "individual_student"
+    ).order_by("-start_at", "-id")
     if request.GET.get("group_id"):
         qs = qs.filter(group_id=request.GET["group_id"])
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
@@ -68,7 +76,12 @@ def trainer_history(request):
 @require_GET
 def trainer_session_detail(request, session_id):
     trainer = _trainer_from_request(request)
-    session = get_object_or_404(Session.objects.select_related("group", "trainer__user"), pk=session_id, trainer=trainer)
+    session = get_object_or_404(
+        Session.objects.select_related("group", "trainer__user", "substitute_trainer__user").filter(
+            _effective_trainer_filter(trainer)
+        ),
+        pk=session_id,
+    )
     attendance = {record.student_id: record for record in session.attendance.all()}
     return JsonResponse({
         "session": _session_payload(session),
@@ -86,18 +99,18 @@ def trainer_session_detail(request, session_id):
 @require_POST
 def trainer_mark_attendance(request, session_id):
     trainer = _trainer_from_request(request)
-    session = get_object_or_404(Session, pk=session_id, trainer=trainer)
+    session = get_object_or_404(Session.objects.filter(_effective_trainer_filter(trainer)), pk=session_id)
     data = _json_body(request)
     try:
         student_id = int(data.get("student_id"))
     except (TypeError, ValueError) as exc:
-        raise ValidationError("student_id РѕР±СЏР·Р°С‚РµР»РµРЅ") from exc
+        raise ValidationError("student_id is required") from exc
     status = data.get("status")
     if status not in AttendanceStatus.values:
-        raise ValidationError("РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ СЃС‚Р°С‚СѓСЃ РїРѕСЃРµС‰Р°РµРјРѕСЃС‚Рё")
+        raise ValidationError("invalid attendance status")
     allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
     if student_id not in allowed_student_ids:
-        raise PermissionDenied("Р­С‚РѕС‚ СѓС‡РµРЅРёРє РЅРµ РѕС‚РЅРѕСЃРёС‚СЃСЏ Рє Р·Р°РЅСЏС‚РёСЋ С‚СЂРµРЅРµСЂР°")
+        raise PermissionDenied("student is not in this trainer session")
     record = set_attendance(session_id=session.id, student=Student.objects.get(pk=student_id),
                             status=status, actor=request.user)
     return JsonResponse({
@@ -107,4 +120,3 @@ def trainer_mark_attendance(request, session_id):
         "status": record.status,
         "deducts": record.deducts,
     })
-

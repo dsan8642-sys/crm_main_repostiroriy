@@ -1,5 +1,5 @@
 import io
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.core import mail
 from django.test import TestCase, override_settings
@@ -20,13 +20,37 @@ from analytics import reports
 from dataio import importer, exports
 from dataio.importer import NEW, DUPLICATE, ERROR
 from dataio.models import ImportBatch
+from localization.models import DictionaryKey, DictionaryTranslation
+from localization.services import translate
 from notifications.backends import SmsBackend, TelegramBackend
 from notifications.models import (Channel, DeliveryStatus, EventType,
                                   NotificationLog, NotificationRule,
-                                  NotificationTemplate)
+                                  NotificationTemplate,
+                                  NotificationTemplateTranslation,
+                                  QuietHoursPolicy)
 from notifications.services import channel_allowed, deliver_pending, run_scheduler
 
 from . import factories as f
+
+
+class LocalizationRule(TestCase):
+    @override_settings(SWIMCRM_DEFAULT_LANGUAGE="en")
+    def test_dictionary_translation_uses_requested_language_then_default(self):
+        key = DictionaryKey.objects.create(domain="ui", code="dashboard.title")
+        DictionaryTranslation.objects.create(
+            key=key,
+            language_code="en",
+            value="Dashboard",
+        )
+        DictionaryTranslation.objects.create(
+            key=key,
+            language_code="pl",
+            value="Panel",
+        )
+
+        self.assertEqual(translate("ui", "dashboard.title", "pl"), "Panel")
+        self.assertEqual(translate("ui", "dashboard.title", "uk"), "Dashboard")
+        self.assertEqual(translate("ui", "missing", "uk", default="Missing"), "Missing")
 
 
 # ---------------- 5.5 Debtors / upcoming ----------------
@@ -48,6 +72,26 @@ class DebtorsRule(TestCase):
                                    paid_at=date.today(), status=PaymentStatus.PENDING)
         confirm_payment(p, f.make_admin())
         self.assertEqual(len(debtors()), 0)
+
+    def test_subscription_in_grace_period_is_not_expired_debtor(self):
+        st = f.make_student()
+        create_subscription(
+            student=st,
+            subscription_type=f.make_sub_type(sessions=8, days=30),
+            start_date=date.today() - timedelta(days=35),
+        )
+        self.assertEqual(debtors(), [])
+
+    def test_subscription_after_grace_period_is_expired_debtor(self):
+        st = f.make_student()
+        create_subscription(
+            student=st,
+            subscription_type=f.make_sub_type(sessions=8, days=30),
+            start_date=date.today() - timedelta(days=40),
+        )
+        rows = debtors()
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0].reasons)
 
     def test_upcoming_by_end_date_and_low_sessions(self):
         st = f.make_student()
@@ -207,6 +251,30 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(NotificationLog.objects.filter(status=DeliveryStatus.SENT).count(), 1)
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_notification_uses_parent_preferred_language_translation(self):
+        parent = self._parent_with_consent()
+        parent.preferred_language = "pl"
+        parent.save(update_fields=["preferred_language"])
+        st = Student.objects.create(parent=parent, first_name="Jan", last_name="K")
+        Charge.objects.create(student=st, description="A", amount_minor=24000, currency="PLN",
+                              due_date=date.today() - timedelta(days=1))
+        rule = self._rule(offset_minutes=0)
+        NotificationTemplateTranslation.objects.create(
+            template=rule.template,
+            language_code="pl",
+            subject="Platnosc",
+            body="{student}, prosimy o platnosc {amount} do {date}.",
+        )
+
+        res = run_scheduler()
+        log = NotificationLog.objects.get()
+
+        self.assertEqual(res["sent"], 1)
+        self.assertEqual(log.language_code, "pl")
+        self.assertEqual(log.subject, "Platnosc")
+        self.assertIn("prosimy o platnosc", log.body)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_offset_defers_send(self):
         parent = self._parent_with_consent()
         st = Student.objects.create(parent=parent, first_name="Ян", last_name="К")
@@ -297,3 +365,65 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(res["sent"], 1)
         self.assertEqual(TelegramBackend.sent_messages[0][0], "123456")
         self.assertTrue(log.provider_message_id.startswith("telegram:dry:"))
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_quiet_hours_defer_and_resume_at_allowed_time(self):
+        parent = self._parent_with_consent()
+        st = Student.objects.create(parent=parent, first_name="Jan", last_name="K")
+        Charge.objects.create(student=st, description="A", amount_minor=24000, currency="PLN",
+                              due_date=date(2026, 7, 14))
+        self._rule(offset_minutes=0)
+        QuietHoursPolicy.objects.create(
+            channel=Channel.EMAIL,
+            starts_at=time(22, 0),
+            ends_at=time(8, 0),
+            timezone="Europe/Warsaw",
+        )
+        quiet_now = timezone.make_aware(datetime(2026, 7, 15, 23, 30))
+
+        result = run_scheduler(now=quiet_now)
+        log = NotificationLog.objects.get()
+
+        self.assertEqual(result["enqueued"], 1)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(log.status, DeliveryStatus.DEFERRED)
+        self.assertEqual(timezone.localtime(log.scheduled_at).strftime("%H:%M"), "08:00")
+        self.assertEqual(len(mail.outbox), 0)
+
+        allowed_now = timezone.make_aware(datetime(2026, 7, 16, 8, 1))
+        delivered = deliver_pending(now=allowed_now)
+        log.refresh_from_db()
+
+        self.assertEqual(delivered["sent"], 1)
+        self.assertEqual(log.status, DeliveryStatus.SENT)
+        self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", SMS_DRY_RUN=True)
+    def test_quiet_hours_are_channel_specific(self):
+        SmsBackend.sent_messages.clear()
+        parent = self._parent_with_consent()
+        sms_consent = Consent.objects.create(parent=parent, type=ConsentType.SMS)
+        sms_consent.grant()
+        st = Student.objects.create(parent=parent, first_name="Jan", last_name="K")
+        Charge.objects.create(student=st, description="A", amount_minor=24000, currency="PLN",
+                              due_date=date(2026, 7, 14))
+        self._rule(offset_minutes=0, channel=Channel.EMAIL)
+        self._rule(offset_minutes=0, channel=Channel.SMS)
+        QuietHoursPolicy.objects.create(
+            channel=Channel.EMAIL,
+            starts_at=time(22, 0),
+            ends_at=time(8, 0),
+            timezone="Europe/Warsaw",
+        )
+
+        result = run_scheduler(now=timezone.make_aware(datetime(2026, 7, 15, 23, 30)))
+        email_log = NotificationLog.objects.get(channel=Channel.EMAIL)
+        sms_log = NotificationLog.objects.get(channel=Channel.SMS)
+
+        self.assertEqual(result["enqueued"], 2)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(email_log.status, DeliveryStatus.DEFERRED)
+        self.assertEqual(sms_log.status, DeliveryStatus.SENT)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(len(SmsBackend.sent_messages), 1)

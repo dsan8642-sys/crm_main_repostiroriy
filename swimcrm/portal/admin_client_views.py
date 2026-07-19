@@ -59,6 +59,8 @@ def admin_client_detail(request, client_id):
             audit(user, "client_account.archived", account, {"source": "api"})
         return JsonResponse(_client_detail_payload(account))
     if request.method != "GET":
+        if not account.user.is_active:
+            raise ValidationError("archived client account cannot be edited")
         data = _json_body(request)
         with transaction.atomic():
             _apply_account_data(account, data)
@@ -92,6 +94,7 @@ def admin_participant_detail(request, participant_id):
         audit(user, "participant.archived", participant, {"source": "api"})
         return JsonResponse(_student_payload(participant))
     if request.method != "GET":
+        _require_active_participant(participant, "be edited")
         data = _json_body(request)
         with transaction.atomic():
             _apply_participant_data(participant, data)

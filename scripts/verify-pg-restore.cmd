@@ -25,7 +25,7 @@ if "%POSTGRES_HOST%"=="" set "POSTGRES_HOST=127.0.0.1"
 if "%POSTGRES_PORT%"=="" set "POSTGRES_PORT=5432"
 set "PGPASSWORD=%POSTGRES_PASSWORD%"
 
-set "PG_BIN=C:\Program Files\PostgreSQL\17\bin"
+if "%PG_BIN%"=="" set "PG_BIN=C:\Program Files\PostgreSQL\17\bin"
 set "DROPDB=%PG_BIN%\dropdb.exe"
 set "CREATEDB=%PG_BIN%\createdb.exe"
 set "PG_RESTORE=%PG_BIN%\pg_restore.exe"

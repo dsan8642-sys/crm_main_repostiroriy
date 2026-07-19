@@ -3,20 +3,23 @@ template). Respects consent/unsubscribe, logs delivery with retries. No hardcode
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import unicodedata
+from zoneinfo import ZoneInfo
 
+from django.db.models import Q
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from accounts.models import ConsentType
 from billing.services import charge_statuses
 from billing.models import Charge
+from localization.services import default_language_code
 from scheduling.models import Session
 from students.models import Student
 from subscriptions.models import Subscription, SubscriptionStatus
 
 from .backends import BACKENDS, DeliveryError
 from .models import (Channel, DeliveryStatus, EventType, NotificationLog,
-                     NotificationRule, NotificationTemplate,
+                     NotificationRule, NotificationTemplate, QuietHoursPolicy,
                      SUPPORTED_NOTIFICATION_CHANNELS)
 
 MAX_RETRIES = 3
@@ -46,11 +49,25 @@ class SafeDict(dict):
         return "{" + key + "}"
 
 
-def render(template: NotificationTemplate, context: dict):
+def _template_content(template: NotificationTemplate, language_code=None):
+    language = (language_code or default_language_code()).lower()
+    translation = template.translations.filter(language_code=language).first()
+    if translation:
+        return translation.subject, translation.body
+    base_language = default_language_code()
+    if language != base_language:
+        translation = template.translations.filter(language_code=base_language).first()
+        if translation:
+            return translation.subject, translation.body
+    return template.subject, template.body
+
+
+def render(template: NotificationTemplate, context: dict, language_code=None):
     if template.channel == Channel.SMS:
         context = {key: _sms_safe(value) for key, value in context.items()}
-    subject = (template.subject or "").format_map(SafeDict(context))
-    body = template.body.format_map(SafeDict(context))
+    raw_subject, raw_body = _template_content(template, language_code)
+    subject = (raw_subject or "").format_map(SafeDict(context))
+    body = raw_body.format_map(SafeDict(context))
     return subject, body
 
 
@@ -122,7 +139,8 @@ def enqueue(*, parent, event_type, channel, template, context, dedup_key):
         with transaction.atomic():
             return NotificationLog.objects.create(
                 recipient=parent, event_type=event_type, channel=channel,
-                status=DeliveryStatus.QUEUED, payload=context, dedup_key=dedup_key)
+                status=DeliveryStatus.QUEUED, payload=context, dedup_key=dedup_key,
+                language_code=(getattr(parent, "preferred_language", "") or default_language_code()).lower())
     except IntegrityError:
         return None  # already queued/sent (idempotent)
 
@@ -140,7 +158,9 @@ def deliver(log: NotificationLog, template: NotificationTemplate):
         subject = log.payload.get("subject", "")
         body = log.payload["body"]
     else:
-        subject, body = render(template, log.payload)
+        if not log.language_code:
+            log.language_code = (getattr(log.recipient, "preferred_language", "") or default_language_code()).lower()
+        subject, body = render(template, log.payload, log.language_code)
     log.subject = subject or ""
     log.body = body or ""
     log.last_attempt_at = timezone.now()
@@ -156,16 +176,70 @@ def deliver(log: NotificationLog, template: NotificationTemplate):
         log.status = DeliveryStatus.FAILED if log.retries >= MAX_RETRIES else DeliveryStatus.QUEUED
     log.save(update_fields=[
         "status", "sent_at", "last_attempt_at", "error", "retries",
-        "subject", "body", "provider_message_id",
+        "subject", "body", "provider_message_id", "language_code",
     ])
     return log
 
 
-def deliver_pending():
-    """Deliver every QUEUED log (also retries earlier soft failures)."""
+def _quiet_window_end(policy, at):
+    local_at = timezone.localtime(at, ZoneInfo(policy.timezone))
+    current = local_at.time()
+    starts = policy.starts_at
+    ends = policy.ends_at
+
+    if starts < ends:
+        if starts <= current < ends:
+            return local_at.replace(hour=ends.hour, minute=ends.minute, second=ends.second, microsecond=0)
+        return None
+
+    if current >= starts:
+        next_day = local_at + timedelta(days=1)
+        return next_day.replace(hour=ends.hour, minute=ends.minute, second=ends.second, microsecond=0)
+    if current < ends:
+        return local_at.replace(hour=ends.hour, minute=ends.minute, second=ends.second, microsecond=0)
+    return None
+
+
+def next_allowed_delivery_at(channel, at=None):
+    """Return the earliest allowed delivery time for a channel."""
+    candidate = at or timezone.now()
+    policies = list(QuietHoursPolicy.objects.filter(channel=channel, is_active=True).order_by("id"))
+    for _ in range(max(1, len(policies) * 2)):
+        next_candidate = None
+        for policy in policies:
+            quiet_end = _quiet_window_end(policy, candidate)
+            if quiet_end and (next_candidate is None or quiet_end > next_candidate):
+                next_candidate = quiet_end
+        if next_candidate is None or next_candidate <= candidate:
+            return candidate
+        candidate = next_candidate
+    return candidate
+
+
+def _defer_if_quiet(log, now):
+    allowed_at = next_allowed_delivery_at(log.channel, now)
+    if allowed_at <= now:
+        return False
+    log.status = DeliveryStatus.DEFERRED
+    log.scheduled_at = allowed_at
+    log.error = ""
+    log.save(update_fields=["status", "scheduled_at", "error"])
+    return True
+
+
+def deliver_pending(now=None):
+    """Deliver due QUEUED/DEFERRED logs and defer sends during quiet hours."""
+    now = now or timezone.now()
     tmpl_cache = {}
-    sent = failed = 0
-    for log in NotificationLog.objects.filter(status=DeliveryStatus.QUEUED):
+    sent = failed = deferred = 0
+    due_logs = NotificationLog.objects.filter(
+        Q(status=DeliveryStatus.QUEUED) |
+        Q(status=DeliveryStatus.DEFERRED, scheduled_at__lte=now)
+    ).order_by("scheduled_at", "id")
+    for log in due_logs:
+        if _defer_if_quiet(log, now):
+            deferred += 1
+            continue
         key = (log.event_type, log.channel)
         tmpl = tmpl_cache.get(key) or NotificationTemplate.objects.filter(
             event_type=log.event_type, channel=log.channel).first()
@@ -181,7 +255,7 @@ def deliver_pending():
             sent += 1
         elif log.status == DeliveryStatus.FAILED:
             failed += 1
-    return {"sent": sent, "failed": failed}
+    return {"sent": sent, "failed": failed, "deferred": deferred}
 
 
 def mass_mailing_recipients(*, audience, group_id=None, trainer_id=None, parent_ids=None):
@@ -248,7 +322,7 @@ def run_scheduler(now=None):
                           context=cand.context, dedup_key=dedup)
             if log:
                 enqueued += 1
-    delivered = deliver_pending()
+    delivered = deliver_pending(now=now)
     return {"enqueued": enqueued, **delivered}
 
 

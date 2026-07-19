@@ -7,6 +7,14 @@ from django.utils import timezone
 logger = logging.getLogger("audit")
 
 
+class AuditLogQuerySet(models.QuerySet):
+    def delete(self):
+        raise ValidationError("Audit log entries are immutable and cannot be deleted.")
+
+    def update(self, **kwargs):
+        raise ValidationError("Audit log entries are immutable and cannot be updated.")
+
+
 class AuditLogEntry(models.Model):
     """Section 5.12: immutable record of who did what and when."""
     actor = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
@@ -15,6 +23,8 @@ class AuditLogEntry(models.Model):
     entity_id = models.CharField(max_length=64, blank=True)
     changes = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
+
+    objects = AuditLogQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at", "-id"]

@@ -112,4 +112,4 @@ exclusion-constraint против гонок в расписании.
 - Продакшн-ключи Telegram-бота и SMS-провайдера задаются через env; SMS-канал уже подчиняется правилам 5.6 (без диакритиков, < 160 символов).
 - Массовые рассылки (5.7) поддерживают сегментацию получателей и персонализацию поверх notification engine.
 - Планировщик/очереди запускаются через Celery/Redis или cron по инструкциям `docs/OPERATIONS.md`.
-- Перед выкладкой запускаются `scripts\release-check-backend.cmd -Postgres`, `npm.cmd run test:smoke`, `scripts\check-production-env.cmd` и backup/restore drill.
+- Перед выкладкой запускаются `scripts\release-check-full.cmd -Postgres`, `scripts\check-production-env.cmd` и backup/restore drill.

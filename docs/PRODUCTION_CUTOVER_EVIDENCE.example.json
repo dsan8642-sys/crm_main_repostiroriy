@@ -1,0 +1,88 @@
+{
+  "version": "2026-07-16",
+  "environment": "production",
+  "generated_at": "2026-07-16T12:00:00+02:00",
+  "release_candidate": {
+    "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+    "branch": "main",
+    "source_tree": "clean"
+  },
+  "required_evidence": [
+    {
+      "id": "local_backend_release_gate",
+      "status": "passed",
+      "command": "scripts\\release-check-backend.cmd",
+      "captured_at": "2026-07-16T12:01:00+02:00",
+      "summary": "Backend release checks passed; Django tests, NocoBase API smoke, readiness audit, cutover audit, and operational guards passed.",
+      "output_excerpt": "Backend release checks passed. Production readiness audit verified. NocoBase API build-pack smoke check. Tracked release source manifests."
+    },
+    {
+      "id": "local_full_stack_release_gate",
+      "status": "passed",
+      "command": "scripts\\release-check-full.cmd",
+      "captured_at": "2026-07-16T12:05:00+02:00",
+      "summary": "Full-stack release checks passed; frontend dependency audit, production build, and Playwright smoke passed.",
+      "output_excerpt": "Full-stack release checks passed. found 0 vulnerabilities. Frontend production build passed. Frontend Playwright smoke tests passed."
+    },
+    {
+      "id": "release_source_archive",
+      "status": "passed",
+      "command": "scripts\\build-release-source.cmd",
+      "captured_at": "2026-07-16T12:06:00+02:00",
+      "summary": "Release source archive was built from clean release commit 0123456789abcdef0123456789abcdef01234567, the manifest was written for audit, and the archive checksum was verified.",
+      "output_excerpt": "Release source archive written: releases\\swimcrm-release-0123456789ab.zip. Release source manifest written: releases\\swimcrm-release-0123456789ab.manifest.json. Release source archive sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. Release source archive manifest verified. commit_sha: 0123456789abcdef0123456789abcdef01234567. archive_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."
+    },
+    {
+      "id": "tracked_release_source_guard",
+      "status": "passed",
+      "command": "scripts\\verify-release-source-manifests.cmd -RequireTracked",
+      "captured_at": "2026-07-16T12:07:00+02:00",
+      "summary": "Tracked release source guard passed after confirming required NocoBase and frontend manifests are tracked by Git.",
+      "output_excerpt": "Release source manifests verified. Required release manifests are tracked by Git."
+    },
+    {
+      "id": "github_full_stack_release_job",
+      "status": "passed",
+      "evidence_url": "https://github.com/acme/swimcrm/actions/runs/1234567890",
+      "captured_at": "2026-07-16T12:10:00+02:00",
+      "summary": "GitHub Actions release-check job passed on release commit 0123456789abcdef0123456789abcdef01234567."
+    },
+    {
+      "id": "github_postgres_backend_job",
+      "status": "passed",
+      "evidence_url": "https://github.com/acme/swimcrm/actions/runs/1234567890",
+      "captured_at": "2026-07-16T12:11:00+02:00",
+      "summary": "GitHub Actions postgres-backend-check job passed against PostgreSQL 16 on release commit 0123456789abcdef0123456789abcdef01234567."
+    },
+    {
+      "id": "production_env_preflight",
+      "status": "passed",
+      "command": "scripts\\check-production-env.cmd",
+      "captured_at": "2026-07-16T12:20:00+02:00",
+      "summary": "Production environment check passed with real secrets, PostgreSQL, Celery, NocoBase, and runtime paths.",
+      "output_excerpt": "Production environment check passed. PostgreSQL configured. NocoBase runtime paths configured."
+    },
+    {
+      "id": "live_hybrid_health",
+      "status": "passed",
+      "command": "scripts\\check-hybrid-health.cmd",
+      "captured_at": "2026-07-16T12:25:00+02:00",
+      "summary": "Live Django health, NocoBase bridge health, guarded config health, ops status, and NocoBase process health passed.",
+      "output_excerpt": "Hybrid health check passed. nocobase_config_health /api/nocobase/config/languages/"
+    },
+    {
+      "id": "hybrid_backup_restore_drill",
+      "status": "passed",
+      "command": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
+      "captured_at": "2026-07-16T12:35:00+02:00",
+      "summary": "Latest production backup was created, the hybrid restore plan was inspected, Django and NocoBase dumps were structurally verified, and restore verification completed for the Django PostgreSQL database.",
+      "output_excerpt": "Hybrid backup set written. backup_set_dir nocobase_database. Django dump sha256 OK. NocoBase dump sha256 OK. Django dump list OK. NocoBase dump list OK. Restore verification OK. Hybrid backup set verification OK."
+    },
+    {
+      "id": "rollback_plan_acknowledged",
+      "status": "passed",
+      "captured_at": "2026-07-16T12:40:00+02:00",
+      "summary": "Rollback plan reviewed: stop writers, restore Django/NocoBase databases and storage, migrate/check, restart services, run live smoke."
+    }
+  ]
+}

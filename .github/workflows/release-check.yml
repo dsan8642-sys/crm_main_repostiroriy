@@ -22,12 +22,31 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Verify release source manifests
+        run: python scripts/verify_release_source_manifests.py --require-tracked
+
+      - name: Build release source archive
+        shell: pwsh
+        run: .\scripts\build-release-source.ps1
+
+      - name: Verify release source archive
+        shell: pwsh
+        run: |
+          $shortSha = (git rev-parse --short=12 HEAD).Trim()
+          .\scripts\verify-release-source-archive.ps1 "releases\swimcrm-release-$shortSha.manifest.json"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install root Node tooling
+        shell: pwsh
+        run: npm ci --cache .npm-cache
 
       - name: Install backend dependencies
         shell: pwsh
@@ -36,25 +55,54 @@ jobs:
           swimcrm\.venv\Scripts\python.exe -m pip install --upgrade pip
           swimcrm\.venv\Scripts\python.exe -m pip install -r swimcrm\requirements.txt
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
+      - name: Full-stack release check
+        shell: pwsh
+        run: .\scripts\release-check-full.ps1 -AllowMissingLocalNocoBaseRuntime
 
-      - name: Backend release check
-        run: scripts\release-check-backend.cmd
+  postgres-backend-check:
+    runs-on: ubuntu-latest
 
-      - name: Frontend audit
-        working-directory: frontend
-        run: npm.cmd audit --audit-level=high
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: swimcrm
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d swimcrm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
-      - name: Install Playwright browser
-        working-directory: frontend
-        run: npx playwright install chromium
+    env:
+      POSTGRES_DB: swimcrm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      PYTHONIOENCODING: utf-8
 
-      - name: Frontend build
-        working-directory: frontend
-        run: npm.cmd run build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Frontend smoke
-        working-directory: frontend
-        run: npm.cmd run test:smoke
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify release source manifests
+        run: python scripts/verify_release_source_manifests.py --require-tracked
+
+      - name: Install backend dependencies
+        run: |
+          python -m venv swimcrm/.venv
+          swimcrm/.venv/bin/python -m pip install --upgrade pip
+          swimcrm/.venv/bin/python -m pip install -r swimcrm/requirements.txt
+
+      - name: PostgreSQL backend tests
+        working-directory: swimcrm
+        run: .venv/bin/python manage.py test tests --noinput

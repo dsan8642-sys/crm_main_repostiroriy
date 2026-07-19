@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, time
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
@@ -16,15 +17,19 @@ from analytics.reports import income_by_group, income_by_trainer, income_for_per
 from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
 from audit.models import audit
-from billing.models import Charge, Payment, PaymentMethod, PaymentStatus, ReceiptFile
+from billing.models import (Charge, Payment, PaymentMethod, PaymentStatus,
+                            ReceiptFile, normalize_payment_method)
 from billing.services import charge_statuses, confirm_payment, reject_payment, student_balance
 from catalog.models import Group, SubscriptionType
 from dataio.exports import export_entity
 from notifications.models import Channel
 from notifications.services import queue_mass_mailing
-from scheduling.models import RecurringTemplate, Session, SessionType
+from scheduling.models import (RecurringTemplate, Session, SessionParticipant,
+                               SessionParticipantStatus, SessionType, WaitlistEntry,
+                               WaitlistStatus)
 from scheduling.services import (ScheduleConflict, cancel_series, check_trainer_conflict,
-                                 create_session, edit_single_session, generate_sessions)
+                                 create_session, edit_single_session, generate_sessions,
+                                 promote_waitlist_entry, session_roster_students)
 from students.models import Student
 from students.services import ensure_account_holder_participant
 from subscriptions.models import Subscription, SubscriptionStatus
@@ -132,6 +137,9 @@ def _student_payload(student):
 
 
 def _session_payload(session):
+    waitlist_active_count = getattr(session, "waitlist_active_count", None)
+    if waitlist_active_count is None and session.pk:
+        waitlist_active_count = session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).count()
     return {
         "id": session.id,
         "template_id": session.template_id,
@@ -141,13 +149,60 @@ def _session_payload(session):
         "session_type": session.session_type,
         "trainer_id": session.trainer_id,
         "trainer": str(session.trainer),
+        "substitute_trainer_id": session.substitute_trainer_id,
+        "substitute_trainer": str(session.substitute_trainer) if session.substitute_trainer_id else None,
+        "effective_trainer_id": session.effective_trainer.id,
+        "effective_trainer": str(session.effective_trainer),
         "group": {"id": session.group_id, "name": session.group.name} if session.group else None,
         "individual_student_id": session.individual_student_id,
         "is_cancelled": session.is_cancelled,
         "is_manually_modified": session.is_manually_modified,
         "max_participants": session.max_participants,
+        "waitlist_active_count": waitlist_active_count,
         "notes": session.notes,
     }
+
+
+def _waitlist_payload(entry):
+    participant_id = getattr(entry, "participant_id", None)
+    if participant_id is None and entry.pk and entry.status == WaitlistStatus.PROMOTED:
+        participant_id = SessionParticipant.objects.filter(
+            session_id=entry.session_id,
+            student_id=entry.student_id,
+            status=SessionParticipantStatus.ACTIVE,
+        ).values_list("id", flat=True).first()
+    return {
+        "id": entry.id,
+        "session_id": entry.session_id,
+        "student_id": entry.student_id,
+        "participant_id": participant_id,
+        "student": _student_payload(entry.student) if getattr(entry, "student", None) else None,
+        "priority": entry.priority,
+        "status": entry.status,
+        "note": entry.note,
+        "created_at": timezone.localtime(entry.created_at).isoformat() if entry.created_at else None,
+        "updated_at": timezone.localtime(entry.updated_at).isoformat() if entry.updated_at else None,
+    }
+
+
+def _apply_waitlist_data(entry, data):
+    if "student_id" in data:
+        entry.student = get_object_or_404(Student, pk=data.get("student_id"))
+    if "priority" in data:
+        try:
+            entry.priority = int(data.get("priority") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("priority must be an integer") from exc
+    if "status" in data:
+        status = data.get("status")
+        if status not in WaitlistStatus.values:
+            raise ValidationError("invalid waitlist status")
+        entry.status = status
+    if "note" in data:
+        entry.note = data.get("note", "") or ""
+    entry.full_clean()
+    entry.save()
+    return entry
 
 
 def _template_payload(template):
@@ -191,6 +246,7 @@ def _subscription_payload(subscription):
         "start_date": subscription.start_date.isoformat(),
         "base_end_date": subscription.base_end_date.isoformat(),
         "effective_end_date": subscription.effective_end_date.isoformat(),
+        "grace_end_date": subscription.grace_end_date.isoformat(),
         "remaining_sessions": subscription.remaining_sessions,
     }
 
@@ -326,6 +382,7 @@ def _client_account_payload(account):
         "email": account.email or user.email,
         "phone": account.phone,
         "telegram_chat_id": account.telegram_chat_id,
+        "preferred_language": account.preferred_language,
         "is_active": user.is_active,
         "created_at": timezone.localtime(account.created_at).isoformat(),
     }
@@ -398,6 +455,8 @@ def _apply_account_data(account, data):
         account.email = account_data.get("email", "") or ""
     if "telegram_chat_id" in account_data:
         account.telegram_chat_id = account_data.get("telegram_chat_id", "") or ""
+    if "preferred_language" in account_data:
+        account.preferred_language = (account_data.get("preferred_language", "") or "").lower()
     account.full_clean(exclude=["user"])
     account.save()
     return account
@@ -422,6 +481,7 @@ def _create_account(data):
         phone=phone,
         email=email,
         telegram_chat_id=account_data.get("telegram_chat_id", "") or "",
+        preferred_language=(account_data.get("preferred_language", "") or settings.SWIMCRM_DEFAULT_LANGUAGE).lower(),
     )
     audit(data.get("_actor"), "client_account.created", account, {"source": "api"})
     return account
@@ -592,7 +652,16 @@ def _payment_data(data):
     return data.get("payment") or data
 
 
+def _require_active_participant(participant, action):
+    if not participant.is_active:
+        raise ValidationError(f"archived participant cannot {action}")
+    if participant.parent_id and not participant.parent.user.is_active:
+        raise ValidationError(f"archived client account cannot {action}")
+    return participant
+
+
 def _create_charge_for_participant(participant, data, *, actor=None, subscription=None):
+    _require_active_participant(participant, "receive new charges")
     charge_data = _charge_data(data)
     subscription_id = charge_data.get("subscription_id")
     if subscription_id:
@@ -627,8 +696,9 @@ def _create_subscription_charge(subscription, *, actor=None, due_date=None):
 
 
 def _create_payment_for_participant(participant, data, *, actor=None):
+    _require_active_participant(participant, "receive new payments")
     payment_data = _payment_data(data)
-    method = payment_data.get("method", PaymentMethod.CASH)
+    method = normalize_payment_method(payment_data.get("method", PaymentMethod.CASH))
     if method not in PaymentMethod.values:
         raise ValidationError("invalid payment method")
     desired_status = payment_data.get("status")
@@ -679,6 +749,9 @@ def _session_changes_from_data(data):
     changes = {}
     if "trainer_id" in data:
         changes["trainer"] = get_object_or_404(Trainer, pk=data.get("trainer_id"))
+    if "substitute_trainer_id" in data:
+        trainer_id = data.get("substitute_trainer_id")
+        changes["substitute_trainer"] = get_object_or_404(Trainer, pk=trainer_id) if trainer_id else None
     if "start_at" in data:
         changes["start_at"] = _parse_datetime(data.get("start_at"), "start_at")
     if "end_at" in data:
@@ -701,6 +774,7 @@ def _session_changes_from_data(data):
         student_id = data.get("individual_student_id")
         changes["individual_student"] = get_object_or_404(Student, pk=student_id) if student_id else None
         if student_id:
+            _require_active_participant(changes["individual_student"], "be assigned to sessions")
             changes["group"] = None
             changes["session_type"] = SessionType.INDIVIDUAL
     return changes
@@ -713,6 +787,7 @@ def _create_session_from_data(data, *, actor=None):
     session_type = data.get("session_type") or SessionType.GROUP
     if data.get("individual_student_id"):
         individual_student = get_object_or_404(Student, pk=data.get("individual_student_id"))
+        _require_active_participant(individual_student, "be assigned to new sessions")
         session_type = SessionType.INDIVIDUAL
     else:
         group = get_object_or_404(Group, pk=data.get("group_id"))
@@ -784,9 +859,7 @@ def _student_owned_by_client(account, student_id):
 
 
 def _session_roster(session):
-    if session.individual_student_id:
-        return Student.objects.filter(pk=session.individual_student_id).select_related("parent", "group")
-    return Student.objects.filter(group=session.group, is_active=True).select_related("parent", "group")
+    return session_roster_students(session)
 
 
 def _visible_parent_sessions(students, date_from=None, date_to=None):

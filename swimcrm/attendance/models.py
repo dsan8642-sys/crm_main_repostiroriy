@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -31,6 +32,9 @@ class AttendanceRecord(models.Model):
     @property
     def deducts(self):
         return self.status in DEDUCTING_STATUSES
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Attendance history is immutable and cannot be deleted.")
 
     def __str__(self):
         return f"{self.student} · {self.get_status_display()}"

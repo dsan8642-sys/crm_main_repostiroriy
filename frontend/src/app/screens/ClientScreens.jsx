@@ -96,7 +96,7 @@ export function createClientScreens(components, icons, reloadRoleData) {
       if (child?.studentId) formData.set('student_id', child.studentId)
       formData.set('amount_minor', String(Math.round(Number(amount || 0) * 100)))
       formData.set('currency', 'PLN')
-      formData.set('method', 'transfer')
+      formData.set('method', 'bank_transfer')
       formData.set('file', file)
       try {
         await api.postForm('/api/client/payments/upload-receipt/', formData)

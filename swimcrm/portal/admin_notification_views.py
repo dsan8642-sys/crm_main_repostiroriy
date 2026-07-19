@@ -1,7 +1,9 @@
 from .support import *
 from .admin_support import _admin_required
+from django.db.models import ProtectedError
 from notifications.models import (DeliveryStatus, EventType, NotificationLog,
                                   NotificationRule, NotificationTemplate,
+                                  QuietHoursPolicy,
                                   SUPPORTED_NOTIFICATION_CHANNELS)
 from notifications.services import deliver, deliver_pending
 
@@ -28,6 +30,18 @@ def _rule_payload(rule):
     }
 
 
+def _quiet_hours_payload(policy):
+    return {
+        "id": policy.id,
+        "channel": policy.channel,
+        "starts_at": policy.starts_at.isoformat(timespec="minutes"),
+        "ends_at": policy.ends_at.isoformat(timespec="minutes"),
+        "timezone": policy.timezone,
+        "is_active": policy.is_active,
+        "created_at": timezone.localtime(policy.created_at).isoformat() if policy.created_at else None,
+    }
+
+
 def _log_payload(log):
     return {
         "id": log.id,
@@ -42,6 +56,7 @@ def _log_payload(log):
         "subject": log.subject,
         "body": log.body,
         "provider_message_id": log.provider_message_id,
+        "scheduled_at": timezone.localtime(log.scheduled_at).isoformat() if log.scheduled_at else None,
         "dedup_key": log.dedup_key,
         "created_at": timezone.localtime(log.created_at).isoformat() if log.created_at else None,
         "last_attempt_at": timezone.localtime(log.last_attempt_at).isoformat() if log.last_attempt_at else None,
@@ -91,6 +106,23 @@ def _apply_rule_data(rule, data):
     return rule
 
 
+def _apply_quiet_hours_data(policy, data):
+    data = data.get("policy") or data
+    if "channel" in data:
+        policy.channel = data.get("channel", "") or ""
+    if "starts_at" in data:
+        policy.starts_at = _parse_time(data.get("starts_at"), "starts_at")
+    if "ends_at" in data:
+        policy.ends_at = _parse_time(data.get("ends_at"), "ends_at")
+    if "timezone" in data:
+        policy.timezone = data.get("timezone", "") or "Europe/Warsaw"
+    if "is_active" in data:
+        policy.is_active = _bool_value(data.get("is_active"), True)
+    policy.full_clean()
+    policy.save()
+    return policy
+
+
 @require_http_methods(["GET", "POST"])
 def admin_notification_templates(request):
     _admin_required(request)
@@ -110,7 +142,10 @@ def admin_notification_template_detail(request, template_id):
     _admin_required(request)
     template = get_object_or_404(NotificationTemplate, pk=template_id)
     if request.method == "DELETE":
-        template.delete()
+        try:
+            template.delete()
+        except ProtectedError as exc:
+            raise ValidationError("notification template is used by active or archived rules") from exc
         return JsonResponse({"ok": True})
     if request.method != "GET":
         _apply_template_data(template, _json_body(request))
@@ -144,6 +179,33 @@ def admin_notification_rule_detail(request, rule_id):
     if request.method != "GET":
         _apply_rule_data(rule, _json_body(request))
     return JsonResponse(_rule_payload(rule))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_quiet_hours_policies(request):
+    _admin_required(request)
+    if request.method == "POST":
+        policy = _apply_quiet_hours_data(QuietHoursPolicy(), _json_body(request))
+        return JsonResponse(_quiet_hours_payload(policy), status=201)
+    qs = QuietHoursPolicy.objects.order_by("channel", "starts_at", "id")
+    if request.GET.get("channel"):
+        qs = qs.filter(channel=request.GET["channel"])
+    if request.GET.get("active") in {"true", "false"}:
+        qs = qs.filter(is_active=request.GET["active"] == "true")
+    return JsonResponse({"policies": [_quiet_hours_payload(policy) for policy in qs[:200]]})
+
+
+@require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
+def admin_quiet_hours_policy_detail(request, policy_id):
+    _admin_required(request)
+    policy = get_object_or_404(QuietHoursPolicy, pk=policy_id)
+    if request.method == "DELETE":
+        policy.is_active = False
+        policy.save(update_fields=["is_active"])
+        return JsonResponse(_quiet_hours_payload(policy))
+    if request.method != "GET":
+        _apply_quiet_hours_data(policy, _json_body(request))
+    return JsonResponse(_quiet_hours_payload(policy))
 
 
 @require_GET

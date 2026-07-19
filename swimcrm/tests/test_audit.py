@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 
 from django.contrib.admin.sites import AdminSite
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -114,3 +115,21 @@ class AuditLogRule(TestCase):
             confirm_payment(p, self.admin)
 
         self.assertTrue(any("audit_event action=payment.confirmed" in line for line in logs.output))
+
+    def test_audit_log_entries_are_immutable(self):
+        p = Payment.objects.create(student=self.student, amount_minor=1000, currency="PLN",
+                                   paid_at=date.today(), status=PaymentStatus.PENDING)
+        confirm_payment(p, self.admin)
+        entry = AuditLogEntry.objects.get(action="payment.confirmed")
+
+        entry.action = "tampered"
+        with self.assertRaises(ValidationError):
+            entry.save()
+        with self.assertRaises(ValidationError):
+            AuditLogEntry.objects.filter(pk=entry.pk).update(action="tampered")
+        with self.assertRaises(ValidationError):
+            AuditLogEntry.objects.filter(pk=entry.pk).delete()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.action, "payment.confirmed")
+        self.assertTrue(AuditLogEntry.objects.filter(pk=entry.pk).exists())

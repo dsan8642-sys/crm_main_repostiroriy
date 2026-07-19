@@ -158,7 +158,7 @@ def client_upload_receipt(request):
         amount_minor=int(request.POST["amount_minor"]),
         currency=request.POST.get("currency", "PLN"),
         paid_at=_parse_date(request.POST.get("paid_at"), "paid_at") or timezone.localdate(),
-        method=request.POST.get("method", "transfer"),
+        method=normalize_payment_method(request.POST.get("method", PaymentMethod.TRANSFER)),
         comment=request.POST.get("comment", ""),
         created_by=request.user,
     )

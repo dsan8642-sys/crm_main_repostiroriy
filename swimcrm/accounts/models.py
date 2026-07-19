@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -26,6 +27,7 @@ class ParentAccount(models.Model):
     phone = models.CharField(max_length=32, help_text="Один телефон на семью (без дубликатов)")
     email = models.EmailField(blank=True)
     telegram_chat_id = models.CharField(max_length=64, blank=True)
+    preferred_language = models.CharField(max_length=12, default=settings.SWIMCRM_DEFAULT_LANGUAGE)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

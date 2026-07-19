@@ -49,6 +49,10 @@ def set_attendance(*, session_id, student, status, actor=None):
     session = Session.objects.select_for_update().get(pk=session_id)
     if session.is_cancelled:
         raise ValidationError("Занятие отменено")
+    if not student.is_active:
+        raise ValidationError("archived participant cannot have attendance marked")
+    if student.parent_id and not student.parent.user.is_active:
+        raise ValidationError("archived client account cannot have attendance marked")
 
     record = AttendanceRecord.objects.select_for_update().filter(
         session=session, student=student).first()

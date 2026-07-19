@@ -70,7 +70,9 @@ def admin_schedule_sessions(request):
     if request.method == "POST":
         session = _create_session_from_data(_json_body(request), actor=user)
         return JsonResponse(_session_payload(session), status=201)
-    qs = Session.objects.select_related("group", "trainer__user", "individual_student", "template").order_by("start_at", "id")
+    qs = Session.objects.select_related(
+        "group", "trainer__user", "substitute_trainer__user", "individual_student", "template"
+    ).order_by("start_at", "id")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     if date_from:
@@ -90,7 +92,9 @@ def admin_schedule_sessions(request):
 def admin_schedule_session_detail(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(
-        Session.objects.select_related("group", "trainer__user", "individual_student", "template"), pk=session_id)
+        Session.objects.select_related(
+            "group", "trainer__user", "substitute_trainer__user", "individual_student", "template"
+        ), pk=session_id)
     if request.method == "POST":
         changes = _session_changes_from_data(_json_body(request))
         edit_single_session(session, actor=user, **changes)
@@ -102,7 +106,9 @@ def admin_schedule_session_detail(request, session_id):
 def admin_schedule_session_attendance(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(
-        Session.objects.select_related("group", "trainer__user", "individual_student"), pk=session_id)
+        Session.objects.select_related(
+            "group", "trainer__user", "substitute_trainer__user", "individual_student"
+        ), pk=session_id)
     if request.method == "POST":
         data = _json_body(request)
         try:
@@ -127,6 +133,72 @@ def admin_schedule_session_attendance(request, session_id):
             "attendance": _attendance_payload(attendance[student.id]) if student.id in attendance else None,
         } for student in _session_roster(session)],
     })
+
+
+@require_http_methods(["GET", "POST"])
+def admin_schedule_session_waitlist(request, session_id):
+    user = _admin_required(request)
+    session = get_object_or_404(Session, pk=session_id)
+    if request.method == "POST":
+        data = _json_body(request)
+        try:
+            student_id = int(data.get("student_id"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("student_id is required") from exc
+        if WaitlistEntry.objects.filter(session=session, student_id=student_id).exists():
+            raise ValidationError("student is already on this session waitlist")
+        entry = WaitlistEntry(session=session)
+        _apply_waitlist_data(entry, data)
+        audit(user, "waitlist.created", entry, {
+            "session_id": session.id,
+            "student_id": entry.student_id,
+            "status": entry.status,
+        })
+        return JsonResponse(_waitlist_payload(entry), status=201)
+    qs = session.waitlist_entries.select_related("student", "student__parent", "student__group")
+    if request.GET.get("status"):
+        qs = qs.filter(status=request.GET["status"])
+    return JsonResponse({
+        "waitlist": [_waitlist_payload(entry) for entry in qs.order_by("priority", "created_at", "id")[:200]],
+    })
+
+
+@require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
+def admin_schedule_waitlist_entry_detail(request, entry_id):
+    user = _admin_required(request)
+    entry = get_object_or_404(
+        WaitlistEntry.objects.select_related("session", "student", "student__parent", "student__group"),
+        pk=entry_id,
+    )
+    if request.method == "GET":
+        return JsonResponse(_waitlist_payload(entry))
+    before = {"priority": entry.priority, "status": entry.status, "note": entry.note}
+    if request.method == "DELETE":
+        if entry.status == WaitlistStatus.PROMOTED:
+            raise ValidationError("promoted waitlist entries cannot be cancelled")
+        _apply_waitlist_data(entry, {"status": WaitlistStatus.CANCELLED})
+    else:
+        data = _json_body(request)
+        if entry.status == WaitlistStatus.PROMOTED and data.get("status") not in (None, WaitlistStatus.PROMOTED):
+            raise ValidationError("promoted waitlist entries cannot change status")
+        _apply_waitlist_data(entry, data)
+    audit(user, "waitlist.updated", entry, {
+        "before": before,
+        "after": {"priority": entry.priority, "status": entry.status, "note": entry.note},
+    })
+    return JsonResponse(_waitlist_payload(entry))
+
+
+@require_POST
+def admin_schedule_waitlist_entry_promote(request, entry_id):
+    user = _admin_required(request)
+    entry = get_object_or_404(
+        WaitlistEntry.objects.select_related("session", "student", "student__parent", "student__group"),
+        pk=entry_id,
+    )
+    entry, participant = promote_waitlist_entry(entry, actor=user)
+    entry.participant_id = participant.id
+    return JsonResponse(_waitlist_payload(entry))
 
 
 @require_POST

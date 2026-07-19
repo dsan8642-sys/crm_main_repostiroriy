@@ -1,5 +1,6 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+from scheduling.models import Location, SessionTypeConfig
 
 @require_GET
 def admin_api_contract(request):
@@ -18,6 +19,12 @@ def admin_reference(request):
             Q(parent__phone__icontains=q) | Q(parent__email__icontains=q) |
             Q(email__icontains=q)
         )
+    session_type_configs = list(SessionTypeConfig.objects.filter(is_active=True).order_by("code", "id"))
+    session_type_choices = (
+        [{"value": row.code, "label": row.label, "default_capacity": row.default_capacity}
+         for row in session_type_configs]
+        or [{"value": value, "label": label, "default_capacity": None} for value, label in SessionType.choices]
+    )
     return JsonResponse({
         "trainers": [_trainer_payload(trainer) for trainer in
                      Trainer.objects.select_related("user").filter(is_active=True).order_by("user__last_name", "id")],
@@ -25,17 +32,42 @@ def admin_reference(request):
                    Group.objects.select_related("default_trainer__user").filter(is_active=True).order_by("name", "id")],
         "subscription_types": [_subscription_type_payload(stype) for stype in
                                SubscriptionType.objects.filter(is_active=True).order_by("name", "id")],
+        "locations": [
+            {
+                "id": location.id,
+                "code": location.code,
+                "name": location.name,
+                "address": location.address,
+                "timezone": location.timezone,
+            }
+            for location in Location.objects.filter(is_active=True).order_by("name", "id")
+        ],
         "participants": [_student_payload(participant) for participant in
                          participants.order_by("last_name", "first_name", "id")[:100]],
         "choices": {
             "payment_methods": [{"value": value, "label": label} for value, label in PaymentMethod.choices],
             "payment_statuses": [{"value": value, "label": label} for value, label in PaymentStatus.choices],
             "subscription_statuses": [{"value": value, "label": label} for value, label in SubscriptionStatus.choices],
-            "session_types": [{"value": value, "label": label} for value, label in SessionType.choices],
+            "session_types": session_type_choices,
         },
     })
 
 
+@require_GET
+def admin_readiness(request):
+    _admin_required(request)
+    from common.readiness import build_readiness_report
+
+    report = build_readiness_report()
+    return JsonResponse(report, status=200 if report["ok"] else 503)
+
+
+@require_GET
+def admin_ops_status(request):
+    _admin_required(request)
+    from common.ops_status import build_ops_status
+
+    return JsonResponse(build_ops_status())
 @require_GET
 def admin_dashboard(request):
     _admin_required(request)

@@ -1,0 +1,227 @@
+{
+  "version": "2026-07-15",
+  "purpose": "Operator build pack for assembling the first production-safe NocoBase screens from Django bridge/config APIs.",
+  "source_blueprint": "docs/NOCOBASE_FIRST_SCREENS.json",
+  "global_guards": [
+    "Use only Django bridge/config API data sources declared in the source blueprint.",
+    "Never connect NocoBase direct SQL write access to payments, ledger, attendance, receipts, payroll calculations, or audit history.",
+    "Use NOCOBASE_BRIDGE_TOKEN only for read-only screens.",
+    "Use NOCOBASE_CONFIG_TOKEN only for guarded configuration screens.",
+    "Hide tokens in NocoBase environment variables or secret storage; never place token values in page definitions."
+  ],
+  "screens": [
+    {
+      "screen_id": "operations_status",
+      "route": "/ops/status",
+      "navigation_group": "Operations",
+      "layout": "dashboard",
+      "data_sources": [
+        {
+          "name": "ops_status",
+          "method": "GET",
+          "path": "/api/nocobase/ops-status/",
+          "token": "NOCOBASE_BRIDGE_TOKEN",
+          "refresh_seconds": 60
+        }
+      ],
+      "blocks": [
+        { "type": "status_card", "source": "ops_status", "fields": ["status", "generated_at", "warnings", "critical"] },
+        { "type": "metric_grid", "source": "ops_status.notifications", "fields": ["due_pending", "scheduled_future", "failed_last_24h", "oldest_due_age_minutes"] },
+        { "type": "key_value", "source": "ops_status.receipt_cleanup", "fields": ["retention_days", "expired_receipts_waiting_cleanup"] },
+        { "type": "json_readonly", "source": "ops_status.celery.beat_schedule", "title": "Celery beat schedule" }
+      ],
+      "actions": [],
+      "permissions": ["admin", "ops"]
+    },
+    {
+      "screen_id": "client_directory",
+      "route": "/clients",
+      "navigation_group": "Clients",
+      "layout": "table_with_detail_drawer",
+      "data_sources": [
+        {
+          "name": "clients",
+          "method": "GET",
+          "path": "/api/nocobase/clients/",
+          "token": "NOCOBASE_BRIDGE_TOKEN",
+          "query": ["q", "active", "limit"]
+        }
+      ],
+      "blocks": [
+        { "type": "filter_bar", "source": "clients", "fields": ["q", "active", "limit"] },
+        { "type": "table", "source": "clients.clients", "fields": ["full_name", "birth_date", "group.name", "parent.full_name", "parent.phone", "balance_minor", "has_overdue_charge"] },
+        { "type": "detail_drawer", "source": "clients.clients", "fields": ["participant_email", "parent.email", "parent.telegram_chat_id", "parent.preferred_language", "latest_payment.status", "active_subscription.remaining_sessions", "active_subscription.grace_end_date"] }
+      ],
+      "actions": [],
+      "permissions": ["admin", "ops"]
+    },
+    {
+      "screen_id": "debtors",
+      "route": "/finance/debtors",
+      "navigation_group": "Finance",
+      "layout": "table",
+      "data_sources": [
+        {
+          "name": "debtors",
+          "method": "GET",
+          "path": "/api/nocobase/debtors/",
+          "token": "NOCOBASE_BRIDGE_TOKEN"
+        }
+      ],
+      "blocks": [
+        { "type": "table", "source": "debtors.debtors", "fields": ["full_name", "group", "parent_phone", "parent_email", "balance_minor", "currency", "reasons"] }
+      ],
+      "actions": [],
+      "permissions": ["admin", "finance"]
+    },
+    {
+      "screen_id": "quiet_hours",
+      "route": "/settings/quiet-hours",
+      "navigation_group": "Settings",
+      "layout": "editable_table_with_form",
+      "data_sources": [
+        { "name": "quiet_hours", "method": "GET", "path": "/api/nocobase/config/quiet-hours/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "quiet_hours_create", "method": "POST", "path": "/api/nocobase/config/quiet-hours/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "quiet_hours_detail", "method": "GET", "path": "/api/nocobase/config/quiet-hours/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "quiet_hours_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/quiet-hours/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "quiet_hours_delete", "method": "DELETE", "path": "/api/nocobase/config/quiet-hours/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" }
+      ],
+      "blocks": [
+        { "type": "table", "source": "quiet_hours.policies", "fields": ["channel", "starts_at", "ends_at", "timezone", "is_active"] },
+        { "type": "form", "source": "quiet_hours_create", "fields": ["channel", "starts_at", "ends_at", "timezone", "is_active"] }
+      ],
+      "actions": ["create", "update", "delete"],
+      "permissions": ["admin"]
+    },
+    {
+      "screen_id": "notification_templates_and_rules",
+      "route": "/settings/notifications",
+      "navigation_group": "Settings",
+      "layout": "tabs",
+      "data_sources": [
+        { "name": "templates", "method": "GET", "path": "/api/nocobase/config/notification-templates/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "templates_create", "method": "POST", "path": "/api/nocobase/config/notification-templates/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "templates_detail", "method": "GET", "path": "/api/nocobase/config/notification-templates/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "templates_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/notification-templates/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "templates_delete", "method": "DELETE", "path": "/api/nocobase/config/notification-templates/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules", "method": "GET", "path": "/api/nocobase/config/notification-rules/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_create", "method": "POST", "path": "/api/nocobase/config/notification-rules/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_detail", "method": "GET", "path": "/api/nocobase/config/notification-rules/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/notification-rules/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_delete", "method": "DELETE", "path": "/api/nocobase/config/notification-rules/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" }
+      ],
+      "blocks": [
+        { "type": "table", "source": "templates.templates", "fields": ["event_type", "channel", "subject", "body"] },
+        { "type": "form", "source": "templates_create", "fields": ["event_type", "channel", "subject", "body"] },
+        { "type": "table", "source": "rules.rules", "fields": ["event_type", "channel", "template_id", "offset_minutes", "is_active"] },
+        { "type": "form", "source": "rules_create", "fields": ["event_type", "channel", "template_id", "offset_minutes", "is_active"] }
+      ],
+      "actions": ["create", "update", "delete"],
+      "permissions": ["admin"]
+    },
+    {
+      "screen_id": "locations_and_session_types",
+      "route": "/settings/locations-session-types",
+      "navigation_group": "Settings",
+      "layout": "tabs",
+      "data_sources": [
+        { "name": "locations", "method": "GET", "path": "/api/nocobase/config/locations/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "locations_create", "method": "POST", "path": "/api/nocobase/config/locations/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "locations_detail", "method": "GET", "path": "/api/nocobase/config/locations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "locations_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/locations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "locations_delete", "method": "DELETE", "path": "/api/nocobase/config/locations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "session_types", "method": "GET", "path": "/api/nocobase/config/session-types/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "session_types_create", "method": "POST", "path": "/api/nocobase/config/session-types/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "session_types_detail", "method": "GET", "path": "/api/nocobase/config/session-types/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "session_types_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/session-types/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "session_types_delete", "method": "DELETE", "path": "/api/nocobase/config/session-types/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" }
+      ],
+      "blocks": [
+        { "type": "table", "source": "locations.locations", "fields": ["code", "name", "address", "timezone", "is_active"] },
+        { "type": "table", "source": "session_types.session_types", "fields": ["code", "label", "default_capacity", "is_active"] }
+      ],
+      "actions": ["create", "update", "delete"],
+      "permissions": ["admin"]
+    },
+    {
+      "screen_id": "payroll_rules",
+      "route": "/payroll/rules",
+      "navigation_group": "Payroll",
+      "layout": "tabs",
+      "data_sources": [
+        { "name": "schemes", "method": "GET", "path": "/api/nocobase/config/payroll/schemes/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "schemes_create", "method": "POST", "path": "/api/nocobase/config/payroll/schemes/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "schemes_detail", "method": "GET", "path": "/api/nocobase/config/payroll/schemes/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "schemes_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/payroll/schemes/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "schemes_delete", "method": "DELETE", "path": "/api/nocobase/config/payroll/schemes/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules", "method": "GET", "path": "/api/nocobase/config/payroll/rules/", "token": "NOCOBASE_CONFIG_TOKEN", "query": ["scheme_id"] },
+        { "name": "rules_create", "method": "POST", "path": "/api/nocobase/config/payroll/rules/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_detail", "method": "GET", "path": "/api/nocobase/config/payroll/rules/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/payroll/rules/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "rules_delete", "method": "DELETE", "path": "/api/nocobase/config/payroll/rules/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "assignments", "method": "GET", "path": "/api/nocobase/config/payroll/assignments/", "token": "NOCOBASE_CONFIG_TOKEN", "query": ["trainer_id"] },
+        { "name": "assignments_create", "method": "POST", "path": "/api/nocobase/config/payroll/assignments/", "token": "NOCOBASE_CONFIG_TOKEN" }
+      ],
+      "blocks": [
+        { "type": "table", "source": "schemes.schemes", "fields": ["name", "location", "is_active"] },
+        { "type": "table", "source": "rules.rules", "fields": ["scheme_id", "session_type", "rule_type", "base_amount_minor", "min_clients_threshold", "extra_client_amount_minor"] },
+        { "type": "table", "source": "assignments.assignments", "fields": ["trainer_id", "scheme_id", "effective_from", "effective_to"] }
+      ],
+      "actions": ["create", "update", "delete"],
+      "permissions": ["admin", "finance"]
+    },
+    {
+      "screen_id": "payroll_periods_reporting",
+      "route": "/payroll/periods",
+      "navigation_group": "Payroll",
+      "layout": "table_with_detail_drawer",
+      "data_sources": [
+        { "name": "periods", "method": "GET", "path": "/api/nocobase/payroll/periods/", "token": "NOCOBASE_BRIDGE_TOKEN", "query": ["location", "status"] },
+        { "name": "period_detail", "method": "GET", "path": "/api/nocobase/payroll/periods/<id>/", "token": "NOCOBASE_BRIDGE_TOKEN" }
+      ],
+      "blocks": [
+        { "type": "filter_bar", "source": "periods", "fields": ["location", "status"] },
+        { "type": "table", "source": "periods.periods", "fields": ["date_from", "date_to", "location", "status", "calculations_count", "totals_by_trainer"] },
+        { "type": "detail_drawer", "source": "period_detail.calculations", "fields": ["trainer", "session_start_at", "session_type", "attended_clients_count", "base_amount_minor", "extra_amount_minor", "final_amount_minor"] }
+      ],
+      "actions": [],
+      "permissions": ["admin", "finance"]
+    },
+    {
+      "screen_id": "localization",
+      "route": "/settings/localization",
+      "navigation_group": "Settings",
+      "layout": "tabs",
+      "data_sources": [
+        { "name": "languages", "method": "GET", "path": "/api/nocobase/config/languages/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "languages_create", "method": "POST", "path": "/api/nocobase/config/languages/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "languages_detail", "method": "GET", "path": "/api/nocobase/config/languages/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "languages_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/languages/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "languages_delete", "method": "DELETE", "path": "/api/nocobase/config/languages/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_keys", "method": "GET", "path": "/api/nocobase/config/dictionary-keys/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_keys_create", "method": "POST", "path": "/api/nocobase/config/dictionary-keys/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_keys_detail", "method": "GET", "path": "/api/nocobase/config/dictionary-keys/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_keys_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/dictionary-keys/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_keys_delete", "method": "DELETE", "path": "/api/nocobase/config/dictionary-keys/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_translations", "method": "GET", "path": "/api/nocobase/config/dictionary-translations/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_translations_create", "method": "POST", "path": "/api/nocobase/config/dictionary-translations/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_translations_detail", "method": "GET", "path": "/api/nocobase/config/dictionary-translations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_translations_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/dictionary-translations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "dictionary_translations_delete", "method": "DELETE", "path": "/api/nocobase/config/dictionary-translations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "template_translations", "method": "GET", "path": "/api/nocobase/config/notification-template-translations/", "token": "NOCOBASE_CONFIG_TOKEN", "query": ["template_id", "language_code"] },
+        { "name": "template_translations_create", "method": "POST", "path": "/api/nocobase/config/notification-template-translations/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "template_translations_detail", "method": "GET", "path": "/api/nocobase/config/notification-template-translations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "template_translations_update", "method": "POST/PATCH/PUT", "path": "/api/nocobase/config/notification-template-translations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" },
+        { "name": "template_translations_delete", "method": "DELETE", "path": "/api/nocobase/config/notification-template-translations/<id>/", "token": "NOCOBASE_CONFIG_TOKEN" }
+      ],
+      "blocks": [
+        { "type": "table", "source": "languages.languages", "fields": ["code", "name", "is_active"] },
+        { "type": "table", "source": "dictionary_keys.keys", "fields": ["domain", "code", "is_active"] },
+        { "type": "table", "source": "dictionary_translations.translations", "fields": ["key_id", "language_code", "value"] },
+        { "type": "table", "source": "template_translations.translations", "fields": ["template_id", "language_code", "subject", "body"] }
+      ],
+      "actions": ["create", "update", "delete"],
+      "permissions": ["admin"]
+    }
+  ]
+}

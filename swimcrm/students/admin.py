@@ -62,3 +62,6 @@ class StudentAdmin(AuditAdminMixin, admin.ModelAdmin):
     @admin.display(description="Тренер")
     def group_trainer(self, obj):
         return obj.group.default_trainer if obj.group else None
+
+    def has_delete_permission(self, request, obj=None):
+        return False

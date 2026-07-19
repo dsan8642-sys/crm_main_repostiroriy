@@ -2,7 +2,22 @@ from django.contrib import admin
 
 from audit.mixins import AuditAdminMixin
 
-from .models import RecurringTemplate, Session
+from .models import (Location, RecurringTemplate, Session, SessionParticipant,
+                     SessionTypeConfig, WaitlistEntry)
+
+
+@admin.register(Location)
+class LocationAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "timezone", "is_active", "updated_at")
+    list_filter = ("is_active", "timezone")
+    search_fields = ("code", "name", "address")
+
+
+@admin.register(SessionTypeConfig)
+class SessionTypeConfigAdmin(admin.ModelAdmin):
+    list_display = ("code", "label", "default_capacity", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("code", "label")
 
 
 @admin.register(RecurringTemplate)
@@ -29,3 +44,29 @@ class SessionAdmin(AuditAdminMixin, admin.ModelAdmin):
     )
     autocomplete_fields = ("template", "group", "trainer", "individual_student")
     date_hierarchy = "start_at"
+
+
+@admin.register(WaitlistEntry)
+class WaitlistEntryAdmin(AuditAdminMixin, admin.ModelAdmin):
+    audit_action_prefix = "waitlist"
+    list_display = ("session", "student", "priority", "status", "created_at", "updated_at")
+    list_filter = ("status", "session__location", "session__start_at")
+    search_fields = (
+        "student__first_name", "student__last_name", "student__parent__phone",
+        "session__location", "note",
+    )
+    autocomplete_fields = ("session", "student")
+    date_hierarchy = "created_at"
+
+
+@admin.register(SessionParticipant)
+class SessionParticipantAdmin(AuditAdminMixin, admin.ModelAdmin):
+    audit_action_prefix = "session_participant"
+    list_display = ("session", "student", "source", "status", "created_at", "updated_at")
+    list_filter = ("source", "status", "session__location", "session__start_at")
+    search_fields = (
+        "student__first_name", "student__last_name", "student__parent__phone",
+        "session__location", "note",
+    )
+    autocomplete_fields = ("session", "student")
+    date_hierarchy = "created_at"

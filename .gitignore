@@ -27,5 +27,17 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 
+# NocoBase local runtime and installer caches
+.nocobase/
+.nocobase-logs/
+.npm-cache/
+.yarn-cache/
+swimcrm-hybrid/
+
 # Local release/archive artifacts
 *.zip
+releases/
+
+# Production cutover evidence is generated per release/host.
+docs/PRODUCTION_CUTOVER_EVIDENCE.json
+docs/PRODUCTION_CUTOVER_EVIDENCE.draft.json

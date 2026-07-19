@@ -6,19 +6,25 @@ param(
     [string]$Password = $env:POSTGRES_PASSWORD,
     [string]$HostName = $env:POSTGRES_HOST,
     [string]$Port = $env:POSTGRES_PORT,
+    [string]$PgBin = $(if ($env:PG_BIN) { $env:PG_BIN } else { "C:\Program Files\PostgreSQL\17\bin" }),
     [switch]$KeepTempDb
 )
+
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib-production-guards.ps1")
 
 if (-not $User) { $User = "postgres" }
 if (-not $HostName) { $HostName = "127.0.0.1" }
 if (-not $Port) { $Port = "5432" }
 if ($Password) { $env:PGPASSWORD = $Password }
 
-$bin = "C:\Program Files\PostgreSQL\17\bin"
-$dropdb = Join-Path $bin "dropdb.exe"
-$createdb = Join-Path $bin "createdb.exe"
-$pgRestore = Join-Path $bin "pg_restore.exe"
-$psql = Join-Path $bin "psql.exe"
+Assert-ProductionValue -Name "POSTGRES_USER" -Value $User
+Assert-ProductionPassword -Name "POSTGRES_PASSWORD" -Value $Password
+
+$dropdb = Join-Path $PgBin "dropdb.exe"
+$createdb = Join-Path $PgBin "createdb.exe"
+$pgRestore = Join-Path $PgBin "pg_restore.exe"
+$psql = Join-Path $PgBin "psql.exe"
 
 foreach ($tool in @($dropdb, $createdb, $pgRestore, $psql)) {
     if (-not (Test-Path -LiteralPath $tool)) {

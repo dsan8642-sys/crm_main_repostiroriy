@@ -35,7 +35,7 @@ def debtors(currency=None):
             reasons.append("Отрицательный баланс")
         expired = Subscription.objects.filter(student=st).exclude(
             status=SubscriptionStatus.CANCELLED)
-        if expired and all(s.effective_end_date < today for s in expired):
+        if expired and all(s.grace_end_date < today for s in expired):
             reasons.append("Истёкший абонемент")
         if reasons:
             out.append(DebtorRow(student=st, reasons=reasons,

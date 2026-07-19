@@ -3,11 +3,15 @@ from datetime import datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from audit.models import audit
+from students.models import Student
 
-from .models import RecurringTemplate, Session, SessionType
+from .models import (RecurringTemplate, Session, SessionParticipant,
+                     SessionParticipantSource, SessionParticipantStatus,
+                     SessionType, WaitlistEntry, WaitlistStatus)
 
 
 class ScheduleConflict(ValidationError):
@@ -19,8 +23,15 @@ def _overlaps(a_start, a_end, b_start, b_end):
 
 
 def check_trainer_conflict(trainer, start_at, end_at, exclude_session_id=None):
-    """Rule 5: a trainer cannot be in two places at the same time."""
-    qs = Session.objects.filter(trainer=trainer, is_cancelled=False)
+    """Rule 5: a trainer cannot be in two places at the same time.
+
+    Substitutions make the substitute the effective trainer for that session,
+    while preserving the originally scheduled trainer for history.
+    """
+    qs = Session.objects.filter(is_cancelled=False).filter(
+        Q(trainer=trainer, substitute_trainer__isnull=True) |
+        Q(substitute_trainer=trainer)
+    )
     if exclude_session_id:
         qs = qs.exclude(pk=exclude_session_id)
     # narrow by day window to keep the scan small, then check exact overlap
@@ -29,6 +40,73 @@ def check_trainer_conflict(trainer, start_at, end_at, exclude_session_id=None):
         raise ScheduleConflict(
             f"Конфликт: тренер уже занят в интервале "
             f"{timezone.localtime(start_at):%d.%m %H:%M}–{timezone.localtime(end_at):%H:%M}")
+
+
+def session_roster_students(session):
+    """Return the effective roster: base group/individual student plus active one-off participants."""
+    participant_ids = session.participants.filter(
+        status=SessionParticipantStatus.ACTIVE,
+    ).values_list("student_id", flat=True)
+    if session.individual_student_id:
+        condition = Q(pk=session.individual_student_id) | Q(pk__in=participant_ids)
+    elif session.group_id:
+        condition = Q(group_id=session.group_id, is_active=True) | Q(pk__in=participant_ids)
+    else:
+        condition = Q(pk__in=participant_ids)
+    return Student.objects.filter(
+        condition,
+        is_active=True,
+        parent__user__is_active=True,
+    ).select_related("parent", "parent__user", "group").distinct()
+
+
+@transaction.atomic
+def promote_waitlist_entry(entry, *, actor=None):
+    """Promote an active waitlist row into the concrete session roster."""
+    entry = WaitlistEntry.objects.select_for_update().select_related(
+        "session", "student", "student__parent__user").get(pk=entry.pk)
+    session = Session.objects.select_for_update().get(pk=entry.session_id)
+    if session.is_cancelled:
+        raise ValidationError("cancelled sessions cannot promote waitlist entries")
+    if entry.status != WaitlistStatus.ACTIVE:
+        raise ValidationError("only active waitlist entries can be promoted")
+    if not entry.student.is_active:
+        raise ValidationError("archived participant cannot be promoted from waitlist")
+    if entry.student.parent_id and not entry.student.parent.user.is_active:
+        raise ValidationError("archived client account cannot be promoted from waitlist")
+
+    roster_ids = set(session_roster_students(session).values_list("id", flat=True))
+    if entry.student_id in roster_ids:
+        raise ValidationError("student is already in this session roster")
+    if len(roster_ids) >= session.max_participants:
+        raise ValidationError(f"session capacity is full ({session.max_participants})")
+
+    participant, created = SessionParticipant.objects.get_or_create(
+        session=session,
+        student=entry.student,
+        defaults={
+            "source": SessionParticipantSource.WAITLIST,
+            "status": SessionParticipantStatus.ACTIVE,
+            "note": entry.note,
+        },
+    )
+    if not created:
+        participant.source = SessionParticipantSource.WAITLIST
+        participant.status = SessionParticipantStatus.ACTIVE
+        participant.note = entry.note
+        participant.full_clean()
+        participant.save(update_fields=["source", "status", "note", "updated_at"])
+
+    entry.status = WaitlistStatus.PROMOTED
+    entry.full_clean()
+    entry.save(update_fields=["status", "updated_at"])
+    if actor is not None:
+        audit(actor, "waitlist.promoted", entry, {
+            "session_id": session.id,
+            "student_id": entry.student_id,
+            "participant_id": participant.id,
+        })
+    return entry, participant
 
 
 @transaction.atomic
@@ -98,10 +176,11 @@ def cancel_series(template: RecurringTemplate, date_from=None, *, actor=None):
 def edit_single_session(session: Session, *, actor=None, **changes):
     """Rule 4: edit ONE class of a series without touching the rest.
     Marks the session as manually modified so future series edits skip it."""
-    new_trainer = changes.get("trainer", session.trainer)
+    new_trainer = changes.get("substitute_trainer") or changes.get("trainer", session.trainer)
     new_start = changes.get("start_at", session.start_at)
     new_end = changes.get("end_at", session.end_at)
-    check_trainer_conflict(new_trainer, new_start, new_end, exclude_session_id=session.pk)
+    if new_trainer is not None:
+        check_trainer_conflict(new_trainer, new_start, new_end, exclude_session_id=session.pk)
     for field, value in changes.items():
         setattr(session, field, value)
     session.is_manually_modified = True

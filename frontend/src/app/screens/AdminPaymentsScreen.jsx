@@ -522,7 +522,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
               Metoda platnosci
               <select value={financeForm.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)} style={{ minHeight: 36 }}>
                 <option value="cash">Gotowka</option>
-                <option value="transfer">Przelew</option>
+                <option value="bank_transfer">Przelew</option>
                 <option value="card">Karta</option>
                 <option value="other">Inne</option>
               </select>

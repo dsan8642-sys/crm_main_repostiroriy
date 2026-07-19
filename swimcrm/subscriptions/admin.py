@@ -7,6 +7,8 @@ from .services import renew_subscription
 class FreezeInline(admin.TabularInline):
     model = FreezePeriod
     extra = 0
+    readonly_fields = ("start_date", "end_date", "reason", "created_by", "created_at")
+    can_delete = False
 
 
 class LedgerInline(admin.TabularInline):
@@ -31,6 +33,9 @@ class SubscriptionAdmin(admin.ModelAdmin):
     inlines = [FreezeInline, LedgerInline]
     readonly_fields = ("effective_end_date", "remaining_sessions", "total_frozen_days")
     actions = ["renew_same_type"]
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
     @admin.action(description="Продлить тем же типом с сегодня (остаток переносится)")
     def renew_same_type(self, request, queryset):

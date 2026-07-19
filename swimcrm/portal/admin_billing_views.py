@@ -34,14 +34,28 @@ def admin_payment_detail(request, payment_id):
     payment = get_object_or_404(Payment.objects.select_related("student", "confirmed_by"), pk=payment_id)
     if request.method == "POST":
         data = _payment_data(_json_body(request))
+        changed_fields = []
+        changes = {}
         if "method" in data:
-            if data["method"] not in PaymentMethod.values:
+            method = normalize_payment_method(data["method"])
+            if method not in PaymentMethod.values:
                 raise ValidationError("invalid payment method")
-            payment.method = data["method"]
+            if payment.method != method:
+                changes["method"] = {"from": payment.method, "to": method}
+                payment.method = method
+                changed_fields.append("method")
         if "comment" in data:
-            payment.comment = data.get("comment", "") or ""
-        payment.save(update_fields=["method", "comment"])
-        audit(user, "payment.updated", payment, {"fields": sorted(data.keys())})
+            comment = data.get("comment", "") or ""
+            if payment.comment != comment:
+                changes["comment_changed"] = True
+                payment.comment = comment
+                changed_fields.append("comment")
+        if changed_fields:
+            payment.save(update_fields=changed_fields)
+            audit(user, "payment.updated", payment, {
+                "fields": sorted(changed_fields),
+                "changes": changes,
+            })
     return JsonResponse(_payment_payload(payment))
 
 

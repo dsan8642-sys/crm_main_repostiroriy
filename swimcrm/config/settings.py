@@ -59,10 +59,12 @@ INSTALLED_APPS = [
     "catalog",
     "students",
     "scheduling",
-    "attendance",
+    "attendance.apps.AttendanceConfig",
     "subscriptions",
-    "billing",
+    "billing.apps.BillingConfig",
     "notifications",
+    "payroll",
+    "localization",
     "audit",
     "analytics",
     "dataio",
@@ -113,6 +115,8 @@ if os.environ.get("POSTGRES_DB"):
         }
     }
 else:
+    if ENVIRONMENT in {"prod", "production"}:
+        raise ImproperlyConfigured("Production environment requires POSTGRES_DB; SQLite is development-only.")
     sqlite_name = ":memory:" if "test" in sys.argv else BASE_DIR / "db.sqlite3"
     DATABASES = {
         "default": {
@@ -146,6 +150,7 @@ AXES_RESET_ON_SUCCESS = True  # a later successful login clears the failure coun
 
 LANGUAGE_CODE = "ru"
 TIME_ZONE = "Europe/Warsaw"
+SWIMCRM_DEFAULT_LANGUAGE = os.environ.get("SWIMCRM_DEFAULT_LANGUAGE", LANGUAGE_CODE.split("-")[0]).lower()
 USE_I18N = True
 USE_TZ = True
 
@@ -167,6 +172,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---- Domain configuration (no hardcoded magic where the spec forbids it) ----
 DEFAULT_CURRENCY = os.environ.get("DEFAULT_CURRENCY", "PLN")
+SUBSCRIPTION_GRACE_DAYS = int(os.environ.get("SUBSCRIPTION_GRACE_DAYS", "7"))
 RECEIPT_RETENTION_DAYS = int(os.environ.get("RECEIPT_RETENTION_DAYS", "30"))  # rule 10
 RECEIPT_MAX_SIZE_MB = int(os.environ.get("RECEIPT_MAX_SIZE_MB", "10"))  # section 6: upload cap
 
@@ -259,6 +265,14 @@ SMS_PROVIDER_URL = os.environ.get("SMS_PROVIDER_URL", "")
 SMS_API_KEY = os.environ.get("SMS_API_KEY", "")
 SMS_SENDER = os.environ.get("SMS_SENDER", "SwimCRM")
 SMS_DRY_RUN = os.environ.get("SMS_DRY_RUN", "1" if DEBUG else "0") == "1"
+
+# ---- NocoBase bridge ----
+# Read-only integration token for NocoBase external API/data blocks.
+# Production deployments must set this to a strong secret.
+NOCOBASE_BRIDGE_TOKEN = os.environ.get("NOCOBASE_BRIDGE_TOKEN", "")
+# Separate write token for guarded low-risk configuration edited from NocoBase.
+# Do not reuse the read-only bridge token in production.
+NOCOBASE_CONFIG_TOKEN = os.environ.get("NOCOBASE_CONFIG_TOKEN", "")
 
 # ---- Background jobs (Celery/Redis, with cron-compatible management commands) ----
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")

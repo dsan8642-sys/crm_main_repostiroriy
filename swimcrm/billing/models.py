@@ -1,5 +1,8 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from common.money import CURRENCY_CHOICES, Money
@@ -29,12 +32,26 @@ class Charge(models.Model):
     def __str__(self):
         return f"{self.description}: {self.amount} (до {self.due_date})"
 
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Charge history is immutable and cannot be deleted.")
+
 
 class PaymentMethod(models.TextChoices):
     CASH = "cash", "Наличные"
-    TRANSFER = "transfer", "Перевод"
+    TRANSFER = "bank_transfer", "Bank transfer"
     CARD = "card", "Карта"
     OTHER = "other", "Другое"
+
+
+PAYMENT_METHOD_ALIASES = {
+    "transfer": PaymentMethod.TRANSFER,
+}
+
+
+def normalize_payment_method(value):
+    if value is None:
+        return value
+    return PAYMENT_METHOD_ALIASES.get(value, value)
 
 
 class PaymentStatus(models.TextChoices):
@@ -72,6 +89,10 @@ class Payment(models.Model):
         return f"{self.student} · {self.amount} · {self.get_status_display()}"
 
 
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Payment history is immutable and cannot be deleted.")
+
+
 class ReceiptFile(models.Model):
     """Rule 10: temporary proof uploaded by a parent. Auto-deleted after N days;
     the Payment survives. `deleted` marks the file scrubbed but the row is a stub log."""
@@ -94,3 +115,13 @@ class ReceiptFile(models.Model):
 
     def __str__(self):
         return f"Чек к {self.payment} ({'удалён' if self.is_deleted else 'хранится'})"
+
+
+@receiver(pre_delete, sender=Payment)
+def prevent_payment_delete(sender, instance, **kwargs):
+    raise ValidationError("Payment history is immutable and cannot be deleted.")
+
+
+@receiver(pre_delete, sender=Charge)
+def prevent_charge_delete(sender, instance, **kwargs):
+    raise ValidationError("Charge history is immutable and cannot be deleted.")

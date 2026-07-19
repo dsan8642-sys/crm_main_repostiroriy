@@ -6,6 +6,7 @@ def admin_participant_subscriptions(request, participant_id):
     user = _admin_required(request)
     participant = get_object_or_404(Student.objects.select_related("parent", "group"), pk=participant_id)
     if request.method == "POST":
+        _require_active_participant(participant, "receive new subscriptions")
         data = _json_body(request)
         subscription_type = get_object_or_404(SubscriptionType, pk=data.get("subscription_type_id"))
         start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
@@ -29,9 +30,10 @@ def admin_participant_subscriptions(request, participant_id):
 def admin_subscription_detail(request, subscription_id):
     user = _admin_required(request)
     subscription = get_object_or_404(
-        Subscription.objects.select_related("student", "student__parent", "subscription_type"),
+        Subscription.objects.select_related("student", "student__parent__user", "subscription_type"),
         pk=subscription_id)
     if request.method == "POST":
+        _require_active_participant(subscription.student, "have subscriptions edited")
         data = _json_body(request)
         status = data.get("status")
         if status not in SubscriptionStatus.values:
@@ -46,7 +48,9 @@ def admin_subscription_detail(request, subscription_id):
 def admin_subscription_renew(request, subscription_id):
     user = _admin_required(request)
     subscription = get_object_or_404(
-        Subscription.objects.select_related("student", "subscription_type"), pk=subscription_id)
+        Subscription.objects.select_related("student", "student__parent__user", "subscription_type"),
+        pk=subscription_id)
+    _require_active_participant(subscription.student, "renew subscriptions")
     data = _json_body(request)
     subscription_type = subscription.subscription_type
     if data.get("subscription_type_id"):
@@ -69,7 +73,10 @@ def admin_subscription_renew(request, subscription_id):
 @require_POST
 def admin_subscription_freeze(request, subscription_id):
     user = _admin_required(request)
-    subscription = get_object_or_404(Subscription, pk=subscription_id)
+    subscription = get_object_or_404(
+        Subscription.objects.select_related("student", "student__parent__user"),
+        pk=subscription_id)
+    _require_active_participant(subscription.student, "freeze subscriptions")
     data = _json_body(request)
     freeze = freeze_subscription(
         subscription=subscription,
@@ -91,7 +98,10 @@ def admin_subscription_freeze(request, subscription_id):
 @require_POST
 def admin_subscription_adjust(request, subscription_id):
     user = _admin_required(request)
-    subscription = get_object_or_404(Subscription, pk=subscription_id)
+    subscription = get_object_or_404(
+        Subscription.objects.select_related("student", "student__parent__user"),
+        pk=subscription_id)
+    _require_active_participant(subscription.student, "receive subscription adjustments")
     data = _json_body(request)
     entry = manual_adjust(
         subscription=subscription,

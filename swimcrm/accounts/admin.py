@@ -12,15 +12,22 @@ class UserAdmin(BaseUserAdmin):
     fieldsets = BaseUserAdmin.fieldsets + (("Роль", {"fields": ("role",)}),)
 
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(ParentAccount)
 class ParentAccountAdmin(admin.ModelAdmin):
-    list_display = ("__str__", "phone", "email", "created_at")
-    list_filter = ("created_at",)
+    list_display = ("__str__", "phone", "email", "preferred_language", "created_at")
+    list_filter = ("preferred_language", "created_at")
     search_fields = (
         "user__username", "user__first_name", "user__last_name",
-        "phone", "email", "students__first_name", "students__last_name",
+        "phone", "email", "preferred_language", "students__first_name", "students__last_name",
     )
     autocomplete_fields = ("user",)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Trainer)
@@ -29,6 +36,10 @@ class TrainerAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("user__username", "user__first_name", "user__last_name", "phone")
     autocomplete_fields = ("user",)
+
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Consent)

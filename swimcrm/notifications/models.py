@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils import timezone
+from django.utils import timezone as dj_timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 def validate_sms_template(body: str):
     """SMS must stay within one 160-character GSM-like segment."""
@@ -48,6 +49,35 @@ class NotificationTemplate(models.Model):
         return f"{self.get_event_type_display()} / {self.get_channel_display()}"
 
 
+class NotificationTemplateTranslation(models.Model):
+    template = models.ForeignKey(NotificationTemplate, on_delete=models.CASCADE, related_name="translations")
+    language_code = models.CharField(max_length=12)
+    subject = models.CharField(max_length=200, blank=True)
+    body = models.TextField()
+    created_at = models.DateTimeField(default=dj_timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["template", "language_code"],
+                name="uniq_notification_template_translation_language",
+            ),
+        ]
+
+    def clean(self):
+        self.language_code = (self.language_code or "").strip().lower()
+        if not self.language_code:
+            raise ValidationError("language_code is required")
+        if not self.body:
+            raise ValidationError("body is required")
+        if self.template_id and self.template.channel == Channel.SMS:
+            validate_sms_template(self.body)
+
+    def __str__(self):
+        return f"{self.template} [{self.language_code}]"
+
+
 class NotificationRule(models.Model):
     """Configurable timing: offset relative to an event reference time."""
     event_type = models.CharField(max_length=32, choices=EventType.choices)
@@ -78,8 +108,39 @@ class NotificationRule(models.Model):
         return f"{self.get_event_type_display()} @ {self.offset_minutes}m / {self.get_channel_display()}"
 
 
+class QuietHoursPolicy(models.Model):
+    channel = models.CharField(max_length=16, choices=Channel.choices)
+    starts_at = models.TimeField()
+    ends_at = models.TimeField()
+    timezone = models.CharField(max_length=64, default="Europe/Warsaw")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=dj_timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["channel", "starts_at", "ends_at", "timezone"],
+                name="uniq_quiet_hours_channel_window_timezone",
+            ),
+        ]
+
+    def clean(self):
+        if self.channel not in SUPPORTED_NOTIFICATION_CHANNELS:
+            raise ValidationError("invalid channel")
+        if self.starts_at == self.ends_at:
+            raise ValidationError("quiet hours start and end must differ")
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValidationError("invalid timezone") from exc
+
+    def __str__(self):
+        return f"{self.get_channel_display()} quiet hours {self.starts_at}-{self.ends_at} {self.timezone}"
+
+
 class DeliveryStatus(models.TextChoices):
     QUEUED = "queued", "Queued"
+    DEFERRED = "deferred", "Deferred"
     SENT = "sent", "Sent"
     DELIVERED = "delivered", "Delivered"
     FAILED = "failed", "Failed"
@@ -93,12 +154,14 @@ class NotificationLog(models.Model):
     retries = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
     payload = models.JSONField(default=dict, blank=True)
+    language_code = models.CharField(max_length=12, blank=True)
     subject = models.CharField(max_length=200, blank=True)
     body = models.TextField(blank=True)
     provider_message_id = models.CharField(max_length=200, blank=True)
+    scheduled_at = models.DateTimeField(default=dj_timezone.now)
     # Idempotency: one send per recipient/event/channel/reference moment.
     dedup_key = models.CharField(max_length=200, blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(default=dj_timezone.now)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)

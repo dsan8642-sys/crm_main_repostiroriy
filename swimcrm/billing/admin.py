@@ -16,12 +16,28 @@ class ChargeAdmin(AuditAdminMixin, admin.ModelAdmin):
     )
     autocomplete_fields = ("student", "subscription", "created_by")
     date_hierarchy = "due_date"
+    immutable_history_fields = (
+        "student", "subscription", "description", "amount_minor", "currency",
+        "due_date", "created_by", "created_at",
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj:
+            fields.extend(field for field in self.immutable_history_fields if field not in fields)
+        return tuple(fields)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class ReceiptInline(admin.TabularInline):
     model = ReceiptFile
     extra = 0
     readonly_fields = ("uploaded_by", "uploaded_at", "is_deleted", "deleted_at")
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Payment)
@@ -37,6 +53,21 @@ class PaymentAdmin(AuditAdminMixin, admin.ModelAdmin):
     autocomplete_fields = ("student", "created_by", "confirmed_by")
     date_hierarchy = "paid_at"
     inlines = [ReceiptInline]
+    readonly_fields = ("confirmed_at",)
+
+    immutable_history_fields = (
+        "student", "amount_minor", "currency", "paid_at", "method", "status",
+        "created_by", "confirmed_by", "confirmed_at",
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj:
+            fields.extend(field for field in self.immutable_history_fields if field not in fields)
+        return tuple(fields)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ReceiptFile)
@@ -51,3 +82,7 @@ class ReceiptAdmin(admin.ModelAdmin):
     )
     autocomplete_fields = ("payment", "uploaded_by")
     date_hierarchy = "uploaded_at"
+    readonly_fields = ("uploaded_at", "is_deleted", "deleted_at")
+
+    def has_delete_permission(self, request, obj=None):
+        return False

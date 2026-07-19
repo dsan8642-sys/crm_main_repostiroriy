@@ -9,10 +9,14 @@ from django.utils import timezone
 from accounts.models import Consent, ConsentType, ParentAccount, Role
 from attendance.models import AttendanceStatus
 from attendance.services import set_attendance
+from audit.models import AuditLogEntry
 from billing.models import Charge, Payment, PaymentStatus
 from billing.services import student_balance
 from notifications.models import (Channel, DeliveryStatus, EventType, NotificationLog,
-                                  NotificationRule, NotificationTemplate)
+                                  NotificationRule, NotificationTemplate, QuietHoursPolicy)
+from scheduling.models import (Location, SessionParticipant, SessionParticipantStatus,
+                               SessionType, SessionTypeConfig, WaitlistEntry,
+                               WaitlistStatus)
 from scheduling.services import create_session
 from students.models import Student
 from subscriptions.services import create_subscription
@@ -119,6 +123,7 @@ class ClientPortalApiRule(TestCase):
 
         self.assertEqual(profile.status_code, 200)
         self.assertEqual(profile.json()["account"]["email"], "client-updated@example.com")
+        self.assertEqual(profile.json()["account"]["preferred_language"], self.parent.preferred_language)
         self.assertEqual(consent.status_code, 200)
         self.assertTrue(consent.json()["is_active"])
         self.assertTrue(any(row["type"] == ConsentType.EMAIL and row["is_active"] for row in listing.json()["consents"]))
@@ -155,7 +160,7 @@ class ClientPortalApiRule(TestCase):
             "amount_minor": "24000",
             "currency": "PLN",
             "paid_at": date.today().isoformat(),
-            "method": "transfer",
+            "method": "bank_transfer",
             "file": SimpleUploadedFile("receipt.pdf", PDF, content_type="application/pdf"),
         })
 
@@ -163,6 +168,7 @@ class ClientPortalApiRule(TestCase):
         payment = Payment.objects.get(pk=response.json()["payment"]["id"])
         self.assertTrue(payment.student.is_account_holder)
         self.assertEqual(payment.student.parent, adult)
+        self.assertEqual(payment.method, "bank_transfer")
         self.assertEqual(payment.receipts.get().uploaded_by, adult)
 
     def test_client_can_upload_receipt_for_own_student(self):
@@ -178,6 +184,7 @@ class ClientPortalApiRule(TestCase):
         payment = Payment.objects.get(pk=response.json()["payment"]["id"])
         self.assertEqual(payment.student, self.student)
         self.assertEqual(payment.status, PaymentStatus.PENDING)
+        self.assertEqual(payment.method, "bank_transfer")
         self.assertEqual(payment.receipts.get().uploaded_by, self.parent)
 
     def test_client_cannot_upload_receipt_for_other_account(self):
@@ -196,7 +203,7 @@ class ClientPortalApiRule(TestCase):
             "amount_minor": "24000",
             "currency": "PLN",
             "paid_at": date.today().isoformat(),
-            "method": "transfer",
+            "method": "bank_transfer",
         })
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
@@ -225,6 +232,24 @@ class TrainerPortalApiRule(TestCase):
         ids = [row["id"] for row in response.json()["sessions"]]
         self.assertIn(self.session.id, ids)
         self.assertNotIn(self.other_session.id, ids)
+
+    def test_substitute_trainer_sees_session_and_can_mark_attendance(self):
+        self.session.substitute_trainer = self.other_trainer
+        self.session.save(update_fields=["substitute_trainer"])
+
+        original_response = self.client.get("/api/trainer/sessions/")
+        self.client.force_login(self.other_trainer.user)
+        substitute_response = self.client.get("/api/trainer/sessions/")
+        attendance = self.client.post(
+            f"/api/trainer/sessions/{self.session.id}/attendance/",
+            data=json.dumps({"student_id": self.student.id, "status": AttendanceStatus.PRESENT}),
+            content_type="application/json",
+        )
+
+        self.assertFalse(any(row["id"] == self.session.id for row in original_response.json()["sessions"]))
+        self.assertTrue(any(row["id"] == self.session.id for row in substitute_response.json()["sessions"]))
+        self.assertEqual(attendance.status_code, 200)
+        self.assertEqual(attendance.json()["status"], AttendanceStatus.PRESENT)
 
     def test_trainer_groups_and_history_are_filtered_to_trainer(self):
         self.group.default_trainer = self.trainer
@@ -361,19 +386,6 @@ class AdminPortalApiRule(TestCase):
     def test_admin_can_update_client_account_and_participant(self):
         account = self.student.parent
 
-        account_response = self.client.patch(
-            f"/api/admin/clients/{account.id}/",
-            data=json.dumps({"account": {
-                "username": "updated_client_api",
-                "first_name": "Client",
-                "last_name": "Account",
-                "phone": "+48555999999",
-                "email": "new@example.com",
-                "telegram_chat_id": "12345",
-                "is_active": False,
-            }}),
-            content_type="application/json",
-        )
         participant_response = self.client.patch(
             f"/api/admin/participants/{self.student.id}/",
             data=json.dumps({"participant": {
@@ -391,9 +403,22 @@ class AdminPortalApiRule(TestCase):
             }}),
             content_type="application/json",
         )
+        account_response = self.client.patch(
+            f"/api/admin/clients/{account.id}/",
+            data=json.dumps({"account": {
+                "username": "updated_client_api",
+                "first_name": "Client",
+                "last_name": "Account",
+                "phone": "+48555999999",
+                "email": "new@example.com",
+                "telegram_chat_id": "12345",
+                "is_active": False,
+            }}),
+            content_type="application/json",
+        )
 
-        self.assertEqual(account_response.status_code, 200)
         self.assertEqual(participant_response.status_code, 200)
+        self.assertEqual(account_response.status_code, 200)
         account.refresh_from_db()
         account.user.refresh_from_db()
         self.student.refresh_from_db()
@@ -433,13 +458,148 @@ class AdminPortalApiRule(TestCase):
         self.assertFalse(client_response.json()["account"]["is_active"])
         self.assertFalse(client_response.json()["participants"][0]["is_active"])
 
+        account_update = self.client.post(
+            f"/api/admin/clients/{account.id}/",
+            data=json.dumps({"phone": "+48000000000"}),
+            content_type="application/json",
+        )
+        archived_participant_update = self.client.post(
+            f"/api/admin/participants/{self.student.id}/",
+            data=json.dumps({"first_name": "Changed"}),
+            content_type="application/json",
+        )
+
         participant = f.make_student(parent=account, first="Second", last="Participant")
+        active_participant_archived_account_update = self.client.post(
+            f"/api/admin/participants/{participant.id}/",
+            data=json.dumps({"first_name": "Blocked"}),
+            content_type="application/json",
+        )
         participant_response = self.client.delete(f"/api/admin/participants/{participant.id}/")
         participant.refresh_from_db()
+        account.refresh_from_db()
+        self.student.refresh_from_db()
 
+        self.assertEqual(account_update.status_code, 400)
+        self.assertEqual(archived_participant_update.status_code, 400)
+        self.assertEqual(active_participant_archived_account_update.status_code, 400)
+        self.assertNotEqual(account.phone, "+48000000000")
+        self.assertNotEqual(self.student.first_name, "Changed")
+        self.assertNotEqual(participant.first_name, "Blocked")
         self.assertEqual(participant_response.status_code, 200)
         self.assertFalse(participant.is_active)
         self.assertFalse(participant_response.json()["is_active"])
+
+    def test_archived_participant_is_read_only_for_new_operations(self):
+        active_subscription = create_subscription(
+            student=self.student,
+            subscription_type=f.make_sub_type(name="Existing Archived Pack", sessions=4),
+            start_date=date.today(),
+            created_by=self.admin,
+        )
+        trainer = f.make_trainer(username="archived_participant_coach")
+        existing_session = create_session(
+            trainer=trainer,
+            individual_student=self.student,
+            start_at=timezone.now() + timedelta(days=2),
+            end_at=timezone.now() + timedelta(days=2, hours=1),
+            location="Lane Existing",
+            max_participants=1,
+        )
+        editable_session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=timezone.now() + timedelta(days=3),
+            end_at=timezone.now() + timedelta(days=3, hours=1),
+            location="Lane Editable",
+            max_participants=8,
+        )
+        self.student.is_active = False
+        self.student.save(update_fields=["is_active"])
+        stype = f.make_sub_type(name="Archived Pack", sessions=4)
+        renewal_type = f.make_sub_type(name="Archived Renewal Pack", sessions=6)
+
+        subscription = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({"subscription_type_id": stype.id, "start_date": "2026-06-01"}),
+            content_type="application/json",
+        )
+        charge = self.client.post(
+            f"/api/admin/participants/{self.student.id}/charges/",
+            data=json.dumps({"description": "Archived charge", "amount_minor": 1000}),
+            content_type="application/json",
+        )
+        payment = self.client.post(
+            "/api/admin/payments/",
+            data=json.dumps({
+                "participant_id": self.student.id,
+                "amount_minor": 1000,
+                "paid_at": date.today().isoformat(),
+                "method": "cash",
+            }),
+            content_type="application/json",
+        )
+        session = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "individual_student_id": self.student.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-07T17:00:00+02:00",
+                "end_at": "2026-06-07T18:00:00+02:00",
+                "location": "Lane 1",
+                "max_participants": 1,
+            }),
+            content_type="application/json",
+        )
+        session_edit = self.client.post(
+            f"/api/admin/schedule/sessions/{editable_session.id}/",
+            data=json.dumps({"individual_student_id": self.student.id}),
+            content_type="application/json",
+        )
+        attendance_roster = self.client.get(f"/api/admin/schedule/sessions/{existing_session.id}/attendance/")
+        attendance_mark = self.client.post(
+            f"/api/admin/schedule/sessions/{existing_session.id}/attendance/",
+            data=json.dumps({"student_id": self.student.id, "status": AttendanceStatus.PRESENT}),
+            content_type="application/json",
+        )
+        subscription_detail = self.client.get(f"/api/admin/subscriptions/{active_subscription.id}/")
+        subscription_status = self.client.post(
+            f"/api/admin/subscriptions/{active_subscription.id}/",
+            data=json.dumps({"status": "cancelled"}),
+            content_type="application/json",
+        )
+        subscription_renew = self.client.post(
+            f"/api/admin/subscriptions/{active_subscription.id}/renew/",
+            data=json.dumps({"subscription_type_id": renewal_type.id, "start_date": "2026-06-01"}),
+            content_type="application/json",
+        )
+        subscription_freeze = self.client.post(
+            f"/api/admin/subscriptions/{active_subscription.id}/freeze/",
+            data=json.dumps({"start_date": "2026-06-01", "end_date": "2026-06-03"}),
+            content_type="application/json",
+        )
+        subscription_adjust = self.client.post(
+            f"/api/admin/subscriptions/{active_subscription.id}/adjust/",
+            data=json.dumps({"delta": 1, "note": "archived participant correction"}),
+            content_type="application/json",
+        )
+        detail = self.client.get(f"/api/admin/participants/{self.student.id}/")
+
+        self.assertEqual(subscription.status_code, 400)
+        self.assertEqual(charge.status_code, 400)
+        self.assertEqual(payment.status_code, 400)
+        self.assertEqual(session.status_code, 400)
+        self.assertEqual(session_edit.status_code, 400)
+        self.assertEqual(attendance_roster.status_code, 200)
+        self.assertFalse(any(row["id"] == self.student.id for row in attendance_roster.json()["students"]))
+        self.assertEqual(attendance_mark.status_code, 403)
+        self.assertEqual(subscription_detail.status_code, 200)
+        self.assertEqual(subscription_status.status_code, 400)
+        self.assertEqual(subscription_renew.status_code, 400)
+        self.assertEqual(subscription_freeze.status_code, 400)
+        self.assertEqual(subscription_adjust.status_code, 400)
+        self.assertEqual(detail.status_code, 200)
+        self.assertFalse(detail.json()["is_active"])
 
     def test_admin_can_view_and_mark_session_attendance(self):
         trainer = f.make_trainer(username="admin_attendance_coach")
@@ -537,8 +697,38 @@ class AdminPortalApiRule(TestCase):
         routes = {(row["method"], row["path"]) for row in payload["endpoints"]}
         self.assertIn(("GET", "/api/admin/dashboard/"), routes)
         self.assertIn(("POST", "/api/admin/schedule/check-conflict/"), routes)
+        self.assertIn(("POST", "/api/admin/schedule/sessions/<id>/waitlist/"), routes)
+        self.assertIn(("POST", "/api/admin/schedule/waitlist/<id>/promote/"), routes)
+        self.assertIn(("DELETE", "/api/admin/schedule/waitlist/<id>/"), routes)
+        self.assertIn(("POST", "/api/admin/notifications/quiet-hours/"), routes)
+        self.assertIn(("POST", "/api/admin/payroll/periods/"), routes)
+        self.assertIn(("GET", "/api/nocobase/clients/"), routes)
+        self.assertIn(("GET", "/api/nocobase/payroll/periods/"), routes)
+        self.assertIn(("GET", "/api/nocobase/payroll/periods/<id>/"), routes)
+        self.assertIn(("POST", "/api/nocobase/config/payroll/rules/"), routes)
+        self.assertIn(("POST", "/api/nocobase/config/languages/"), routes)
+        self.assertIn(("POST", "/api/nocobase/config/locations/"), routes)
+        self.assertIn(("POST", "/api/nocobase/config/session-types/"), routes)
+        self.assertIn(("POST", "/api/nocobase/config/notification-template-translations/"), routes)
         self.assertIn(("GET", "/api/client/overview/"), routes)
         self.assertIn("participant", payload["resources"])
+        self.assertIn("waitlist_entry", payload["resources"])
+        self.assertIn("location", payload["resources"])
+        self.assertIn("session_type_config", payload["resources"])
+        self.assertIn("payroll_period", payload["resources"])
+        self.assertIn("dictionary_translation", payload["resources"])
+        by_route = {(row["method"], row["path"]): row for row in payload["endpoints"]}
+        self.assertEqual(by_route[("GET", "/api/nocobase/clients/")]["query"], ["q", "active", "limit"])
+        self.assertEqual(by_route[("GET", "/api/nocobase/payroll/periods/")]["query"], ["location", "status"])
+        self.assertEqual(
+            by_route[("GET", "/api/nocobase/config/notification-template-translations/")]["query"],
+            ["template_id", "language_code"],
+        )
+        self.assertEqual(by_route[("GET", "/api/nocobase/config/payroll/rules/")]["query"], ["scheme_id"])
+        self.assertEqual(
+            by_route[("GET", "/api/nocobase/config/payroll/assignments/")]["query"],
+            ["trainer_id"],
+        )
 
         parent = f.make_parent(username="contract_client")
         self.client.force_login(parent.user)
@@ -600,6 +790,12 @@ class AdminPortalApiRule(TestCase):
         self.group.default_trainer = trainer
         self.group.save()
         stype = f.make_sub_type(name="Reference Pack", sessions=8)
+        location = Location.objects.create(code="ref-pool", name="Reference Pool")
+        SessionTypeConfig.objects.create(
+            code=SessionType.SPLIT,
+            label="Reference split",
+            default_capacity=2,
+        )
 
         response = self.client.get("/api/admin/reference/", {"q": "Тестова"})
 
@@ -608,8 +804,14 @@ class AdminPortalApiRule(TestCase):
         self.assertTrue(any(row["id"] == trainer.id for row in payload["trainers"]))
         self.assertTrue(any(row["id"] == self.group.id for row in payload["groups"]))
         self.assertTrue(any(row["id"] == stype.id for row in payload["subscription_types"]))
+        self.assertTrue(any(row["id"] == location.id for row in payload["locations"]))
         self.assertEqual(payload["participants"][0]["id"], self.student.id)
         self.assertIn("payment_methods", payload["choices"])
+        payment_method_values = [row["value"] for row in payload["choices"]["payment_methods"]]
+        self.assertIn("bank_transfer", payment_method_values)
+        self.assertNotIn("transfer", payment_method_values)
+        self.assertEqual(payload["choices"]["session_types"][0]["value"], SessionType.SPLIT)
+        self.assertEqual(payload["choices"]["session_types"][0]["default_capacity"], 2)
 
     def test_admin_dashboard_endpoint_exposes_metrics(self):
         trainer = f.make_trainer(username="dashboard_coach")
@@ -926,6 +1128,181 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.json()["individual_student_id"], self.student.id)
         self.assertIsNone(response.json()["group"])
 
+    def test_admin_can_set_and_clear_session_substitute_trainer(self):
+        trainer = f.make_trainer(username="scheduled_session_coach")
+        substitute = f.make_trainer(username="substitute_session_coach")
+        session = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "group_id": self.group.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-03T17:00:00+02:00",
+                "end_at": "2026-06-03T18:00:00+02:00",
+                "location": "Pool A",
+                "max_participants": 8,
+            }),
+            content_type="application/json",
+        )
+        substituted = self.client.post(
+            f"/api/admin/schedule/sessions/{session.json()['id']}/",
+            data=json.dumps({"substitute_trainer_id": substitute.id}),
+            content_type="application/json",
+        )
+        cleared = self.client.post(
+            f"/api/admin/schedule/sessions/{session.json()['id']}/",
+            data=json.dumps({"substitute_trainer_id": None}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(session.status_code, 201)
+        self.assertEqual(substituted.status_code, 200)
+        self.assertEqual(substituted.json()["trainer_id"], trainer.id)
+        self.assertEqual(substituted.json()["substitute_trainer_id"], substitute.id)
+        self.assertEqual(substituted.json()["effective_trainer_id"], substitute.id)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["substitute_trainer_id"])
+        self.assertEqual(cleared.json()["effective_trainer_id"], trainer.id)
+
+    def test_admin_can_manage_session_waitlist_without_deleting_history(self):
+        trainer = f.make_trainer(username="waitlist_session_coach")
+        waiting_student = f.make_student(first="Wait", last="Listed")
+        cancelled_student = f.make_student(first="No", last="Longer")
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=f.dt(2026, 6, 2, 19),
+            end_at=f.dt(2026, 6, 2, 20),
+            location="Pool A",
+            max_participants=3,
+        )
+
+        created = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            data=json.dumps({"student_id": waiting_student.id, "priority": 2, "note": "prefers 19:00"}),
+            content_type="application/json",
+        )
+        duplicate = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            data=json.dumps({"student_id": waiting_student.id}),
+            content_type="application/json",
+        )
+        cancel_candidate = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            data=json.dumps({"student_id": cancelled_student.id, "priority": 3}),
+            content_type="application/json",
+        )
+        listing = self.client.get(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            {"status": WaitlistStatus.ACTIVE},
+        )
+        session_detail = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        promoted = self.client.post(f"/api/admin/schedule/waitlist/{created.json()['id']}/promote/")
+        attendance_roster = self.client.get(f"/api/admin/schedule/sessions/{session.id}/attendance/")
+        attendance = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/attendance/",
+            data=json.dumps({"student_id": waiting_student.id, "status": AttendanceStatus.PRESENT}),
+            content_type="application/json",
+        )
+        repeat_promote = self.client.post(f"/api/admin/schedule/waitlist/{created.json()['id']}/promote/")
+        cannot_cancel_promoted = self.client.delete(f"/api/admin/schedule/waitlist/{created.json()['id']}/")
+        cancelled = self.client.delete(f"/api/admin/schedule/waitlist/{cancel_candidate.json()['id']}/")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["student_id"], waiting_student.id)
+        self.assertEqual(cancel_candidate.status_code, 201)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.json()["waitlist"]), 2)
+        self.assertEqual(session_detail.json()["waitlist_active_count"], 2)
+        self.assertEqual(promoted.status_code, 200)
+        self.assertEqual(promoted.json()["status"], WaitlistStatus.PROMOTED)
+        self.assertIsNotNone(promoted.json()["participant_id"])
+        self.assertTrue(SessionParticipant.objects.filter(pk=promoted.json()["participant_id"]).exists())
+        roster_ids = [row["id"] for row in attendance_roster.json()["students"]]
+        self.assertIn(waiting_student.id, roster_ids)
+        self.assertEqual(attendance.status_code, 200)
+        self.assertEqual(repeat_promote.status_code, 400)
+        self.assertEqual(cannot_cancel_promoted.status_code, 400)
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.json()["status"], WaitlistStatus.CANCELLED)
+        entry = WaitlistEntry.objects.get(pk=created.json()["id"])
+        cancelled_entry = WaitlistEntry.objects.get(pk=cancel_candidate.json()["id"])
+        self.assertEqual(entry.status, WaitlistStatus.PROMOTED)
+        self.assertEqual(cancelled_entry.status, WaitlistStatus.CANCELLED)
+        self.assertTrue(AuditLogEntry.objects.filter(action="waitlist.created", entity_id=str(entry.id)).exists())
+        self.assertTrue(AuditLogEntry.objects.filter(action="waitlist.updated", entity_id=str(cancelled_entry.id)).exists())
+        self.assertTrue(AuditLogEntry.objects.filter(action="waitlist.promoted", entity_id=str(entry.id)).exists())
+
+    def test_waitlist_promotion_full_session_keeps_entry_active(self):
+        trainer = f.make_trainer(username="full_waitlist_coach")
+        roster_student = f.make_student(first="Roster", last="Full", group=self.group)
+        waiting_student = f.make_student(first="Still", last="Waiting")
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=f.dt(2026, 6, 2, 20),
+            end_at=f.dt(2026, 6, 2, 21),
+            location="Pool A",
+            max_participants=1,
+        )
+        set_attendance(
+            session_id=session.id,
+            student=roster_student,
+            status=AttendanceStatus.PRESENT,
+            actor=self.admin,
+        )
+        created = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            data=json.dumps({"student_id": waiting_student.id, "priority": 1}),
+            content_type="application/json",
+        )
+        promoted = self.client.post(f"/api/admin/schedule/waitlist/{created.json()['id']}/promote/")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(promoted.status_code, 400)
+        entry = WaitlistEntry.objects.get(pk=created.json()["id"])
+        self.assertEqual(entry.status, WaitlistStatus.ACTIVE)
+        self.assertFalse(SessionParticipant.objects.filter(session=session, student=waiting_student).exists())
+
+    def test_archived_client_account_cannot_use_waitlist_operations(self):
+        trainer = f.make_trainer(username="archived_waitlist_coach")
+        archived_student = f.make_student(first="Archived", last="Waitlist")
+        promote_blocked_student = f.make_student(first="Promote", last="Blocked")
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=f.dt(2026, 6, 2, 21),
+            end_at=f.dt(2026, 6, 2, 22),
+            location="Pool B",
+            max_participants=5,
+        )
+
+        archived_student.parent.user.is_active = False
+        archived_student.parent.user.save(update_fields=["is_active"])
+        create_blocked = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            data=json.dumps({"student_id": archived_student.id}),
+            content_type="application/json",
+        )
+        created_before_archive = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/waitlist/",
+            data=json.dumps({"student_id": promote_blocked_student.id}),
+            content_type="application/json",
+        )
+        promote_blocked_student.parent.user.is_active = False
+        promote_blocked_student.parent.user.save(update_fields=["is_active"])
+        promote_blocked = self.client.post(
+            f"/api/admin/schedule/waitlist/{created_before_archive.json()['id']}/promote/")
+
+        self.assertEqual(create_blocked.status_code, 400)
+        self.assertEqual(created_before_archive.status_code, 201)
+        self.assertEqual(promote_blocked.status_code, 400)
+        self.assertFalse(SessionParticipant.objects.filter(
+            session=session,
+            student=promote_blocked_student,
+            status=SessionParticipantStatus.ACTIVE,
+        ).exists())
+
     def test_admin_cannot_double_book_trainer(self):
         trainer = f.make_trainer(username="blocked_session_coach")
         create_session(
@@ -973,6 +1350,40 @@ class AdminPortalApiRule(TestCase):
         payment.refresh_from_db()
         self.assertEqual(payment.method, "cash")
 
+    def test_admin_payment_method_update_is_audited_with_before_after(self):
+        payment = Payment.objects.create(
+            student=self.student,
+            amount_minor=1000,
+            currency="PLN",
+            paid_at=date.today(),
+            method="cash",
+            status=PaymentStatus.PENDING,
+            created_by=self.admin,
+        )
+
+        response = self.client.post(
+            f"/api/admin/payments/{payment.id}/",
+            data=json.dumps({
+                "method": "bank_transfer",
+                "amount_minor": 999999,
+                "paid_at": "2025-01-01",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual(payment.method, "bank_transfer")
+        self.assertEqual(payment.amount_minor, 1000)
+        self.assertEqual(payment.paid_at, date.today())
+        entry = AuditLogEntry.objects.get(action="payment.updated", entity_id=str(payment.id))
+        self.assertEqual(entry.actor, self.admin)
+        self.assertEqual(entry.changes["fields"], ["method"])
+        self.assertEqual(entry.changes["changes"]["method"], {
+            "from": "cash",
+            "to": "bank_transfer",
+        })
+
     def test_admin_income_report_requires_date_range(self):
         response = self.client.get("/api/admin/reports/income/")
         self.assertEqual(response.status_code, 400)
@@ -982,6 +1393,24 @@ class AdminPortalApiRule(TestCase):
         response = self.client.get("/api/admin/export/clients/pdf/")
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
+
+    def test_admin_can_export_clients_csv_and_xlsx(self):
+        csv_response = self.client.get("/api/admin/export/clients/csv/")
+        xlsx_response = self.client.get("/api/admin/export/clients/xlsx/")
+
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertEqual(csv_response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn('filename="clients.csv"', csv_response["Content-Disposition"])
+        self.assertTrue(csv_response.content.startswith(b"\xef\xbb\xbf"))
+        self.assertIn(self.student.last_name.encode("utf-8"), csv_response.content)
+
+        self.assertEqual(xlsx_response.status_code, 200)
+        self.assertEqual(
+            xlsx_response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn('filename="clients.xlsx"', xlsx_response["Content-Disposition"])
+        self.assertTrue(xlsx_response.content.startswith(b"PK"))
 
     def test_admin_mass_mail_requires_valid_channel_and_body(self):
         bad_channel = self.client.post(
@@ -1116,6 +1545,7 @@ class AdminPortalApiRule(TestCase):
         )
         logs = self.client.get("/api/admin/notifications/logs/", {"status": DeliveryStatus.FAILED})
         log_detail = self.client.get(f"/api/admin/notifications/logs/{log.id}/")
+        protected_template_delete = self.client.delete(f"/api/admin/notifications/templates/{template_id}/")
         archived_rule = self.client.delete(f"/api/admin/notifications/rules/{rule_id}/")
 
         self.assertEqual(updated_template.status_code, 200)
@@ -1126,7 +1556,40 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(logs.status_code, 200)
         self.assertEqual(logs.json()["logs"][0]["id"], log.id)
         self.assertEqual(log_detail.json()["error"], "Provider down")
+        self.assertEqual(protected_template_delete.status_code, 400)
+        self.assertIn("notification template is used", protected_template_delete.json()["error"][0])
+        self.assertTrue(NotificationTemplate.objects.filter(pk=template_id).exists())
         self.assertFalse(archived_rule.json()["is_active"])
+
+    def test_admin_can_manage_quiet_hours_policies(self):
+        create = self.client.post(
+            "/api/admin/notifications/quiet-hours/",
+            data=json.dumps({
+                "channel": Channel.EMAIL,
+                "starts_at": "22:00",
+                "ends_at": "08:00",
+                "timezone": "Europe/Warsaw",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(create.status_code, 201)
+        policy_id = create.json()["id"]
+
+        update = self.client.patch(
+            f"/api/admin/notifications/quiet-hours/{policy_id}/",
+            data=json.dumps({"policy": {"starts_at": "21:30"}}),
+            content_type="application/json",
+        )
+        listing = self.client.get("/api/admin/notifications/quiet-hours/", {"channel": Channel.EMAIL})
+        archived = self.client.delete(f"/api/admin/notifications/quiet-hours/{policy_id}/")
+
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.json()["starts_at"], "21:30")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()["policies"][0]["id"], policy_id)
+        self.assertEqual(archived.status_code, 200)
+        self.assertFalse(archived.json()["is_active"])
+        self.assertEqual(QuietHoursPolicy.objects.get(pk=policy_id).starts_at.isoformat(timespec="minutes"), "21:30")
 
     def test_admin_can_anonymize_client_account(self):
         parent = self.student.parent

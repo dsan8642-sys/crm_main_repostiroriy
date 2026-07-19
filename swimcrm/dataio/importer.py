@@ -12,6 +12,7 @@ from accounts.models import ParentAccount, User
 from audit.models import audit
 from catalog.models import Group, SubscriptionType
 from students.models import Student
+from subscriptions.models import allow_subscription_history_delete
 from subscriptions.services import create_subscription
 
 from .models import ImportBatch
@@ -188,7 +189,8 @@ def rollback(batch: ImportBatch):
         raise ValidationError("Импорт уже откачен")
     # Delete created students explicitly (some may hang off a reused family parent
     # that must survive), then drop the parents this batch created (cascades users).
-    Student.objects.filter(id__in=batch.created_student_ids).delete()
+    with allow_subscription_history_delete():
+        Student.objects.filter(id__in=batch.created_student_ids).delete()
     user_ids = list(ParentAccount.objects.filter(id__in=batch.created_parent_ids)
                     .values_list("user_id", flat=True))
     User.objects.filter(id__in=user_ids).delete()
