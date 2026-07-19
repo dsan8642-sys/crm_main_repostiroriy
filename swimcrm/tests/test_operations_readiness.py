@@ -746,6 +746,12 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Operations status ok requirement passed", script)
         self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", handoff)
 
+    def test_hybrid_cutover_audit_uses_release_health_plan(self):
+        script = (REPO_ROOT / "scripts" / "verify-hybrid-cutover-readiness.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("check-hybrid-health.ps1", script)
+        self.assertIn("-RequireHttps -RequireOpsOk -PlanOnly", script)
+
     def test_nocobase_runtime_requires_strong_production_app_key(self):
         runtime = (REPO_ROOT / "scripts" / "run-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")
         verifier = (REPO_ROOT / "scripts" / "verify-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")

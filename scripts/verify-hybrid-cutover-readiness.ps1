@@ -192,7 +192,7 @@ $backupRestore = Invoke-Step -Name "Hybrid backup/restore guards" -Command {
 Add-Check -Checks $checks -Name $backupRestore.name -Ok $backupRestore.ok -Details $backupRestore
 
 $healthPlan = Invoke-Step -Name "Hybrid health plan" -Command {
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\check-hybrid-health.ps1") -PlanOnly
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\check-hybrid-health.ps1") -RequireHttps -RequireOpsOk -PlanOnly
 }
 Add-Check -Checks $checks -Name $healthPlan.name -Ok $healthPlan.ok -Details $healthPlan
 

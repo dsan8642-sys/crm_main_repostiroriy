@@ -1123,6 +1123,7 @@
             "verify-release-source-manifests.ps1",
             "verify-release-source-archive.ps1",
             "verify-local-release-candidate.ps1",
+            "-RequireHttps -RequireOpsOk -PlanOnly",
             "-RequireTracked"
           ]
         },
@@ -1437,6 +1438,7 @@
             "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
             "test_cutover_evidence_requires_https_live_health_fragment",
             "test_cutover_evidence_requires_live_ops_ok_fragment",
+            "test_hybrid_cutover_audit_uses_release_health_plan",
             "test_cutover_evidence_requires_live_health_production_urls",
             "test_cutover_evidence_rejects_localhost_live_health_urls",
             "test_cutover_evidence_requires_complete_rollback_acknowledgement",
