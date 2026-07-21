@@ -14,6 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$InstallVerifier = Join-Path $RepoRoot "scripts\verify-target-host-release-install.ps1"
 
 function Resolve-RequiredPath {
     param(
@@ -80,6 +81,9 @@ function Invoke-Step {
 
 if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
     throw "Release archive verifier not found at $ArchiveVerifier."
+}
+if (-not (Test-Path -LiteralPath $InstallVerifier)) {
+    throw "Target-host release install verifier not found at $InstallVerifier."
 }
 
 $manifestPath = Resolve-RequiredPath -Path $Manifest -Label "Manifest"
@@ -232,6 +236,18 @@ Invoke-Step "Prepare NocoBase runtime roots" {
     New-Item -ItemType Directory -Force -Path $nocoBaseStorageDirPath | Out-Null
     Write-Host "NocoBase app root outside source tree."
     Write-Host "NocoBase storage outside source tree."
+}
+
+Invoke-Step "Verify installed release source tree" {
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallVerifier `
+        -Manifest $manifestPath `
+        -ReleaseDir $ReleaseDir `
+        -NocoBaseAppRoot $nocoBaseAppRootPath `
+        -NocoBaseStorageDir $nocoBaseStorageDirPath `
+        -RequireInstalledDependencies
+    if ($LASTEXITCODE -ne 0) {
+        throw "Target-host release install verification failed with exit code $LASTEXITCODE."
+    }
 }
 
 Write-Host ""

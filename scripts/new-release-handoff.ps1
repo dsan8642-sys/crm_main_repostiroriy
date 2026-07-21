@@ -85,7 +85,7 @@ $operatorChecklist = @(
         id = "install_release_archive_on_target_host"
         title = "Install the verified release archive on the target host."
         command = "scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-$shortSha.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall"
-        expected_evidence = "Target-host release install completed; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree."
+        expected_evidence = "Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree."
         stop_if_missing = $true
     },
     [ordered]@{

@@ -76,8 +76,9 @@ Production approval requires evidence that cannot be invented locally:
 - GitHub Actions `postgres-backend-check` run URL for the exact release commit;
 - target-host `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall`
   output proving the verified archive was extracted, dependencies were
-  installed, migrations were checked, and NocoBase app/storage roots are outside
-  the source tree;
+  installed, migrations were checked, the extracted source tree was verified
+  against the release archive, and NocoBase app/storage roots are outside the
+  source tree;
 - target-host `scripts\check-production-env.cmd` output with real production
   environment variables;
 - target-host `scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk`

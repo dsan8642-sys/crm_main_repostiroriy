@@ -227,9 +227,9 @@ not just `status=passed`:
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
 - target-host release install: `Target-host release install completed`,
-  `Release archive extracted on target host`, `Release source archive manifest
-  verified`, `Release source archive contents verified`, `Release source
-  archive tracked file list verified`,
+  `Target-host release install verified`, `Release archive extracted on target
+  host`, `Release source archive manifest verified`, `Release source archive
+  contents verified`, `Release source archive tracked file list verified`,
   `tracked_file_count`, `tracked_file_list_sha256`, `Backend dependencies
   installed`, `Root Node tooling installed`, `Frontend dependencies installed`,
   `Django migrations check passed`, `NocoBase app root outside source tree`,
@@ -449,6 +449,10 @@ Before creating a production package:
 - the target-host installer supports manifests created on another machine: if
   the manifest contains the build machine's absolute archive path, the verifier
   falls back to the sibling `.zip` next to the manifest;
+- the target-host installer finishes by running
+  `scripts\verify-target-host-release-install.cmd` logic against the extracted
+  release tree, so paste both `Target-host release install completed` and
+  `Target-host release install verified` into cutover evidence;
 - use `scripts\verify-release-tree.cmd -Strict` only as a clean checkout guard
   before dependencies and runtime assets are generated;
 - on the production host, run `scripts\check-production-env.cmd` with real environment variables;

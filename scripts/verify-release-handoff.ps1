@@ -156,6 +156,7 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_release_archive_on_target_host" -Fragments @(
     "Target-host release install completed",
+    "Target-host release install verified",
     "Release archive extracted on target host",
     "Release source archive tracked file list verified",
     "tracked_file_count",

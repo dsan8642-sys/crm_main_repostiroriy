@@ -1005,6 +1005,10 @@
         },
         {
           "type": "command_exists",
+          "path": "scripts/verify-target-host-release-install.cmd"
+        },
+        {
+          "type": "command_exists",
           "path": "scripts/verify-local-release-candidate.cmd"
         },
         {
@@ -1081,6 +1085,31 @@
             "Frontend dependencies installed",
             "Django migrations check passed",
             "Target-host release install completed",
+            "verify-target-host-release-install.ps1",
+            "RequireInstalledDependencies",
+            "tracked_file_count",
+            "tracked_file_list_sha256"
+          ]
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/verify-target-host-release-install.ps1",
+          "patterns": [
+            "verify-release-source-archive.ps1",
+            "Get-PortableRelativePath",
+            "Get-ZipFileEntries",
+            "Get-ReleaseSourceEntries",
+            "BlockedGeneratedPrefixes",
+            "Installed release source tree must match the verified release archive",
+            "Installed release tracked file count mismatch",
+            "Installed release tracked file list sha256 mismatch",
+            "RequireInstalledDependencies",
+            "swimcrm\\\\\\.venv\\\\Scripts\\\\python\\.exe",
+            "node_modules\\\\@nocobase\\\\cli\\\\package\\.json",
+            "frontend\\\\node_modules",
+            "NOCOBASE_APP_ROOT must be outside the extracted release source tree",
+            "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree",
+            "Target-host release install verified",
             "tracked_file_count",
             "tracked_file_list_sha256"
           ]
@@ -1170,6 +1199,7 @@
             "install-release-on-target-host.cmd",
             "Release archive extracted on target host",
             "Target-host release install completed",
+            "Target-host release install verified",
             "Backend dependencies installed",
             "Root Node tooling installed",
             "Frontend dependencies installed",
@@ -1212,6 +1242,7 @@
             "install-release-on-target-host.cmd",
             "-RunInstall",
             "Target-host release install completed",
+            "Target-host release install verified",
             "Backend dependencies installed",
             "NocoBase storage outside source tree",
             "real https:// Django production URL",
@@ -1481,6 +1512,7 @@
             "install-release-on-target-host.cmd",
             "-RunInstall",
             "Target-host release install completed",
+            "Target-host release install verified",
             "Release archive extracted on target host",
             "Backend dependencies installed",
             "Root Node tooling installed",
@@ -1539,6 +1571,7 @@
             "install-release-on-target-host.cmd",
             "-RunInstall",
             "Target-host release install completed",
+            "Target-host release install verified",
             "NocoBase app root outside source tree",
             "swimcrm-release-source-<commit-sha>",
             "Tracked release source manifests",
@@ -1566,6 +1599,7 @@
             "test_cutover_evidence_requires_release_source_archive",
             "test_cutover_evidence_requires_target_host_release_install",
             "test_cutover_evidence_requires_target_host_install_fragments",
+            "test_cutover_evidence_requires_target_host_install_verification",
             "test_cutover_evidence_requires_source_archive_release_sha",
             "test_cutover_evidence_requires_source_archive_sha256",
             "test_cutover_evidence_requires_source_archive_manifest_verification",
@@ -1582,6 +1616,7 @@
             "test_cutover_evidence_rejects_localhost_live_health_urls",
             "test_cutover_evidence_requires_complete_rollback_acknowledgement",
             "ReleaseSourceArchiveVerifierRule",
+            "TargetHostReleaseInstallVerifierRule",
             "test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha",
             "test_release_source_manifests_fail_when_root_tooling_is_untracked",
             "test_release_workflow_requires_postgres_manifest_guard",

@@ -87,6 +87,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
     ],
     "target_host_release_install": [
         "Target-host release install completed",
+        "Target-host release install verified",
         "Release archive extracted on target host",
         "Release source archive manifest verified",
         "Release source archive contents verified",
