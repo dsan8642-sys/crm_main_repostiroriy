@@ -895,11 +895,12 @@ class AdminPortalApiRule(TestCase):
 
     def test_admin_dashboard_endpoint_exposes_metrics(self):
         trainer = f.make_trainer(username="dashboard_coach")
+        session_start = timezone.localtime().replace(hour=12, minute=0, second=0, microsecond=0)
         create_session(
             trainer=trainer,
             group=self.group,
-            start_at=timezone.now() + timedelta(hours=1),
-            end_at=timezone.now() + timedelta(hours=2),
+            start_at=session_start,
+            end_at=session_start + timedelta(hours=1),
             location="Pool A",
             max_participants=8,
         )
