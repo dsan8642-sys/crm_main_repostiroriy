@@ -3,6 +3,7 @@ and size before they are accepted."""
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -23,6 +24,16 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 class ProductionSettingsRule(SimpleTestCase):
+    def _outside_source_runtime_env(self):
+        runtime_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(runtime_dir.cleanup)
+        root = Path(runtime_dir.name)
+        return {
+            "SWIMCRM_RUNTIME_DIR": str(root),
+            "STATIC_ROOT": str(root / "staticfiles"),
+            "MEDIA_ROOT": str(root / "uploads"),
+        }
+
     def _import_settings(self, **env_updates):
         env = os.environ.copy()
         for key in [
@@ -74,6 +85,7 @@ class ProductionSettingsRule(SimpleTestCase):
             POSTGRES_PASSWORD="release-db-password",
             POSTGRES_HOST="db.example.internal",
             POSTGRES_PORT="5432",
+            **self._outside_source_runtime_env(),
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -126,6 +138,7 @@ class ProductionSettingsRule(SimpleTestCase):
             "POSTGRES_PASSWORD": "release-db-password",
             "POSTGRES_HOST": "db.example.internal",
             "POSTGRES_PORT": "5432",
+            **self._outside_source_runtime_env(),
         })
         code = (
             "import os; "
