@@ -949,6 +949,7 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn('import waitress', script)
         self.assertIn("Waitress production WSGI server installed", script)
         self.assertIn("node_modules\\@nocobase\\cli\\package.json", script)
+        self.assertIn('devDependencies."@nocobase/cli"', script)
         self.assertIn("Root package.json must pin @nocobase/cli", script)
         self.assertIn("Installed @nocobase/cli version mismatch", script)
         self.assertIn("NocoBase CLI package installed", script)

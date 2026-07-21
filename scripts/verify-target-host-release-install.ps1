@@ -173,7 +173,7 @@ function Assert-NocoBaseCliPackage {
 
     $rootPackage = Get-Content -LiteralPath $rootPackagePath -Raw | ConvertFrom-Json
     $installedPackage = Get-Content -LiteralPath $installedPackagePath -Raw | ConvertFrom-Json
-    $expectedVersion = [string]$rootPackage.dependencies."@nocobase/cli"
+    $expectedVersion = [string]$rootPackage.devDependencies."@nocobase/cli"
     if ([string]::IsNullOrWhiteSpace($expectedVersion)) {
         throw "Root package.json must pin @nocobase/cli."
     }
