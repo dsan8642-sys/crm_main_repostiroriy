@@ -1490,6 +1490,31 @@
           "path": "scripts/new-production-cutover-evidence.cmd"
         },
         {
+          "type": "command_exists",
+          "path": "scripts/acknowledge-production-rollback.cmd"
+        },
+        {
+          "type": "file_contains",
+          "path": "scripts/acknowledge-production-rollback.ps1",
+          "patterns": [
+            "ConfirmStopWriters",
+            "ConfirmVerifiedBackup",
+            "ConfirmRestorePlan",
+            "ConfirmMigrateCheck",
+            "ConfirmRestartServices",
+            "ConfirmLiveSmoke",
+            "Rollback acknowledgement requires every confirmation flag",
+            "Rollback plan reviewed",
+            "stop writers",
+            "verified backup",
+            "restore",
+            "migrate --check",
+            "restart services",
+            "live smoke",
+            "Production rollback acknowledgement completed"
+          ]
+        },
+        {
           "type": "file_contains",
           "path": "scripts/verify_production_cutover_evidence.py",
           "patterns": [
@@ -1537,7 +1562,9 @@
             "found 0 vulnerabilities",
             "Tracked release source manifests",
             "Release source manifests verified",
-            "tracked"
+            "tracked",
+            "acknowledge-production-rollback.cmd",
+            "Production rollback acknowledgement completed"
           ]
         },
         {
@@ -1585,7 +1612,9 @@
             "production-nocobase-host",
             "<64-hex-sha256>",
             "stop writers",
-            "migrate --check"
+            "migrate --check",
+            "acknowledge-production-rollback.cmd",
+            "Production rollback acknowledgement completed"
           ]
         },
         {
@@ -1615,8 +1644,10 @@
             "test_cutover_evidence_requires_live_health_production_urls",
             "test_cutover_evidence_rejects_localhost_live_health_urls",
             "test_cutover_evidence_requires_complete_rollback_acknowledgement",
+            "test_cutover_evidence_requires_rollback_acknowledgement_command",
             "ReleaseSourceArchiveVerifierRule",
             "TargetHostReleaseInstallVerifierRule",
+            "ProductionRollbackAcknowledgementRule",
             "test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha",
             "test_release_source_manifests_fail_when_root_tooling_is_untracked",
             "test_release_workflow_requires_postgres_manifest_guard",

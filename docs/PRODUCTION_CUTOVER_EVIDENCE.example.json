@@ -89,8 +89,10 @@
     {
       "id": "rollback_plan_acknowledged",
       "status": "passed",
+      "command": "scripts\\acknowledge-production-rollback.cmd -ConfirmStopWriters -ConfirmVerifiedBackup -ConfirmRestorePlan -ConfirmMigrateCheck -ConfirmRestartServices -ConfirmLiveSmoke",
       "captured_at": "2026-07-16T12:40:00+02:00",
-      "summary": "Rollback plan reviewed: stop writers, verified backup, restore Django/NocoBase databases and storage, migrate --check, restart services, live smoke."
+      "summary": "Rollback plan reviewed before cutover approval.",
+      "output_excerpt": "Rollback plan reviewed. stop writers. verified backup. restore. migrate --check. restart services. live smoke. Production rollback acknowledgement completed."
     }
   ]
 }

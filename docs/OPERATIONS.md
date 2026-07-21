@@ -249,7 +249,7 @@ not just `status=passed`:
   `Hybrid backup set verification OK`;
 - rollback acknowledgement: `Rollback plan reviewed`, `stop writers`,
   `verified backup`, `restore`, `migrate --check`, `restart services`,
-  `live smoke`.
+  `live smoke`, `Production rollback acknowledgement completed`.
 
 ## NocoBase runtime
 
@@ -409,6 +409,10 @@ Before creating a production package:
   `docs\PRODUCTION_CUTOVER_EVIDENCE.example.json`, or generate a draft with
   `scripts\new-production-cutover-evidence.cmd`, then run
   `scripts\verify-production-cutover-evidence.cmd`;
+- before approving final cutover, run
+  `scripts\acknowledge-production-rollback.cmd -ConfirmStopWriters -ConfirmVerifiedBackup -ConfirmRestorePlan -ConfirmMigrateCheck -ConfirmRestartServices -ConfirmLiveSmoke`
+  and paste `Production rollback acknowledgement completed` plus the rollback
+  checklist output into the evidence manifest;
 - when local backend/full-stack/archive checks already passed, generate the
   draft with `scripts\new-production-cutover-evidence.cmd -LocalBackendPassed
   -LocalFullStackPassed -ReleaseArchivePassed -ArchiveSha256 <sha256>

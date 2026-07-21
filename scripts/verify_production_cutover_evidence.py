@@ -50,6 +50,7 @@ EXPECTED_COMMANDS = {
     "production_env_preflight": "scripts\\check-production-env.cmd",
     "live_hybrid_health": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
     "hybrid_backup_restore_drill": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
+    "rollback_plan_acknowledged": "scripts\\acknowledge-production-rollback.cmd",
 }
 
 REQUIRED_OUTPUT_FRAGMENTS = {
@@ -135,6 +136,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "migrate --check",
         "restart services",
         "live smoke",
+        "Production rollback acknowledgement completed",
     ],
 }
 
@@ -245,7 +247,7 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
                 f"({expected_archive_sha256})"
             )
         _validate_release_archive_file_list_proof(evidence_id, combined, errors)
-    elif evidence_id != "rollback_plan_acknowledged" and not item.get("command"):
+    elif not item.get("command"):
         errors.append(f"{evidence_id}: command is required")
 
     expected_command = EXPECTED_COMMANDS.get(evidence_id)
@@ -259,6 +261,19 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
                     errors.append(f"{evidence_id}: command must include {argument}")
             if "-InstallRoot" not in command and "-ReleaseDir" not in command:
                 errors.append(f"{evidence_id}: command must include -InstallRoot or -ReleaseDir")
+        elif evidence_id == "rollback_plan_acknowledged":
+            if not command.startswith(expected_command):
+                errors.append(f"{evidence_id}: command must start with {expected_command!r}")
+            for argument in (
+                "-ConfirmStopWriters",
+                "-ConfirmVerifiedBackup",
+                "-ConfirmRestorePlan",
+                "-ConfirmMigrateCheck",
+                "-ConfirmRestartServices",
+                "-ConfirmLiveSmoke",
+            ):
+                if argument not in command:
+                    errors.append(f"{evidence_id}: command must include {argument}")
         elif command != expected_command:
             errors.append(f"{evidence_id}: command must be {expected_command!r}")
 

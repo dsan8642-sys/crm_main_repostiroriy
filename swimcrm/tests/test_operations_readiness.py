@@ -477,8 +477,11 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             row for row in payload["required_evidence"]
             if row["id"] == "rollback_plan_acknowledged"
         )
-        item["summary"] = item["summary"].replace(
-            "stop writers, ",
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "stop writers. ",
+            "",
+        ).replace(
+            "Production rollback acknowledgement completed.",
             "",
         )
 
@@ -486,6 +489,26 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
 
         self.assertIn(
             "rollback_plan_acknowledged: missing evidence fragment: stop writers",
+            errors,
+        )
+        self.assertIn(
+            "rollback_plan_acknowledged: missing evidence fragment: Production rollback acknowledgement completed",
+            errors,
+        )
+
+    def test_cutover_evidence_requires_rollback_acknowledgement_command(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "rollback_plan_acknowledged"
+        )
+        item.pop("command")
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn("rollback_plan_acknowledged: command is required", errors)
+        self.assertIn(
+            "rollback_plan_acknowledged: command must start with 'scripts\\\\acknowledge-production-rollback.cmd'",
             errors,
         )
 
@@ -911,6 +934,29 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn("verify-target-host-release-install.ps1", wrapper)
 
 
+class ProductionRollbackAcknowledgementRule(SimpleTestCase):
+    def test_production_rollback_acknowledgement_requires_all_confirmations(self):
+        script = (REPO_ROOT / "scripts" / "acknowledge-production-rollback.ps1").read_text(encoding="utf-8-sig")
+        wrapper = (REPO_ROOT / "scripts" / "acknowledge-production-rollback.cmd").read_text(encoding="utf-8-sig")
+
+        self.assertIn("ConfirmStopWriters", script)
+        self.assertIn("ConfirmVerifiedBackup", script)
+        self.assertIn("ConfirmRestorePlan", script)
+        self.assertIn("ConfirmMigrateCheck", script)
+        self.assertIn("ConfirmRestartServices", script)
+        self.assertIn("ConfirmLiveSmoke", script)
+        self.assertIn("Rollback acknowledgement requires every confirmation flag", script)
+        self.assertIn("Rollback plan reviewed", script)
+        self.assertIn("stop writers", script)
+        self.assertIn("verified backup", script)
+        self.assertIn("restore", script)
+        self.assertIn("migrate --check", script)
+        self.assertIn("restart services", script)
+        self.assertIn("live smoke", script)
+        self.assertIn("Production rollback acknowledgement completed", script)
+        self.assertIn("acknowledge-production-rollback.ps1", wrapper)
+
+
 class LocalReleaseCandidateVerifierRule(SimpleTestCase):
     def test_release_candidate_readiness_doc_is_stable_not_a_stale_snapshot(self):
         doc = (REPO_ROOT / "docs" / "RELEASE_CANDIDATE_READINESS.md").read_text(encoding="utf-8-sig")
@@ -994,6 +1040,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("real https:// NocoBase production URL", script)
         self.assertIn("64-character SHA256", script)
         self.assertIn("Rollback plan reviewed", script)
+        self.assertIn("acknowledge-production-rollback.cmd", script)
+        self.assertIn("Production rollback acknowledgement completed", script)
         self.assertIn("Release source archive contents verified", script)
         self.assertIn("Release source archive tracked file list verified", script)
         self.assertIn("tracked_file_count", script)
@@ -1027,6 +1075,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("real https:// Django production URL", script)
         self.assertIn("64-character SHA256", script)
         self.assertIn("stop writers", script)
+        self.assertIn("Production rollback acknowledgement completed", script)
         self.assertIn("Release source archive contents verified", script)
         self.assertIn("Release source archive tracked file list verified", script)
         self.assertIn("tracked_file_count", script)
@@ -1064,6 +1113,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         release_check = (REPO_ROOT / "scripts" / "release-check-backend.ps1").read_text(encoding="utf-8-sig")
 
         self.assertIn("check-hybrid-health.ps1", script)
+        self.assertIn("acknowledge-production-rollback.ps1", script)
+        self.assertIn("acknowledge-production-rollback.cmd", script)
         self.assertIn("-RequireHttps -RequireOpsOk -PlanOnly", script)
         self.assertIn("Hybrid health plan check", release_check)
         self.assertIn("-RequireHttps -RequireOpsOk -PlanOnly", release_check)

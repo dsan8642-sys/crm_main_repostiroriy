@@ -70,7 +70,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "rollback_plan_acknowledged",
-        "summary": "Confirm rollback plan was reviewed before cutover approval. Must include: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke.",
+        "command": "scripts\\acknowledge-production-rollback.cmd -ConfirmStopWriters -ConfirmVerifiedBackup -ConfirmRestorePlan -ConfirmMigrateCheck -ConfirmRestartServices -ConfirmLiveSmoke",
+        "summary": "Run the explicit rollback acknowledgement helper before cutover approval and paste its full pass output here.",
+        "output_excerpt": "Must include: Rollback plan reviewed; stop writers; verified backup; restore; migrate --check; restart services; live smoke; Production rollback acknowledgement completed.",
     },
 ]
 

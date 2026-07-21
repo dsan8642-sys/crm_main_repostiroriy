@@ -86,7 +86,8 @@ Production approval requires evidence that cannot be invented locally:
   NocoBase bridge/config APIs, ops status, and NocoBase process health;
 - target-host hybrid backup/restore drill evidence with checksum-backed backup
   verification;
-- rollback plan acknowledgement.
+- target-host `scripts\acknowledge-production-rollback.cmd -ConfirmStopWriters -ConfirmVerifiedBackup -ConfirmRestorePlan -ConfirmMigrateCheck -ConfirmRestartServices -ConfirmLiveSmoke`
+  output proving the rollback plan was explicitly reviewed before approval.
 
 Fill `docs\PRODUCTION_CUTOVER_EVIDENCE.json` only after collecting real
 external evidence:

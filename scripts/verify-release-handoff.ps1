@@ -187,7 +187,8 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_pr
     "stop writers",
     "verified backup",
     "migrate --check",
-    "live smoke"
+    "live smoke",
+    "Production rollback acknowledgement completed"
 )
 
 $handoffBlockerIds = @($handoffData.release_blockers | ForEach-Object { $_.id } | Sort-Object)

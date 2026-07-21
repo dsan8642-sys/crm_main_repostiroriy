@@ -57,6 +57,8 @@ $RequiredFiles = @(
     "scripts\install-release-on-target-host.cmd",
     "scripts\verify-target-host-release-install.ps1",
     "scripts\verify-target-host-release-install.cmd",
+    "scripts\acknowledge-production-rollback.ps1",
+    "scripts\acknowledge-production-rollback.cmd",
     "scripts\verify-local-release-candidate.ps1",
     "scripts\verify-local-release-candidate.cmd",
     "scripts\verify-production-cutover-evidence.ps1",
