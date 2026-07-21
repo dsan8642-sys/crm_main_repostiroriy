@@ -944,6 +944,8 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn("Installed release tracked file list sha256 mismatch", script)
         self.assertIn("RequireInstalledDependencies", script)
         self.assertIn("swimcrm\\.venv\\Scripts\\python.exe", script)
+        self.assertIn('import waitress', script)
+        self.assertIn("Waitress production WSGI server installed", script)
         self.assertIn("node_modules\\@nocobase\\cli\\package.json", script)
         self.assertIn("Root package.json must pin @nocobase/cli", script)
         self.assertIn("Installed @nocobase/cli version mismatch", script)

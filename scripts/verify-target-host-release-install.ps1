@@ -240,12 +240,18 @@ Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package.json") -Lab
 Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package-lock.json") -Label "Frontend package-lock.json"
 
 if ($RequireInstalledDependencies) {
-    Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\.venv\Scripts\python.exe") -Label "Backend virtualenv Python"
+    $backendPython = Join-Path $releaseDirPath "swimcrm\.venv\Scripts\python.exe"
+    Assert-PathExists -Path $backendPython -Label "Backend virtualenv Python"
+    & $backendPython -c "import waitress"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend virtualenv must include the Waitress production WSGI server."
+    }
     Assert-NocoBaseCliPackage -Root $releaseDirPath
     Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\node_modules") -Label "Frontend node_modules"
     Assert-PathExists -Path $nocoBaseAppRootPath -Label "NocoBase app root"
     Assert-PathExists -Path $nocoBaseStorageDirPath -Label "NocoBase storage directory"
     Write-Host "Backend dependencies installed."
+    Write-Host "Waitress production WSGI server installed."
     Write-Host "Root Node tooling installed."
     Write-Host "NocoBase CLI package installed."
     Write-Host "Frontend dependencies installed."
