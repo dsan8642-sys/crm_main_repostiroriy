@@ -939,6 +939,8 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn("Get-ZipFileEntries", script)
         self.assertIn("Get-ReleaseSourceEntries", script)
         self.assertIn("BlockedGeneratedPrefixes", script)
+        self.assertIn("__pycache__", script)
+        self.assertIn("\\.py[co]$", script)
         self.assertIn("Installed release source tree must match the verified release archive", script)
         self.assertIn("Installed release tracked file count mismatch", script)
         self.assertIn("Installed release tracked file list sha256 mismatch", script)

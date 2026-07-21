@@ -138,7 +138,7 @@ function Get-ReleaseSourceEntries {
         Get-ChildItem -LiteralPath $Root -Recurse -File -Force |
             ForEach-Object {
                 $relative = (Get-PortableRelativePath -Root $Root -Path $_.FullName).Replace("\", "/")
-                $isGenerated = $false
+                $isGenerated = $relative -match '(^|/)__pycache__/' -or $relative -match '\.py[co]$'
                 foreach ($prefix in $BlockedGeneratedPrefixes) {
                     if ($relative.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
                         $isGenerated = $true
