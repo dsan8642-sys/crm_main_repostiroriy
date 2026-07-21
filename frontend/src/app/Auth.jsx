@@ -17,17 +17,17 @@ export function RoleSwitch({ role, onDevLogin, apiState }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-      <div className="seg" aria-label="Dev login" style={{ transform: 'scale(.86)', transformOrigin: 'right center' }}>
+      <div className="seg" aria-label="Тестовый вход" style={{ transform: 'scale(.86)', transformOrigin: 'right center' }}>
         {Object.entries(ROLE_META).map(([key, meta]) => (
           <button
             key={key}
             type="button"
             className={role === key ? 'on' : ''}
-            title={`Dev login: ${meta.label}`}
+            title={`Тестовый вход: ${meta.label}`}
             disabled={busyRole != null || apiState.state === 'loading'}
             onClick={() => loginAs(key)}
           >
-            {busyRole === key ? '...' : `API ${meta.label}`}
+            {busyRole === key ? '...' : meta.label}
           </button>
         ))}
       </div>
@@ -50,7 +50,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
     try {
       await onLogin({ login: loginValue, password })
     } catch (err) {
-      setError(err.message || 'Nie udalo sie zalogowac')
+      setError(err.message || 'Не удалось войти')
     } finally {
       setBusy(false)
     }
@@ -61,14 +61,14 @@ export function LoginScreen({ design, apiState, onLogin }) {
       <form className="card card-pad" style={{ width: 'min(420px, 100%)', display: 'grid', gap: 14 }} onSubmit={submit}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24 }}>SwimCRM</h1>
-          <div className="muted" style={{ marginTop: 4 }}>Logowanie do systemu</div>
+          <div className="muted" style={{ marginTop: 4 }}>Вход в систему</div>
         </div>
         {error && <Banner tone="danger" onClose={() => setError('')}>{error}</Banner>}
         {apiState.state === 'error' && apiState.status !== 403 && (
-          <Banner tone="warning">API: {apiState.error}</Banner>
+          <Banner tone="warning">Не удалось подключиться к серверу: {apiState.error}</Banner>
         )}
         <label style={{ display: 'grid', gap: 6 }}>
-          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Login lub email</span>
+          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Логин или email</span>
           <input
             className="input"
             autoComplete="username"
@@ -77,7 +77,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
           />
         </label>
         <label style={{ display: 'grid', gap: 6 }}>
-          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Haslo</span>
+          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Пароль</span>
           <input
             className="input"
             autoComplete="current-password"
@@ -88,7 +88,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
         </label>
         <Button type="submit" loading={busy} disabled={busy || !loginValue || !password}>
           <icons.Logout size={16} style={{ transform: 'rotate(180deg)' }} />
-          Zaloguj
+          Войти
         </Button>
       </form>
     </div>

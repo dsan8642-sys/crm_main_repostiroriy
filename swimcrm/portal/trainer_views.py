@@ -50,6 +50,7 @@ def trainer_groups(request):
             "students_count": group.students.filter(is_active=True).count(),
             "is_active": group.is_active,
             "next_session": _session_payload(next_session) if next_session else None,
+            "students": [{"id": student.id, "full_name": student.full_name} for student in group.students.filter(is_active=True).order_by("last_name", "first_name")],
         })
     return JsonResponse({"groups": payload})
 
@@ -86,7 +87,9 @@ def trainer_session_detail(request, session_id):
     return JsonResponse({
         "session": _session_payload(session),
         "students": [{
-            **_student_payload(student),
+            "id": student.id,
+            "full_name": student.full_name,
+            "group": {"id": student.group_id, "name": student.group.name} if student.group_id else None,
             "attendance": {
                 "status": attendance[student.id].status,
                 "comment": attendance[student.id].comment,

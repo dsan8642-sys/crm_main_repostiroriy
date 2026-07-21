@@ -7,14 +7,15 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
   const { Button, Avatar, Banner } = components
   const I = icons
   const options = ['present', 'absent', 'excused', 'rescheduled']
-  const labels = { present: 'Obecny', absent: 'Nieobecny', excused: 'Uspr.', rescheduled: 'Przel.' }
+  const labels = { present: 'Был', absent: 'Не был', excused: 'Уважительная', rescheduled: 'Перенос' }
 
   return function ApiTrainerSession({ go, trainerSessionId }) {
     const [rows, setRows] = useState(() => [...(globalThis.TrainerData?.roster || [])])
-    const [title, setTitle] = useState(globalThis.TrainerData?.activeSessionTitle || 'Frekwencja')
+    const [title, setTitle] = useState(globalThis.TrainerData?.activeSessionTitle || 'Посещаемость')
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busyId, setBusyId] = useState(null)
+    const [loading, setLoading] = useState(false)
     const sessionId = trainerSessionId || globalThis.TrainerData?.activeSessionId
 
     useEffect(() => {
@@ -28,7 +29,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
       api.get(`/api/trainer/sessions/${trainerSessionId}/`)
         .then((payload) => {
           if (!alive) return
-          setTitle(`${payload.session?.group?.name || 'Indywidualne'} В· ${formatTime(payload.session?.start_at)}-${formatTime(payload.session?.end_at)}`)
+          setTitle(`${payload.session?.group?.name || 'Индивидуальное'} · ${formatTime(payload.session?.start_at)}-${formatTime(payload.session?.end_at)}`)
           setRows((payload.students || []).map((student) => ({
             id: String(student.id),
             studentId: student.id,
@@ -57,7 +58,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
           status,
         })
         setRows((current) => current.map((item) => item.id === row.id ? { ...item, status } : item))
-        setMessage('Frekwencja zapisana.')
+        setMessage('Посещаемость сохранена.')
         reloadRoleData?.('trainer')
       } catch (err) {
         setError(err.message)
@@ -66,20 +67,30 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
       }
     }
 
+    async function markAllPresent() {
+      setBusyId('all'); setError(null)
+      try {
+        await Promise.all(rows.map((row) => api.post(`/api/trainer/sessions/${sessionId}/attendance/`, { student_id: row.studentId, status: 'present' })))
+        setRows((current) => current.map((row) => ({ ...row, status: 'present' })))
+        setMessage(`Отмечены присутствующими: ${rows.length}.`)
+      } catch (err) { setError(err.message) } finally { setBusyId(null) }
+    }
+
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <button onClick={() => go('sessions')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Moje zajecia</button>
+            <button onClick={() => go('sessions')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Мои занятия</button>
             <h2 className="page-title">{title}</h2>
-            <p className="page-desc">Dane i zapis z /api/trainer/sessions/.</p>
+            <p className="page-desc">Отметьте посещаемость каждого ученика.</p>
           </div>
+          <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={markAllPresent}>Все присутствовали</Button>
         </div>
 
         {message && <Banner tone="success" style={{ marginBottom: 14 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {error && <Banner tone="danger" style={{ marginBottom: 14 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={loading}>Roster zajecia jest ladowany...</BusyBanner>
-        <BusyBanner Banner={Banner} show={busyId != null}>Frekwencja jest zapisywana...</BusyBanner>
+        <BusyBanner Banner={Banner} show={loading}>Загружаю состав занятия...</BusyBanner>
+        <BusyBanner Banner={Banner} show={busyId != null}>Сохраняю посещаемость...</BusyBanner>
 
         <div className="card" style={{ overflow: 'hidden' }}>
           {rows.map((row, index) => (
@@ -87,7 +98,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
               <Avatar name={row.name} size={32} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="strong">{row.name}</div>
-                <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>{row.emergency || '-'}</div>
+                <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>Данные доступны только в рамках занятия</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {options.map((status) => {
@@ -109,7 +120,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
               </div>
             </div>
           ))}
-          {rows.length === 0 && <div className="muted" style={{ padding: 16 }}>Brak uczestnikow dla tego zajecia.</div>}
+          {rows.length === 0 && <div className="muted" style={{ padding: 16 }}>На этом занятии пока нет участников.</div>}
         </div>
       </div>
     )
@@ -123,37 +134,42 @@ export function createTrainerSessionsScreen(components, icons) {
   return function ApiTrainerSessions({ go }) {
     const sessions = globalThis.TrainerData?.sessions || []
     const groups = globalThis.TrainerData?.groups || []
-    const [filters, setFilters] = useState({ groupId: '', status: 'all' })
+    const [filters, setFilters] = useState({ groupId: '', status: 'all', period: 'week' })
     const visibleSessions = sessions.filter((session) => {
       if (filters.groupId && String(session.groupId) !== String(filters.groupId)) return false
       if (filters.status !== 'all' && session.status !== filters.status) return false
+      const date = new Date(`${session.rawDate}T12:00:00`)
+      const now = new Date()
+      if (filters.period === 'today' && session.rawDate !== now.toISOString().slice(0, 10)) return false
+      if (filters.period === 'week' && date > new Date(now.getTime() + 7 * 86400000)) return false
       return true
     })
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Moje zajecia</h2>
-            <p className="page-desc">Dane z /api/trainer/sessions/.</p>
+            <h2 className="page-title">Мои занятия</h2>
+            <p className="page-desc">Ближайшие, завершённые и отменённые занятия.</p>
           </div>
         </div>
 
         <div className="card card-pad" style={{ marginBottom: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(160px, 1fr)', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(160px, 1fr))', gap: 10 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Период<select value={filters.period} onChange={(event) => setFilters((current) => ({ ...current, period: event.target.value }))}><option value="today">Сегодня</option><option value="week">7 дней</option><option value="all">Все ближайшие</option></select></label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Grupa
+              Группа
               <select value={filters.groupId} onChange={(event) => setFilters((current) => ({ ...current, groupId: event.target.value }))} style={{ minHeight: 36 }}>
-                <option value="">Wszystkie</option>
+                <option value="">Все группы</option>
                 {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Status
+              Статус
               <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} style={{ minHeight: 36 }}>
-                <option value="all">Wszystkie</option>
-                <option value="planned">Zaplanowane</option>
-                <option value="done">Zakonczone</option>
-                <option value="cancelled">Anulowane</option>
+                <option value="all">Все статусы</option>
+                <option value="planned">Запланировано</option>
+                <option value="done">Завершено</option>
+                <option value="cancelled">Отменено</option>
               </select>
             </label>
           </div>
@@ -161,16 +177,16 @@ export function createTrainerSessionsScreen(components, icons) {
 
         <div className="card" style={{ overflow: 'hidden' }}>
           {visibleSessions.map((session, index) => (
-            <div key={session.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', opacity: session.status === 'cancelled' ? 0.65 : 1 }}>
+            <div key={session.id} role="button" tabIndex={0} className="ops-session-row" onClick={() => go('session', { trainerSessionId: session.sessionId })} onKeyDown={(event) => { if (event.key === 'Enter') go('session', { trainerSessionId: session.sessionId }) }} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', opacity: session.status === 'cancelled' ? 0.58 : 1, cursor: 'pointer' }}>
               <span className="mono" style={{ width: 120, fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)' }}>{session.date}</span>
               <span className="mono" style={{ width: 104, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{session.start}-{session.end}</span>
               <span className="strong" style={{ width: 140 }}>{session.group}</span>
               <span className="muted" style={{ flex: 1, fontSize: 'var(--fs-xs)', display: 'inline-flex', alignItems: 'center', gap: 5 }}><I.Location size={13} />{session.location}</span>
-              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status}</Badge>
-              {session.status !== 'cancelled' && <Button size="sm" variant="subtle" onClick={() => go('session', { trainerSessionId: session.sessionId })}>Frekwencja</Button>}
+              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : session.status === 'done' ? 'Завершено' : 'Запланировано'}</Badge>
+              <span className="ops-muted-chip">Открыть</span>
             </div>
           ))}
-          {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>Brak zajec w API.</div>}
+          {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>Занятий по выбранным фильтрам нет.</div>}
         </div>
       </div>
     )
@@ -184,36 +200,37 @@ export function createTrainerHistoryScreen(components, icons) {
     const sessions = globalThis.TrainerData?.history || []
     const groups = globalThis.TrainerData?.groups || []
     const [groupId, setGroupId] = useState('')
-    const visibleSessions = groupId ? sessions.filter((session) => String(session.groupId) === String(groupId)) : sessions
+    const [period, setPeriod] = useState('90')
+    const visibleSessions = (groupId ? sessions.filter((session) => String(session.groupId) === String(groupId)) : sessions).filter((session) => !period || new Date(session.rawDate) >= new Date(Date.now() - Number(period) * 86400000))
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Historia</h2>
-            <p className="page-desc">Zakonczone zajecia z /api/trainer/history/.</p>
+            <h2 className="page-title">История</h2>
+            <p className="page-desc">Завершённые занятия и их состав.</p>
           </div>
         </div>
         <div className="card card-pad" style={{ marginBottom: 14 }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', maxWidth: 320 }}>
-            Grupa
+          <div className="ops-form-grid"><label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
+            Группа
             <select value={groupId} onChange={(event) => setGroupId(event.target.value)} style={{ minHeight: 36 }}>
-              <option value="">Wszystkie</option>
+              <option value="">Все группы</option>
               {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
             </select>
-          </label>
+          </label><label>Период<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Вся история</option></select></label></div>
         </div>
         <div className="card" style={{ overflow: 'hidden' }}>
           {visibleSessions.map((session, index) => (
-            <div key={session.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+            <div key={session.id} role="button" tabIndex={0} className="ops-session-row" onClick={() => go('session', { trainerSessionId: session.sessionId })} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}>
               <span className="mono" style={{ width: 120, fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)' }}>{session.date}</span>
               <span className="mono" style={{ width: 104, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{session.start}-{session.end}</span>
               <span className="strong" style={{ width: 140 }}>{session.group}</span>
               <span className="muted" style={{ flex: 1, fontSize: 'var(--fs-xs)', display: 'inline-flex', alignItems: 'center', gap: 5 }}><I.Location size={13} />{session.location}</span>
-              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status}</Badge>
-              <Button size="sm" variant="subtle" onClick={() => go('session', { trainerSessionId: session.sessionId })}>Roster</Button>
+              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : 'Завершено'}</Badge>
+              <span className="ops-muted-chip">Состав и отметки</span>
             </div>
           ))}
-          {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>Brak historii w API.</div>}
+          {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>Истории занятий пока нет.</div>}
         </div>
       </div>
     )
@@ -224,28 +241,31 @@ export function createTrainerGroupsScreen(components, icons) {
   const { Badge } = components
   const I = icons
 
-  return function ApiTrainerGroups() {
+  return function ApiTrainerGroups({ go }) {
     const groups = globalThis.TrainerData?.groups || []
+    const sessions = globalThis.TrainerData?.sessions || []
+    const [selectedGroupId, setSelectedGroupId] = useState(null)
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Moje grupy</h2>
-            <p className="page-desc">{groups.length} grup przypisanych do trenera.</p>
+            <h2 className="page-title">Мои группы</h2>
+            <p className="page-desc">Назначено групп: {groups.length}.</p>
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
           {groups.map((group) => (
-            <div key={group.id} className="card card-pad">
+            <button key={group.id} type="button" className={`card card-pad ops-action-card${selectedGroupId === group.groupId ? ' is-active' : ''}`} onClick={() => setSelectedGroupId((current) => current === group.groupId ? null : group.groupId)}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 'var(--radius-md)', background: 'var(--primary-soft)', color: 'var(--primary)' }}><I.Waves size={18} /></span>
-                <div><div className="strong" style={{ fontSize: 'var(--fs-md)' }}>{group.name}</div><div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{group.students} uczniow</div></div>
+                <div><div className="strong" style={{ fontSize: 'var(--fs-md)' }}>{group.name}</div><div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Учеников: {group.students}</div></div>
               </div>
-              <Badge tone="primary" dot>{group.next || 'Brak terminu'}</Badge>
-            </div>
+              <Badge tone="primary" dot>{group.next || 'Ближайшее занятие не назначено'}</Badge>
+            </button>
           ))}
-          {groups.length === 0 && <div className="card card-pad muted">Brak grup w API.</div>}
+          {groups.length === 0 && <div className="card card-pad muted">Назначенных групп пока нет.</div>}
         </div>
+        {selectedGroupId && (() => { const group = groups.find((item) => item.groupId === selectedGroupId); const upcoming = sessions.filter((session) => session.groupId === selectedGroupId).slice(0, 5); return <div className="card ops-entity-card" style={{ marginTop: 16 }}><div className="ops-entity-head"><div><div className="eyebrow">Состав группы</div><h3>{group.name}</h3></div><Badge tone="primary">{group.roster?.length || 0} участников</Badge></div><div className="ops-detail-grid"><div>{(group.roster || []).map((student) => <div className="ops-detail-row" key={student.id}><strong>{student.full_name}</strong><span>Участник группы</span></div>)}</div><div>{upcoming.map((session) => <button type="button" className="ops-detail-row" key={session.id} onClick={() => go('session', { trainerSessionId: session.sessionId })}><strong>{session.date} · {session.start}</strong><span>{session.location}</span></button>)}</div></div></div> })()}
       </div>
     )
   }

@@ -193,6 +193,19 @@ def admin_payroll_assignments(request):
     return JsonResponse({"assignments": [_payroll_assignment_payload(assignment) for assignment in qs[:200]]})
 
 
+@require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
+def admin_payroll_assignment_detail(request, assignment_id):
+    _admin_required(request)
+    assignment = get_object_or_404(
+        TrainerPayrollAssignment.objects.select_related("trainer__user", "scheme"), pk=assignment_id)
+    if request.method == "DELETE":
+        assignment.delete()
+        return JsonResponse({"ok": True, "id": assignment_id})
+    if request.method != "GET":
+        _apply_payroll_assignment_data(assignment, _json_body(request))
+    return JsonResponse(_payroll_assignment_payload(assignment))
+
+
 @require_http_methods(["GET", "POST"])
 def admin_payroll_periods(request):
     user = _admin_required(request)

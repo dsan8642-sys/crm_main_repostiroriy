@@ -136,7 +136,7 @@ export async function fetchAdminPortal() {
     api.get('/api/admin/groups/'),
     api.get('/api/admin/subscription-types/'),
     api.get('/api/admin/schedule/templates/'),
-    api.get(`/api/admin/schedule/sessions/?date_from=${today}`),
+    api.get('/api/admin/schedule/sessions/'),
     api.get('/api/admin/payments/'),
     api.get('/api/admin/debtors/'),
   ])

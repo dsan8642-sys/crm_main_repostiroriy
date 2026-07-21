@@ -490,6 +490,46 @@ class AdminPortalApiRule(TestCase):
         self.assertFalse(participant.is_active)
         self.assertFalse(participant_response.json()["is_active"])
 
+    def test_admin_can_restore_archived_client_and_participants(self):
+        account = self.student.parent
+        self.client.delete(f"/api/admin/clients/{account.id}/")
+
+        response = self.client.post(f"/api/admin/clients/{account.id}/restore/")
+
+        account.user.refresh_from_db()
+        self.student.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(account.user.is_active)
+        self.assertTrue(self.student.is_active)
+        self.assertTrue(response.json()["account"]["is_active"])
+        self.assertTrue(response.json()["participants"][0]["is_active"])
+        self.assertTrue(AuditLogEntry.objects.filter(
+            action="client_account.restored",
+            entity_id=str(account.id),
+        ).exists())
+
+    def test_admin_settings_routes_replace_separate_configuration_panel(self):
+        created = self.client.post(
+            "/api/admin/settings/locations/",
+            data=json.dumps({"code": "settings-pool", "name": "Settings Pool", "timezone": "Europe/Warsaw"}),
+            content_type="application/json",
+        )
+
+        locations = self.client.get("/api/admin/settings/locations/")
+        audit_log = self.client.get("/api/admin/system/audit/")
+        imports = self.client.get("/api/admin/system/imports/")
+        security = self.client.get("/api/admin/system/security/")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(locations.status_code, 200)
+        self.assertTrue(any(row["code"] == "settings-pool" for row in locations.json()["locations"]))
+        self.assertEqual(audit_log.status_code, 200)
+        self.assertIn("entries", audit_log.json())
+        self.assertEqual(imports.status_code, 200)
+        self.assertIn("batches", imports.json())
+        self.assertEqual(security.status_code, 200)
+        self.assertTrue(any(row["id"] == self.admin.id for row in security.json()["users"]))
+
     def test_archived_participant_is_read_only_for_new_operations(self):
         active_subscription = create_subscription(
             student=self.student,
@@ -623,6 +663,46 @@ class AdminPortalApiRule(TestCase):
         self.assertTrue(any(row["id"] == self.student.id for row in roster.json()["students"]))
         self.assertEqual(marked.status_code, 200)
         self.assertEqual(marked.json()["status"], AttendanceStatus.PRESENT)
+
+    def test_admin_can_add_mark_and_remove_one_off_session_participant(self):
+        trainer = f.make_trainer(username="admin_one_off_coach")
+        other_group = f.make_group("One-off group")
+        extra_student = f.make_student(group=other_group, first="Extra", last="Student")
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=timezone.now() + timedelta(hours=3),
+            end_at=timezone.now() + timedelta(hours=4),
+            location="Pool Admin",
+            max_participants=8,
+        )
+
+        added = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/participants/",
+            data=json.dumps({"student_id": extra_student.id}),
+            content_type="application/json",
+        )
+        marked = self.client.post(
+            f"/api/admin/schedule/sessions/{session.id}/attendance/",
+            data=json.dumps({"student_id": extra_student.id, "status": AttendanceStatus.PRESENT}),
+            content_type="application/json",
+        )
+        removed = self.client.delete(
+            f"/api/admin/schedule/sessions/{session.id}/participants/{extra_student.id}/",
+        )
+
+        self.assertEqual(added.status_code, 201)
+        extra_row = next(row for row in added.json()["students"] if row["id"] == extra_student.id)
+        self.assertEqual(extra_row["session_participant"]["source"], "manual")
+        self.assertTrue(extra_row["can_remove_from_session"])
+        self.assertEqual(marked.status_code, 200)
+        self.assertEqual(marked.json()["status"], AttendanceStatus.PRESENT)
+        self.assertEqual(removed.status_code, 200)
+        self.assertFalse(any(row["id"] == extra_student.id for row in removed.json()["students"]))
+        self.assertEqual(
+            SessionParticipant.objects.get(session=session, student=extra_student).status,
+            SessionParticipantStatus.CANCELLED,
+        )
 
     def test_admin_client_detail_includes_operational_history(self):
         trainer = f.make_trainer(username="detail_coach")
@@ -1127,6 +1207,27 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.json()["session_type"], "individual")
         self.assertEqual(response.json()["individual_student_id"], self.student.id)
         self.assertIsNone(response.json()["group"])
+
+    def test_admin_can_create_split_session_for_two_clients(self):
+        trainer = f.make_trainer(username="split_session_coach")
+        response = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "individual_student_id": self.student.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-02T19:00:00+02:00",
+                "end_at": "2026-06-02T20:00:00+02:00",
+                "location": "Lane 2",
+                "max_participants": 2,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["session_type"], "split")
+        self.assertEqual(response.json()["individual_student_id"], self.student.id)
+        self.assertEqual(response.json()["max_participants"], 2)
 
     def test_admin_can_set_and_clear_session_substitute_trainer(self):
         trainer = f.make_trainer(username="scheduled_session_coach")

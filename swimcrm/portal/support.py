@@ -25,8 +25,8 @@ from dataio.exports import export_entity
 from notifications.models import Channel
 from notifications.services import queue_mass_mailing
 from scheduling.models import (RecurringTemplate, Session, SessionParticipant,
-                               SessionParticipantStatus, SessionType, WaitlistEntry,
-                               WaitlistStatus)
+                               SessionParticipantSource, SessionParticipantStatus,
+                               SessionType, WaitlistEntry, WaitlistStatus)
 from scheduling.services import (ScheduleConflict, cancel_series, check_trainer_conflict,
                                  create_session, edit_single_session, generate_sessions,
                                  promote_waitlist_entry, session_roster_students)
@@ -118,6 +118,7 @@ def _student_payload(student):
     return {
         "id": student.id,
         "client_id": student.parent_id,
+        "client_is_active": student.parent.user.is_active,
         "first_name": student.first_name,
         "last_name": student.last_name,
         "full_name": student.full_name,
@@ -158,6 +159,7 @@ def _session_payload(session):
         "is_cancelled": session.is_cancelled,
         "is_manually_modified": session.is_manually_modified,
         "max_participants": session.max_participants,
+        "participants_count": len(_session_roster(session)),
         "waitlist_active_count": waitlist_active_count,
         "notes": session.notes,
     }
@@ -248,6 +250,7 @@ def _subscription_payload(subscription):
         "effective_end_date": subscription.effective_end_date.isoformat(),
         "grace_end_date": subscription.grace_end_date.isoformat(),
         "remaining_sessions": subscription.remaining_sessions,
+        "created_at": timezone.localtime(subscription.created_at).isoformat(),
     }
 
 
@@ -788,7 +791,7 @@ def _create_session_from_data(data, *, actor=None):
     if data.get("individual_student_id"):
         individual_student = get_object_or_404(Student, pk=data.get("individual_student_id"))
         _require_active_participant(individual_student, "be assigned to new sessions")
-        session_type = SessionType.INDIVIDUAL
+        session_type = session_type if session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT} else SessionType.INDIVIDUAL
     else:
         group = get_object_or_404(Group, pk=data.get("group_id"))
         session_type = SessionType.GROUP

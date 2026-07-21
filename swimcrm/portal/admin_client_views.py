@@ -19,7 +19,7 @@ def admin_clients(request):
                 audit(user, "participant.created", participant, {"client_id": account.id, "is_account_holder": False})
         return JsonResponse(_client_detail_payload(account), status=201)
 
-    qs = Student.objects.select_related("parent", "group", "group__default_trainer__user").all()
+    qs = Student.objects.select_related("parent", "parent__user", "group", "group__default_trainer__user").all()
     q = request.GET.get("q", "").strip()
     if q:
         qs = qs.filter(
@@ -66,6 +66,21 @@ def admin_client_detail(request, client_id):
             _apply_account_data(account, data)
             audit(user, "client_account.updated", account, {"fields": sorted(_account_data(data).keys())})
         return JsonResponse(_client_detail_payload(account))
+    return JsonResponse(_client_detail_payload(account))
+
+
+@require_POST
+def admin_client_restore(request, client_id):
+    user = _admin_required(request)
+    account = get_object_or_404(ParentAccount.objects.select_related("user"), pk=client_id)
+    with transaction.atomic():
+        account.user.is_active = True
+        account.user.save(update_fields=["is_active"])
+        restored_participants = account.students.filter(is_active=False).update(is_active=True)
+        audit(user, "client_account.restored", account, {
+            "source": "api",
+            "restored_participants": restored_participants,
+        })
     return JsonResponse(_client_detail_payload(account))
 
 

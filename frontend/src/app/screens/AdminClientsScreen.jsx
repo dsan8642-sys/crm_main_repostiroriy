@@ -4,7 +4,7 @@ import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../map
 import { BusyBanner } from '../runtime.jsx'
 
 export function createAdminClientsScreen(components, reloadRoleData) {
-  const { Table, StatusPill, Avatar, Button, Banner, Input } = components
+  const { Table, StatusPill, Avatar, Button, Banner, Input, Dialog } = components
   return function ApiAdminClients({ go }) {
     const rows = globalThis.AdminData?.clients || []
     const groups = globalThis.AdminData?.groups || []
@@ -46,6 +46,18 @@ export function createAdminClientsScreen(components, reloadRoleData) {
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
+    const [quickAction, setQuickAction] = useState(null)
+    const [query, setQuery] = useState('')
+    const [scope, setScope] = useState('active')
+    const [clientAction, setClientAction] = useState(null)
+    const scopedRows = scope === 'blacklist'
+      ? Array.from(new Map(rows.filter((row) => row.accountActive === false).map((row) => [row.clientId, row])).values())
+      : rows.filter((row) => row.accountActive !== false && row.isActive)
+    const filteredRows = scopedRows.filter((row) => {
+      const needle = query.trim().toLocaleLowerCase('ru-RU')
+      if (!needle) return true
+      return [row.first, row.last, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))
+    })
 
     const updateClientForm = (field, value) => setClientForm((current) => ({ ...current, [field]: value }))
     const updateParticipantForm = (field, value) => setParticipantForm((current) => ({ ...current, [field]: value }))
@@ -114,7 +126,8 @@ export function createAdminClientsScreen(components, reloadRoleData) {
             is_account_holder: clientForm.isAdult,
           },
         })
-        setMessage('Klient utworzony w backendzie.')
+        setMessage('Клиент создан.')
+        setQuickAction(null)
         setClientForm({
           firstName: '',
           lastName: '',
@@ -136,7 +149,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
 
     async function addParticipant() {
       if (!participantForm.clientId) {
-        setError('Wybierz konto klienta.')
+        setError('Выберите аккаунт клиента.')
         return
       }
       setBusy(true)
@@ -151,7 +164,8 @@ export function createAdminClientsScreen(components, reloadRoleData) {
             group_id: participantForm.groupId || null,
           },
         })
-        setMessage('Uczestnik dodany do konta klienta.')
+        setMessage('Участник добавлен к аккаунту клиента.')
+        setQuickAction(null)
         setParticipantForm({ clientId: participantForm.clientId, firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
         await reloadRoleData?.('admin')
       } catch (err) {
@@ -187,7 +201,28 @@ export function createAdminClientsScreen(components, reloadRoleData) {
           },
         })
         setEditingClient(null)
-        setMessage('Klient i uczestnik zaktualizowani w backendzie.')
+        setMessage('Данные клиента и участника обновлены.')
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setBusy(false)
+      }
+    }
+
+    async function applyClientAction() {
+      if (!clientAction?.row?.clientId) return
+      setBusy(true)
+      setError(null)
+      try {
+        if (clientAction.type === 'archive') {
+          await api.delete(`/api/admin/clients/${clientAction.row.clientId}/`)
+          setMessage('Клиент перемещён в чёрный список. Вся история сохранена.')
+        } else {
+          await api.post(`/api/admin/clients/${clientAction.row.clientId}/restore/`)
+          setMessage('Клиент восстановлен и снова отображается в рабочем списке.')
+        }
+        setClientAction(null)
         await reloadRoleData?.('admin')
       } catch (err) {
         setError(err.message)
@@ -200,123 +235,182 @@ export function createAdminClientsScreen(components, reloadRoleData) {
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Klienci</h2>
-            <p className="page-desc">Tabela z /api/admin/clients/.</p>
+            <h2 className="page-title">Клиенты</h2>
+            <p className="page-desc">Родители, дети, контакты и связанные группы.</p>
           </div>
         </div>
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Trwa zapis danych klienta...</BusyBanner>
+        <BusyBanner Banner={Banner} show={busy}>Сохраняю данные клиента...</BusyBanner>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(320px, 1fr)', gap: 14, marginBottom: 16 }}>
+        <div className="ops-action-strip">
+          <button type="button" className={`ops-action-card${quickAction === 'client' ? ' is-active' : ''}`} onClick={() => setQuickAction((current) => current === 'client' ? null : 'client')}>
+            <span>Новый клиент</span>
+            <small>Открыть форму создания</small>
+          </button>
+          <button type="button" className={`ops-action-card${quickAction === 'participant' ? ' is-active' : ''}`} onClick={() => setQuickAction((current) => current === 'participant' ? null : 'participant')}>
+            <span>Участник к аккаунту</span>
+            <small>Добавить второго ребенка/участника</small>
+          </button>
+        </div>
+
+        {quickAction && (
+        <div style={{ display: 'grid', gridTemplateColumns: quickAction === 'client' ? 'minmax(320px, 1fr)' : 'minmax(320px, 1fr)', gap: 14, marginBottom: 16 }}>
+          {quickAction === 'client' && (
           <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Nowy klient</div>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Новый клиент</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Input label="Imie konta" value={clientForm.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
-              <Input label="Nazwisko konta" value={clientForm.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
+              <Input label="Имя владельца аккаунта" value={clientForm.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
+              <Input label="Фамилия владельца" value={clientForm.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
               <Input label="Email" value={clientForm.email} onChange={(event) => updateClientForm('email', event.target.value)} />
-              <Input label="Telefon" value={clientForm.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
-              <Input label="Imie uczestnika" value={clientForm.participantFirstName} onChange={(event) => updateClientForm('participantFirstName', event.target.value)} placeholder="Jak konto" />
-              <Input label="Nazwisko uczestnika" value={clientForm.participantLastName} onChange={(event) => updateClientForm('participantLastName', event.target.value)} placeholder="Jak konto" />
-              <Input label="Data ur." value={clientForm.birthDate} onChange={(event) => updateClientForm('birthDate', event.target.value)} placeholder="YYYY-MM-DD" />
+              <Input label="Телефон" value={clientForm.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
+              <Input label="Имя участника" value={clientForm.participantFirstName} onChange={(event) => updateClientForm('participantFirstName', event.target.value)} placeholder="Как у владельца" />
+              <Input label="Фамилия участника" value={clientForm.participantLastName} onChange={(event) => updateClientForm('participantLastName', event.target.value)} placeholder="Как у владельца" />
+              <Input label="Дата рождения" value={clientForm.birthDate} onChange={(event) => updateClientForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                Grupa
+                Группа
                 <select value={clientForm.groupId} onChange={(event) => updateClientForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Indywidualnie</option>
+                  <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
               </label>
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 'var(--fs-sm)' }}>
               <input type="checkbox" checked={clientForm.isAdult} onChange={(event) => updateClientForm('isAdult', event.target.checked)} />
-              Dorosly klient jest uczestnikiem
+              Взрослый клиент сам является участником
             </label>
             <div style={{ marginTop: 12 }}>
-              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>Utworz klienta</Button>
+              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>Создать клиента</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setQuickAction(null)} style={{ marginLeft: 8 }}>Закрыть</Button>
             </div>
           </div>
+          )}
 
+          {quickAction === 'participant' && (
           <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Uczestnik do konta</div>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Новый участник аккаунта</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', gridColumn: '1 / -1' }}>
-                Konto klienta
+                Аккаунт клиента
                 <select value={participantForm.clientId} onChange={(event) => updateParticipantForm('clientId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Wybierz konto</option>
+                  <option value="">Выберите аккаунт</option>
                   {clientOptions.map((row) => (
-                    <option key={row.clientId} value={row.clientId}>{row.last} {row.first} Р’В· {row.phone || row.email || row.clientId}</option>
+                    <option key={row.clientId} value={row.clientId}>{row.last} {row.first} · {row.phone || row.email || row.clientId}</option>
                   ))}
                 </select>
               </label>
-              <Input label="Imie" value={participantForm.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
-              <Input label="Nazwisko" value={participantForm.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
-              <Input label="Data ur." value={participantForm.birthDate} onChange={(event) => updateParticipantForm('birthDate', event.target.value)} placeholder="YYYY-MM-DD" />
+              <Input label="Имя" value={participantForm.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
+              <Input label="Фамилия" value={participantForm.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
+              <Input label="Дата рождения" value={participantForm.birthDate} onChange={(event) => updateParticipantForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
               <Input label="Email" value={participantForm.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', gridColumn: '1 / -1' }}>
-                Grupa
+                Группа
                 <select value={participantForm.groupId} onChange={(event) => updateParticipantForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Indywidualnie</option>
+                  <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
               </label>
             </div>
             <div style={{ marginTop: 12 }}>
-              <Button variant="secondary" loading={busy && !editingClient} disabled={busy} onClick={addParticipant}>Dodaj uczestnika</Button>
+              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={addParticipant}>Добавить участника</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setQuickAction(null)} style={{ marginLeft: 8 }}>Закрыть</Button>
             </div>
           </div>
+          )}
         </div>
+        )}
         {editingClient && (
           <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Edycja klienta i uczestnika</div>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование клиента и участника</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10 }}>
-              <Input label="Imie konta" value={clientEditForm.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
-              <Input label="Nazwisko konta" value={clientEditForm.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
-              <Input label="Email konta" value={clientEditForm.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
-              <Input label="Telefon konta" value={clientEditForm.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
-              <Input label="Imie uczestnika" value={clientEditForm.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
-              <Input label="Nazwisko uczestnika" value={clientEditForm.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
-              <Input label="Data ur." value={clientEditForm.birthDate} onChange={(event) => updateClientEditForm('birthDate', event.target.value)} placeholder="YYYY-MM-DD" />
-              <Input label="Email uczestnika" value={clientEditForm.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
+              <Input label="Имя владельца" value={clientEditForm.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
+              <Input label="Фамилия владельца" value={clientEditForm.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
+              <Input label="Email владельца" value={clientEditForm.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
+              <Input label="Телефон владельца" value={clientEditForm.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
+              <Input label="Имя участника" value={clientEditForm.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
+              <Input label="Фамилия участника" value={clientEditForm.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
+              <Input label="Дата рождения" value={clientEditForm.birthDate} onChange={(event) => updateClientEditForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+              <Input label="Email участника" value={clientEditForm.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                Grupa
+                Группа
                 <select value={clientEditForm.groupId} onChange={(event) => updateClientEditForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Indywidualnie</option>
+                  <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                 <input type="checkbox" checked={clientEditForm.isActive} onChange={(event) => updateClientEditForm('isActive', event.target.checked)} />
-                Aktywny
+                Активен
               </label>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" loading={busy} disabled={busy} onClick={saveClientEdit}>Zapisz klienta</Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setEditingClient(null)}>Zamknij</Button>
+              <Button variant="primary" loading={busy} disabled={busy} onClick={saveClientEdit}>Сохранить</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setEditingClient(null)}>Закрыть</Button>
             </div>
           </div>
         )}
+        <div className="ops-command-row">
+          <div className="ops-client-list-tools">
+            <div className="seg" aria-label="Режим списка клиентов">
+              <button type="button" className={scope === 'active' ? 'on' : ''} onClick={() => setScope('active')}>Клиенты</button>
+              <button type="button" className={scope === 'blacklist' ? 'on' : ''} onClick={() => setScope('blacklist')}>Чёрный список</button>
+            </div>
+            <div className="ops-search">
+              <span aria-hidden="true">⌕</span>
+              <input aria-label="Поиск клиентов" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, телефон, email или группа" />
+            </div>
+          </div>
+          <span className="muted">Найдено: {filteredRows.length}</span>
+        </div>
         <Table
-          rows={rows}
-          emptyLabel="Brak klientow w API"
+          rows={filteredRows}
+          emptyLabel={scope === 'blacklist' ? 'Чёрный список пуст' : 'Активных клиентов пока нет'}
           columns={[
-            { key: 'name', header: 'Uczestnik', render: (row) => <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}><Avatar name={`${row.first} ${row.last}`} size={28} /><span className="strong">{row.last} {row.first}</span></span> },
-            { key: 'phone', header: 'Telefon', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
+            { key: 'name', header: 'Участник', render: (row) => (
+              <button type="button" className="ops-link-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
+                <Avatar name={`${row.first} ${row.last}`} size={28} />
+                <span className="strong">{row.last} {row.first}</span>
+              </button>
+            ) },
+            { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
             { key: 'email', header: 'Email', muted: true },
-            { key: 'group', header: 'Grupa' },
-            { key: 'status', header: 'Status', width: 110, render: (row) => <StatusPill status={row.status} size="sm" /> },
+            { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button" onClick={() => go?.('groups', { groupId: row.groupId })}>{row.group}</button> : row.group },
+            { key: 'finance', header: 'Финансы', width: 110, render: (row) => <button type="button" className="ops-count-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId, tab: 'subscriptions' })}>Открыть</button> },
+            { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.status} size="sm" /> },
             {
               key: 'act',
               header: '',
               width: 170,
               render: (row) => (
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <Button size="sm" variant="subtle" disabled={busy || !row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>Szczegoly</Button>
-                  <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>Edytuj</Button>
+                  <Button size="sm" variant="subtle" disabled={busy || !row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>Карточка</Button>
+                  {scope === 'active' ? (
+                    <>
+                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>Изменить</Button>
+                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => setClientAction({ type: 'archive', row })}>В чёрный список</Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="primary" disabled={busy} onClick={() => setClientAction({ type: 'restore', row })}>Восстановить</Button>
+                  )}
                 </div>
               ),
             },
           ]}
         />
+        {clientAction && (
+          <Dialog
+            title={clientAction.type === 'archive' ? 'Переместить клиента в чёрный список?' : 'Восстановить клиента?'}
+            description={clientAction.type === 'archive'
+              ? 'Клиент исчезнет из рабочего списка, но платежи, посещения, абонементы и журнал действий останутся в системе.'
+              : 'Аккаунт и его участники снова станут активными и появятся в рабочем списке.'}
+            tone={clientAction.type === 'archive' ? 'danger' : 'default'}
+            confirmLabel={clientAction.type === 'archive' ? 'В чёрный список' : 'Восстановить'}
+            onClose={() => busy ? null : setClientAction(null)}
+            onConfirm={applyClientAction}
+          >
+            <div className="strong">{clientAction.row.last} {clientAction.row.first}</div>
+          </Dialog>
+        )}
       </div>
     )
   }

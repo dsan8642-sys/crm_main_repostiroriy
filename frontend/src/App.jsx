@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import './design/styles.css'
 import './design/ui_kits/shared/kit.css'
+import './app/ops-redesign.css'
 import {
   devLogin,
   fetchAdminPortal,
@@ -18,12 +19,43 @@ import {
 import { LoginScreen } from './app/Auth.jsx'
 import { AppShell } from './app/AppShell.jsx'
 import { ROLE_META, ensureDesignDataRefs } from './app/runtime.jsx'
+
+const STATUS_LABELS = {
+  active: 'Активен',
+  inactive: 'Неактивен',
+  planned: 'Запланировано',
+  done: 'Завершено',
+  cancelled: 'Отменено',
+  present: 'Был',
+  absent: 'Не был',
+  excused: 'Уважительная причина',
+  moved: 'Перенос',
+  paid: 'Подтверждён',
+  pending: 'На проверке',
+  rejected: 'Отклонён',
+  overdue: 'Просрочен',
+  awaiting: 'Ожидается',
+}
+
+function localizedComponents(source) {
+  const BaseStatusPill = source.StatusPill
+  return {
+    ...source,
+    StatusPill: (props) => (
+      <BaseStatusPill
+        {...props}
+        label={props.label || STATUS_LABELS[props.status] || props.status}
+      />
+    ),
+  }
+}
+
 export default function App() {
   const [design, setDesign] = useState(null)
   const [health, setHealth] = useState({ state: 'loading' })
   const [apiState, setApiState] = useState({ state: 'loading' })
   const [initialRole, setInitialRole] = useState('admin')
-  const [authRequired, setAuthRequired] = useState(false)
+  const [authRequired, setAuthRequired] = useState(null)
 
   const applyRoleData = useCallback((role, mapped) => {
     const refs = ensureDesignDataRefs()
@@ -61,9 +93,9 @@ export default function App() {
     setApiState({ state: 'loading', role })
     try {
       await devLogin(role)
-      setAuthRequired(false)
       setInitialRole(role)
       await loadRoleData(role)
+      setAuthRequired(false)
     } catch (error) {
       setApiState({ state: 'error', role, error: error.message, status: error.status })
       throw error
@@ -74,10 +106,10 @@ export default function App() {
     setApiState({ state: 'loading', role: 'unknown' })
     const payload = await productionLogin(credentials)
     const role = payload.user?.role === 'parent' ? 'client' : payload.user?.role
-    if (!ROLE_META[role]) throw new Error('Unsupported user role')
-    setAuthRequired(false)
+    if (!ROLE_META[role]) throw new Error('Для этой роли интерфейс пока не настроен')
     setInitialRole(role)
     await loadRoleData(role)
+    setAuthRequired(false)
   }, [loadRoleData])
 
   const handleProductionLogout = useCallback(async () => {
@@ -86,7 +118,7 @@ export default function App() {
       await productionLogout()
     } finally {
       setAuthRequired(true)
-      setApiState({ state: 'error', role: 'unknown', error: 'Login required', status: 403 })
+      setApiState({ state: 'error', role: 'unknown', error: 'Требуется вход', status: 403 })
     }
   }, [initialRole])
 
@@ -95,26 +127,13 @@ export default function App() {
     globalThis.React = React
     const refs = ensureDesignDataRefs()
     import('./design/_ds_bundle.js').then(async () => {
-      const bundled = {
-        AdminData: globalThis.AdminData,
-        TrainerData: globalThis.TrainerData,
-        ParentData: globalThis.ParentData,
-      }
-      Object.assign(refs.AdminData, bundled.AdminData)
-      Object.assign(refs.TrainerData, bundled.TrainerData)
-      Object.assign(refs.ParentData, bundled.ParentData)
       globalThis.AdminData = refs.AdminData
       globalThis.TrainerData = refs.TrainerData
       globalThis.ParentData = refs.ParentData
 
       const nextDesign = {
-        components: globalThis.SwimCRMDesignSystem_546643,
+        components: localizedComponents(globalThis.SwimCRMDesignSystem_546643),
         icons: globalThis.SwimIcons,
-        screens: {
-          AdminScreens: globalThis.AdminScreens,
-          TrainerScreens: globalThis.TrainerScreens,
-          ParentScreens: globalThis.ParentScreens,
-        },
         data: {
           AdminData: refs.AdminData,
           TrainerData: refs.TrainerData,
@@ -127,9 +146,9 @@ export default function App() {
         const me = await fetchMe()
         const role = me.role === 'parent' ? 'client' : me.role
         if (alive && ROLE_META[role]) {
-          setAuthRequired(false)
           setInitialRole(role)
           await loadRoleData(role)
+          setAuthRequired(false)
         }
       } catch (error) {
         if (alive) {
@@ -153,10 +172,10 @@ export default function App() {
       .catch((error) => setHealth({ state: 'error', error: String(error) }))
   }, [])
 
-  if (!design) {
+  if (!design || authRequired === null) {
     return (
       <div className="app" style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <div className="card card-pad">Ladowanie systemu projektowego...</div>
+        <div className="card card-pad">Загружаю рабочие данные...</div>
       </div>
     )
   }

@@ -32,6 +32,10 @@ def _nocobase_required(request):
 
 
 def _nocobase_config_required(request):
+    # The same configuration operations are now exposed in the SwimCRM admin UI.
+    # A signed-in administrator must not need a separate bridge token or NocoBase UI.
+    if getattr(request.user, "is_authenticated", False) and request.user.role == Role.ADMIN:
+        return
     token = getattr(settings, "NOCOBASE_CONFIG_TOKEN", "")
     if token:
         auth = request.headers.get("Authorization", "")

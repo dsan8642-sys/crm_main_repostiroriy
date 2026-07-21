@@ -7,11 +7,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
   const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Dialog, Avatar, Input } = components
   const I = icons
 
-  return function ApiAdminPayments() {
+  return function ApiAdminPayments({ go, initialTab }) {
     const participants = globalThis.AdminData?.clients || []
     const subscriptionTypes = globalThis.AdminData?.subscriptionTypes || []
     const [tab, setTab] = useState('review')
+    const [methodFilter, setMethodFilter] = useState('')
     const [reject, setReject] = useState(null)
+    const [editingPayment, setEditingPayment] = useState(null)
+    const [paymentEditForm, setPaymentEditForm] = useState({ method: 'cash', comment: '' })
     const [rows, setRows] = useState(() => [...(globalThis.AdminData?.payments || [])])
     const [subscriptions, setSubscriptions] = useState([])
     const [financeForm, setFinanceForm] = useState({
@@ -20,7 +23,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
       subscriptionId: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
-      chargeDescription: 'Manual charge',
+      chargeDescription: 'Ручное начисление',
       chargeAmount: '',
       paymentAmount: '',
       paymentDate: new Date().toISOString().slice(0, 10),
@@ -56,6 +59,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busyId, setBusyId] = useState(null)
+    const [toolPanel, setToolPanel] = useState(null)
     const selectedType = subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))
 
     const updateFinanceForm = (field, value) => setFinanceForm((current) => {
@@ -87,6 +91,10 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
     }, [globalThis.AdminData?.payments])
 
     useEffect(() => {
+      if (initialTab) setTab(initialTab)
+    }, [initialTab])
+
+    useEffect(() => {
       if (!financeForm.participantId) return
       let alive = true
       api.get(`/api/admin/participants/${financeForm.participantId}/subscriptions/`)
@@ -112,13 +120,15 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
     const counts = {
       all: rows.length,
       review: rows.filter((payment) => payment.status === 'pending').length,
+      confirmed: rows.filter((payment) => payment.status === 'paid').length,
       rejected: rows.filter((payment) => payment.status === 'rejected').length,
     }
     const visibleRows = rows.filter((payment) => {
       if (tab === 'review') return payment.status === 'pending'
+      if (tab === 'confirmed') return payment.status === 'paid'
       if (tab === 'rejected') return payment.status === 'rejected'
       return true
-    })
+    }).filter((payment) => !methodFilter || payment.methodCode === methodFilter)
 
     async function updatePayment(payment, action) {
       setBusyId(payment.id)
@@ -127,18 +137,32 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
         const path = action === 'confirm'
           ? `/api/admin/payments/${payment.paymentId || payment.id}/confirm/`
           : `/api/admin/payments/${payment.paymentId || payment.id}/reject/`
-        await api.post(path, action === 'reject' ? { reason: 'Rejected from CRM frontend' } : {})
+        await api.post(path, action === 'reject' ? { reason: 'Отклонено администратором в CRM' } : {})
         setRows((current) => current.map((item) => item.id === payment.id
           ? { ...item, status: action === 'confirm' ? 'paid' : 'rejected' }
           : item))
         setReject(null)
-        setMessage(action === 'confirm' ? 'Platnosc potwierdzona.' : 'Platnosc odrzucona.')
+        setMessage(action === 'confirm' ? 'Платёж подтверждён.' : 'Платёж отклонён.')
         reloadRoleData?.('admin')
       } catch (err) {
         setError(err.message)
       } finally {
         setBusyId(null)
       }
+    }
+
+    function openPaymentEdit(payment) {
+      setEditingPayment(payment)
+      setPaymentEditForm({ method: payment.methodCode || 'cash', comment: payment.receipt || '' })
+    }
+
+    async function savePaymentEdit() {
+      setBusyId(`edit-${editingPayment.id}`); setError(null)
+      try {
+        await api.post(`/api/admin/payments/${editingPayment.paymentId || editingPayment.id}/`, { method: paymentEditForm.method, comment: paymentEditForm.comment })
+        setRows((current) => current.map((item) => item.id === editingPayment.id ? { ...item, methodCode: paymentEditForm.method, method: { cash: 'Наличные', bank_transfer: 'Bank transfer / IBAN', card: 'Карта', other: 'Другое' }[paymentEditForm.method], receipt: paymentEditForm.comment } : item))
+        setEditingPayment(null); setMessage('Реквизиты платежа обновлены, изменение записано в журнал.')
+      } catch (err) { setError(err.message) } finally { setBusyId(null) }
     }
 
     function minorFromMajor(value) {
@@ -173,14 +197,15 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function createSubscriptionType() {
       if (!subscriptionTypeForm.name) {
-        setError('Podaj nazwe typu abonamentu.')
+        setError('Укажите название типа абонемента.')
         return
       }
       setBusyId('subscription-type')
       setError(null)
       try {
         await api.post('/api/admin/subscription-types/', subscriptionTypePayload(subscriptionTypeForm))
-        setMessage('Typ abonamentu utworzony.')
+        setMessage('Тип абонемента создан.')
+        setToolPanel(null)
         setSubscriptionTypeForm({
           name: '',
           price: '',
@@ -233,7 +258,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function createSubscription() {
       if (!financeForm.participantId || !financeForm.subscriptionTypeId) {
-        setError('Wybierz uczestnika i typ abonamentu.')
+        setError('Выберите участника и тип абонемента.')
         return
       }
       setBusyId('subscription')
@@ -245,7 +270,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           due_date: financeForm.dueDate,
           create_charge: financeForm.createCharge,
         })
-        setMessage(financeForm.createCharge ? 'Abonament i naliczenie utworzone.' : 'Abonament utworzony.')
+        setMessage(financeForm.createCharge ? 'Абонемент и начисление созданы.' : 'Абонемент создан.')
+        setToolPanel(null)
         setFinanceForm((current) => ({ ...current, subscriptionId: result.subscription?.id || current.subscriptionId }))
         await reloadSubscriptions()
         await reloadRoleData?.('admin')
@@ -258,7 +284,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function createCharge() {
       if (!financeForm.participantId) {
-        setError('Wybierz uczestnika.')
+        setError('Выберите участника.')
         return
       }
       setBusyId('charge')
@@ -270,7 +296,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           currency: 'PLN',
           due_date: financeForm.dueDate,
         })
-        setMessage('Naliczenie utworzone.')
+        setMessage('Начисление создано.')
+        setToolPanel(null)
         await reloadRoleData?.('admin')
       } catch (err) {
         setError(err.message)
@@ -281,7 +308,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function createPayment() {
       if (!financeForm.participantId) {
-        setError('Wybierz uczestnika.')
+        setError('Выберите участника.')
         return
       }
       setBusyId('payment')
@@ -294,7 +321,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           paid_at: financeForm.paymentDate,
           method: financeForm.paymentMethod,
         })
-        setMessage('Platnosc dodana.')
+        setMessage('Платёж добавлен.')
+        setToolPanel(null)
         await reloadRoleData?.('admin')
       } catch (err) {
         setError(err.message)
@@ -305,7 +333,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function freezeSubscription() {
       if (!financeForm.subscriptionId) {
-        setError('Wybierz abonament.')
+        setError('Выберите абонемент.')
         return
       }
       setBusyId('freeze')
@@ -316,7 +344,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           end_date: financeForm.freezeEnd,
           reason: financeForm.freezeReason,
         })
-        setMessage(`Abonament zamrozony na ${result.days} dni.`)
+        setMessage(`Абонемент заморожен на ${result.days} дней.`)
         await reloadSubscriptions()
       } catch (err) {
         setError(err.message)
@@ -327,7 +355,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function adjustSubscription() {
       if (!financeForm.subscriptionId) {
-        setError('Wybierz abonament.')
+        setError('Выберите абонемент.')
         return
       }
       setBusyId('adjust')
@@ -337,7 +365,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           delta: Number(financeForm.adjustDelta || 0),
           note: financeForm.adjustNote,
         })
-        setMessage('Korekta abonamentu zapisana.')
+        setMessage('Корректировка абонемента сохранена.')
         await reloadSubscriptions()
       } catch (err) {
         setError(err.message)
@@ -348,7 +376,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
 
     async function renewSubscription() {
       if (!financeForm.subscriptionId || !financeForm.subscriptionTypeId) {
-        setError('Wybierz abonament i typ odnowienia.')
+        setError('Выберите абонемент и тип продления.')
         return
       }
       setBusyId('renew')
@@ -360,7 +388,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           due_date: financeForm.dueDate,
           create_charge: financeForm.createCharge,
         })
-        setMessage(financeForm.createCharge ? 'Abonament odnowiony z naliczeniem.' : 'Abonament odnowiony.')
+        setMessage(financeForm.createCharge ? 'Абонемент продлён с начислением.' : 'Абонемент продлён.')
         setFinanceForm((current) => ({ ...current, subscriptionId: result.subscription?.id || current.subscriptionId }))
         await reloadSubscriptions()
         await reloadRoleData?.('admin')
@@ -375,67 +403,79 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Platnosci</h2>
-            <p className="page-desc">Dane z /api/admin/payments/. Akcje zapisuja status w backendzie.</p>
+            <h2 className="page-title">Платежи</h2>
+            <p className="page-desc">Подтверждение оплат, абонементы, начисления и корректировки.</p>
           </div>
         </div>
 
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busyId != null}>Operacja jest zapisywana w backendzie...</BusyBanner>
-        {participants.length === 0 && <Banner tone="warning" style={{ marginBottom: 12 }}>Brak uczestnikow w API. Najpierw dodaj klienta lub uczestnika.</Banner>}
-        {subscriptionTypes.length === 0 && <Banner tone="warning" style={{ marginBottom: 12 }}>Brak typow abonamentow. Utworz typ abonamentu przed nadaniem abonamentu.</Banner>}
+        <BusyBanner Banner={Banner} show={busyId != null}>Сохраняю операцию...</BusyBanner>
+        {participants.length === 0 && <Banner tone="warning" style={{ marginBottom: 12 }}>Сначала добавьте клиента или участника.</Banner>}
+        {subscriptionTypes.length === 0 && <Banner tone="warning" style={{ marginBottom: 12 }}>Создайте тип абонемента перед выдачей абонемента.</Banner>}
 
+        <div className="ops-action-strip">
+          <button type="button" className={`ops-action-card${toolPanel === 'subscriptions' ? ' is-active' : ''}`} onClick={() => setToolPanel((current) => current === 'subscriptions' ? null : 'subscriptions')}>
+            <span>Типы абонементов</span>
+            <small>Цены и количество занятий</small>
+          </button>
+          <button type="button" className={`ops-action-card${toolPanel === 'finance' ? ' is-active' : ''}`} onClick={() => setToolPanel((current) => current === 'finance' ? null : 'finance')}>
+            <span>Баланс клиента</span>
+            <small>Абонемент, начисление, платеж</small>
+          </button>
+        </div>
+
+        {toolPanel === 'subscriptions' && (
         <div className="card card-pad" style={{ marginBottom: 16 }}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Typy abonamentow</div>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Типы абонементов</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.4fr) repeat(3, minmax(120px, 1fr))', gap: 10, marginBottom: 12 }}>
-            <Input label="Nazwa" value={subscriptionTypeForm.name} onChange={(event) => updateSubscriptionTypeForm('name', event.target.value)} />
-            <Input label="Cena" value={subscriptionTypeForm.price} onChange={(event) => updateSubscriptionTypeForm('price', event.target.value)} placeholder="240.00" />
-            <Input label="Waluta" value={subscriptionTypeForm.currency} onChange={(event) => updateSubscriptionTypeForm('currency', event.target.value)} />
-            <Input label="Dni" value={subscriptionTypeForm.durationDays} onChange={(event) => updateSubscriptionTypeForm('durationDays', event.target.value)} />
-            <Input label="Wejscia" value={subscriptionTypeForm.sessionsCount} onChange={(event) => updateSubscriptionTypeForm('sessionsCount', event.target.value)} placeholder="Puste dla bez limitu" />
+            <Input label="Название" value={subscriptionTypeForm.name} onChange={(event) => updateSubscriptionTypeForm('name', event.target.value)} />
+            <Input label="Цена" value={subscriptionTypeForm.price} onChange={(event) => updateSubscriptionTypeForm('price', event.target.value)} placeholder="240.00" />
+            <Input label="Валюта" value={subscriptionTypeForm.currency} onChange={(event) => updateSubscriptionTypeForm('currency', event.target.value)} />
+            <Input label="Дней" value={subscriptionTypeForm.durationDays} onChange={(event) => updateSubscriptionTypeForm('durationDays', event.target.value)} />
+            <Input label="Занятий" value={subscriptionTypeForm.sessionsCount} onChange={(event) => updateSubscriptionTypeForm('sessionsCount', event.target.value)} placeholder="Пусто для безлимитного" />
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
               <input type="checkbox" checked={subscriptionTypeForm.isUnlimited} onChange={(event) => updateSubscriptionTypeForm('isUnlimited', event.target.checked)} />
-              Bez limitu
+              Безлимитный
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
               <input type="checkbox" checked={subscriptionTypeForm.isIndividual} onChange={(event) => updateSubscriptionTypeForm('isIndividual', event.target.checked)} />
-              Indywidualny
+              Индивидуальный
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
               <input type="checkbox" checked={subscriptionTypeForm.isActive} onChange={(event) => updateSubscriptionTypeForm('isActive', event.target.checked)} />
-              Aktywny
+              Активен
             </label>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: editingSubscriptionType ? 14 : 0 }}>
-            <Button variant="primary" loading={busyId === 'subscription-type'} disabled={busyId != null} onClick={createSubscriptionType}>Utworz typ</Button>
+            <Button variant="primary" loading={busyId === 'subscription-type'} disabled={busyId != null} onClick={createSubscriptionType}>Создать тип</Button>
           </div>
 
           {editingSubscriptionType && (
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 14 }}>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>Edycja typu abonamentu</div>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование типа абонемента</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.4fr) repeat(3, minmax(120px, 1fr))', gap: 10, marginBottom: 12 }}>
-                <Input label="Nazwa" value={subscriptionTypeEditForm.name} onChange={(event) => updateSubscriptionTypeEditForm('name', event.target.value)} />
-                <Input label="Cena" value={subscriptionTypeEditForm.price} onChange={(event) => updateSubscriptionTypeEditForm('price', event.target.value)} />
-                <Input label="Waluta" value={subscriptionTypeEditForm.currency} onChange={(event) => updateSubscriptionTypeEditForm('currency', event.target.value)} />
-                <Input label="Dni" value={subscriptionTypeEditForm.durationDays} onChange={(event) => updateSubscriptionTypeEditForm('durationDays', event.target.value)} />
-                <Input label="Wejscia" value={subscriptionTypeEditForm.sessionsCount} onChange={(event) => updateSubscriptionTypeEditForm('sessionsCount', event.target.value)} placeholder="Puste dla bez limitu" />
+                <Input label="Название" value={subscriptionTypeEditForm.name} onChange={(event) => updateSubscriptionTypeEditForm('name', event.target.value)} />
+                <Input label="Цена" value={subscriptionTypeEditForm.price} onChange={(event) => updateSubscriptionTypeEditForm('price', event.target.value)} />
+                <Input label="Валюта" value={subscriptionTypeEditForm.currency} onChange={(event) => updateSubscriptionTypeEditForm('currency', event.target.value)} />
+                <Input label="Дней" value={subscriptionTypeEditForm.durationDays} onChange={(event) => updateSubscriptionTypeEditForm('durationDays', event.target.value)} />
+                <Input label="Занятий" value={subscriptionTypeEditForm.sessionsCount} onChange={(event) => updateSubscriptionTypeEditForm('sessionsCount', event.target.value)} placeholder="Пусто для безлимитного" />
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                   <input type="checkbox" checked={subscriptionTypeEditForm.isUnlimited} onChange={(event) => updateSubscriptionTypeEditForm('isUnlimited', event.target.checked)} />
-                  Bez limitu
+                  Безлимитный
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                   <input type="checkbox" checked={subscriptionTypeEditForm.isIndividual} onChange={(event) => updateSubscriptionTypeEditForm('isIndividual', event.target.checked)} />
-                  Indywidualny
+                  Индивидуальный
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                   <input type="checkbox" checked={subscriptionTypeEditForm.isActive} onChange={(event) => updateSubscriptionTypeEditForm('isActive', event.target.checked)} />
-                  Aktywny
+                  Активен
                 </label>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Button variant="primary" loading={busyId === 'subscription-type-edit'} disabled={busyId != null} onClick={saveSubscriptionTypeEdit}>Zapisz typ</Button>
-                <Button variant="secondary" disabled={busyId != null} onClick={() => setEditingSubscriptionType(null)}>Zamknij</Button>
+                <Button variant="primary" loading={busyId === 'subscription-type-edit'} disabled={busyId != null} onClick={saveSubscriptionTypeEdit}>Сохранить тип</Button>
+                <Button variant="secondary" disabled={busyId != null} onClick={() => setEditingSubscriptionType(null)}>Закрыть</Button>
               </div>
             </div>
           )}
@@ -443,57 +483,59 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           <div style={{ marginTop: 14 }}>
             <Table
               rows={subscriptionTypes}
-              emptyLabel="Brak typow abonamentow w API"
+              emptyLabel="Типов абонементов пока нет"
               columns={[
-                { key: 'name', header: 'Typ', render: (type) => <span className="strong">{type.name}</span> },
-                { key: 'price', header: 'Cena', align: 'right', width: 110, render: (type) => <Money amount={type.price} /> },
-                { key: 'sessions', header: 'Wejscia', align: 'right', width: 100, render: (type) => type.isUnlimited ? 'Bez limitu' : type.sessions },
-                { key: 'days', header: 'Dni', align: 'right', width: 80 },
-                { key: 'isIndividual', header: 'Rodzaj', width: 120, render: (type) => type.isIndividual ? 'Indywidualny' : 'Grupowy' },
-                { key: 'active', header: 'Status', width: 110, render: (type) => <StatusPill status={type.active ? 'active' : 'inactive'} size="sm" /> },
+                { key: 'name', header: 'Тип', render: (type) => <span className="strong">{type.name}</span> },
+                { key: 'price', header: 'Цена', align: 'right', width: 110, render: (type) => <Money amount={type.price} /> },
+                { key: 'sessions', header: 'Занятий', align: 'right', width: 100, render: (type) => type.isUnlimited ? 'Безлимитный' : type.sessions },
+                { key: 'days', header: 'Дней', align: 'right', width: 80 },
+                { key: 'isIndividual', header: 'Вид', width: 120, render: (type) => type.isIndividual ? 'Индивидуальный' : 'Групповой' },
+                { key: 'active', header: 'Статус', width: 110, render: (type) => <StatusPill status={type.active ? 'active' : 'inactive'} size="sm" /> },
                 {
                   key: 'act',
                   header: '',
                   width: 90,
-                  render: (type) => <Button size="sm" variant="subtle" disabled={busyId != null} onClick={() => openSubscriptionTypeEdit(type)}>Edytuj</Button>,
+                  render: (type) => <Button size="sm" variant="subtle" disabled={busyId != null} onClick={() => openSubscriptionTypeEdit(type)}>Изменить</Button>,
                 },
               ]}
             />
           </div>
         </div>
+        )}
 
+        {toolPanel === 'finance' && (
         <div className="card card-pad" style={{ marginBottom: 16 }}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Abonamenty i rozliczenia</div>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Абонементы и расчёты</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.3fr) minmax(220px, 1.3fr) minmax(180px, 1fr)', gap: 10, marginBottom: 12 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Uczestnik
+              Участник
               <select value={financeForm.participantId} onChange={(event) => updateFinanceForm('participantId', event.target.value)} style={{ minHeight: 36 }}>
-                <option value="">Wybierz uczestnika</option>
+                <option value="">Выберите участника</option>
                 {participants.map((participant) => (
                   <option key={participant.studentId} value={participant.studentId}>
-                    {participant.last} {participant.first} Р’В· {participant.phone || participant.email || participant.group}
+                    {participant.last} {participant.first} · {participant.phone || participant.email || participant.group}
                   </option>
                 ))}
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Typ abonamentu
+              Тип абонемента
               <select value={financeForm.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)} style={{ minHeight: 36 }}>
-                <option value="">Wybierz typ</option>
+                <option value="">Выберите тип</option>
                 {subscriptionTypes.map((type) => (
                   <option key={type.typeId} value={type.typeId}>
-                    {type.name} Р’В· {type.price.toLocaleString('pl-PL')} {type.currency}
+                    {type.name} · {type.price.toLocaleString('ru-RU')} {type.currency}
                   </option>
                 ))}
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Abonament uczestnika
+              Абонемент участника
               <select value={financeForm.subscriptionId} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)} style={{ minHeight: 36 }}>
-                <option value="">Wybierz abonament</option>
+                <option value="">Выберите абонемент</option>
                 {subscriptions.map((subscription) => (
                   <option key={subscription.id} value={subscription.id}>
-                    #{subscription.id} Р’В· {subscription.type} Р’В· {subscription.status} Р’В· {subscription.remaining_sessions ?? 'bez limitu'}
+                    #{subscription.id} · {subscription.type} · {subscription.status} · {subscription.remaining_sessions ?? 'безлимитный'}
                   </option>
                 ))}
               </select>
@@ -501,81 +543,90 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
-            <Input label="Start abonamentu" value={financeForm.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="YYYY-MM-DD" />
-            <Input label="Termin platnosci" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="YYYY-MM-DD" />
+            <Input label="Начало абонемента" value={financeForm.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Input label="Срок оплаты" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
               <input type="checkbox" checked={financeForm.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} />
-              Utworz naliczenie
+              Создать начисление
             </label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
-              <Button variant="primary" loading={busyId === 'subscription'} disabled={busyId != null} onClick={createSubscription}>Dodaj abonament</Button>
-              <Button variant="secondary" loading={busyId === 'renew'} disabled={busyId != null} onClick={renewSubscription}>Przedluz</Button>
+              <Button variant="primary" loading={busyId === 'subscription'} disabled={busyId != null} onClick={createSubscription}>Выдать абонемент</Button>
+              <Button variant="secondary" loading={busyId === 'renew'} disabled={busyId != null} onClick={renewSubscription}>Продлить</Button>
             </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
-            <Input label="Opis naliczenia" value={financeForm.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} />
-            <Input label="Kwota naliczenia" value={financeForm.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
-            <Input label="Kwota platnosci" value={financeForm.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
-            <Input label="Data platnosci" value={financeForm.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder="YYYY-MM-DD" />
+            <Input label="Описание начисления" value={financeForm.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} />
+            <Input label="Сумма начисления" value={financeForm.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
+            <Input label="Сумма платежа" value={financeForm.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
+            <Input label="Дата платежа" value={financeForm.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Metoda platnosci
+              Способ оплаты
               <select value={financeForm.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)} style={{ minHeight: 36 }}>
-                <option value="cash">Gotowka</option>
-                <option value="bank_transfer">Przelew</option>
-                <option value="card">Karta</option>
-                <option value="other">Inne</option>
+                <option value="cash">Наличные</option>
+                <option value="bank_transfer">Bank transfer / IBAN</option>
+                <option value="card">Карта</option>
+                <option value="other">Другое</option>
               </select>
             </label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
-              <Button variant="secondary" loading={busyId === 'charge'} disabled={busyId != null} onClick={createCharge}>Dodaj naliczenie</Button>
-              <Button variant="secondary" loading={busyId === 'payment'} disabled={busyId != null} onClick={createPayment}>Dodaj platnosc</Button>
+              <Button variant="secondary" loading={busyId === 'charge'} disabled={busyId != null} onClick={createCharge}>Добавить начисление</Button>
+              <Button variant="secondary" loading={busyId === 'payment'} disabled={busyId != null} onClick={createPayment}>Добавить платёж</Button>
             </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10 }}>
-            <Input label="Freeze od" value={financeForm.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="YYYY-MM-DD" />
-            <Input label="Freeze do" value={financeForm.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="YYYY-MM-DD" />
-            <Input label="Powod freeze" value={financeForm.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
+            <Input label="Заморозить с" value={financeForm.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Input label="Заморозить до" value={financeForm.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Input label="Причина заморозки" value={financeForm.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
-              <Button variant="secondary" loading={busyId === 'freeze'} disabled={busyId != null} onClick={freezeSubscription}>Zamroz</Button>
+              <Button variant="secondary" loading={busyId === 'freeze'} disabled={busyId != null} onClick={freezeSubscription}>Заморозить</Button>
             </div>
-            <Input label="Korekta wejsc" value={financeForm.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} />
-            <Input label="Notatka korekty" value={financeForm.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
+            <Input label="Корректировка занятий" value={financeForm.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} />
+            <Input label="Комментарий к корректировке" value={financeForm.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
-              <Button variant="secondary" loading={busyId === 'adjust'} disabled={busyId != null} onClick={adjustSubscription}>Zapisz korekte</Button>
+              <Button variant="secondary" loading={busyId === 'adjust'} disabled={busyId != null} onClick={adjustSubscription}>Сохранить корректировку</Button>
             </div>
           </div>
         </div>
+        )}
 
         <div className="toolbar">
           <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
-            { value: 'all', label: 'Wszystkie', count: counts.all },
-            { value: 'review', label: 'Na weryfikacji', count: counts.review },
-            { value: 'rejected', label: 'Odrzucone', count: counts.rejected },
+            { value: 'all', label: 'Все', count: counts.all },
+            { value: 'review', label: 'На проверке', count: counts.review },
+            { value: 'confirmed', label: 'Подтверждённые', count: counts.confirmed },
+            { value: 'rejected', label: 'Отклонённые', count: counts.rejected },
           ]} />
+          <span className="spacer" />
+          <label>Способ оплаты <select aria-label="Способ оплаты" value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option></select></label>
         </div>
+
+        {editingPayment && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="eyebrow">Чувствительное действие: реквизиты платежа</div><p className="muted">Сумма, время и сама запись не удаляются. Изменение способа и комментария попадёт в журнал действий.</p><div className="ops-form-grid"><label>Способ оплаты<select value={paymentEditForm.method} onChange={(event) => setPaymentEditForm({ ...paymentEditForm, method: event.target.value })}><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label><Input label="Комментарий" value={paymentEditForm.comment} onChange={(event) => setPaymentEditForm({ ...paymentEditForm, comment: event.target.value })} /></div><div className="ops-button-row"><Button variant="primary" disabled={busyId != null} onClick={savePaymentEdit}>Сохранить изменение</Button><Button variant="secondary" onClick={() => setEditingPayment(null)}>Отмена</Button></div></div>}
 
         <Table
           rows={visibleRows}
-          emptyLabel="Brak platnosci w tej kategorii"
+          emptyLabel="В этой категории платежей нет"
           columns={[
-            { key: 'child', header: 'Uczestnik', render: (payment) => <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Avatar name={payment.child} size={26} /><span className="strong">{payment.child}</span></span> },
-            { key: 'method', header: 'Sposob', muted: true },
-            { key: 'date', header: 'Data', muted: true, render: (payment) => <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{payment.date}</span> },
-            { key: 'receipt', header: 'Komentarz', render: (payment) => payment.receipt ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-link)', fontSize: 'var(--fs-xs)' }}><I.File size={14} /> {payment.receipt}</span> : <span className="muted">-</span> },
-            { key: 'amount', header: 'Kwota', align: 'right', width: 110, render: (payment) => <Money amount={payment.amount} /> },
-            { key: 'status', header: 'Status', width: 130, render: (payment) => <StatusPill status={payment.status} size="sm" /> },
+            { key: 'child', header: 'Участник', render: (payment) => <button type="button" className="ops-link-button" disabled={!payment.clientId} onClick={() => go?.('clientDetail', { clientId: payment.clientId, tab: 'payments' })}><Avatar name={payment.child} size={26} /><span className="strong">{payment.child}</span></button> },
+            { key: 'method', header: 'Способ', muted: true },
+            { key: 'date', header: 'Дата', muted: true, render: (payment) => <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{payment.date}</span> },
+            { key: 'receipt', header: 'Комментарий', render: (payment) => payment.receipt ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-link)', fontSize: 'var(--fs-xs)' }}><I.File size={14} /> {payment.receipt}</span> : <span className="muted">-</span> },
+            { key: 'amount', header: 'Сумма', align: 'right', width: 110, render: (payment) => <Money amount={payment.amount} /> },
+            { key: 'status', header: 'Статус', width: 130, render: (payment) => <StatusPill status={payment.status} size="sm" /> },
             {
               key: 'act',
               header: '',
-              width: 100,
-              render: (payment) => payment.status === 'pending' ? (
+              width: 190,
+              render: (payment) => (
                 <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-                  <IconButton label="Potwierdz" size="sm" disabled={busyId === payment.id} onClick={() => updatePayment(payment, 'confirm')}><I.Check size={16} /></IconButton>
-                  <IconButton label="Odrzuc" size="sm" variant="danger" disabled={busyId === payment.id} onClick={() => setReject(payment)}><I.X size={16} /></IconButton>
+                  <Button size="sm" variant="subtle" disabled={busyId != null} onClick={() => openPaymentEdit(payment)}>Изменить</Button>
+                  {payment.status === 'pending' && <>
+                  <IconButton label="Подтвердить" size="sm" disabled={busyId === payment.id} onClick={() => updatePayment(payment, 'confirm')}><I.Check size={16} /></IconButton>
+                  <IconButton label="Отклонить" size="sm" variant="danger" disabled={busyId === payment.id} onClick={() => setReject(payment)}><I.X size={16} /></IconButton>
+                  </>}
                 </div>
-              ) : null,
+              ),
             },
           ]}
         />
@@ -584,12 +635,12 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           <Dialog
             open
             tone="danger"
-            title="Odrzucic platnosc?"
-            confirmLabel="Odrzuc"
-            cancelLabel="Anuluj"
+            title="Отклонить платёж?"
+            confirmLabel="Отклонить"
+            cancelLabel="Отмена"
             onClose={() => setReject(null)}
             onConfirm={() => updatePayment(reject, 'reject')}
-            description={`Platnosc ${reject.child} na ${reject.amount} zostanie odrzucona w backendzie.`}
+            description={`Платёж ${reject.child} на сумму ${reject.amount} будет отклонён.`}
           />
         )}
       </div>

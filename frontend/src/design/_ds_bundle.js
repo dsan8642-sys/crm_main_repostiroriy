@@ -468,7 +468,8 @@ function Table({
   const allSelected = rows.length > 0 && selectedIds.length === rows.length;
   const someSelected = selectedIds.length > 0 && !allSelected;
   return /*#__PURE__*/React.createElement("div", {
-    style: wrap
+    style: wrap,
+    className: "table-wrap"
   }, /*#__PURE__*/React.createElement("table", {
     style: tableBase
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, selectable && /*#__PURE__*/React.createElement("th", {
@@ -523,6 +524,7 @@ function Table({
       onChange: () => onToggleRow && onToggleRow(id)
     })), columns.map(c => /*#__PURE__*/React.createElement("td", {
       key: c.key,
+      "data-label": c.header,
       style: {
         ...tdBase,
         padding: cellPad,
@@ -649,7 +651,7 @@ function Banner({
     }
   }, children)), action, onClose && /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    "aria-label": "Zamknij",
+    "aria-label": "Закрыть",
     style: {
       background: 'none',
       border: 'none',
@@ -876,7 +878,7 @@ function Toast({
     }
   }, children)), onClose && /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    "aria-label": "Zamknij",
+    "aria-label": "Закрыть",
     style: {
       background: 'none',
       border: 'none',
@@ -1025,8 +1027,8 @@ function Dialog({
   children,
   onClose,
   onConfirm,
-  confirmLabel = 'Potwierdź',
-  cancelLabel = 'Anuluj',
+  confirmLabel = 'Подтвердить',
+  cancelLabel = 'Отмена',
   tone = 'primary',
   width = 460,
   hideFooter = false,
@@ -1078,7 +1080,7 @@ function Dialog({
       letterSpacing: '0.06em',
       textTransform: 'uppercase'
     }
-  }, /*#__PURE__*/React.createElement(WarnIcon, null), " Dzia\u0142anie nieodwracalne"), title && /*#__PURE__*/React.createElement("h2", {
+  }, /*#__PURE__*/React.createElement(WarnIcon, null), " Действие необратимо"), title && /*#__PURE__*/React.createElement("h2", {
     style: {
       margin: 0,
       font: 'var(--text-card-title)',

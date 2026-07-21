@@ -1,5 +1,38 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+from audit.models import AuditLogEntry
+
+
+def _session_attendance_payload(session):
+    attendance = {record.student_id: record for record in session.attendance.select_related("student")}
+    one_off_participants = {
+        participant.student_id: participant
+        for participant in session.participants.filter(
+            status=SessionParticipantStatus.ACTIVE,
+        ).select_related("student")
+    }
+    history = AuditLogEntry.objects.filter(entity_type="Session", entity_id=str(session.id)).select_related("actor")[:50]
+    return {
+        "session": _session_payload(session),
+        "history": [{
+            "id": entry.id,
+            "action": entry.action,
+            "actor": str(entry.actor) if entry.actor_id else "Система",
+            "changes": entry.changes,
+            "created_at": timezone.localtime(entry.created_at).isoformat(),
+        } for entry in history],
+        "students": [{
+            **_student_payload(student),
+            "attendance": _attendance_payload(attendance[student.id]) if student.id in attendance else None,
+            "session_participant": {
+                "id": one_off_participants[student.id].id,
+                "source": one_off_participants[student.id].source,
+                "status": one_off_participants[student.id].status,
+                "note": one_off_participants[student.id].note,
+            } if student.id in one_off_participants else None,
+            "can_remove_from_session": student.id in one_off_participants,
+        } for student in _session_roster(session)],
+    }
 
 @require_http_methods(["GET", "POST"])
 def admin_schedule_templates(request):
@@ -125,14 +158,75 @@ def admin_schedule_session_attendance(request, session_id):
                                 status=status, actor=user)
         return JsonResponse(_attendance_payload(record))
 
-    attendance = {record.student_id: record for record in session.attendance.select_related("student")}
-    return JsonResponse({
-        "session": _session_payload(session),
-        "students": [{
-            **_student_payload(student),
-            "attendance": _attendance_payload(attendance[student.id]) if student.id in attendance else None,
-        } for student in _session_roster(session)],
+    return JsonResponse(_session_attendance_payload(session))
+
+
+@require_POST
+def admin_schedule_session_participants(request, session_id):
+    user = _admin_required(request)
+    session = get_object_or_404(
+        Session.objects.select_related(
+            "group", "trainer__user", "substitute_trainer__user", "individual_student"
+        ),
+        pk=session_id,
+    )
+    data = _json_body(request)
+    if session.is_cancelled:
+        raise ValidationError("cancelled sessions cannot receive participants")
+    try:
+        student_id = int(data.get("student_id"))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("student_id is required") from exc
+    student = get_object_or_404(Student.objects.select_related("parent__user", "group"), pk=student_id)
+    _require_active_participant(student, "be added to sessions")
+
+    existing_active_ids = set(_session_roster(session).values_list("id", flat=True))
+    participant = SessionParticipant.objects.filter(session=session, student=student).first()
+    if student.id in existing_active_ids and not participant:
+        raise ValidationError("student is already in this session roster")
+    if student.id not in existing_active_ids and len(existing_active_ids) >= session.max_participants:
+        raise ValidationError(f"session capacity is full ({session.max_participants})")
+
+    created = participant is None
+    if created:
+        participant = SessionParticipant(session=session, student=student)
+    participant.source = SessionParticipantSource.MANUAL
+    participant.status = SessionParticipantStatus.ACTIVE
+    participant.note = data.get("note", "") or ""
+    participant.full_clean()
+    participant.save()
+    audit(user, "session_participant.added", participant, {
+        "session_id": session.id,
+        "student_id": student.id,
+        "created": created,
     })
+    return JsonResponse(_session_attendance_payload(session), status=201 if created else 200)
+
+
+@require_http_methods(["DELETE"])
+def admin_schedule_session_participant_detail(request, session_id, student_id):
+    user = _admin_required(request)
+    session = get_object_or_404(
+        Session.objects.select_related(
+            "group", "trainer__user", "substitute_trainer__user", "individual_student"
+        ),
+        pk=session_id,
+    )
+    participant = SessionParticipant.objects.filter(
+        session=session,
+        student_id=student_id,
+        status=SessionParticipantStatus.ACTIVE,
+    ).first()
+    if not participant:
+        raise ValidationError("base group/individual participant cannot be removed from this session here")
+    participant.status = SessionParticipantStatus.CANCELLED
+    participant.full_clean()
+    participant.save(update_fields=["status", "updated_at"])
+    audit(user, "session_participant.cancelled", participant, {
+        "session_id": session.id,
+        "student_id": student_id,
+    })
+    return JsonResponse(_session_attendance_payload(session))
 
 
 @require_http_methods(["GET", "POST"])
@@ -205,7 +299,12 @@ def admin_schedule_waitlist_entry_promote(request, entry_id):
 def admin_schedule_session_cancel(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(Session, pk=session_id)
-    session = edit_single_session(session, actor=user, is_cancelled=True)
+    data = _json_body(request) if request.content_type == "application/json" else {}
+    reason = str(data.get("reason") or "").strip()
+    notes = session.notes
+    if reason:
+        notes = f"{notes}\nПричина отмены: {reason}".strip()
+    session = edit_single_session(session, actor=user, is_cancelled=True, notes=notes)
     return JsonResponse(_session_payload(session))
 
 

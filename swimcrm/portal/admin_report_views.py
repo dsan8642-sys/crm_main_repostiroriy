@@ -1,15 +1,25 @@
 ﻿from .support import *
 from .admin_support import _admin_required
 
-@require_GET
-def admin_debtors(request):
-    _admin_required(request)
-    return JsonResponse({"debtors": [{
+
+def _debtor_payload(row):
+    today = timezone.localdate()
+    overdue = Charge.objects.filter(student=row.student, due_date__lt=today).order_by("due_date").first()
+    last_payment = Payment.objects.filter(student=row.student, status=PaymentStatus.CONFIRMED).order_by("-paid_at", "-id").first()
+    return {
         "student": _student_payload(row.student),
         "reasons": row.reasons,
         "balance_minor": row.balance_minor,
         "currency": row.currency,
-    } for row in debtors()]})
+        "oldest_due_date": overdue.due_date.isoformat() if overdue else None,
+        "days_overdue": (today - overdue.due_date).days if overdue else 0,
+        "last_payment_at": last_payment.paid_at.isoformat() if last_payment else None,
+    }
+
+@require_GET
+def admin_debtors(request):
+    _admin_required(request)
+    return JsonResponse({"debtors": [_debtor_payload(row) for row in debtors()]})
 
 
 @require_GET

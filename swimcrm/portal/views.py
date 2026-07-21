@@ -1,5 +1,6 @@
 from .auth_views import *
 from .admin_views import *
+from .admin_system_views import *
 from .client_views import *
 from .dev_views import *
 from .nocobase_views import *
