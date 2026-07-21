@@ -60,7 +60,7 @@
       "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall",
       "captured_at": "2026-07-16T12:18:00+02:00",
       "summary": "Release archive was extracted and installed on the target host from the verified archive SHA256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
-      "output_excerpt": "Target-host release install completed. Target-host release install verified. Release archive extracted on target host. Release source archive manifest verified. Release source archive contents verified. Release source archive tracked file list verified. tracked_file_count: 1234. tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. Backend dependencies installed. Root Node tooling installed. Frontend dependencies installed. Django migrations check passed. NocoBase app root outside source tree. NocoBase storage outside source tree."
+      "output_excerpt": "Target-host release install completed. Target-host release install verified. Release archive extracted on target host. Release source archive manifest verified. Release source archive contents verified. Release source archive tracked file list verified. tracked_file_count: 1234. tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. Backend dependencies installed. Root Node tooling installed. NocoBase CLI package installed. Frontend dependencies installed. Django migrations check passed. NocoBase app root outside source tree. NocoBase storage outside source tree."
     },
     {
       "id": "production_env_preflight",

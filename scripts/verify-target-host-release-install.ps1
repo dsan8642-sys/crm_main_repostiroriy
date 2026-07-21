@@ -164,6 +164,24 @@ function Assert-PathExists {
     }
 }
 
+function Assert-NocoBaseCliPackage {
+    param([string]$Root)
+
+    $rootPackagePath = Join-Path $Root "package.json"
+    $installedPackagePath = Join-Path $Root "node_modules\@nocobase\cli\package.json"
+    Assert-PathExists -Path $installedPackagePath -Label "Root @nocobase/cli package"
+
+    $rootPackage = Get-Content -LiteralPath $rootPackagePath -Raw | ConvertFrom-Json
+    $installedPackage = Get-Content -LiteralPath $installedPackagePath -Raw | ConvertFrom-Json
+    $expectedVersion = [string]$rootPackage.dependencies."@nocobase/cli"
+    if ([string]::IsNullOrWhiteSpace($expectedVersion)) {
+        throw "Root package.json must pin @nocobase/cli."
+    }
+    if ([string]$installedPackage.version -ne $expectedVersion) {
+        throw "Installed @nocobase/cli version mismatch. Expected $expectedVersion but got $($installedPackage.version)."
+    }
+}
+
 if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
     throw "Release archive verifier not found at $ArchiveVerifier."
 }
@@ -223,12 +241,13 @@ Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package-lock.json")
 
 if ($RequireInstalledDependencies) {
     Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\.venv\Scripts\python.exe") -Label "Backend virtualenv Python"
-    Assert-PathExists -Path (Join-Path $releaseDirPath "node_modules\@nocobase\cli\package.json") -Label "Root @nocobase/cli package"
+    Assert-NocoBaseCliPackage -Root $releaseDirPath
     Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\node_modules") -Label "Frontend node_modules"
     Assert-PathExists -Path $nocoBaseAppRootPath -Label "NocoBase app root"
     Assert-PathExists -Path $nocoBaseStorageDirPath -Label "NocoBase storage directory"
     Write-Host "Backend dependencies installed."
     Write-Host "Root Node tooling installed."
+    Write-Host "NocoBase CLI package installed."
     Write-Host "Frontend dependencies installed."
     Write-Host "NocoBase app root outside source tree."
     Write-Host "NocoBase storage outside source tree."

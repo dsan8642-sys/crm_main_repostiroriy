@@ -97,6 +97,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "tracked_file_list_sha256",
         "Backend dependencies installed",
         "Root Node tooling installed",
+        "NocoBase CLI package installed",
         "Frontend dependencies installed",
         "Django migrations check passed",
         "NocoBase app root outside source tree",

@@ -231,8 +231,9 @@ not just `status=passed`:
   host`, `Release source archive manifest verified`, `Release source archive
   contents verified`, `Release source archive tracked file list verified`,
   `tracked_file_count`, `tracked_file_list_sha256`, `Backend dependencies
-  installed`, `Root Node tooling installed`, `Frontend dependencies installed`,
-  `Django migrations check passed`, `NocoBase app root outside source tree`,
+  installed`, `Root Node tooling installed`, `NocoBase CLI package installed`,
+  `Frontend dependencies installed`, `Django migrations check passed`,
+  `NocoBase app root outside source tree`,
   `NocoBase storage outside source tree`;
 - production preflight: `Production environment check passed`, `Runtime path
   settings passed`, `PostgreSQL production settings passed`, `Celery

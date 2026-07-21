@@ -201,6 +201,7 @@ Invoke-Step "Install root Node tooling" {
         Pop-Location
     }
     Write-Host "Root Node tooling installed."
+    Write-Host "NocoBase CLI package installed."
 }
 
 Invoke-Step "Install frontend dependencies" {

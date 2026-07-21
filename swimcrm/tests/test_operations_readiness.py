@@ -198,6 +198,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
+    def test_cutover_evidence_requires_target_host_nocobase_cli_package(self):
+        payload = self._example_payload()
+        item = next(
+            row for row in payload["required_evidence"]
+            if row["id"] == "target_host_release_install"
+        )
+        item["output_excerpt"] = item["output_excerpt"].replace(
+            "NocoBase CLI package installed. ",
+            "",
+        )
+
+        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
+
+        self.assertIn(
+            "target_host_release_install: missing evidence fragment: NocoBase CLI package installed",
+            errors,
+        )
+
     def test_cutover_evidence_requires_source_archive_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -627,6 +645,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("-RunInstall", generator)
         self.assertIn("Target-host release install completed", generator)
         self.assertIn("Target-host release install verified", generator)
+        self.assertIn("NocoBase CLI package installed", generator)
         self.assertIn("NocoBase app root outside source tree", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
         self.assertIn("Operations status ok requirement passed", generator)
@@ -899,6 +918,7 @@ class TargetHostReleaseInstallerRule(SimpleTestCase):
         self.assertIn("--check", script)
         self.assertIn("Backend dependencies installed", script)
         self.assertIn("Root Node tooling installed", script)
+        self.assertIn("NocoBase CLI package installed", script)
         self.assertIn("Frontend dependencies installed", script)
         self.assertIn("Django migrations check passed", script)
         self.assertIn("Target-host release install completed", script)
@@ -925,6 +945,9 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn("RequireInstalledDependencies", script)
         self.assertIn("swimcrm\\.venv\\Scripts\\python.exe", script)
         self.assertIn("node_modules\\@nocobase\\cli\\package.json", script)
+        self.assertIn("Root package.json must pin @nocobase/cli", script)
+        self.assertIn("Installed @nocobase/cli version mismatch", script)
+        self.assertIn("NocoBase CLI package installed", script)
         self.assertIn("frontend\\node_modules", script)
         self.assertIn("NOCOBASE_APP_ROOT must be outside the extracted release source tree", script)
         self.assertIn("NOCOBASE_STORAGE_DIR must be outside the extracted release source tree", script)
@@ -1069,6 +1092,7 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Target-host release install verified", script)
         self.assertIn("Backend dependencies installed", script)
         self.assertIn("NocoBase storage outside source tree", script)
+        self.assertIn("NocoBase CLI package installed", script)
         self.assertIn("is missing expected_evidence", script)
         self.assertIn("must stop if evidence is missing", script)
         self.assertIn("Assert-ChecklistEvidenceContains", script)
