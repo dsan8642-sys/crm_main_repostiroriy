@@ -2,6 +2,7 @@
 import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminScheduleScreen(components, icons, reloadRoleData) {
   const { Button, Badge, Banner, Input, Table, StatusPill } = components
@@ -66,11 +67,13 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
     const [actionPanel, setActionPanel] = useState(null)
+    const [displayMode, setDisplayMode] = useState('calendar')
     const [viewMode, setViewMode] = useState('week')
     const [focusDate, setFocusDate] = useState(new Date().toISOString().slice(0, 10))
     const [filters, setFilters] = useState({ trainerId: '', groupId: '', location: '', status: '' })
     useEffect(() => {
       if (['day', 'week', 'month'].includes(initialTab)) setViewMode(initialTab)
+      if (['calendar', 'list'].includes(initialTab)) setDisplayMode(initialTab)
     }, [initialTab])
     const updateSessionForm = (field, value) => setSessionForm((current) => ({ ...current, [field]: value }))
     const updateTemplateForm = (field, value) => setTemplateForm((current) => ({ ...current, [field]: value }))
@@ -96,6 +99,48 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
     function isoDate(iso) {
       return String(iso || '').slice(0, 10)
     }
+
+    function dateFromIso(value) {
+      return new Date(`${value}T12:00:00`)
+    }
+
+    function dateToIso(value) {
+      const year = value.getFullYear()
+      const month = String(value.getMonth() + 1).padStart(2, '0')
+      const day = String(value.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    function addDays(value, amount) {
+      const result = new Date(value)
+      result.setDate(result.getDate() + amount)
+      return result
+    }
+
+    const calendarDates = useMemo(() => {
+      const anchor = dateFromIso(focusDate)
+      if (viewMode === 'day') return [focusDate]
+      if (viewMode === 'week') {
+        const monday = addDays(anchor, -((anchor.getDay() + 6) % 7))
+        return Array.from({ length: 7 }, (_, index) => dateToIso(addDays(monday, index)))
+      }
+      const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12)
+      const gridStart = addDays(monthStart, -((monthStart.getDay() + 6) % 7))
+      const monthEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 12)
+      const gridEnd = addDays(monthEnd, 6 - ((monthEnd.getDay() + 6) % 7))
+      const days = Math.round((gridEnd - gridStart) / 86400000) + 1
+      return Array.from({ length: days }, (_, index) => dateToIso(addDays(gridStart, index)))
+    }, [focusDate, viewMode])
+
+    const sessionsByDate = useMemo(() => {
+      const grouped = {}
+      visibleSessions.forEach((session) => {
+        const date = isoDate(session.startAt)
+        grouped[date] = [...(grouped[date] || []), session]
+      })
+      Object.values(grouped).forEach((items) => items.sort((left, right) => String(left.startAt).localeCompare(String(right.startAt))))
+      return grouped
+    }, [visibleSessions])
 
     function openSessionEdit(session) {
       setEditingSession(session)
@@ -306,6 +351,14 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
             <h2 className="page-title">Расписание</h2>
             <p className="page-desc">Занятия, регулярные шаблоны и генерация расписания.</p>
           </div>
+          <div className="seg" role="group" aria-label="Режим отображения расписания">
+            <button type="button" className={displayMode === 'calendar' ? 'on' : ''} aria-pressed={displayMode === 'calendar'} onClick={() => setDisplayMode('calendar')}>
+              <I.Calendar size={15} /> Календарь
+            </button>
+            <button type="button" className={displayMode === 'list' ? 'on' : ''} aria-pressed={displayMode === 'list'} onClick={() => setDisplayMode('list')}>
+              <I.List size={15} /> Список
+            </button>
+          </div>
         </div>
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
@@ -343,7 +396,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
             <div className="eyebrow" style={{ marginBottom: 10 }}>Новое занятие</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Тип занятия<select value={sessionForm.sessionType} onChange={(event) => updateSessionForm('sessionType', event.target.value)}><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит для двоих</option></select></label>
-              {sessionForm.sessionType !== 'group' && <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Участник<select value={sessionForm.participantId} onChange={(event) => updateSessionForm('participantId', event.target.value)}><option value="">Выберите участника</option>{participants.map((participant) => <option key={participant.studentId} value={participant.studentId}>{participant.last} {participant.first}</option>)}</select></label>}
+              {sessionForm.sessionType !== 'group' && <SearchableSelect label="Участник" value={sessionForm.participantId} onChange={(value) => updateSessionForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant))} />}
               {sessionForm.sessionType === 'group' && (
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
                 Группа
@@ -562,7 +615,45 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
         </div>
 
         <div className="eyebrow" style={{ marginBottom: 10 }}>Занятия</div>
-        <div className="card" style={{ overflow: 'hidden' }}>
+        {displayMode === 'calendar' && (
+          <div
+            className={`ops-schedule-calendar is-${viewMode}`}
+            data-testid="schedule-calendar"
+            aria-label="Календарь занятий"
+          >
+            {calendarDates.map((date) => {
+              const daySessions = sessionsByDate[date] || []
+              const dateValue = dateFromIso(date)
+              const outsideMonth = viewMode === 'month' && date.slice(0, 7) !== focusDate.slice(0, 7)
+              return (
+                <section key={date} className={`ops-schedule-day${outsideMonth ? ' is-outside' : ''}${date === new Date().toISOString().slice(0, 10) ? ' is-today' : ''}`}>
+                  <header>
+                    <span>{dateValue.toLocaleDateString('ru-RU', { weekday: 'short' })}</span>
+                    <strong>{dateValue.toLocaleDateString('ru-RU', { day: 'numeric', month: viewMode === 'month' ? undefined : 'short' })}</strong>
+                  </header>
+                  <div className="ops-schedule-day-events">
+                    {daySessions.map((session) => (
+                      <button
+                        type="button"
+                        key={session.id}
+                        className={`ops-schedule-event${session.isCancelled ? ' is-cancelled' : ''}`}
+                        onClick={() => go('attendance', { sessionId: session.sessionId })}
+                        title={`${session.start}-${session.end} · ${session.group} · ${session.trainer}`}
+                      >
+                        <span className="mono">{session.start}-{session.end}</span>
+                        <strong>{session.group}</strong>
+                        <small>{session.trainer}</small>
+                        <small><I.Location size={11} /> {session.location}</small>
+                      </button>
+                    ))}
+                    {!daySessions.length && <span className="ops-schedule-empty-day">Нет занятий</span>}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        )}
+        {displayMode === 'list' && <div className="card" data-testid="schedule-list" style={{ overflow: 'hidden' }}>
           {visibleSessions.map((session, index) => (
             <div
               key={session.id}
@@ -591,7 +682,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
             </div>
           ))}
           {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>В выбранном периоде занятий нет.</div>}
-        </div>
+        </div>}
       </div>
     )
   }

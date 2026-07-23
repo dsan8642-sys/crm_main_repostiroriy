@@ -2,6 +2,7 @@
 import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminClientsScreen(components, reloadRoleData) {
   const { Table, StatusPill, Avatar, Button, Banner, Input, Dialog } = components
@@ -290,15 +291,17 @@ export function createAdminClientsScreen(components, reloadRoleData) {
           <div className="card card-pad">
             <div className="eyebrow" style={{ marginBottom: 10 }}>Новый участник аккаунта</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', gridColumn: '1 / -1' }}>
-                Аккаунт клиента
-                <select value={participantForm.clientId} onChange={(event) => updateParticipantForm('clientId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Выберите аккаунт</option>
-                  {clientOptions.map((row) => (
-                    <option key={row.clientId} value={row.clientId}>{row.last} {row.first} · {row.phone || row.email || row.clientId}</option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                className="ops-grid-full"
+                label="Аккаунт клиента"
+                value={participantForm.clientId}
+                onChange={(value) => updateParticipantForm('clientId', value)}
+                options={clientOptions.map((row) => clientSelectOption(row, {
+                  valueKey: 'clientId',
+                  description: (client) => client.phone || client.email || `ID ${client.clientId}`,
+                }))}
+                placeholder="Найдите аккаунт по имени или фамилии"
+              />
               <Input label="Имя" value={participantForm.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
               <Input label="Фамилия" value={participantForm.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
               <Input label="Дата рождения" value={participantForm.birthDate} onChange={(event) => updateParticipantForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />

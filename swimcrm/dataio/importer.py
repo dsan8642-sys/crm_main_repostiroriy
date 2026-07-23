@@ -156,6 +156,10 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Tr
                 username=username, role="parent",
                 first_name=d.get("first_name", ""), last_name=d.get("last_name", ""),
                 email=d.get("email", ""))
+            # Imported clients keep their domain identity and history, but portal
+            # access is enabled only through the one-time activation flow.
+            puser.set_unusable_password()
+            puser.save(update_fields=["password"])
             parent = ParentAccount.objects.create(user=puser, phone=phone,
                                                   email=d.get("email", ""))
             created_parents.append(parent.id)

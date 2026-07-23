@@ -79,21 +79,25 @@ export function createClientScreens(components, icons, reloadRoleData) {
     const charges = globalThis.ParentData?.charges || []
     const payments = globalThis.ParentData?.payments || []
 
-    async function uploadReceipt() {
+    async function createTopUpRequest() {
+      const amountNumber = Number(amount)
+      if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+        setError('Укажите сумму пополнения больше нуля.')
+        return
+      }
       if (!file) {
-        setError('Выберите файл PDF, JPG или PNG.')
+        setError('Приложите подтверждение банковского перевода: PDF, JPG или PNG.')
         return
       }
       setBusy(true)
       const formData = new FormData()
       if (child?.studentId) formData.set('student_id', child.studentId)
-      formData.set('amount_minor', String(Math.round(Number(amount || 0) * 100)))
+      formData.set('amount_minor', String(Math.round(amountNumber * 100)))
       formData.set('currency', 'PLN')
-      formData.set('method', 'bank_transfer')
       formData.set('file', file)
       try {
-        await api.postForm('/api/client/payments/upload-receipt/', formData)
-        setMessage('Подтверждение оплаты отправлено на проверку.')
+        await api.postForm('/api/client/payments/top-up-requests/', formData)
+        setMessage('Запрос отправлен администратору. Баланс изменится только после подтверждения.')
         setError(null)
         setFile(null)
         setAmount('')
@@ -107,18 +111,20 @@ export function createClientScreens(components, icons, reloadRoleData) {
 
     return (
       <div className="page" style={{ maxWidth: 900 }}>
-        <div className="page-head"><div><h2 className="page-title">Платежи</h2><p className="page-desc">Начисления, история платежей и подтверждение банковского перевода.</p></div></div>
+        <div className="page-head"><div><h2 className="page-title">Платежи</h2><p className="page-desc">Начисления, история операций и запросы на пополнение баланса.</p></div></div>
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Отправляю подтверждение на проверку...</BusyBanner>
+        <BusyBanner Banner={Banner} show={busy}>Отправляю запрос на пополнение...</BusyBanner>
         <div className="card card-pad" style={{ marginBottom: 16 }}>
+          <div className="eyebrow">Запрос на пополнение</div>
+          <p className="muted" style={{ margin: '6px 0 14px' }}>Запрос не меняет баланс автоматически. Администратор проверит перевод, после чего сумма будет зачислена или запрос будет отклонён.</p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
-            <Input label="Сумма" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="240.00" />
+            <Input label="Сумма пополнения" type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="240.00" />
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               Файл подтверждения
               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setFile(event.target.files?.[0] || null)} />
             </label>
-            <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={uploadReceipt}>Отправить</Button>
+            <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>Отправить запрос</Button>
           </div>
         </div>
         <Table rows={charges} emptyLabel="Начислений нет" columns={[
@@ -130,11 +136,13 @@ export function createClientScreens(components, icons, reloadRoleData) {
         ]} />
         <div style={{ height: 16 }} />
         <Table rows={payments} emptyLabel="Платежей нет" columns={[
+          { key: 'sourceLabel', header: 'Операция' },
           { key: 'child', header: 'Участник' },
           { key: 'date', header: 'Дата', muted: true },
           { key: 'method', header: 'Способ', muted: true },
           { key: 'amount', header: 'Сумма', align: 'right', render: (row) => <Money amount={row.amount} /> },
           { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status} size="sm" /> },
+          { key: 'effect', header: 'Баланс', muted: true, render: (row) => row.affectsBalance ? 'Зачислено' : 'Не влияет' },
         ]} />
       </div>
     )

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
@@ -60,18 +61,34 @@ class PaymentStatus(models.TextChoices):
     REJECTED = "rejected", "Отклонён"
 
 
+class PaymentSource(models.TextChoices):
+    ADMIN = "admin", "Создан администратором"
+    CLIENT_TOP_UP = "client_top_up", "Запрос клиента на пополнение"
+
+
+class PaymentEventType(models.TextChoices):
+    CREATED = "created", "Платёж создан"
+    REQUESTED = "requested", "Запрос на пополнение отправлен"
+    CONFIRMED = "confirmed", "Платёж подтверждён"
+    REJECTED = "rejected", "Платёж отклонён"
+
+
 class Payment(models.Model):
-    """Rule 9: a fact of payment. Entered by admin OR via a parent-uploaded receipt.
-    Only CONFIRMED payments reduce the balance. The record is kept permanently
-    (rule 10) as the accounting document, even after the receipt file is deleted."""
+    """A payment or a client top-up request.
+
+    Only CONFIRMED records affect the balance. CLIENT_TOP_UP records are always
+    created as PENDING and require an explicit admin decision.
+    """
     student = models.ForeignKey("students.Student", on_delete=models.CASCADE, related_name="payments")
-    amount_minor = models.BigIntegerField()
+    amount_minor = models.BigIntegerField(validators=[MinValueValidator(1)])
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
                                 default=settings.DEFAULT_CURRENCY)
     paid_at = models.DateField()
     method = models.CharField(max_length=16, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
     comment = models.TextField(blank=True)
     status = models.CharField(max_length=16, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
+    source = models.CharField(
+        max_length=24, choices=PaymentSource.choices, default=PaymentSource.ADMIN)
 
     created_by = models.ForeignKey("accounts.User", null=True, blank=True,
                                    on_delete=models.SET_NULL, related_name="created_payments")
@@ -91,6 +108,28 @@ class Payment(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Payment history is immutable and cannot be deleted.")
+
+
+class PaymentEvent(models.Model):
+    """Append-only evidence for every payment workflow transition."""
+
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name="events")
+    event_type = models.CharField(max_length=16, choices=PaymentEventType.choices)
+    actor = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="payment_events")
+    from_status = models.CharField(max_length=16, choices=PaymentStatus.choices, blank=True)
+    to_status = models.CharField(max_length=16, choices=PaymentStatus.choices)
+    amount_minor = models.BigIntegerField()
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES)
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Payment event history is immutable and cannot be deleted.")
 
 
 class ReceiptFile(models.Model):
@@ -125,3 +164,8 @@ def prevent_payment_delete(sender, instance, **kwargs):
 @receiver(pre_delete, sender=Charge)
 def prevent_charge_delete(sender, instance, **kwargs):
     raise ValidationError("Charge history is immutable and cannot be deleted.")
+
+
+@receiver(pre_delete, sender=PaymentEvent)
+def prevent_payment_event_delete(sender, instance, **kwargs):
+    raise ValidationError("Payment event history is immutable and cannot be deleted.")

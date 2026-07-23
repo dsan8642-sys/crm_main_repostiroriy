@@ -1076,6 +1076,107 @@ button.ops-detail-row:hover,
   font-size: var(--fs-sm);
 }
 
+.ops-schedule-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--ops-line);
+  border-radius: 12px;
+  background: var(--ops-panel);
+}
+
+.ops-schedule-calendar.is-day {
+  grid-template-columns: minmax(280px, 1fr);
+}
+
+.ops-schedule-day {
+  min-width: 0;
+  min-height: 180px;
+  border-right: 1px solid var(--ops-line-soft);
+  border-bottom: 1px solid var(--ops-line-soft);
+  background: var(--ops-panel);
+}
+
+.ops-schedule-calendar.is-month .ops-schedule-day {
+  min-height: 150px;
+}
+
+.ops-schedule-day.is-outside {
+  background: var(--ops-panel-2);
+  opacity: .58;
+}
+
+.ops-schedule-day.is-today {
+  box-shadow: inset 0 3px 0 var(--primary);
+}
+
+.ops-schedule-day > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--ops-line-soft);
+}
+
+.ops-schedule-day > header span {
+  color: var(--ops-muted);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+}
+
+.ops-schedule-day-events {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 8px;
+}
+
+.ops-schedule-event {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--ops-line-soft));
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--ops-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ops-schedule-event:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.ops-schedule-event.is-cancelled {
+  border-color: var(--danger);
+  opacity: .65;
+  text-decoration: line-through;
+}
+
+.ops-schedule-event strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ops-schedule-event small {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  color: var(--ops-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-schedule-empty-day {
+  padding: 8px 2px;
+  color: var(--ops-muted);
+  font-size: var(--fs-xs);
+}
+
 .ops-muted-chip {
   display: inline-flex;
   align-items: center;
@@ -1112,6 +1213,15 @@ button.ops-detail-row:hover,
     gap: 6px;
     overflow-x: auto;
     padding: 10px 0 2px;
+  }
+
+  .ops-schedule-calendar {
+    grid-template-columns: minmax(230px, 1fr);
+  }
+
+  .ops-schedule-day {
+    min-height: 110px;
+    border-right: 0;
   }
 
   .ops-nav-section,
@@ -1423,5 +1533,112 @@ button.ops-detail-row:hover,
 
   .table-wrap td {
     grid-template-columns: 86px minmax(0, 1fr);
+  }
+}
+.ops-search-select {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  font-size: var(--fs-sm);
+}
+
+.ops-grid-full {
+  grid-column: 1 / -1;
+}
+
+.ops-inline-add .ops-search-select {
+  flex: 1;
+}
+
+.ops-search-select-label {
+  color: var(--text);
+}
+
+.ops-search-select-control {
+  position: relative;
+  display: flex;
+}
+
+.ops-search-select-control input {
+  width: 100%;
+  min-height: 38px;
+  padding-right: 38px;
+}
+
+.ops-search-select-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 36px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 7px 7px 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.ops-search-select-control:focus-within {
+  border-radius: 8px;
+  outline: 2px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.ops-search-select-list {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  max-height: 260px;
+  margin: 0;
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  list-style: none;
+}
+
+.ops-search-select-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.ops-search-select-list li.is-active {
+  background: var(--surface-hover);
+  outline: 1px solid var(--border-strong);
+}
+
+.ops-search-select-list li[aria-selected='true'] strong {
+  color: var(--primary);
+}
+
+.ops-search-select-list small {
+  color: var(--text-muted);
+}
+
+.ops-search-select-list .is-empty {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .ops-inline-add {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ops-search-select-list {
+    max-height: 220px;
   }
 }

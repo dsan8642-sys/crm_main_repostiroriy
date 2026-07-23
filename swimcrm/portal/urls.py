@@ -8,6 +8,7 @@ from . import views
 urlpatterns = [
     path("csrf/", views.csrf, name="api-csrf"),
     path("auth/login/", views.auth_login, name="api-auth-login"),
+    path("auth/activate/", views.auth_activate, name="api-auth-activate"),
     path("auth/logout/", views.auth_logout, name="api-auth-logout"),
     path("me/", views.me, name="api-me"),
 
@@ -73,7 +74,10 @@ urlpatterns = [
     path("client/schedule/", views.client_schedule, name="api-client-schedule"),
     path("client/attendance/", views.client_attendance, name="api-client-attendance"),
     path("client/payments/", views.client_payments, name="api-client-payments"),
+    path("client/payments/top-up-requests/", views.client_create_top_up_request,
+         name="api-client-top-up-request"),
     path("client/payments/upload-receipt/", views.client_upload_receipt, name="api-client-upload-receipt"),
+    path("documents/<int:document_id>/download/", views.download_receipt, name="api-document-download"),
 
     path("trainer/sessions/", views.trainer_sessions, name="api-trainer-sessions"),
     path("trainer/groups/", views.trainer_groups, name="api-trainer-groups"),
@@ -85,6 +89,8 @@ urlpatterns = [
     path("admin/clients/<int:client_id>/", views.admin_client_detail, name="api-admin-client-detail"),
     path("admin/clients/<int:client_id>/restore/", views.admin_client_restore,
          name="api-admin-client-restore"),
+    path("admin/clients/<int:client_id>/activation/", views.admin_create_client_activation,
+         name="api-admin-client-activation"),
     path("admin/clients/<int:client_id>/participants/", views.admin_client_participants,
          name="api-admin-client-participants"),
     path("admin/participants/<int:participant_id>/", views.admin_participant_detail,

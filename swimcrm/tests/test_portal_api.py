@@ -10,7 +10,9 @@ from accounts.models import Consent, ConsentType, ParentAccount, Role
 from attendance.models import AttendanceStatus
 from attendance.services import set_attendance
 from audit.models import AuditLogEntry
-from billing.models import Charge, Payment, PaymentStatus
+from billing.models import (
+    Charge, Payment, PaymentEventType, PaymentMethod, PaymentSource, PaymentStatus,
+)
 from billing.services import student_balance
 from notifications.models import (Channel, DeliveryStatus, EventType, NotificationLog,
                                   NotificationRule, NotificationTemplate, QuietHoursPolicy)
@@ -186,6 +188,107 @@ class ClientPortalApiRule(TestCase):
         self.assertEqual(payment.status, PaymentStatus.PENDING)
         self.assertEqual(payment.method, "bank_transfer")
         self.assertEqual(payment.receipts.get().uploaded_by, self.parent)
+
+    def test_client_top_up_request_cannot_choose_status_or_payment_method(self):
+        Charge.objects.create(
+            student=self.student,
+            description="Membership",
+            amount_minor=24000,
+            currency="PLN",
+            due_date=date.today(),
+        )
+        balance_before = student_balance(self.student).amount_minor
+
+        response = self.client.post("/api/client/payments/top-up-requests/", {
+            "student_id": self.student.id,
+            "amount_minor": "10000",
+            "currency": "PLN",
+            "status": "confirmed",
+            "confirm": "true",
+            "method": "cash",
+            "file": SimpleUploadedFile("transfer.pdf", PDF, content_type="application/pdf"),
+        })
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(pk=response.json()["top_up_request"]["id"])
+        self.assertEqual(payment.status, PaymentStatus.PENDING)
+        self.assertEqual(payment.method, PaymentMethod.TRANSFER)
+        self.assertEqual(payment.source, PaymentSource.CLIENT_TOP_UP)
+        self.assertEqual(student_balance(self.student).amount_minor, balance_before)
+        self.assertFalse(response.json()["top_up_request"]["affects_balance"])
+        self.assertEqual(payment.events.get().event_type, PaymentEventType.REQUESTED)
+
+    def test_client_top_up_request_rejects_non_positive_amount(self):
+        response = self.client.post("/api/client/payments/top-up-requests/", {
+            "student_id": self.student.id,
+            "amount_minor": "-100",
+            "currency": "PLN",
+            "file": SimpleUploadedFile("transfer.pdf", PDF, content_type="application/pdf"),
+        })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Payment.objects.filter(student=self.student).exists())
+
+    def test_only_admin_confirmation_credits_client_balance_and_is_in_history(self):
+        Charge.objects.create(
+            student=self.student,
+            description="Membership",
+            amount_minor=24000,
+            currency="PLN",
+            due_date=date.today(),
+        )
+        response = self.client.post("/api/client/payments/top-up-requests/", {
+            "student_id": self.student.id,
+            "amount_minor": "10000",
+            "currency": "PLN",
+            "file": SimpleUploadedFile("transfer.pdf", PDF, content_type="application/pdf"),
+        })
+        payment_id = response.json()["top_up_request"]["id"]
+
+        forbidden = self.client.post(f"/api/admin/payments/{payment_id}/confirm/")
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(student_balance(self.student).amount_minor, 24000)
+
+        admin = f.make_admin(username="payment_approver")
+        self.client.force_login(admin)
+        confirmed = self.client.post(f"/api/admin/payments/{payment_id}/confirm/")
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertTrue(confirmed.json()["affects_balance"])
+        self.assertEqual(student_balance(self.student).amount_minor, 14000)
+
+        self.client.force_login(self.parent.user)
+        history = self.client.get("/api/client/payments/").json()["payments"][0]
+        self.assertEqual(history["status"], PaymentStatus.CONFIRMED)
+        self.assertEqual(
+            [event["type"] for event in history["events"]],
+            [PaymentEventType.REQUESTED, PaymentEventType.CONFIRMED],
+        )
+
+    def test_uploaded_receipt_is_visible_and_downloadable_by_client_and_admin(self):
+        response = self.client.post("/api/client/payments/upload-receipt/", {
+            "student_id": self.student.id,
+            "amount_minor": "24000",
+            "currency": "PLN",
+            "method": "bank_transfer",
+            "file": SimpleUploadedFile("profile-document.pdf", PDF, content_type="application/pdf"),
+        })
+        self.assertEqual(response.status_code, 201)
+        receipt_id = response.json()["receipt"]["id"]
+
+        client_payments = self.client.get("/api/client/payments/").json()["payments"]
+        self.assertEqual(client_payments[0]["receipt"]["original_name"], "profile-document.pdf")
+        client_download = self.client.get(f"/api/documents/{receipt_id}/download/")
+        self.assertEqual(client_download.status_code, 200)
+        b"".join(client_download.streaming_content)
+        client_download.close()
+
+        self.client.force_login(f.make_admin(username="document_admin"))
+        admin_payments = self.client.get("/api/admin/payments/").json()["payments"]
+        self.assertEqual(admin_payments[0]["receipt"]["original_name"], "profile-document.pdf")
+        admin_download = self.client.get(f"/api/documents/{receipt_id}/download/")
+        self.assertEqual(admin_download.status_code, 200)
+        b"".join(admin_download.streaming_content)
+        admin_download.close()
 
     def test_client_cannot_upload_receipt_for_other_account(self):
         response = self.client.post("/api/client/payments/upload-receipt/", {

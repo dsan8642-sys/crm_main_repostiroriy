@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.http import HttpResponse, JsonResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
@@ -17,10 +17,15 @@ from analytics.reports import income_by_group, income_by_trainer, income_for_per
 from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
 from audit.models import audit
-from billing.models import (Charge, Payment, PaymentMethod, PaymentStatus,
+from billing.models import (Charge, Payment, PaymentMethod, PaymentSource, PaymentStatus,
                             ReceiptFile, normalize_payment_method)
-from billing.services import charge_statuses, confirm_payment, reject_payment, student_balance
+from billing.services import (
+    charge_statuses, confirm_payment, create_client_top_up_request,
+    record_admin_payment_created,
+    reject_payment, student_balance,
+)
 from catalog.models import Group, SubscriptionType
+from common.money import Money
 from dataio.exports import export_entity
 from notifications.models import Channel
 from notifications.services import queue_mass_mailing
@@ -299,6 +304,23 @@ def _charge_payload(charge):
 
 
 def _payment_payload(payment):
+    receipts = [{
+        "id": receipt.id,
+        "original_name": receipt.original_name,
+        "uploaded_at": timezone.localtime(receipt.uploaded_at).isoformat(),
+        "download_url": f"/api/documents/{receipt.id}/download/",
+    } for receipt in payment.receipts.all() if receipt.file and not receipt.is_deleted]
+    events = [{
+        "id": event.id,
+        "type": event.event_type,
+        "from_status": event.from_status or None,
+        "to_status": event.to_status,
+        "amount_minor": event.amount_minor,
+        "currency": event.currency,
+        "note": event.note,
+        "actor": str(event.actor) if event.actor_id else None,
+        "created_at": timezone.localtime(event.created_at).isoformat(),
+    } for event in payment.events.all()]
     return {
         "id": payment.id,
         "participant_id": payment.student_id,
@@ -309,10 +331,15 @@ def _payment_payload(payment):
         "paid_at": payment.paid_at.isoformat(),
         "method": payment.method,
         "status": payment.status,
+        "source": payment.source,
+        "affects_balance": payment.status == PaymentStatus.CONFIRMED,
         "comment": payment.comment,
         "confirmed_by": str(payment.confirmed_by) if payment.confirmed_by_id else None,
         "confirmed_at": timezone.localtime(payment.confirmed_at).isoformat() if payment.confirmed_at else None,
         "created_at": timezone.localtime(payment.created_at).isoformat(),
+        "documents": receipts,
+        "receipt": receipts[0] if receipts else None,
+        "events": events,
     }
 
 
@@ -387,6 +414,7 @@ def _client_account_payload(account):
         "telegram_chat_id": account.telegram_chat_id,
         "preferred_language": account.preferred_language,
         "is_active": user.is_active,
+        "access_activated": user.has_usable_password(),
         "created_at": timezone.localtime(account.created_at).isoformat(),
     }
 
@@ -400,7 +428,8 @@ def _client_detail_payload(account):
     charges = Charge.objects.filter(student_id__in=participant_ids).select_related(
         "student", "subscription").order_by("-due_date", "-id")
     payments = Payment.objects.filter(student_id__in=participant_ids).select_related(
-        "student", "confirmed_by").order_by("-paid_at", "-id")
+        "student", "confirmed_by").prefetch_related(
+        "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     attendance = AttendanceRecord.objects.filter(student_id__in=participant_ids).select_related(
         "student", "session", "session__group", "session__trainer__user").order_by("-session__start_at", "-id")
     balances = {student.id: student_balance(student).amount_minor for student in participants}
@@ -561,6 +590,13 @@ def _required_int(value, field):
         raise ValidationError(f"{field} must be an integer") from exc
 
 
+def _positive_int(value, field):
+    parsed = _required_int(value, field)
+    if parsed <= 0:
+        raise ValidationError(f"{field} must be greater than zero")
+    return parsed
+
+
 def _create_trainer(data):
     trainer_data = _trainer_data(data)
     email = trainer_data.get("email", "") or ""
@@ -707,22 +743,30 @@ def _create_payment_for_participant(participant, data, *, actor=None):
     desired_status = payment_data.get("status")
     if desired_status and desired_status not in PaymentStatus.values:
         raise ValidationError("invalid payment status")
+    amount_minor = _positive_int(payment_data.get("amount_minor"), "amount_minor")
+    currency = payment_data.get("currency", settings.DEFAULT_CURRENCY)
+    try:
+        Money(amount_minor, currency)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
     payment = Payment.objects.create(
         student=participant,
-        amount_minor=int(payment_data["amount_minor"]),
-        currency=payment_data.get("currency", "PLN"),
+        amount_minor=amount_minor,
+        currency=currency,
         paid_at=_parse_date(payment_data.get("paid_at"), "paid_at") or timezone.localdate(),
         method=method,
         comment=payment_data.get("comment", "") or "",
         status=PaymentStatus.PENDING,
+        source=PaymentSource.ADMIN,
         created_by=actor,
     )
+    record_admin_payment_created(payment, actor)
     if desired_status == PaymentStatus.REJECTED:
-        reject_payment(payment, actor, payment_data.get("reason", ""))
+        payment = reject_payment(payment, actor, payment_data.get("reason", ""))
     elif desired_status == PaymentStatus.PENDING or payment_data.get("confirm") is False:
-        audit(actor, "payment.created", payment, {"status": payment.status})
+        pass
     else:
-        confirm_payment(payment, actor)
+        payment = confirm_payment(payment, actor)
     return payment
 
 

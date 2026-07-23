@@ -10,9 +10,10 @@ from common.money import Money
 from accounts.models import Consent, ConsentType
 from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
-from billing.models import Charge, Payment, PaymentStatus, ReceiptFile
+from billing.models import Charge, Payment, PaymentEvent, PaymentEventType, PaymentStatus, ReceiptFile
 from billing.services import (charge_statuses, confirm_payment,
-                              purge_expired_receipts, student_balance)
+                              purge_expired_receipts, reject_payment,
+                              student_balance)
 from notifications.models import validate_sms_template
 from scheduling.models import Session
 from scheduling.services import (ScheduleConflict, create_session,
@@ -394,6 +395,42 @@ class BillingRule(TestCase):
         self.assertEqual(student_balance(self.st).amount_minor, 0)
         self.assertEqual(p.confirmed_by, admin)
         self.assertIsNotNone(p.confirmed_at)
+
+    def test_final_payment_cannot_be_changed_to_the_opposite_state(self):
+        admin = f.make_admin()
+        confirmed = Payment.objects.create(
+            student=self.st, amount_minor=1000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.PENDING)
+        rejected = Payment.objects.create(
+            student=self.st, amount_minor=1000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.PENDING)
+
+        confirm_payment(confirmed, admin)
+        reject_payment(rejected, admin, "not received")
+
+        with self.assertRaises(ValidationError):
+            reject_payment(confirmed, admin)
+        with self.assertRaises(ValidationError):
+            confirm_payment(rejected, admin)
+
+    def test_payment_event_history_cannot_be_deleted(self):
+        payment = Payment.objects.create(
+            student=self.st, amount_minor=1000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.PENDING)
+        event = PaymentEvent.objects.create(
+            payment=payment,
+            event_type=PaymentEventType.CREATED,
+            to_status=PaymentStatus.PENDING,
+            amount_minor=payment.amount_minor,
+            currency=payment.currency,
+        )
+
+        with self.assertRaises(ValidationError):
+            event.delete()
+        with self.assertRaises(ValidationError):
+            PaymentEvent.objects.filter(pk=event.pk).delete()
+        transaction.set_rollback(False)
+        self.assertTrue(PaymentEvent.objects.filter(pk=event.pk).exists())
 
     def test_payment_history_cannot_be_deleted(self):
         payment = Payment.objects.create(

@@ -118,7 +118,9 @@ def client_payments(request):
     students = list(_student_queryset_for_client(account))
     student_ids = [s.id for s in students]
     charges = Charge.objects.filter(student_id__in=student_ids).select_related("student").order_by("-due_date", "-id")
-    payments = Payment.objects.filter(student_id__in=student_ids).select_related("student").order_by("-paid_at", "-id")
+    payments = Payment.objects.filter(student_id__in=student_ids).select_related(
+        "student", "confirmed_by").prefetch_related(
+        "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     return JsonResponse({
         "charges": [{
             "id": charge.id,
@@ -131,45 +133,62 @@ def client_payments(request):
             "due_date": charge.due_date.isoformat(),
         } for charge in charges],
         "payments": [{
-            "id": payment.id,
+            **_payment_payload(payment),
             "student_id": payment.student_id,
             "student": payment.student.full_name,
-            "amount": payment.amount.format(),
-            "amount_minor": payment.amount_minor,
-            "currency": payment.currency,
-            "paid_at": payment.paid_at.isoformat(),
-            "method": payment.method,
-            "status": payment.status,
-            "comment": payment.comment,
         } for payment in payments],
     })
 
 
 @require_POST
-def client_upload_receipt(request):
+def client_create_top_up_request(request):
     account = _client_account_from_request(request)
     student_id = request.POST.get("student_id")
     student = _student_owned_by_client(account, student_id) if student_id else _default_billing_student_for_client(account)
     file = request.FILES.get("file")
     if file is None:
-        raise ValidationError("РќСѓР¶РЅРѕ РїСЂРёР»РѕР¶РёС‚СЊ С„Р°Р№Р» С‡РµРєР°")
-    payment = Payment.objects.create(
+        raise ValidationError("Нужно приложить подтверждение банковского перевода")
+    payment, receipt = create_client_top_up_request(
         student=student,
-        amount_minor=int(request.POST["amount_minor"]),
-        currency=request.POST.get("currency", "PLN"),
+        account=account,
+        actor=request.user,
+        amount_minor=request.POST.get("amount_minor"),
+        currency=request.POST.get("currency", settings.DEFAULT_CURRENCY),
         paid_at=_parse_date(request.POST.get("paid_at"), "paid_at") or timezone.localdate(),
-        method=normalize_payment_method(request.POST.get("method", PaymentMethod.TRANSFER)),
+        file=file,
         comment=request.POST.get("comment", ""),
-        created_by=request.user,
     )
-    receipt = ReceiptFile(
-        payment=payment, uploaded_by=account, file=file,
-        original_name=getattr(file, "name", ""))
-    receipt.full_clean(exclude=["payment", "uploaded_by"])
-    receipt.save()
+    payload = _payment_payload(payment)
     return JsonResponse({
-        "payment": {"id": payment.id, "status": payment.status, "amount": payment.amount.format()},
+        "top_up_request": payload,
+        "payment": payload,
         "receipt": {"id": receipt.id, "original_name": receipt.original_name},
     }, status=201)
+
+
+# Compatibility route for already deployed clients. It uses the same safe
+# pending-request workflow and can never create a confirmed payment.
+client_upload_receipt = client_create_top_up_request
+
+
+@require_GET
+def download_receipt(request, document_id):
+    receipt = get_object_or_404(
+        ReceiptFile.objects.select_related("payment__student__parent"),
+        pk=document_id, is_deleted=False)
+    if not receipt.file:
+        return _error("Document is no longer available", status=404)
+    owns_document = (
+        request.user.is_authenticated
+        and request.user.role == Role.PARENT
+        and receipt.payment.student.parent.user_id == request.user.id
+    )
+    is_admin = request.user.is_authenticated and request.user.role == Role.ADMIN
+    if not (owns_document or is_admin):
+        raise PermissionDenied("Document access denied")
+    return FileResponse(
+        receipt.file.open("rb"),
+        as_attachment=True,
+        filename=receipt.original_name or receipt.file.name.rsplit("/", 1)[-1])
 
 

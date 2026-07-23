@@ -1,7 +1,8 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
 import { api, downloadFile } from '../../api.js'
-import { asMoneyMajor, formatDate, formatShortDate, formatTime, paymentMethodLabel } from '../../mappers.js'
+import { asAccountBalance, asMoneyMajor, formatDate, formatShortDate, formatTime, paymentMethodLabel } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminClientDetailScreen(components, icons, reloadRoleData) {
   const { Table, StatusPill, Avatar, Button, Banner, Tabs, Money, Badge, Dialog, Input } = components
@@ -13,6 +14,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     const [detail, setDetail] = useState(null)
     const [error, setError] = useState(null)
     const [message, setMessage] = useState(null)
+    const [activationInfo, setActivationInfo] = useState(null)
     const [loading, setLoading] = useState(false)
     const [actionBusy, setActionBusy] = useState(null)
     const [confirmAction, setConfirmAction] = useState(null)
@@ -84,6 +86,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
 
     const participantName = (id) => participants.find((participant) => participant.id === id)?.full_name || '-'
     const money = (minor) => asMoneyMajor(minor || 0)
+    const accountBalance = asAccountBalance(summary.balance_minor)
+    const balanceCaption = accountBalance > 0
+      ? 'Переплата: подтверждённые оплаты выше начислений'
+      : accountBalance < 0
+        ? 'К оплате: начисления выше подтверждённых оплат'
+        : 'Баланс закрыт'
     const status = (value) => {
       if (value === 'active') return 'active'
       if (value === 'confirmed') return 'paid'
@@ -98,6 +106,20 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     }
     const updatePaymentForm = (field, value) => setPaymentForm((current) => ({ ...current, [field]: value }))
     const updateFinanceForm = (field, value) => setFinanceForm((current) => ({ ...current, [field]: value }))
+
+    async function createActivation() {
+      setError(null)
+      setActivationInfo(null)
+      setActionBusy('activation')
+      try {
+        const payload = await api.post(`/api/admin/clients/${fallbackClientId}/activation/`)
+        setActivationInfo(payload)
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setActionBusy(null)
+      }
+    }
 
     useEffect(() => {
       if (!participants.length) return
@@ -352,6 +374,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
             <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
           </div>
           <div className="ops-button-row ops-page-actions">
+            {!accountArchived && !account.access_activated && <Button variant="secondary" loading={actionBusy === 'activation'} disabled={loading || actionBusy != null} onClick={createActivation}>Выдать доступ</Button>}
             {!accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>Редактировать клиента</Button>}
             {accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>Восстановить</Button>}
             <Button variant="secondary" disabled={loading} onClick={refreshDetail}>Обновить</Button>
@@ -360,6 +383,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
 
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        {activationInfo && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setActivationInfo(null)}>
+          Передайте клиенту номер <strong>{activationInfo.client_id}</strong> и одноразовый код <strong style={{ wordBreak: 'break-all' }}>{activationInfo.activation_token}</strong>. Код действует 72 часа.
+        </Banner>}
         {loading && <Banner tone="info" style={{ marginBottom: 12 }}>Загружаю карточку клиента...</Banner>}
         {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>Клиент находится в чёрном списке.</strong> Данные и история доступны только для просмотра. Восстановите клиента, чтобы снова выполнять действия.</Banner>}
 
@@ -400,10 +426,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
           </div>
           <div className="kpi">
             <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>Баланс</div>
-            <div className="kpi-value" style={{ color: (summary.balance_minor || 0) > 0 ? 'var(--money-debt)' : 'var(--money-credit)' }}>
-              {money(summary.balance_minor).toLocaleString('ru-RU')} zl
+            <div className="kpi-value">
+              <Money amount={accountBalance} signed currency="zł" size="inherit" />
             </div>
-            <div className="kpi-sub">Начисления минус подтверждённые оплаты</div>
+            <div className="kpi-sub">{balanceCaption}</div>
           </div>
           <div className="kpi">
             <div className="kpi-label"><span className="kpi-ico"><I.Alert size={15} /></span>Платежи</div>
@@ -448,13 +474,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(160px, 1fr))', gap: 10, alignItems: 'end' }}>
               {(financeAction === 'charge' || financeAction === 'issue') && (
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                  Участник
-                  <select value={financeForm.participantId} onChange={(event) => updateFinanceForm('participantId', event.target.value)} style={{ minHeight: 36 }}>
-                    <option value="">Выберите участника</option>
-                    {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.full_name}</option>)}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Участник"
+                  value={financeForm.participantId}
+                  onChange={(value) => updateFinanceForm('participantId', value)}
+                  options={participants.map((participant) => clientSelectOption(participant))}
+                />
               )}
               {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && (
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
@@ -536,7 +561,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
               { key: 'birth_date', header: 'Дата рождения', muted: true, render: (row) => row.birth_date || '-' },
               { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
               { key: 'group', header: 'Группа', render: (row) => row.group?.name || 'Индивидуально' },
-              { key: 'balance', header: 'Баланс', align: 'right', width: 110, render: (row) => <Money amount={money(row.balance_minor)} /> },
+              { key: 'balance', header: 'Баланс', align: 'right', width: 110, render: (row) => <Money amount={asAccountBalance(row.balance_minor)} signed /> },
               { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
             ]}
           />
@@ -565,15 +590,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
               <div className="card card-pad" style={{ marginBottom: 16 }}>
                 <div className="eyebrow" style={{ marginBottom: 10 }}>Ручная оплата</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.4fr) repeat(3, minmax(140px, 1fr))', gap: 10, alignItems: 'end' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                    Участник
-                    <select value={paymentForm.participantId} onChange={(event) => updatePaymentForm('participantId', event.target.value)} style={{ minHeight: 36 }}>
-                      <option value="">Выберите участника</option>
-                      {participants.map((participant) => (
-                        <option key={participant.id} value={participant.id}>{participant.full_name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <SearchableSelect
+                    label="Участник"
+                    value={paymentForm.participantId}
+                    onChange={(value) => updatePaymentForm('participantId', value)}
+                    options={participants.map((participant) => clientSelectOption(participant))}
+                  />
                   <Input label="Сумма" value={paymentForm.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240.00" />
                   <Input label="Дата оплаты" value={paymentForm.paidAt} onChange={(event) => updatePaymentForm('paidAt', event.target.value)} placeholder="YYYY-MM-DD" />
                   <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>

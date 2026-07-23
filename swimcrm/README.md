@@ -47,6 +47,10 @@ Django-админка (все сущности зарегистрированы;
     python manage.py runserver      # админка: http://127.0.0.1:8000/admin/
     python manage.py test tests     # прогон бизнес-правил
 
+`requirements.txt` is the exact Python 3.12 production/CI lock. Update direct
+dependencies in `requirements.in`, then keep their exact versions and resolved
+transitive dependencies synchronized in `requirements.txt`.
+
 Ночная задача (правило 10) — `python manage.py purge_receipts` (повесить на Celery beat).
 
 Для PostgreSQL задайте `POSTGRES_DB/USER/PASSWORD/HOST` — тогда включится и

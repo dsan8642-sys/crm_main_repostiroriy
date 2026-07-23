@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api.js'
 import { formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
   const { Table, Button, Banner, Avatar, StatusPill, Input, Badge } = components
@@ -213,17 +214,14 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
           <div className="card card-pad">
             <div className="eyebrow" style={{ marginBottom: 10 }}>Добавить участника</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                Клиент / ученик
-                <select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)} style={{ minHeight: 38 }}>
-                  <option value="">Выберите клиента</option>
-                  {availableStudents.map((client) => (
-                    <option key={client.studentId} value={client.studentId}>
-                      {client.last} {client.first} - {client.group || 'Индивидуально'} - {client.phone || 'без телефона'}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SearchableSelect
+                label="Клиент / ученик"
+                value={selectedStudentId}
+                onChange={setSelectedStudentId}
+                options={availableStudents.map((client) => clientSelectOption(client, {
+                  description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}`,
+                }))}
+              />
               <Button variant="primary" disabled={!selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button>
             </div>
             <div className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>

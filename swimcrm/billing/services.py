@@ -12,7 +12,10 @@ from django.utils import timezone
 from audit.models import audit
 from common.money import Money
 
-from .models import Charge, Payment, PaymentStatus, ReceiptFile
+from .models import (
+    Charge, Payment, PaymentEvent, PaymentEventType, PaymentMethod,
+    PaymentSource, PaymentStatus, ReceiptFile,
+)
 
 
 @dataclass
@@ -66,23 +69,111 @@ def charge_statuses(student, currency=None):
     return out
 
 
+def _validate_payment_amount(amount_minor):
+    try:
+        amount_minor = int(amount_minor)
+    except (TypeError, ValueError):
+        raise ValidationError("amount_minor must be a positive integer") from None
+    if amount_minor <= 0:
+        raise ValidationError("Payment amount must be greater than zero")
+    return amount_minor
+
+
+def _record_payment_event(payment, event_type, actor, from_status="", note=""):
+    return PaymentEvent.objects.create(
+        payment=payment,
+        event_type=event_type,
+        actor=actor,
+        from_status=from_status,
+        to_status=payment.status,
+        amount_minor=payment.amount_minor,
+        currency=payment.currency,
+        note=note or "",
+    )
+
+
+def _sync_payment_instance(target, source):
+    """Keep callers holding the pre-lock instance compatible with service updates."""
+    for field in ("status", "confirmed_by", "confirmed_by_id", "confirmed_at", "comment"):
+        setattr(target, field, getattr(source, field))
+
+
+@transaction.atomic
+def create_client_top_up_request(
+        *, student, account, actor, amount_minor, currency, paid_at, file, comment=""):
+    """Create a pending bank-transfer request; never credit the balance here."""
+    amount_minor = _validate_payment_amount(amount_minor)
+    try:
+        Money(amount_minor, currency)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+    payment = Payment.objects.create(
+        student=student,
+        amount_minor=amount_minor,
+        currency=currency,
+        paid_at=paid_at,
+        method=PaymentMethod.TRANSFER,
+        comment=comment or "",
+        status=PaymentStatus.PENDING,
+        source=PaymentSource.CLIENT_TOP_UP,
+        created_by=actor,
+    )
+    receipt = ReceiptFile(
+        payment=payment,
+        uploaded_by=account,
+        file=file,
+        original_name=getattr(file, "name", ""),
+    )
+    receipt.full_clean(exclude=["payment", "uploaded_by"])
+    receipt.save()
+    _record_payment_event(payment, PaymentEventType.REQUESTED, actor)
+    audit(actor, "payment.top_up_requested", payment, {
+        "amount_minor": payment.amount_minor,
+        "currency": payment.currency,
+    })
+    return payment, receipt
+
+
+def record_admin_payment_created(payment, actor):
+    _record_payment_event(payment, PaymentEventType.CREATED, actor)
+    audit(actor, "payment.created", payment, {"status": payment.status})
+
+
 @transaction.atomic
 def confirm_payment(payment: Payment, admin):
     """Rule 9: admin verifies -> Confirmed. Only now does it affect balance."""
+    original = payment
+    payment = Payment.objects.select_for_update().get(pk=payment.pk)
     if payment.status == PaymentStatus.CONFIRMED:
+        _sync_payment_instance(original, payment)
         return payment
+    if payment.status != PaymentStatus.PENDING:
+        raise ValidationError("Only a pending payment can be confirmed")
+    previous_status = payment.status
     payment.status = PaymentStatus.CONFIRMED
     payment.confirmed_by = admin
     payment.confirmed_at = timezone.now()
     payment.save(update_fields=["status", "confirmed_by", "confirmed_at"])
     payment.receipts.update(decided_at=timezone.now())
+    _record_payment_event(
+        payment, PaymentEventType.CONFIRMED, admin, from_status=previous_status)
     audit(admin, "payment.confirmed", payment,
           {"amount_minor": payment.amount_minor, "currency": payment.currency})
+    _sync_payment_instance(original, payment)
     return payment
 
 
 @transaction.atomic
 def reject_payment(payment: Payment, admin, reason=""):
+    original = payment
+    payment = Payment.objects.select_for_update().get(pk=payment.pk)
+    if payment.status == PaymentStatus.REJECTED:
+        _sync_payment_instance(original, payment)
+        return payment
+    if payment.status != PaymentStatus.PENDING:
+        raise ValidationError("Only a pending payment can be rejected")
+    previous_status = payment.status
     payment.status = PaymentStatus.REJECTED
     payment.confirmed_by = admin
     payment.confirmed_at = timezone.now()
@@ -90,7 +181,11 @@ def reject_payment(payment: Payment, admin, reason=""):
         payment.comment = (payment.comment + f"\nОтклонено: {reason}").strip()
     payment.save(update_fields=["status", "confirmed_by", "confirmed_at", "comment"])
     payment.receipts.update(decided_at=timezone.now())
+    _record_payment_event(
+        payment, PaymentEventType.REJECTED, admin,
+        from_status=previous_status, note=reason)
     audit(admin, "payment.rejected", payment, {"reason": reason})
+    _sync_payment_instance(original, payment)
     return payment
 
 

@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from audit.mixins import AuditAdminMixin
 
-from .models import Charge, Payment, ReceiptFile
+from .models import Charge, Payment, PaymentEvent, ReceiptFile
 
 
 @admin.register(Charge)
@@ -42,8 +42,11 @@ class ReceiptInline(admin.TabularInline):
 
 @admin.register(Payment)
 class PaymentAdmin(AuditAdminMixin, admin.ModelAdmin):
-    list_display = ("student", "amount", "method", "status", "paid_at", "confirmed_by", "confirmed_at")
-    list_filter = ("status", "method", "currency", "paid_at", "student__group")
+    list_display = (
+        "student", "amount", "source", "method", "status", "paid_at",
+        "confirmed_by", "confirmed_at",
+    )
+    list_filter = ("source", "status", "method", "currency", "paid_at", "student__group")
     search_fields = (
         "student__first_name", "student__last_name", "student__email",
         "student__parent__phone", "student__group__name",
@@ -56,7 +59,7 @@ class PaymentAdmin(AuditAdminMixin, admin.ModelAdmin):
     readonly_fields = ("confirmed_at",)
 
     immutable_history_fields = (
-        "student", "amount_minor", "currency", "paid_at", "method", "status",
+        "student", "amount_minor", "currency", "paid_at", "method", "status", "source",
         "created_by", "confirmed_by", "confirmed_at",
     )
 
@@ -83,6 +86,27 @@ class ReceiptAdmin(admin.ModelAdmin):
     autocomplete_fields = ("payment", "uploaded_by")
     date_hierarchy = "uploaded_at"
     readonly_fields = ("uploaded_at", "is_deleted", "deleted_at")
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PaymentEvent)
+class PaymentEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "payment", "event_type", "from_status", "to_status", "actor", "created_at")
+    list_filter = ("event_type", "to_status", "currency", "created_at")
+    search_fields = (
+        "payment__student__first_name", "payment__student__last_name",
+        "actor__username", "note",
+    )
+    readonly_fields = (
+        "payment", "event_type", "actor", "from_status", "to_status",
+        "amount_minor", "currency", "note", "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
 
     def has_delete_permission(self, request, obj=None):
         return False

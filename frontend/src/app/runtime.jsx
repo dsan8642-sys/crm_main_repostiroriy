@@ -60,7 +60,13 @@ export function roleNav(role, icons, data) {
       { key: 'groups', label: 'Группы', icon: <icons.Users size={17} />, count: data.AdminData?.groups?.length, section: 'Операции' },
       { key: 'schedule', label: 'Расписание', icon: <icons.Calendar size={17} />, section: 'Операции' },
       { key: 'attendance', label: 'Занятие', icon: <icons.Check size={17} />, section: 'Операции' },
-      { key: 'payments', label: 'Платежи', icon: <icons.Cash size={17} />, count: data.AdminData?.payments?.length, section: 'Финансы' },
+      {
+        key: 'payments',
+        label: 'Платежи',
+        icon: <icons.Cash size={17} />,
+        count: data.AdminData?.payments?.filter((payment) => payment.status === 'pending').length,
+        section: 'Финансы',
+      },
       {
         key: 'debtors',
         label: 'Должники',

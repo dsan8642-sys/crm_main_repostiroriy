@@ -20,7 +20,8 @@ def admin_payments(request):
         participant = get_object_or_404(Student, pk=_payment_data(data).get("participant_id") or _payment_data(data).get("student_id"))
         payment = _create_payment_for_participant(participant, data, actor=user)
         return JsonResponse(_payment_payload(payment), status=201)
-    qs = Payment.objects.select_related("student", "confirmed_by").order_by("-paid_at", "-id")
+    qs = Payment.objects.select_related("student", "confirmed_by").prefetch_related(
+        "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     if request.GET.get("participant_id"):
         qs = qs.filter(student_id=request.GET["participant_id"])
     if request.GET.get("status"):
@@ -31,7 +32,10 @@ def admin_payments(request):
 @require_http_methods(["GET", "POST"])
 def admin_payment_detail(request, payment_id):
     user = _admin_required(request)
-    payment = get_object_or_404(Payment.objects.select_related("student", "confirmed_by"), pk=payment_id)
+    payment = get_object_or_404(
+        Payment.objects.select_related("student", "confirmed_by").prefetch_related(
+            "receipts", "events", "events__actor"),
+        pk=payment_id)
     if request.method == "POST":
         data = _payment_data(_json_body(request))
         changed_fields = []
@@ -63,7 +67,7 @@ def admin_payment_detail(request, payment_id):
 def admin_payment_confirm(request, payment_id):
     user = _admin_required(request)
     payment = get_object_or_404(Payment, pk=payment_id)
-    confirm_payment(payment, user)
+    payment = confirm_payment(payment, user)
     return JsonResponse(_payment_payload(payment))
 
 
@@ -72,7 +76,7 @@ def admin_payment_reject(request, payment_id):
     user = _admin_required(request)
     payment = get_object_or_404(Payment, pk=payment_id)
     data = _json_body(request)
-    reject_payment(payment, user, data.get("reason", "") or "")
+    payment = reject_payment(payment, user, data.get("reason", "") or "")
     return JsonResponse(_payment_payload(payment))
 
 

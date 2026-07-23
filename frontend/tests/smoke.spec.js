@@ -134,6 +134,20 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
           is_active: false,
           group: { id: 2, name: 'Rekiny' },
         },
+        {
+          id: 3,
+          client_id: 12,
+          first_name: 'Aleksandra',
+          last_name: 'Żółć',
+          full_name: 'Aleksandra Żółć',
+          birth_date: '2015-08-20',
+          email: 'aleksandra@example.com',
+          client_phone: '+48777888999',
+          client_is_active: true,
+          is_account_holder: false,
+          is_active: true,
+          group: null,
+        },
       ],
     },
     '/api/admin/clients/10/': {
@@ -178,7 +192,11 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       }],
     },
     '/api/admin/payments/': {
-      payments: [{ id: 1, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 24000, currency: 'PLN', paid_at: '2026-07-16', method: 'bank_transfer', status: 'pending', comment: '' }],
+      payments: [
+        { id: 1, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 24000, currency: 'PLN', paid_at: '2026-07-16', method: 'bank_transfer', status: 'pending', comment: '' },
+        { id: 2, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 12000, currency: 'PLN', paid_at: '2026-07-15', method: 'cash', status: 'confirmed', comment: '' },
+        { id: 3, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 9000, currency: 'PLN', paid_at: '2026-07-14', method: 'bank_transfer', status: 'rejected', comment: '' },
+      ],
     },
     '/api/admin/debtors/': {
       debtors: [{ student: { id: 1, client_id: 10, full_name: 'Jan Kowalski', client_phone: '+48111222333', group: { id: 1, name: 'Delfiny' } }, reasons: ['Przeterminowana platnosc'], balance_minor: 24000, currency: 'PLN', oldest_due_date: '2026-07-10', days_overdue: 11, last_payment_at: '2026-06-20' }],
@@ -291,6 +309,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.locator('.ops-nav-button[title="Клиенты"]').click()
   await expect(page.locator('h2.page-title', { hasText: 'Клиенты' })).toBeVisible()
   await expect(page.getByRole('row', { name: /Kowalski Jan/ })).toBeVisible()
+  await expect(page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')).toHaveText('1')
   await expect(page.getByRole('button', { name: /Новый клиент/ })).toBeVisible()
   await expect(page.getByText('Piotr Nowak')).toHaveCount(0)
   await page.getByRole('button', { name: 'Чёрный список', exact: true }).click()
@@ -314,9 +333,17 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: 'Delfiny', exact: true }).first().click()
   await expect(page.getByRole('region', { name: /Карточка группы/ })).toBeVisible()
   await expect(page.getByText('Состав группы')).toBeVisible()
+  const clientCombobox = page.getByRole('combobox', { name: 'Добавить участника' })
+  await clientCombobox.fill('zolc aleks')
+  await expect(page.getByRole('option', { name: /Żółć Aleksandra/ })).toBeVisible()
+  await clientCombobox.press('Escape')
 
   await page.locator('.ops-nav-button[title="Расписание"]').click()
   await expect(page.locator('h2.page-title', { hasText: 'Расписание' })).toBeVisible()
+  await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+  await expect(page.getByTestId('schedule-list')).toHaveCount(0)
+  await page.locator('[aria-label="Режим отображения расписания"] button').nth(1).click()
+  await expect(page.getByTestId('schedule-list')).toBeVisible()
   await expect(page.locator('.ops-session-row').first()).toContainText('Basen A')
   await expect(page.getByRole('button', { name: /Новое занятие/ })).toBeVisible()
   await page.locator('.ops-session-row').first().click()

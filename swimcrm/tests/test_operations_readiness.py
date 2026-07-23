@@ -1,11 +1,13 @@
 import tempfile
 import json
 import importlib.util
+import re
 import subprocess
 from datetime import timedelta
 from pathlib import Path
 
 from django.test import SimpleTestCase, TestCase, override_settings
+from django import get_version
 from django.utils import timezone
 
 from billing.models import Payment, PaymentStatus, ReceiptFile
@@ -16,6 +18,33 @@ from . import factories as f
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+class DependencyLockTests(SimpleTestCase):
+    requirement_pattern = re.compile(
+        r"^(?P<name>[A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==(?P<version>[^\s]+)$"
+    )
+
+    def _requirements(self, filename):
+        lines = (REPO_ROOT / "swimcrm" / filename).read_text(encoding="utf-8").splitlines()
+        requirements = {}
+        for line in lines:
+            value = line.strip()
+            if not value or value.startswith("#"):
+                continue
+            match = self.requirement_pattern.fullmatch(value)
+            self.assertIsNotNone(match, f"{filename} contains an unpinned requirement: {value}")
+            requirements[match.group("name").lower()] = match.group("version")
+        return requirements
+
+    def test_backend_dependencies_are_exactly_pinned_on_django_52_lts(self):
+        direct = self._requirements("requirements.in")
+        locked = self._requirements("requirements.txt")
+
+        self.assertTrue(direct["django"].startswith("5.2."))
+        self.assertEqual(get_version(), locked["django"])
+        for name, version in direct.items():
+            self.assertEqual(locked.get(name), version, f"{name} is out of sync with the lock")
 
 
 def _load_cutover_evidence_verifier():

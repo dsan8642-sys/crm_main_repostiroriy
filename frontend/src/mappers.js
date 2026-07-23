@@ -2,6 +2,12 @@ export function asMoneyMajor(minor) {
   return Math.round((Number(minor || 0) / 100) * 100) / 100
 }
 
+// The backend stores debt as charges minus payments. In the UI, a positive
+// account balance means credit, while a negative balance means money owed.
+export function asAccountBalance(minor) {
+  return -asMoneyMajor(minor)
+}
+
 export function formatDate(iso) {
   if (!iso) return '-'
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(iso))
@@ -24,6 +30,10 @@ export function paymentMethodLabel(method) {
     card: 'Карта',
     other: 'Другое',
   }[method] || method || '-'
+}
+
+export function paymentSourceLabel(source) {
+  return source === 'client_top_up' ? 'Запрос на пополнение' : 'Платёж администратора'
 }
 
 function statusFromPayment(status) {
@@ -56,7 +66,7 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         subLeft: student.current_subscription?.remaining_sessions ?? null,
         subEnds: student.current_subscription?.effective_end_date || '-',
         subscription: profileSubscriptions.find((subscription) => subscription.participant_id === student.id) || student.current_subscription || null,
-        balance: -asMoneyMajor(student.balance_minor),
+        balance: asAccountBalance(student.balance_minor),
       }))
     : [{
         id: 'account',
@@ -132,7 +142,12 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
       amount: asMoneyMajor(payment.amount_minor),
       status: statusFromPayment(payment.status),
       method: paymentMethodLabel(payment.method),
-      receipt: payment.comment || '',
+      source: payment.source,
+      sourceLabel: paymentSourceLabel(payment.source),
+      affectsBalance: Boolean(payment.affects_balance),
+      events: payment.events || [],
+      receipt: payment.receipt?.original_name || payment.comment || '',
+      receiptUrl: payment.receipt?.download_url || null,
       studentId: payment.student_id,
     })),
   }
@@ -291,9 +306,14 @@ export function mapAdminPortalData({ clients, trainers, groups, subscriptionType
       amount: asMoneyMajor(payment.amount_minor),
       method: paymentMethodLabel(payment.method),
       methodCode: payment.method,
+      source: payment.source,
+      sourceLabel: paymentSourceLabel(payment.source),
+      affectsBalance: Boolean(payment.affects_balance),
+      events: payment.events || [],
       date: payment.paid_at,
       status: statusFromPayment(payment.status),
-      receipt: payment.comment || null,
+      receipt: payment.receipt?.original_name || payment.comment || null,
+      receiptUrl: payment.receipt?.download_url || null,
     })),
     debtors: (debtors.debtors || []).map((row) => ({
       id: `d${row.student.id}`,
@@ -303,7 +323,7 @@ export function mapAdminPortalData({ clients, trainers, groups, subscriptionType
       group: row.student.group?.name || 'Индивидуально',
       trainer: '',
       reason: row.reasons.join(', '),
-      balance: -asMoneyMajor(row.balance_minor),
+      balance: asAccountBalance(row.balance_minor),
       balanceMinor: row.balance_minor,
       daysOverdue: row.days_overdue || 0,
       dueDate: row.oldest_due_date || '-',

@@ -42,6 +42,22 @@ class ParentAccount(models.Model):
         return self.user.get_full_name() or self.user.username
 
 
+class AccountActivation(models.Model):
+    """Single-use credential used to attach portal access to an existing client."""
+    parent = models.ForeignKey(ParentAccount, on_delete=models.CASCADE, related_name="activations")
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="created_client_activations")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    @property
+    def is_valid(self):
+        return self.used_at is None and self.expires_at > timezone.now()
+
+
 class Trainer(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="trainer_profile")
     phone = models.CharField(max_length=32, blank=True)

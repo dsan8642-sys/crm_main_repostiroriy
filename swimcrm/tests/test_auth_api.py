@@ -165,3 +165,38 @@ class ProductionAuthApiTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_imported_client_can_activate_existing_profile_without_losing_history(self):
+        admin = f.make_admin(username="activation_admin")
+        account = f.make_parent(username="imported_client", phone="+48500999111")
+        account.email = "imported@example.test"
+        account.save(update_fields=["email"])
+        account.user.set_unusable_password()
+        account.user.save(update_fields=["password"])
+        student = f.make_student(parent=account)
+
+        admin_client = Client()
+        admin_client.force_login(admin)
+        issued = admin_client.post(f"/api/admin/clients/{account.id}/activation/")
+        self.assertEqual(issued.status_code, 201)
+
+        activated = self.client.post("/api/auth/activate/", {
+            "client_id": account.id,
+            "activation_token": issued.json()["activation_token"],
+            "password": "Q7!vL2#pN9$xR4@m",
+        }, content_type="application/json")
+        self.assertEqual(activated.status_code, 200)
+        self.assertEqual(account.students.get().id, student.id)
+
+        login_response = self.client.post("/api/auth/login/", {
+            "login": "imported@example.test",
+            "password": "Q7!vL2#pN9$xR4@m",
+        }, content_type="application/json")
+        self.assertEqual(login_response.status_code, 200)
+
+        reused = self.client.post("/api/auth/activate/", {
+            "client_id": account.id,
+            "activation_token": issued.json()["activation_token"],
+            "password": "Another!Strong2026",
+        }, content_type="application/json")
+        self.assertEqual(reused.status_code, 400)

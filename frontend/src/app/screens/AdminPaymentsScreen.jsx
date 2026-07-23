@@ -2,6 +2,7 @@
 import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
   const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Dialog, Avatar, Input } = components
@@ -507,17 +508,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Абонементы и расчёты</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.3fr) minmax(220px, 1.3fr) minmax(180px, 1fr)', gap: 10, marginBottom: 12 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Участник
-              <select value={financeForm.participantId} onChange={(event) => updateFinanceForm('participantId', event.target.value)} style={{ minHeight: 36 }}>
-                <option value="">Выберите участника</option>
-                {participants.map((participant) => (
-                  <option key={participant.studentId} value={participant.studentId}>
-                    {participant.last} {participant.first} · {participant.phone || participant.email || participant.group}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SearchableSelect
+              label="Участник"
+              value={financeForm.participantId}
+              onChange={(value) => updateFinanceForm('participantId', value)}
+              options={participants.map((participant) => clientSelectOption(participant, {
+                description: (row) => row.phone || row.email || row.group,
+              }))}
+            />
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               Тип абонемента
               <select value={financeForm.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)} style={{ minHeight: 36 }}>
@@ -608,10 +606,11 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           rows={visibleRows}
           emptyLabel="В этой категории платежей нет"
           columns={[
+            { key: 'sourceLabel', header: 'Тип', muted: true },
             { key: 'child', header: 'Участник', render: (payment) => <button type="button" className="ops-link-button" disabled={!payment.clientId} onClick={() => go?.('clientDetail', { clientId: payment.clientId, tab: 'payments' })}><Avatar name={payment.child} size={26} /><span className="strong">{payment.child}</span></button> },
             { key: 'method', header: 'Способ', muted: true },
             { key: 'date', header: 'Дата', muted: true, render: (payment) => <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{payment.date}</span> },
-            { key: 'receipt', header: 'Комментарий', render: (payment) => payment.receipt ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-link)', fontSize: 'var(--fs-xs)' }}><I.File size={14} /> {payment.receipt}</span> : <span className="muted">-</span> },
+            { key: 'receipt', header: 'Документ', render: (payment) => payment.receipt ? <a href={payment.receiptUrl || '#'} target={payment.receiptUrl ? '_blank' : undefined} rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-link)', fontSize: 'var(--fs-xs)' }}><I.File size={14} /> {payment.receipt}</a> : <span className="muted">-</span> },
             { key: 'amount', header: 'Сумма', align: 'right', width: 110, render: (payment) => <Money amount={payment.amount} /> },
             { key: 'status', header: 'Статус', width: 130, render: (payment) => <StatusPill status={payment.status} size="sm" /> },
             {
@@ -640,7 +639,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
             cancelLabel="Отмена"
             onClose={() => setReject(null)}
             onConfirm={() => updatePayment(reject, 'reject')}
-            description={`Платёж ${reject.child} на сумму ${reject.amount} будет отклонён.`}
+            description={`${reject.source === 'client_top_up' ? 'Запрос на пополнение' : 'Платёж'} ${reject.child} на сумму ${reject.amount} будет отклонён.`}
           />
         )}
       </div>
