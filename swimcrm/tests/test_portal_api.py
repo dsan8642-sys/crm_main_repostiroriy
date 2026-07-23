@@ -277,17 +277,20 @@ class ClientPortalApiRule(TestCase):
 
         client_payments = self.client.get("/api/client/payments/").json()["payments"]
         self.assertEqual(client_payments[0]["receipt"]["original_name"], "profile-document.pdf")
+        admin = f.make_admin(username="document_admin")
         client_download = self.client.get(f"/api/documents/{receipt_id}/download/")
         self.assertEqual(client_download.status_code, 200)
-        b"".join(client_download.streaming_content)
-        client_download.close()
 
-        self.client.force_login(f.make_admin(username="document_admin"))
+        # Closing a streaming response emits request_finished and closes the
+        # PostgreSQL connection. Finish database-backed assertions first.
+        self.client.force_login(admin)
         admin_payments = self.client.get("/api/admin/payments/").json()["payments"]
         self.assertEqual(admin_payments[0]["receipt"]["original_name"], "profile-document.pdf")
         admin_download = self.client.get(f"/api/documents/{receipt_id}/download/")
         self.assertEqual(admin_download.status_code, 200)
-        b"".join(admin_download.streaming_content)
+        self.assertEqual(b"".join(client_download.streaming_content), PDF)
+        client_download.close()
+        self.assertEqual(b"".join(admin_download.streaming_content), PDF)
         admin_download.close()
 
     def test_client_cannot_upload_receipt_for_other_account(self):

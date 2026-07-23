@@ -430,7 +430,8 @@
           "type": "file_contains",
           "path": "swimcrm/billing/models.py",
           "patterns": [
-            "The record is kept permanently",
+            "Payment history is immutable and cannot be deleted.",
+            "Payment event history is immutable and cannot be deleted.",
             "Charge history is immutable and cannot be deleted."
           ]
         },
@@ -440,6 +441,7 @@
           "patterns": [
             "test_purge_scrubs_old_receipt_keeps_payment",
             "test_payment_history_cannot_be_deleted",
+            "test_payment_event_history_cannot_be_deleted",
             "test_payment_admin_locks_history_fields_and_delete",
             "test_charge_history_cannot_be_deleted",
             "test_charge_admin_locks_history_fields_and_delete"
