@@ -108,20 +108,19 @@ def admin_create_client_activation(request, client_id):
 def auth_activate(request):
     try:
         data = _json_body(request)
-        client_id = int(data.get("client_id"))
-    except (ValidationError, TypeError, ValueError):
-        return _error("Client, activation code and password are required", status=400)
+    except ValidationError:
+        return _error("Activation code and password are required", status=400)
     token = str(data.get("activation_token") or data.get("token") or "").strip()
     password = str(data.get("password") or "")
     if not token or not password:
-        return _error("Client, activation code and password are required", status=400)
+        return _error("Activation code and password are required", status=400)
 
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with transaction.atomic():
         activation = (
             AccountActivation.objects.select_for_update()
             .select_related("parent__user")
-            .filter(parent_id=client_id, token_hash=token_hash)
+            .filter(token_hash=token_hash)
             .first()
         )
         if activation is None or not activation.is_valid:

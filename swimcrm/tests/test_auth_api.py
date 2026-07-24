@@ -181,7 +181,6 @@ class ProductionAuthApiTest(TestCase):
         self.assertEqual(issued.status_code, 201)
 
         activated = self.client.post("/api/auth/activate/", {
-            "client_id": account.id,
             "activation_token": issued.json()["activation_token"],
             "password": "Q7!vL2#pN9$xR4@m",
         }, content_type="application/json")
@@ -195,8 +194,59 @@ class ProductionAuthApiTest(TestCase):
         self.assertEqual(login_response.status_code, 200)
 
         reused = self.client.post("/api/auth/activate/", {
-            "client_id": account.id,
             "activation_token": issued.json()["activation_token"],
             "password": "Another!Strong2026",
         }, content_type="application/json")
         self.assertEqual(reused.status_code, 400)
+
+    def _issue_activation(self, username, phone):
+        admin = f.make_admin(username=f"{username}_admin")
+        account = f.make_parent(username=username, phone=phone)
+        account.user.set_unusable_password()
+        account.user.save(update_fields=["password"])
+        admin_client = Client()
+        admin_client.force_login(admin)
+        issued = admin_client.post(f"/api/admin/clients/{account.id}/activation/")
+        self.assertEqual(issued.status_code, 201)
+        return issued.json()["activation_token"]
+
+    def test_activation_accepts_eight_char_password_without_complexity(self):
+        token = self._issue_activation("simple_pass_client", "+48500111222")
+
+        # 8 chars, lowercase only, no digit/special/uppercase, not a common password.
+        response = self.client.post("/api/auth/activate/", {
+            "activation_token": token,
+            "password": "plywanie",
+        }, content_type="application/json")
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_activation_rejects_password_shorter_than_eight(self):
+        token = self._issue_activation("short_pass_client", "+48500111333")
+
+        response = self.client.post("/api/auth/activate/", {
+            "activation_token": token,
+            "password": "krotkie",  # 7 chars
+        }, content_type="application/json")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_activation_rejects_numeric_only_password(self):
+        token = self._issue_activation("numeric_pass_client", "+48500111444")
+
+        response = self.client.post("/api/auth/activate/", {
+            "activation_token": token,
+            "password": "20260724",  # 8 chars but digits only
+        }, content_type="application/json")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_activation_without_client_id_still_resolves_client(self):
+        token = self._issue_activation("token_only_client", "+48500111555")
+
+        response = self.client.post("/api/auth/activate/", {
+            "activation_token": token,
+            "password": "plywanie",
+        }, content_type="application/json")
+
+        self.assertEqual(response.status_code, 200, response.content)

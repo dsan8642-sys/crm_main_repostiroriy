@@ -384,7 +384,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {activationInfo && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setActivationInfo(null)}>
-          Передайте клиенту номер <strong>{activationInfo.client_id}</strong> и одноразовый код <strong style={{ wordBreak: 'break-all' }}>{activationInfo.activation_token}</strong>. Код действует 72 часа.
+          Передайте клиенту одноразовый код активации <strong style={{ wordBreak: 'break-all' }}>{activationInfo.activation_token}</strong>. Код действует 72 часа.
         </Banner>}
         {loading && <Banner tone="info" style={{ marginBottom: 12 }}>Загружаю карточку клиента...</Banner>}
         {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>Клиент находится в чёрном списке.</strong> Данные и история доступны только для просмотра. Восстановите клиента, чтобы снова выполнять действия.</Banner>}

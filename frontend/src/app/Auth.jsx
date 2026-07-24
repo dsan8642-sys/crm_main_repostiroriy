@@ -2,6 +2,27 @@ import React, { useState } from 'react'
 import { api } from '../api.js'
 import { ROLE_META } from './runtime.jsx'
 
+function EyeIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function EyeOffIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10.6 6.1A9.9 9.9 0 0 1 12 6c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.4 3.2M6.2 6.2A17.2 17.2 0 0 0 2 12s3.5 7 10 7a9.9 9.9 0 0 0 4.3-1" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+      <line x1="3" y1="3" x2="21" y2="21" />
+    </svg>
+  )
+}
+
 export function RoleSwitch({ role, onDevLogin, apiState }) {
   const [busyRole, setBusyRole] = useState(null)
 
@@ -34,7 +55,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
   const icons = design.icons
   const [loginValue, setLoginValue] = useState('')
   const [password, setPassword] = useState('')
-  const [clientId, setClientId] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [activationToken, setActivationToken] = useState('')
   const [activationMode, setActivationMode] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -45,11 +66,14 @@ export function LoginScreen({ design, apiState, onLogin }) {
     event.preventDefault()
     setError('')
     setMessage('')
+    if (activationMode && password.length < 8) {
+      setError('Пароль должен содержать минимум 8 символов.')
+      return
+    }
     setBusy(true)
     try {
       if (activationMode) {
         await api.post('/api/auth/activate/', {
-          client_id: clientId,
           activation_token: activationToken,
           password,
         })
@@ -85,24 +109,30 @@ export function LoginScreen({ design, apiState, onLogin }) {
           </label>
         )}
         {activationMode && (
-          <>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Номер клиента</span>
-              <input className="input" inputMode="numeric" value={clientId} onChange={(event) => setClientId(event.target.value)} />
-            </label>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Код активации</span>
-              <input className="input" autoComplete="one-time-code" value={activationToken} onChange={(event) => setActivationToken(event.target.value)} />
-            </label>
-          </>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Код активации</span>
+            <input className="input" autoComplete="one-time-code" value={activationToken} onChange={(event) => setActivationToken(event.target.value)} />
+          </label>
         )}
         <label style={{ display: 'grid', gap: 6 }}>
           <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{activationMode ? 'Новый пароль' : 'Пароль'}</span>
-          <input className="input" autoComplete={activationMode ? 'new-password' : 'current-password'} type="password"
-            value={password} onChange={(event) => setPassword(event.target.value)} />
+          <div style={{ position: 'relative', display: 'flex' }}>
+            <input className="input" autoComplete={activationMode ? 'new-password' : 'current-password'}
+              type={showPassword ? 'text' : 'password'} style={{ width: '100%', paddingRight: 40 }}
+              value={password} onChange={(event) => setPassword(event.target.value)} />
+            <button type="button" onClick={() => setShowPassword((value) => !value)}
+              aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+              title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'none',
+                border: 'none', padding: 4, cursor: 'pointer', color: 'var(--muted, #888)' }}>
+              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+          {activationMode && <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Минимум 8 символов.</span>}
         </label>
         <Button type="submit" loading={busy}
-          disabled={busy || !password || (activationMode ? !clientId || !activationToken : !loginValue)}>
+          disabled={busy || !password || (activationMode ? !activationToken : !loginValue)}>
           <icons.Logout size={16} style={{ transform: 'rotate(180deg)' }} />
           {activationMode ? 'Активировать доступ' : 'Войти'}
         </Button>
