@@ -28,7 +28,7 @@ if ($status) {
 
 $commitSha = (& git -C $RepoRoot rev-parse HEAD).Trim()
 $shortSha = (& git -C $RepoRoot rev-parse --short=12 HEAD).Trim()
-$branch = (& git -C $RepoRoot branch --show-current).Trim()
+$branch = ((& git -C $RepoRoot branch --show-current) -join "").Trim()
 $trackedEntries = @(
     & git -C $RepoRoot -c core.quotepath=false ls-tree -r --name-only HEAD |
         ForEach-Object { $_.Replace("\", "/") } |
