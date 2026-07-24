@@ -235,7 +235,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           subscriptionTypePayload(subscriptionTypeEditForm),
         )
         setEditingSubscriptionType(null)
-        setMessage('Typ abonamentu zaktualizowany.')
+        setMessage('Тип абонемента обновлён.')
         await reloadRoleData?.('admin')
       } catch (err) {
         setError(err.message)

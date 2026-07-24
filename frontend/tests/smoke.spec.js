@@ -522,3 +522,91 @@ test('client can open every menu screen without runtime errors', async ({ page }
   await expect(page.locator('.topbar h1')).toHaveText('Согласия')
   expect(errors).toEqual([])
 })
+
+test('admin confirms and rejects pending payments and the nav counter decrements', async ({ page }) => {
+  const errors = collectPageErrors(page)
+  const seen = new Set()
+  // Backend-side status the mocked API reports; the confirm/reject POSTs mutate it,
+  // so the nav counter (driven by a refetch, not local table state) can be asserted.
+  const status = { 1: 'pending', 4: 'pending' }
+  const paymentsPayload = () => ({
+    payments: [
+      { id: 1, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 24000, currency: 'PLN', paid_at: '2026-07-16', method: 'bank_transfer', status: status[1], comment: '' },
+      { id: 4, participant_id: 2, participant: 'Piotr Nowak', amount_minor: 15000, currency: 'PLN', paid_at: '2026-07-13', method: 'cash', status: status[4], comment: '' },
+    ],
+  })
+  const routes = {
+    '/api/csrf/': { ok: true },
+    '/api/health/': { status: 'ok', service: 'swimcrm' },
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 2, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] },
+      notification_settings: { quiet_hours: {} },
+    },
+    '/api/admin/clients/': {
+      clients: [
+        { id: 1, client_id: 10, first_name: 'Jan', last_name: 'Kowalski', full_name: 'Jan Kowalski', is_account_holder: false, is_active: true, client_is_active: true, group: null },
+        { id: 2, client_id: 11, first_name: 'Piotr', last_name: 'Nowak', full_name: 'Piotr Nowak', is_account_holder: false, is_active: true, client_is_active: true, group: null },
+      ],
+    },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/schedule/templates/': { templates: [] },
+    '/api/admin/schedule/sessions/': { sessions: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  }
+
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    const method = route.request().method()
+    if (method === 'POST' && url.pathname === '/api/admin/payments/1/confirm/') {
+      status[1] = 'confirmed'
+      seen.add(url.pathname)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/admin/payments/4/reject/') {
+      status[4] = 'rejected'
+      seen.add(url.pathname)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+      return
+    }
+    if (url.pathname === '/api/admin/payments/') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(paymentsPayload()) })
+      return
+    }
+    const payload = routes[url.pathname]
+    await route.fulfill({
+      status: payload ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(payload || { error: `Unhandled smoke endpoint: ${url.pathname}` }),
+    })
+  })
+
+  await page.goto('/')
+  await expect(page.locator('h2.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+
+  const counter = page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')
+  await expect(counter).toHaveText('2')
+
+  await page.locator('.ops-nav-button[title="Платежи"]').click()
+  await expect(page.locator('h2.page-title', { hasText: 'Платежи' })).toBeVisible()
+
+  // Confirm the first pending payment: balance-affecting action, counter must drop 2 -> 1.
+  await page.getByRole('row', { name: /Kowalski/ }).getByRole('button', { name: 'Подтвердить' }).click()
+  await expect(page.getByText('Платёж подтверждён.')).toBeVisible()
+  await expect(counter).toHaveText('1')
+
+  // Reject the remaining pending payment through the confirmation dialog: counter 1 -> 0.
+  await page.getByRole('row', { name: /Nowak/ }).getByRole('button', { name: 'Отклонить' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Отклонить' }).click()
+  await expect(page.getByText('Платёж отклонён.')).toBeVisible()
+  await expect(counter).toHaveText('0')
+
+  expect(seen, 'confirm endpoint should be hit').toContain('/api/admin/payments/1/confirm/')
+  expect(seen, 'reject endpoint should be hit').toContain('/api/admin/payments/4/reject/')
+  expect(errors).toEqual([])
+})

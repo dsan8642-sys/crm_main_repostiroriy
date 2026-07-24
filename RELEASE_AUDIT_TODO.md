@@ -5,6 +5,12 @@
 Цель файла: зафиксировать найденные проблемы как рабочий список задач,
 чтобы последовательно закрыть их перед production release.
 
+> **Статус:** все пункты этого локального аудита закрыты (`[x]`), но это НЕ означает
+> production-approved. Проект остаётся **локальным release candidate** до сбора внешних
+> cutover-доказательств в `docs/PRODUCTION_CUTOVER_EVIDENCE.json` (сейчас есть только
+> `.draft`/`.example`). Итоговый вердикт и внешние гейты — в
+> [docs/RELEASE_CANDIDATE_READINESS.md](docs/RELEASE_CANDIDATE_READINESS.md).
+
 ## Critical / High
 
 - [x] Изолировать upload-тесты от реального `MEDIA_ROOT`
