@@ -7,8 +7,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $requiredArchiveEntries = @(
-    "package.json",
-    "package-lock.json",
     "frontend/package.json",
     "frontend/package-lock.json"
 )

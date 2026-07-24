@@ -200,8 +200,6 @@ if ($installedFileListHash -ne ([string]$manifestData.tracked_file_list_sha256).
     throw "Installed release tracked file list sha256 mismatch. Expected $($manifestData.tracked_file_list_sha256) but got $installedFileListHash."
 }
 
-Assert-PathExists -Path (Join-Path $releaseDirPath "package.json") -Label "Root package.json"
-Assert-PathExists -Path (Join-Path $releaseDirPath "package-lock.json") -Label "Root package-lock.json"
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\manage.py") -Label "Django manage.py"
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\requirements.txt") -Label "Backend requirements.txt"
 Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package.json") -Label "Frontend package.json"

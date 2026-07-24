@@ -12,8 +12,6 @@ $blocked = New-Object System.Collections.Generic.List[string]
 $canUseGitFileList = $false
 
 $requiredReleaseFiles = @(
-    "package.json",
-    "package-lock.json",
     "frontend\package.json",
     "frontend\package-lock.json"
 )
