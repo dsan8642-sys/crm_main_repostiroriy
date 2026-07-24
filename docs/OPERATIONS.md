@@ -496,6 +496,40 @@ Recommended policy:
 - verify restore at least weekly;
 - store a copy outside the application server.
 
+## PostgreSQL restore
+
+Restore is destructive. Stop all writers before restoring:
+
+- Django web process;
+- Celery workers and beat;
+- notification jobs;
+- any admin import/export jobs.
+
+Before any real restore, confirm the dump restores cleanly into a temporary
+database:
+
+```powershell
+.\scripts\verify-pg-restore.ps1 -BackupFile C:\SwimCRMRuntime\backups\swimcrm-YYYYMMDD-HHMMSS.dump
+```
+
+Restore into the production database only after that drill passes and the
+target database name is confirmed:
+
+```powershell
+pg_restore --clean --if-exists --no-owner --dbname swimcrm C:\SwimCRMRuntime\backups\swimcrm-YYYYMMDD-HHMMSS.dump
+```
+
+After restore:
+
+- run `cd swimcrm; .\.venv\Scripts\python.exe manage.py migrate --check`;
+- restart Django and Celery services;
+- run `scripts\check-app-health.cmd`;
+- run a smoke test for login, client detail, payment summary, and notifications.
+
+This is the sequence the rollback acknowledgement requires
+(`scripts\acknowledge-production-rollback.cmd`): stop writers, verified backup,
+restore, `migrate --check`, restart services, live smoke.
+
 ## PostgreSQL DB-level trainer conflict check
 
 Run tests on PostgreSQL:
