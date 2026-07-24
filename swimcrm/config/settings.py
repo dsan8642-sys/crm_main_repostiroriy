@@ -267,14 +267,6 @@ SMS_API_KEY = os.environ.get("SMS_API_KEY", "")
 SMS_SENDER = os.environ.get("SMS_SENDER", "SwimCRM")
 SMS_DRY_RUN = os.environ.get("SMS_DRY_RUN", "1" if DEBUG else "0") == "1"
 
-# ---- NocoBase bridge ----
-# Read-only integration token for NocoBase external API/data blocks.
-# Production deployments must set this to a strong secret.
-NOCOBASE_BRIDGE_TOKEN = os.environ.get("NOCOBASE_BRIDGE_TOKEN", "")
-# Separate write token for guarded low-risk configuration edited from NocoBase.
-# Do not reuse the read-only bridge token in production.
-NOCOBASE_CONFIG_TOKEN = os.environ.get("NOCOBASE_CONFIG_TOKEN", "")
-
 # ---- Background jobs (Celery/Redis, with cron-compatible management commands) ----
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)

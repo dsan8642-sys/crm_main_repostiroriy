@@ -51,12 +51,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
-            package-lock.json
             frontend/package-lock.json
-
-      - name: Install root Node tooling
-        shell: pwsh
-        run: npm ci --cache .npm-cache
 
       - name: Install backend dependencies
         shell: pwsh
@@ -67,7 +62,7 @@ jobs:
 
       - name: Full-stack release check
         shell: pwsh
-        run: .\scripts\release-check-full.ps1 -AllowMissingLocalNocoBaseRuntime
+        run: .\scripts\release-check-full.ps1
 
   postgres-backend-check:
     runs-on: ubuntu-latest

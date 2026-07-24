@@ -138,11 +138,10 @@ def validate(path=WORKFLOW):
             errors,
         )
         _require(release, r"verify-release-tree\.ps1 -Strict", "strict release tree check", errors)
-        _require(release, r"npm ci --cache \.npm-cache", "root Node install", errors)
         _require(release, r"pip install -r swimcrm\\requirements\.txt", "backend dependency install", errors)
         _require(
             release,
-            r"release-check-full\.ps1 -AllowMissingLocalNocoBaseRuntime",
+            r"release-check-full\.ps1",
             "full-stack release gate",
             errors,
         )

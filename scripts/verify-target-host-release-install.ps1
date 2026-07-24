@@ -4,8 +4,6 @@ param(
     [string]$Manifest,
     [Parameter(Mandatory = $true)]
     [string]$ReleaseDir,
-    [string]$NocoBaseAppRoot = $(if ($env:NOCOBASE_APP_ROOT) { $env:NOCOBASE_APP_ROOT } else { "" }),
-    [string]$NocoBaseStorageDir = $(if ($env:NOCOBASE_STORAGE_DIR) { $env:NOCOBASE_STORAGE_DIR } else { "" }),
     [switch]$RequireInstalledDependencies
 )
 
@@ -27,11 +25,8 @@ $BlockedGeneratedPrefixes = @(
     "backups/",
     "releases/",
     ".runtime/",
-    ".nocobase/",
-    ".nocobase-logs/",
     ".npm-cache/",
-    ".yarn-cache/",
-    "swimcrm-hybrid/"
+    ".yarn-cache/"
 )
 
 function Resolve-RequiredPath {
@@ -164,42 +159,15 @@ function Assert-PathExists {
     }
 }
 
-function Assert-NocoBaseCliPackage {
-    param([string]$Root)
-
-    $rootPackagePath = Join-Path $Root "package.json"
-    $installedPackagePath = Join-Path $Root "node_modules\@nocobase\cli\package.json"
-    Assert-PathExists -Path $installedPackagePath -Label "Root @nocobase/cli package"
-
-    $rootPackage = Get-Content -LiteralPath $rootPackagePath -Raw | ConvertFrom-Json
-    $installedPackage = Get-Content -LiteralPath $installedPackagePath -Raw | ConvertFrom-Json
-    $expectedVersion = [string]$rootPackage.devDependencies."@nocobase/cli"
-    if ([string]::IsNullOrWhiteSpace($expectedVersion)) {
-        throw "Root package.json must pin @nocobase/cli."
-    }
-    if ([string]$installedPackage.version -ne $expectedVersion) {
-        throw "Installed @nocobase/cli version mismatch. Expected $expectedVersion but got $($installedPackage.version)."
-    }
-}
-
 if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
     throw "Release archive verifier not found at $ArchiveVerifier."
 }
 
 $manifestPath = Resolve-RequiredPath -Path $Manifest -Label "Manifest"
 $releaseDirPath = Resolve-RequiredPath -Path $ReleaseDir -Label "ReleaseDir"
-$nocoBaseAppRootPath = Resolve-RequiredPath -Path $NocoBaseAppRoot -Label "NocoBaseAppRoot"
-$nocoBaseStorageDirPath = Resolve-RequiredPath -Path $NocoBaseStorageDir -Label "NocoBaseStorageDir"
 
 Assert-PathExists -Path $manifestPath -Label "Release source archive manifest"
 Assert-PathExists -Path $releaseDirPath -Label "Release directory"
-
-if (Test-PathInside -Child $nocoBaseAppRootPath -Parent $releaseDirPath) {
-    throw "NOCOBASE_APP_ROOT must be outside the extracted release source tree."
-}
-if (Test-PathInside -Child $nocoBaseStorageDirPath -Parent $releaseDirPath) {
-    throw "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree."
-}
 
 $manifestData = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $archivePath = Resolve-ArchivePath -ManifestData $manifestData -ManifestDir (Split-Path -Parent $manifestPath)
@@ -246,17 +214,10 @@ if ($RequireInstalledDependencies) {
     if ($LASTEXITCODE -ne 0) {
         throw "Backend virtualenv must include the Waitress production WSGI server."
     }
-    Assert-NocoBaseCliPackage -Root $releaseDirPath
     Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\node_modules") -Label "Frontend node_modules"
-    Assert-PathExists -Path $nocoBaseAppRootPath -Label "NocoBase app root"
-    Assert-PathExists -Path $nocoBaseStorageDirPath -Label "NocoBase storage directory"
     Write-Host "Backend dependencies installed."
     Write-Host "Waitress production WSGI server installed."
-    Write-Host "Root Node tooling installed."
-    Write-Host "NocoBase CLI package installed."
     Write-Host "Frontend dependencies installed."
-    Write-Host "NocoBase app root outside source tree."
-    Write-Host "NocoBase storage outside source tree."
 }
 
 Write-Host "Target-host release install verified."

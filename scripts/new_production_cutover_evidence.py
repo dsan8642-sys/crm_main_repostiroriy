@@ -14,7 +14,7 @@ EVIDENCE_ITEMS = [
         "id": "local_backend_release_gate",
         "command": "scripts\\release-check-backend.cmd",
         "summary": "Run the backend release gate and paste the final pass summary here.",
-        "output_excerpt": "Must include: Backend release checks passed; Production readiness audit verified; NocoBase API build-pack smoke check; Tracked release source manifests.",
+        "output_excerpt": "Must include: Backend release checks passed; Production readiness audit verified; Tracked release source manifests.",
     },
     {
         "id": "local_full_stack_release_gate",
@@ -46,27 +46,27 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "target_host_release_install",
-        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall",
-        "summary": "Extract the verified release archive on the target host, install backend/root/frontend dependencies, verify the pinned NocoBase CLI package, verify migrations, and prepare NocoBase app/storage roots outside the source tree.",
-        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; NocoBase CLI package installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree.",
+        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -RunInstall",
+        "summary": "Extract the verified release archive on the target host, install backend/frontend dependencies, and verify migrations.",
+        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed.",
     },
     {
         "id": "production_env_preflight",
         "command": "scripts\\check-production-env.cmd",
         "summary": "Run the production preflight on the target host and paste the pass summary here.",
-        "output_excerpt": "Must include: Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; NocoBase production settings passed; HTTPS reverse-proxy settings passed.",
+        "output_excerpt": "Must include: Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; HTTPS reverse-proxy settings passed.",
     },
     {
-        "id": "live_hybrid_health",
-        "command": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
-        "summary": "Run live hybrid health on the target host and paste the pass summary here, including the real Django and NocoBase https:// production URLs.",
-        "output_excerpt": "Must include: Django health check passed: https://<production-django-host>/api/health/; Django operations status: ok; Operations status ok requirement passed; NocoBase process health check passed: https://<production-nocobase-host>/api/__health_check; Hybrid health check passed; HTTPS live endpoint requirement passed; nocobase_config_health; /api/nocobase/config/languages/",
+        "id": "live_app_health",
+        "command": "scripts\\check-app-health.cmd -RequireHttps -RequireOpsOk",
+        "summary": "Run live app health on the target host and paste the pass summary here, including the real Django https:// production URL.",
+        "output_excerpt": "Must include: Django health check passed: https://<production-django-host>/api/health/; Django operations status: ok; Operations status ok requirement passed; HTTPS live endpoint requirement passed; App health check passed.",
     },
     {
-        "id": "hybrid_backup_restore_drill",
-        "command": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
-        "summary": "Paste latest backup, hybrid restore plan, hybrid backup-set verification, PostgreSQL restore drill evidence, and the Django/NocoBase dump SHA256 values here.",
-        "output_excerpt": "Must include: Hybrid backup set written; backup_set_dir; nocobase_database; Django dump sha256 OK: <64-hex-sha256>; NocoBase dump sha256 OK: <64-hex-sha256>; Django dump list OK; NocoBase dump list OK; Restore verification OK; Hybrid backup set verification OK.",
+        "id": "backup_restore_drill",
+        "command": "scripts\\backup-pg.cmd; scripts\\verify-pg-restore.cmd",
+        "summary": "Paste the latest backup, PostgreSQL restore drill evidence, and the backup dump SHA256 value here.",
+        "output_excerpt": "Must include: PostgreSQL backup written; Backup dump sha256 OK: <64-hex-sha256>; Backup dump list OK; Restore verification OK; Backup set verification OK.",
     },
     {
         "id": "rollback_plan_acknowledged",
@@ -132,7 +132,7 @@ def _evidence_items(
             item["status"] = "passed"
             item["captured_at"] = now
             item["summary"] = "Backend release checks passed."
-            item["output_excerpt"] = "Backend release checks passed. Production readiness audit verified. NocoBase API build-pack smoke check. Tracked release source manifests."
+            item["output_excerpt"] = "Backend release checks passed. Production readiness audit verified. Tracked release source manifests."
         if item["id"] == "local_full_stack_release_gate" and local_full_stack_passed:
             item["status"] = "passed"
             item["captured_at"] = now
@@ -158,7 +158,7 @@ def _evidence_items(
         if item["id"] == "tracked_release_source_guard" and release_archive_passed:
             item["status"] = "passed"
             item["captured_at"] = now
-            item["summary"] = "Tracked release-source guard passed for required root and frontend manifests."
+            item["summary"] = "Tracked release-source guard passed for required frontend manifests."
             item["output_excerpt"] = "Release source manifests verified. Required release manifests are tracked by Git."
         rows.append(item)
     return rows

@@ -31,8 +31,8 @@ REQUIRED_EVIDENCE_IDS = {
     "github_postgres_backend_job",
     "target_host_release_install",
     "production_env_preflight",
-    "live_hybrid_health",
-    "hybrid_backup_restore_drill",
+    "live_app_health",
+    "backup_restore_drill",
     "rollback_plan_acknowledged",
 }
 
@@ -48,8 +48,8 @@ EXPECTED_COMMANDS = {
     "tracked_release_source_guard": "scripts\\verify-release-source-manifests.cmd -RequireTracked",
     "target_host_release_install": "scripts\\install-release-on-target-host.cmd",
     "production_env_preflight": "scripts\\check-production-env.cmd",
-    "live_hybrid_health": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
-    "hybrid_backup_restore_drill": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
+    "live_app_health": "scripts\\check-app-health.cmd -RequireHttps -RequireOpsOk",
+    "backup_restore_drill": "scripts\\backup-pg.cmd; scripts\\verify-pg-restore.cmd",
     "rollback_plan_acknowledged": "scripts\\acknowledge-production-rollback.cmd",
 }
 
@@ -57,7 +57,6 @@ REQUIRED_OUTPUT_FRAGMENTS = {
     "local_backend_release_gate": [
         "Backend release checks passed",
         "Production readiness audit verified",
-        "NocoBase API build-pack smoke check",
         "Tracked release source manifests",
     ],
     "local_full_stack_release_gate": [
@@ -96,38 +95,27 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "tracked_file_count",
         "tracked_file_list_sha256",
         "Backend dependencies installed",
-        "Root Node tooling installed",
-        "NocoBase CLI package installed",
         "Frontend dependencies installed",
         "Django migrations check passed",
-        "NocoBase app root outside source tree",
-        "NocoBase storage outside source tree",
     ],
     "production_env_preflight": [
         "Production environment check passed",
         "Runtime path settings passed",
         "PostgreSQL production settings passed",
         "Celery production settings passed",
-        "NocoBase production settings passed",
         "HTTPS reverse-proxy settings passed",
     ],
-    "live_hybrid_health": [
-        "Hybrid health check passed",
+    "live_app_health": [
+        "App health check passed",
         "HTTPS live endpoint requirement passed",
         "Operations status ok requirement passed",
-        "nocobase_config_health",
-        "/api/nocobase/config/languages/",
     ],
-    "hybrid_backup_restore_drill": [
-        "Hybrid backup set written",
-        "backup_set_dir",
-        "nocobase_database",
-        "Django dump sha256 OK",
-        "NocoBase dump sha256 OK",
-        "Django dump list OK",
-        "NocoBase dump list OK",
+    "backup_restore_drill": [
+        "PostgreSQL backup written",
+        "Backup dump sha256 OK",
+        "Backup dump list OK",
         "Restore verification OK",
-        "Hybrid backup set verification OK",
+        "Backup set verification OK",
     ],
     "rollback_plan_acknowledged": [
         "Rollback plan reviewed",
@@ -197,10 +185,10 @@ def _combined_item_text(item):
     )
 
 
-def _validate_live_health_urls(evidence_id, combined, errors):
+def _validate_live_health_url(evidence_id, combined, errors):
     urls = HTTPS_URL_PATTERN.findall(combined)
-    if len(urls) < 2:
-        errors.append(f"{evidence_id}: evidence must include Django and NocoBase https:// production URLs")
+    if len(urls) < 1:
+        errors.append(f"{evidence_id}: evidence must include a Django https:// production URL")
         return
     for url in urls:
         if NON_PRODUCTION_HOST_PATTERN.search(url):
@@ -209,8 +197,8 @@ def _validate_live_health_urls(evidence_id, combined, errors):
 
 def _validate_backup_restore_hashes(evidence_id, combined, errors):
     hashes = SHA256_PATTERN.findall(combined)
-    if len(set(hash_value.lower() for hash_value in hashes)) < 2:
-        errors.append(f"{evidence_id}: evidence must include Django and NocoBase dump SHA256 values")
+    if len(set(hash_value.lower() for hash_value in hashes)) < 1:
+        errors.append(f"{evidence_id}: evidence must include a backup dump SHA256 value")
 
 
 def _validate_release_archive_file_list_proof(evidence_id, combined, errors):
@@ -257,7 +245,7 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
         if evidence_id == "target_host_release_install":
             if not command.startswith(expected_command):
                 errors.append(f"{evidence_id}: command must start with {expected_command!r}")
-            for argument in ("-Manifest", "-NocoBaseAppRoot", "-NocoBaseStorageDir", "-RunInstall"):
+            for argument in ("-Manifest", "-RunInstall"):
                 if argument not in command:
                     errors.append(f"{evidence_id}: command must include {argument}")
             if "-InstallRoot" not in command and "-ReleaseDir" not in command:
@@ -279,9 +267,9 @@ def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=
             errors.append(f"{evidence_id}: command must be {expected_command!r}")
 
     combined = _combined_item_text(item)
-    if evidence_id == "live_hybrid_health":
-        _validate_live_health_urls(evidence_id, combined, errors)
-    if evidence_id == "hybrid_backup_restore_drill":
+    if evidence_id == "live_app_health":
+        _validate_live_health_url(evidence_id, combined, errors)
+    if evidence_id == "backup_restore_drill":
         _validate_backup_restore_hashes(evidence_id, combined, errors)
     if evidence_id == "target_host_release_install":
         _validate_release_archive_file_list_proof(evidence_id, combined, errors)

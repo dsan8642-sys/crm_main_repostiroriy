@@ -5,8 +5,6 @@ param(
     [string]$InstallRoot = $(if ($env:SWIMCRM_RELEASE_ROOT) { $env:SWIMCRM_RELEASE_ROOT } else { "" }),
     [string]$ReleaseDir = "",
     [string]$Python = $(if ($env:PYTHON) { $env:PYTHON } else { "python.exe" }),
-    [string]$NocoBaseAppRoot = $(if ($env:NOCOBASE_APP_ROOT) { $env:NOCOBASE_APP_ROOT } else { "" }),
-    [string]$NocoBaseStorageDir = $(if ($env:NOCOBASE_STORAGE_DIR) { $env:NOCOBASE_STORAGE_DIR } else { "" }),
     [switch]$RunInstall
 )
 
@@ -106,16 +104,6 @@ else {
     $ReleaseDir = Resolve-RequiredPath -Path $ReleaseDir -Label "ReleaseDir"
 }
 
-$nocoBaseAppRootPath = Resolve-RequiredPath -Path $NocoBaseAppRoot -Label "NocoBaseAppRoot"
-$nocoBaseStorageDirPath = Resolve-RequiredPath -Path $NocoBaseStorageDir -Label "NocoBaseStorageDir"
-
-if (Test-PathInside -Child $nocoBaseAppRootPath -Parent $ReleaseDir) {
-    throw "NOCOBASE_APP_ROOT must be outside the extracted release source tree."
-}
-if (Test-PathInside -Child $nocoBaseStorageDirPath -Parent $ReleaseDir) {
-    throw "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree."
-}
-
 $backendDir = Join-Path $ReleaseDir "swimcrm"
 $backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
 $frontendDir = Join-Path $ReleaseDir "frontend"
@@ -131,17 +119,13 @@ $plan = [ordered]@{
     backend_dir = $backendDir
     backend_python = $backendPython
     frontend_dir = $frontendDir
-    nocobase_app_root = $nocoBaseAppRootPath
-    nocobase_storage_dir = $nocoBaseStorageDirPath
     run_install = [bool]$RunInstall
     steps = @(
         "verify release source archive manifest and contents",
         "extract archive into an empty release directory",
         "create backend virtualenv and install swimcrm/requirements.txt",
-        "install root Node tooling with npm ci",
         "install frontend dependencies with npm ci",
-        "run Django migrate --check",
-        "prepare NocoBase app/storage roots outside the source tree"
+        "run Django migrate --check"
     )
 }
 
@@ -189,21 +173,6 @@ Invoke-Step "Install backend dependencies" {
     Write-Host "Backend dependencies installed."
 }
 
-Invoke-Step "Install root Node tooling" {
-    Push-Location $ReleaseDir
-    try {
-        npm.cmd ci
-        if ($LASTEXITCODE -ne 0) {
-            throw "Root Node tooling installation failed with exit code $LASTEXITCODE."
-        }
-    }
-    finally {
-        Pop-Location
-    }
-    Write-Host "Root Node tooling installed."
-    Write-Host "NocoBase CLI package installed."
-}
-
 Invoke-Step "Install frontend dependencies" {
     Push-Location $frontendDir
     try {
@@ -232,19 +201,10 @@ Invoke-Step "Check Django migrations" {
     Write-Host "Django migrations check passed."
 }
 
-Invoke-Step "Prepare NocoBase runtime roots" {
-    New-Item -ItemType Directory -Force -Path $nocoBaseAppRootPath | Out-Null
-    New-Item -ItemType Directory -Force -Path $nocoBaseStorageDirPath | Out-Null
-    Write-Host "NocoBase app root outside source tree."
-    Write-Host "NocoBase storage outside source tree."
-}
-
 Invoke-Step "Verify installed release source tree" {
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallVerifier `
         -Manifest $manifestPath `
         -ReleaseDir $ReleaseDir `
-        -NocoBaseAppRoot $nocoBaseAppRootPath `
-        -NocoBaseStorageDir $nocoBaseStorageDirPath `
         -RequireInstalledDependencies
     if ($LASTEXITCODE -ne 0) {
         throw "Target-host release install verification failed with exit code $LASTEXITCODE."

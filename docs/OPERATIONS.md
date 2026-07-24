@@ -22,21 +22,6 @@ POSTGRES_PORT=5432
 CELERY_BROKER_URL=redis://127.0.0.1:6379/0
 CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
 BACKUP_DIR=C:\SwimCRMRuntime\backups
-NOCOBASE_BRIDGE_TOKEN=<production bridge token>
-NOCOBASE_CONFIG_TOKEN=<production config token>
-NOCOBASE_APP_ENV=production
-NOCOBASE_APP_KEY=<long random app key>
-NOCOBASE_APP_ROOT=C:\SwimCRMRuntime\nocobase-app
-NOCOBASE_APP_PORT=13000
-NOCOBASE_DB_HOST=<production db host>
-NOCOBASE_DB_PORT=5432
-NOCOBASE_DB_DATABASE=nocobase_hybrid
-NOCOBASE_DB_USER=<production nocobase db user>
-NOCOBASE_DB_PASSWORD=<production nocobase db password>
-NOCOBASE_ROOT_USERNAME=<admin username>
-NOCOBASE_ROOT_EMAIL=<admin email>
-NOCOBASE_ROOT_PASSWORD=<strong initial/root password>
-NOCOBASE_STORAGE_DIR=C:\SwimCRMRuntime\nocobase-storage
 SECURE_SSL_REDIRECT=1
 TRUST_PROXY_SSL_HEADER=1
 CSRF_TRUSTED_ORIGINS=https://crm.example.com
@@ -120,32 +105,21 @@ Playwright smoke tests. Frontend dependency install uses the repository-local
 Use `-SkipFrontendInstall` only when `frontend\node_modules` is already known
 to match `frontend\package-lock.json`.
 
-CI may run the same gate with `-AllowMissingLocalNocoBaseRuntime` because
-`swimcrm-hybrid\source` is an ignored local runtime tree and is not part of a
-clean source checkout. Do not use that flag for the final pre-deploy check on a
-prepared release host; the normal gate should fingerprint the downloaded local
-NocoBase runtime.
+## Live app smoke check
 
-## Live hybrid smoke check
-
-After deploying or restarting the production host, run the live hybrid smoke
-check against the real URLs:
+After deploying or restarting the production host, run the live app smoke
+check against the real URL:
 
 ```powershell
 $env:DJANGO_BASE_URL="https://crm.example.com"
-$env:NOCOBASE_BASE_URL="https://nocobase.example.com"
-$env:NOCOBASE_BRIDGE_TOKEN="<production bridge token>"
-$env:NOCOBASE_CONFIG_TOKEN="<production config token>"
-scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk
+scripts\check-app-health.cmd -RequireHttps -RequireOpsOk
 ```
 
 The script verifies:
 
 - public Django liveness at `/api/health/`;
-- Django's NocoBase bridge health at `/api/nocobase/health/`;
-- Django's NocoBase operations snapshot at `/api/nocobase/ops-status/`;
-- Django's NocoBase guarded config API at `/api/nocobase/config/languages/`;
-- NocoBase process health at `/api/__health_check`.
+- admin operations snapshot at `/api/admin/ops-status/` (requires an admin
+  session cookie).
 
 For release approval, `-RequireOpsOk` requires the operations snapshot to be
 exactly `status=ok`. Without that release flag, `status=critical` still fails
@@ -163,8 +137,8 @@ release evidence:
 - local backend and full-stack release gate outputs;
 - release source archive builder output proving the reusable source package was
   created from the clean release commit;
-- tracked release-source guard output proving required NocoBase and frontend
-  manifests are Git-tracked;
+- tracked release-source guard output proving required frontend manifests are
+  Git-tracked;
 - GitHub Actions run URL proving `release-check` passed on the release commit
   and evidence text naming `swimcrm-release-source-<commit-sha>`;
 - GitHub Actions `release-check` run artifact named
@@ -172,7 +146,7 @@ release evidence:
   manifest;
 - GitHub Actions run URL proving `postgres-backend-check` passed on the release commit;
 - production environment preflight output;
-- live `scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk` output from the target host;
+- live `scripts\check-app-health.cmd -RequireHttps -RequireOpsOk` output from the target host;
 - latest backup/restore drill evidence;
 - rollback plan acknowledgement.
 
@@ -197,26 +171,22 @@ By default, the verifier accepts only `environment=production`. Use
 `-AllowStaging` only for a staging rehearsal manifest, never for final cutover
 approval.
 
-The verifier intentionally rejects placeholders and requires the live hybrid
-health evidence to include the guarded config API check
-`/api/nocobase/config/languages/`. External CI evidence must use GitHub
-Actions run URLs and mention the exact `release_candidate.commit_sha`. For final
-approval, run it with `-RequireCurrentHead` so stale evidence for an older
-commit or release archive checksum cannot approve the current release
+The verifier intentionally rejects placeholders and requires the live app
+health evidence to include a real production URL. External CI evidence must
+use GitHub Actions run URLs and mention the exact `release_candidate.commit_sha`.
+For final approval, run it with `-RequireCurrentHead` so stale evidence for an
+older commit or release archive checksum cannot approve the current release
 candidate.
 
 Production preflight also enforces minimum secret lengths: `SECRET_KEY` must be
-at least 50 characters, while `NOCOBASE_BRIDGE_TOKEN`,
-`NOCOBASE_CONFIG_TOKEN`, `NOCOBASE_APP_KEY`, and `NOCOBASE_ROOT_PASSWORD` must
-each be at least 32 characters and must not be copied from examples or
-release-check placeholders.
+at least 50 characters and must not be copied from examples or release-check
+placeholders.
 
 The manifest must also include the critical pass fragments from each command,
 not just `status=passed`:
 
 - backend release gate: `Backend release checks passed`, `Production readiness
-  audit verified`, `NocoBase API build-pack smoke check`, `Tracked release
-  source manifests`;
+  audit verified`, `Tracked release source manifests`;
 - full-stack release gate: `Full-stack release checks passed`, `found 0
   vulnerabilities`, `Frontend production build`, `Frontend Playwright smoke
   tests`;
@@ -231,57 +201,20 @@ not just `status=passed`:
   host`, `Release source archive manifest verified`, `Release source archive
   contents verified`, `Release source archive tracked file list verified`,
   `tracked_file_count`, `tracked_file_list_sha256`, `Backend dependencies
-  installed`, `Root Node tooling installed`, `NocoBase CLI package installed`,
-  `Frontend dependencies installed`, `Django migrations check passed`,
-  `NocoBase app root outside source tree`,
-  `NocoBase storage outside source tree`;
+  installed`, `Frontend dependencies installed`, `Django migrations check
+  passed`;
 - production preflight: `Production environment check passed`, `Runtime path
   settings passed`, `PostgreSQL production settings passed`, `Celery
-  production settings passed`, `NocoBase production settings passed`, `HTTPS
-  reverse-proxy settings passed`;
-- live hybrid health: `Hybrid health check passed`, `HTTPS live endpoint
-  requirement passed`, `Operations status ok requirement passed`, real
-  `https://` Django and NocoBase production URLs, `nocobase_config_health`,
-  `/api/nocobase/config/languages/`;
-- backup/restore drill: `Hybrid backup set written`, `backup_set_dir`,
-  `nocobase_database`, `Django dump sha256 OK`, `NocoBase dump sha256 OK`,
-  the actual 64-character Django and NocoBase dump SHA256 values,
-  `Django dump list OK`, `NocoBase dump list OK`, `Restore verification OK`,
-  `Hybrid backup set verification OK`;
+  production settings passed`, `HTTPS reverse-proxy settings passed`;
+- live app health: `App health check passed`, `HTTPS live endpoint
+  requirement passed`, `Operations status ok requirement passed`, a real
+  `https://` Django production URL;
+- backup/restore drill: `PostgreSQL backup written`, `Backup dump sha256 OK`,
+  the actual 64-character backup dump SHA256 value, `Backup dump list OK`,
+  `Restore verification OK`, `Backup set verification OK`;
 - rollback acknowledgement: `Rollback plan reviewed`, `stop writers`,
   `verified backup`, `restore`, `migrate --check`, `restart services`,
   `live smoke`, `Production rollback acknowledgement completed`.
-
-## NocoBase runtime
-
-Production NocoBase runtime must be started with explicit environment
-variables. Do not use development defaults for database or root credentials:
-
-```powershell
-$env:NOCOBASE_APP_ENV="production"
-$env:NOCOBASE_APP_KEY="<long random app key>"
-$env:NOCOBASE_APP_ROOT="C:\SwimCRMRuntime\nocobase-app"
-$env:NOCOBASE_APP_PORT="13000"
-$env:NOCOBASE_DB_HOST="<production db host>"
-$env:NOCOBASE_DB_PORT="5432"
-$env:NOCOBASE_DB_DATABASE="nocobase_hybrid"
-$env:NOCOBASE_DB_USER="<production nocobase db user>"
-$env:NOCOBASE_DB_PASSWORD="<production nocobase db password>"
-$env:NOCOBASE_ROOT_USERNAME="<admin username>"
-$env:NOCOBASE_ROOT_EMAIL="<admin email>"
-$env:NOCOBASE_ROOT_PASSWORD="<strong initial/root password>"
-$env:NOCOBASE_STORAGE_DIR="C:\SwimCRMRuntime\nocobase-storage"
-```
-
-The runtime script supports a non-starting plan check:
-
-```powershell
-.\scripts\run-nocobase-runtime.ps1 -PlanOnly
-```
-
-When `NOCOBASE_APP_ENV=production` or `DJANGO_ENV=production`, the script fails
-fast if required secrets are missing, if NocoBase app/database/root secrets are
-weak or copied from examples, or if runtime paths point inside the source tree.
 
 ## Observability
 
@@ -330,9 +263,6 @@ Use `GET /api/admin/readiness/` after admin login for deeper backend readiness:
 - pending Django migrations;
 - writable `MEDIA_ROOT`;
 - runtime path placement outside the source tree in production;
-- configured NocoBase bridge and config tokens;
-- verified NocoBase first-screens blueprint, API contract, response schemas, and
-  Django route resolution;
 - configured default language.
 
 The readiness endpoint intentionally does not expose secret values. It only
@@ -349,23 +279,9 @@ monitoring. It reports:
 - configured Celery beat jobs;
 - redacted Celery broker/result backend settings.
 
-The same read-only snapshot is available to NocoBase through the bridge:
-
-```http
-GET /api/nocobase/ops-status/
-Authorization: Bearer <NOCOBASE_BRIDGE_TOKEN>
-```
-
-Use this endpoint for the first NocoBase operations dashboard. Treat
-`status=critical` as an incident signal. In particular, investigate immediately
-when due notifications are older than 60 minutes or expected Celery beat jobs
-are missing.
-
-Check NocoBase process health separately:
-
-```powershell
-scripts\check-nocobase-health.cmd
-```
+Treat `status=critical` as an incident signal. In particular, investigate
+immediately when due notifications are older than 60 minutes or expected
+Celery beat jobs are missing.
 
 ## Release checklist
 
@@ -391,17 +307,9 @@ Before creating a production package:
   evidence gap without running long checks;
 - run `scripts\verify-frontend-release.cmd` when validating only the React/Vite
   frontend dependency audit, build, browser install, and Playwright smoke tests;
-- run `scripts\verify-hybrid-cutover-readiness.cmd` when you need the
-  machine-readable Django + NocoBase cutover evidence matrix separately from
-  the full release gate;
-- run `scripts\verify-nocobase-prerequisites.cmd`,
-  `scripts\verify-nocobase-runtime.cmd`, and
-  `scripts\verify-nocobase-blueprint.cmd` when diagnosing NocoBase-specific
-  release failures separately from the full gate;
-- run `scripts\verify-nocobase-build-pack.cmd` when validating the operator
-  assembly plan for the first NocoBase screens separately from the full gate;
-- run `scripts\verify-nocobase-api-smoke.cmd` when validating that the first
-  NocoBase screen data sources still match live Django response schemas;
+- run `scripts\verify-app-cutover-readiness.cmd` when you need the
+  machine-readable Django cutover readiness matrix separately from the full
+  release gate;
 - run `scripts\verify-production-readiness-audit.cmd` when validating that the
   business/architecture requirements still have concrete code, test, script, or
   runbook evidence before release;
@@ -433,9 +341,8 @@ Before creating a production package:
 - run `scripts\verify-release-tree.cmd -SourceOnly` before packaging source from a
   working tree that already contains local runtime/build directories;
 - run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\verify-release-tree.ps1 -SourceOnly -RequireTrackedReleaseFiles`
-  before final cutover approval to confirm the root NocoBase tooling manifests
-  and frontend manifests are Git-tracked, not merely present in the local
-  worktree;
+  before final cutover approval to confirm the frontend manifests are
+  Git-tracked, not merely present in the local worktree;
 - run `scripts\verify-release-source-manifests.cmd -RequireTracked` when you
   need the same tracked-manifest guard through an ops/admin-friendly wrapper;
 - after the release commit is clean, run `scripts\build-release-source.cmd` to
@@ -450,7 +357,7 @@ Before creating a production package:
   `archive_sha256` into the cutover evidence;
 - on the target host, copy the release `.zip` and `.manifest.json` together and
   install from the verified archive with
-  `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall`;
+  `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<sha>.manifest.json -InstallRoot <release-root> -RunInstall`;
 - the target-host installer supports manifests created on another machine: if
   the manifest contains the build machine's absolute archive path, the verifier
   falls back to the sibling `.zip` next to the manifest;
@@ -469,22 +376,17 @@ Before creating a production package:
   `docs\PRODUCTION_CUTOVER_EVIDENCE.draft.json` are not included in reusable
   source packages; production cutover evidence is host/release-specific;
 - confirm Celery beat or cron runs due jobs, receipt cleanup, and PostgreSQL backups;
-- verify the latest hybrid backup set with `scripts\verify-hybrid-backup-set.cmd`;
-- when checking a standalone Django dump, verify the latest PostgreSQL backup
-  restore with `scripts\verify-pg-restore.cmd <path-to-dump>`;
+- verify the latest PostgreSQL backup restore with
+  `scripts\verify-pg-restore.cmd <path-to-dump>`;
 - verify `GET /api/health/`, `GET /api/admin/readiness/`,
-  `GET /api/admin/ops-status/`, and `scripts\check-hybrid-health.cmd` on the
+  `GET /api/admin/ops-status/`, and `scripts\check-app-health.cmd` on the
   target host;
-- confirm `GET /api/admin/readiness/` reports
-  `checks.nocobase_first_screens.ok=true`;
-- confirm `GET /api/admin/readiness/` reports
-  `checks.nocobase_screen_build_pack.ok=true`;
 - keep `docs\RODO_GDPR.md` aligned with the actual retention and incident process.
 
-`scripts\check-production-env.cmd` is the host-level hybrid preflight. It
+`scripts\check-production-env.cmd` is the host-level production preflight. It
 validates Django security settings, HTTPS reverse-proxy settings, PostgreSQL
-credentials, Celery URLs, NocoBase runtime secrets, bridge/config tokens, and
-runtime/backup paths before running `manage.py check --deploy`.
+credentials, Celery URLs, and runtime/backup paths before running
+`manage.py check --deploy`.
 
 ## Admin 2FA
 
@@ -593,109 +495,6 @@ Recommended policy:
 - keep weekly backups for 8 weeks;
 - verify restore at least weekly;
 - store a copy outside the application server.
-
-## Hybrid Django + NocoBase backup
-
-For production, prefer the full-stack backup wrapper. It captures:
-
-- Django PostgreSQL database;
-- NocoBase PostgreSQL database;
-- Django media/uploads directory;
-- NocoBase storage directory;
-- a `manifest.json` describing the backup set.
-
-Production backup/restore scripts fail fast when `DJANGO_ENV=production` and
-required credentials or runtime paths are missing. In production:
-
-- set `BACKUP_DIR` explicitly and keep it outside the source tree;
-- set `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`;
-- set `NOCOBASE_DB_DATABASE`, `NOCOBASE_DB_USER`, and `NOCOBASE_DB_PASSWORD`;
-- set `MEDIA_ROOT` outside the source tree when media backup/restore is used;
-- set `NOCOBASE_STORAGE_DIR` outside the source tree when NocoBase storage
-  backup/restore is used;
-- never use `POSTGRES_PASSWORD=postgres` or `NOCOBASE_DB_PASSWORD=postgres`.
-
-Dry-run the plan first:
-
-```powershell
-.\scripts\backup-hybrid.ps1 -PlanOnly
-```
-
-Create a backup set:
-
-```powershell
-.\scripts\backup-hybrid.ps1 `
-  -OutDir C:\SwimCRMRuntime\backups `
-  -DjangoDbName swimcrm `
-  -NocoBaseDbName nocobase_hybrid `
-  -MediaRoot C:\SwimCRMRuntime\uploads `
-  -NocoBaseStorageDir C:\SwimCRMRuntime\nocobase-storage
-```
-
-If the local NocoBase runtime uses the repository-local development storage,
-use the documented local path only for development backups:
-
-```powershell
-.\scripts\backup-hybrid.ps1 -NocoBaseStorageDir .\swimcrm-hybrid\source\storage
-```
-
-Do not commit generated backup sets. `verify-release-tree.ps1` blocks `.dump`,
-`.zip`, `backups/`, runtime, media, and NocoBase generated directories.
-
-Verify the latest hybrid backup set after creation:
-
-```powershell
-.\scripts\verify-hybrid-backup-set.cmd
-```
-
-The wrapper finds the latest `hybrid-*` directory in `BACKUP_DIR`, verifies the
-manifest, SHA256 checksums for Django/NocoBase dumps and optional media/storage
-archives, checks both database dumps with `pg_restore --list`, and runs a
-Django restore drill in a temporary PostgreSQL database.
-
-## Hybrid restore
-
-Restore is destructive. Stop all writers before restoring:
-
-- Django web process;
-- Celery workers and beat;
-- notification jobs;
-- NocoBase runtime;
-- any admin import/export jobs.
-
-Inspect the restore plan:
-
-```powershell
-.\scripts\restore-hybrid.ps1 -BackupSetDir C:\SwimCRMRuntime\backups\hybrid-YYYYMMDD-HHMMSS -PlanOnly
-```
-
-Before any real restore, verify the backup set manifest and dump/archive
-checksums:
-
-```powershell
-.\scripts\verify-hybrid-backup-set.ps1 -BackupSetDir C:\SwimCRMRuntime\backups\hybrid-YYYYMMDD-HHMMSS
-```
-
-Run the restore only after confirming the target databases and storage
-directories are correct:
-
-```powershell
-.\scripts\restore-hybrid.ps1 `
-  -BackupSetDir C:\SwimCRMRuntime\backups\hybrid-YYYYMMDD-HHMMSS `
-  -DjangoDbName swimcrm `
-  -NocoBaseDbName nocobase_hybrid `
-  -MediaRoot C:\SwimCRMRuntime\uploads `
-  -NocoBaseStorageDir C:\SwimCRMRuntime\nocobase-storage `
-  -ConfirmRestore
-```
-
-After restore:
-
-- run `cd swimcrm; .\.venv\Scripts\python.exe manage.py migrate --check`;
-- start Django and NocoBase;
-- run `scripts\check-nocobase-health.cmd`;
-- run a smoke test for login, client detail, payment summary, notifications,
-  and a read-only NocoBase bridge request.
 
 ## PostgreSQL DB-level trainer conflict check
 

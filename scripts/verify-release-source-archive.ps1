@@ -16,8 +16,6 @@ $blockedArchivePrefixes = @(
     ".git/",
     ".codebase-memory/",
     ".runtime/",
-    ".nocobase/",
-    ".nocobase-logs/",
     ".npm-cache/",
     ".yarn-cache/",
     "node_modules/",
@@ -26,7 +24,6 @@ $blockedArchivePrefixes = @(
     "frontend/test-results/",
     "frontend/playwright-report/",
     "swimcrm/.venv/",
-    "swimcrm-hybrid/",
     "backups/",
     "releases/",
     "dist/"

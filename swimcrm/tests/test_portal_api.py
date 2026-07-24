@@ -888,14 +888,13 @@ class AdminPortalApiRule(TestCase):
         self.assertIn(("DELETE", "/api/admin/schedule/waitlist/<id>/"), routes)
         self.assertIn(("POST", "/api/admin/notifications/quiet-hours/"), routes)
         self.assertIn(("POST", "/api/admin/payroll/periods/"), routes)
-        self.assertIn(("GET", "/api/nocobase/clients/"), routes)
-        self.assertIn(("GET", "/api/nocobase/payroll/periods/"), routes)
-        self.assertIn(("GET", "/api/nocobase/payroll/periods/<id>/"), routes)
-        self.assertIn(("POST", "/api/nocobase/config/payroll/rules/"), routes)
-        self.assertIn(("POST", "/api/nocobase/config/languages/"), routes)
-        self.assertIn(("POST", "/api/nocobase/config/locations/"), routes)
-        self.assertIn(("POST", "/api/nocobase/config/session-types/"), routes)
-        self.assertIn(("POST", "/api/nocobase/config/notification-template-translations/"), routes)
+        self.assertIn(("GET", "/api/admin/payroll/periods/"), routes)
+        self.assertIn(("GET", "/api/admin/payroll/periods/<id>/"), routes)
+        self.assertIn(("POST", "/api/admin/payroll/rules/"), routes)
+        self.assertIn(("POST", "/api/admin/settings/languages/"), routes)
+        self.assertIn(("POST", "/api/admin/settings/locations/"), routes)
+        self.assertIn(("POST", "/api/admin/settings/session-types/"), routes)
+        self.assertIn(("POST", "/api/admin/settings/notification-template-translations/"), routes)
         self.assertIn(("GET", "/api/client/overview/"), routes)
         self.assertIn("participant", payload["resources"])
         self.assertIn("waitlist_entry", payload["resources"])
@@ -904,15 +903,14 @@ class AdminPortalApiRule(TestCase):
         self.assertIn("payroll_period", payload["resources"])
         self.assertIn("dictionary_translation", payload["resources"])
         by_route = {(row["method"], row["path"]): row for row in payload["endpoints"]}
-        self.assertEqual(by_route[("GET", "/api/nocobase/clients/")]["query"], ["q", "active", "limit"])
-        self.assertEqual(by_route[("GET", "/api/nocobase/payroll/periods/")]["query"], ["location", "status"])
+        self.assertEqual(by_route[("GET", "/api/admin/settings/locations/")]["query"], ["q", "active"])
         self.assertEqual(
-            by_route[("GET", "/api/nocobase/config/notification-template-translations/")]["query"],
+            by_route[("GET", "/api/admin/settings/notification-template-translations/")]["query"],
             ["template_id", "language_code"],
         )
-        self.assertEqual(by_route[("GET", "/api/nocobase/config/payroll/rules/")]["query"], ["scheme_id"])
+        self.assertEqual(by_route[("GET", "/api/admin/payroll/rules/")]["query"], ["scheme_id"])
         self.assertEqual(
-            by_route[("GET", "/api/nocobase/config/payroll/assignments/")]["query"],
+            by_route[("GET", "/api/admin/payroll/assignments/")]["query"],
             ["trainer_id"],
         )
 

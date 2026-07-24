@@ -1,11 +1,10 @@
 {
   "version": "2026-07-15",
-  "purpose": "Machine-readable evidence map for the Hybrid Rewrite under NocoBase production-readiness audit.",
+  "purpose": "Machine-readable evidence map for the SwimCRM Django production-readiness audit.",
   "rules": {
     "minimum_requirements": 20,
     "required_categories": [
       "architecture",
-      "nocobase",
       "access",
       "billing",
       "subscriptions",
@@ -23,8 +22,10 @@
     {
       "id": "architecture.hybrid_django_source_of_truth",
       "category": "architecture",
-      "statement": "Django remains the source of truth; NocoBase is limited to low-risk admin/configuration surfaces.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "docs/NOCOBASE_BOUNDARY_MAP.md"],
+      "statement": "Django remains the source of truth; low-risk admin/configuration surfaces are served by Django's own admin settings API, not a separate low-code layer.",
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -33,14 +34,6 @@
             "Django backend remains the system of record",
             "Do not do a full rebuild from scratch on NocoBase"
           ]
-        },
-        {
-          "type": "file_contains",
-          "path": "docs/NOCOBASE_BOUNDARY_MAP.md",
-          "patterns": [
-            "Django remains the canonical backend and database owner",
-            "NocoBase is optional and supportive"
-          ]
         }
       ]
     },
@@ -48,7 +41,9 @@
       "id": "architecture.first_release_decisions_locked",
       "category": "architecture",
       "statement": "First-release business decisions are locked in the core specification; remaining items are explicitly later scope, not implementation blockers.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -73,220 +68,35 @@
       ]
     },
     {
-      "id": "nocobase.critical_writes_forbidden",
-      "category": "nocobase",
-      "statement": "NocoBase must not directly mutate payments, ledger, attendance, receipts, payroll calculations, or audit history; allowed config mutations must be audited in Django.",
-      "source_refs": ["docs/NOCOBASE_FIRST_SCREENS.json", "docs/NOCOBASE_SCREEN_BUILD_PACK.json", "swimcrm/portal/nocobase_views.py"],
-      "evidence": [
-        {
-          "type": "file_contains",
-          "path": "docs/NOCOBASE_FIRST_SCREENS.json",
-          "patterns": ["must not directly mutate payments, ledger, attendance, payroll calculations, receipts, or audit history"]
-        },
-        {
-          "type": "file_contains",
-          "path": "docs/NOCOBASE_SCREEN_BUILD_PACK.json",
-          "patterns": ["Never connect NocoBase direct SQL write access to payments, ledger, attendance, receipts, payroll calculations, or audit history"]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": [
-            "test_clients_endpoint_uses_domain_state_without_sensitive_fields",
-            "test_payroll_periods_bridge_is_read_only_reporting",
-            "nocobase_config.PayrollRule.created",
-            "nocobase_config.NotificationTemplate.created",
-            "nocobase_config.DictionaryTranslation.created",
-            "notification template is used"
-          ]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": [
-            "protected_template_delete",
-            "notification template is used"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "swimcrm/portal/nocobase_views.py",
-          "patterns": [
-            "_audit_nocobase_config",
-            "nocobase_config_api",
-            "audit\\(",
-            "source"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "nocobase.first_screens_and_api_contract",
-      "category": "nocobase",
-      "statement": "The first NocoBase screens are defined by a build pack and validated against live Django bridge/config APIs.",
-      "source_refs": ["docs/NOCOBASE_FIRST_SCREENS.json", "docs/NOCOBASE_SCREEN_BUILD_PACK.json"],
-      "evidence": [
-        {
-          "type": "file_exists",
-          "path": "docs/NOCOBASE_FIRST_SCREENS.json"
-        },
-        {
-          "type": "file_exists",
-          "path": "docs/NOCOBASE_SCREEN_BUILD_PACK.json"
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": ["test_build_pack_list_data_sources_match_live_response_schemas"]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": [
-            "test_build_pack_validator_rejects_query_metadata_drift",
-            "query_mismatches"
-          ]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": [
-            "test_clients_endpoint_validates_limit_query",
-            "test_config_list_endpoints_validate_integer_filters"
-          ]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": [
-            "by_route =",
-            "/api/nocobase/clients/",
-            "[\"q\", \"active\", \"limit\"]",
-            "/api/nocobase/config/payroll/rules/",
-            "[\"scheme_id\"]"
-          ]
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/verify-nocobase-build-pack.cmd"
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/verify-nocobase-api-smoke.cmd"
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/verify-api-contract-docs.cmd"
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/release-check-backend.ps1",
-          "patterns": ["API contract docs check"]
-        }
-      ]
-    },
-    {
-      "id": "nocobase.runtime_production_guards",
-      "category": "nocobase",
-      "statement": "NocoBase bootstrap and runtime startup use repository-pinned tooling plus production guards for secrets, default passwords, app root, storage, runtime fingerprinting, and health-checked background startup.",
-      "source_refs": ["scripts/init-nocobase-hybrid.ps1", "scripts/run-nocobase-runtime.ps1", "scripts/start-nocobase-runtime.ps1", "scripts/verify-nocobase-runtime.ps1", "docs/NOCOBASE_HYBRID_BOOTSTRAP.md"],
-      "evidence": [
-        {
-          "type": "file_contains",
-          "path": "package.json",
-          "patterns": [
-            "\"@nocobase/cli\": \"2\\.1\\.24\"",
-            "\"yarn\": \"1\\.22\\.22\""
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/verify-nocobase-prerequisites.ps1",
-          "patterns": [
-            "NocoBase tooling pins passed",
-            "Assert-ExactPackageVersion"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/init-nocobase-hybrid.ps1",
-          "patterns": [
-            "node_modules\\\\.bin\\\\nb.cmd",
-            "npm install",
-            "LocalNb init --ui --env"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "docs/NOCOBASE_HYBRID_BOOTSTRAP.md",
-          "patterns": [
-            "repository-pinned `@nocobase/cli`",
-            ".\\\\node_modules\\\\.bin\\\\nb.cmd --version",
-            ".\\\\scripts\\\\init-nocobase-hybrid.cmd -RunInit"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/run-nocobase-runtime.ps1",
-          "patterns": [
-            "NOCOBASE_APP_KEY",
-            "NOCOBASE_DB_PASSWORD",
-            "NOCOBASE_ROOT_PASSWORD",
-            "Assert-ProductionSecret",
-            "is required when NocoBase runs in production",
-            "at least 32 characters long",
-            "NOCOBASE_APP_ROOT must be outside the source tree",
-            "NOCOBASE_STORAGE_DIR must be outside the source tree"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/verify-nocobase-runtime.ps1",
-          "patterns": [
-            "short-key",
-            "NOCOBASE_APP_KEY must be a real production secret at least 32 characters long",
-            "NocoBase production app key strength guard passed",
-            "short-root-password",
-            "NocoBase production root password strength guard passed"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/start-nocobase-runtime.ps1",
-          "patterns": [
-            "Start-Process",
-            "-WindowStyle Hidden",
-            "WaitForHealth",
-            "check-nocobase-health.ps1",
-            "did not become healthy"
-          ]
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/verify-nocobase-runtime.cmd"
-        }
-      ]
-    },
-    {
       "id": "access.archive_read_only_mode",
       "category": "access",
       "statement": "Archived participants remain visible for history, but cannot receive new operational, scheduling, billing, or subscription actions.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/portal/support.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/portal/support.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
           "path": "docs/CRM_CORE_SPEC.md",
-          "patterns": ["Archive/read-only modes are required"]
+          "patterns": [
+            "Archive/read-only modes are required"
+          ]
         },
         {
           "type": "file_contains",
           "path": "swimcrm/portal/support.py",
-          "patterns": ["def _require_active_participant", "archived participant cannot"]
+          "patterns": [
+            "def _require_active_participant",
+            "archived participant cannot"
+          ]
         },
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": ["test_archived_participant_is_read_only_for_new_operations"]
+          "patterns": [
+            "test_archived_participant_is_read_only_for_new_operations"
+          ]
         },
         {
           "type": "test_contains",
@@ -299,7 +109,10 @@
         {
           "type": "file_contains",
           "path": "swimcrm/students/admin.py",
-          "patterns": ["def has_delete_permission", "return False"]
+          "patterns": [
+            "def has_delete_permission",
+            "return False"
+          ]
         },
         {
           "type": "file_contains",
@@ -318,12 +131,16 @@
       "id": "access.parent_own_children_only",
       "category": "access",
       "statement": "Parents can see only their own children and cannot upload receipts for another account.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
           "path": "docs/CRM_CORE_SPEC.md",
-          "patterns": ["A parent can see only their own children"]
+          "patterns": [
+            "A parent can see only their own children"
+          ]
         },
         {
           "type": "test_contains",
@@ -339,7 +156,9 @@
       "id": "access.trainer_finance_isolation",
       "category": "access",
       "statement": "Trainers cannot see client financial data and can only operate on their own sessions.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -363,7 +182,10 @@
       "id": "billing.confirmed_payments_only",
       "category": "billing",
       "statement": "Only confirmed payments affect balances, reports, and debt calculations.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/billing/services.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/billing/services.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -384,7 +206,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_phase2.py",
-          "patterns": ["test_income_cash_basis_only_confirmed"]
+          "patterns": [
+            "test_income_cash_basis_only_confirmed"
+          ]
         }
       ]
     },
@@ -392,7 +216,10 @@
       "id": "billing.payment_methods_cash_bank_transfer",
       "category": "billing",
       "statement": "Payment method is required and supports cash plus bank transfer/internal transfer records.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/billing/models.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/billing/models.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -412,11 +239,6 @@
             "bank_transfer",
             "assertNotIn\\(\"transfer\", payment_method_values\\)"
           ]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": ["row\\[\"latest_payment\"\\]\\[\"method\"\\]"]
         }
       ]
     },
@@ -424,7 +246,10 @@
       "id": "billing.financial_history_retained",
       "category": "billing",
       "statement": "Charge and payment records are retained; receipt files may be purged but financial history remains.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/billing/models.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/billing/models.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -450,7 +275,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": ["test_admin_payment_method_update_is_audited_with_before_after"]
+          "patterns": [
+            "test_admin_payment_method_update_is_audited_with_before_after"
+          ]
         }
       ]
     },
@@ -458,7 +285,9 @@
       "id": "subscriptions.grace_and_manual_adjustment_history",
       "category": "subscriptions",
       "statement": "Subscriptions stay valid through end date plus 7 days, and admins can manually adjust remaining sessions while operational subscription, ledger, and freeze history cannot be deleted outside guarded import rollback.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -472,7 +301,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": ["test_admin_can_freeze_adjust_and_renew_subscription"]
+          "patterns": [
+            "test_admin_can_freeze_adjust_and_renew_subscription"
+          ]
         },
         {
           "type": "test_contains",
@@ -512,7 +343,9 @@
       "id": "scheduling.reschedule_substitution_session_types",
       "category": "scheduling",
       "statement": "Scheduling supports reschedules/transfers, trainer substitutions, and group/individual/split session types.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -537,7 +370,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_business_rules.py",
-          "patterns": ["test_session_must_be_group_xor_individual"]
+          "patterns": [
+            "test_session_must_be_group_xor_individual"
+          ]
         }
       ]
     },
@@ -545,17 +380,26 @@
       "id": "scheduling.waitlist_management",
       "category": "scheduling",
       "statement": "Admins can manage per-session waitlists, promote students into the concrete roster, and keep waitlist history.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/scheduling/models.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/scheduling/models.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
           "path": "docs/CRM_CORE_SPEC.md",
-          "patterns": ["Waitlist support is required"]
+          "patterns": [
+            "Waitlist support is required"
+          ]
         },
         {
           "type": "file_contains",
           "path": "swimcrm/scheduling/models.py",
-          "patterns": ["class WaitlistEntry", "class WaitlistStatus", "class SessionParticipant"]
+          "patterns": [
+            "class WaitlistEntry",
+            "class WaitlistStatus",
+            "class SessionParticipant"
+          ]
         },
         {
           "type": "test_contains",
@@ -571,12 +415,17 @@
       "id": "attendance.history_and_deductions",
       "category": "attendance",
       "statement": "Attendance is auditable, affects session ledger correctly, and attendance history must not be deleted.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/tests/test_business_rules.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/tests/test_business_rules.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
           "path": "docs/CRM_CORE_SPEC.md",
-          "patterns": ["Attendance history must never be deleted"]
+          "patterns": [
+            "Attendance history must never be deleted"
+          ]
         },
         {
           "type": "test_contains",
@@ -590,7 +439,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_audit.py",
-          "patterns": ["test_attendance_marking_is_audited"]
+          "patterns": [
+            "test_attendance_marking_is_audited"
+          ]
         }
       ]
     },
@@ -598,7 +449,10 @@
       "id": "notifications.quiet_hours_deferred_delivery",
       "category": "notifications",
       "statement": "Quiet hours are configurable; due messages are not sent at night and are deferred to the nearest allowed time.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/notifications/services.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/notifications/services.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -619,7 +473,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": ["test_admin_can_manage_quiet_hours_policies"]
+          "patterns": [
+            "test_admin_can_manage_quiet_hours_policies"
+          ]
         }
       ]
     },
@@ -627,7 +483,9 @@
       "id": "notifications.multilingual_templates",
       "category": "notifications",
       "statement": "Notification templates and delivery rendering support multiple languages.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -640,12 +498,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_phase2.py",
-          "patterns": ["test_notification_uses_parent_preferred_language_translation"]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": ["test_config_token_can_manage_localization_config"]
+          "patterns": [
+            "test_notification_uses_parent_preferred_language_translation"
+          ]
         }
       ]
     },
@@ -653,7 +508,9 @@
       "id": "payroll.configurable_rules",
       "category": "payroll",
       "statement": "Admin can configure payroll rules by session type, including group thresholds, extra clients, individual, and split sessions.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -674,11 +531,6 @@
             "test_cancelled_sessions_are_excluded_from_payroll",
             "test_admin_can_configure_and_calculate_payroll_period"
           ]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": ["test_config_payroll_rule_validation_stays_in_django"]
         }
       ]
     },
@@ -686,7 +538,9 @@
       "id": "localization.multi_location_and_dictionaries",
       "category": "localization",
       "statement": "System supports multiple locations, multilingual UI/templates, and localizable reference dictionaries.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -699,14 +553,8 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_phase2.py",
-          "patterns": ["test_dictionary_translation_uses_requested_language_then_default"]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
           "patterns": [
-            "test_config_token_can_manage_locations_and_session_types",
-            "test_config_token_can_manage_localization_config"
+            "test_dictionary_translation_uses_requested_language_then_default"
           ]
         }
       ]
@@ -715,7 +563,10 @@
       "id": "operations.reporting_import_export",
       "category": "operations",
       "statement": "Ops/admin users can run debt/upcoming/income reports and export operational data without direct database access.",
-      "source_refs": ["docs/IMPLEMENTATION_ROADMAP.md", "swimcrm/portal/admin_report_views.py"],
+      "source_refs": [
+        "docs/IMPLEMENTATION_ROADMAP.md",
+        "swimcrm/portal/admin_report_views.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -761,7 +612,10 @@
       "id": "security.privacy_export_anonymization",
       "category": "security",
       "statement": "Admin can export complete client data for access requests and anonymize client accounts through audited backend flows.",
-      "source_refs": ["docs/IMPLEMENTATION_ROADMAP.md", "swimcrm/portal/admin_privacy_views.py"],
+      "source_refs": [
+        "docs/IMPLEMENTATION_ROADMAP.md",
+        "swimcrm/portal/admin_privacy_views.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -783,7 +637,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": ["test_admin_can_anonymize_client_account"]
+          "patterns": [
+            "test_admin_can_anonymize_client_account"
+          ]
         },
         {
           "type": "file_contains",
@@ -799,12 +655,17 @@
       "id": "security.audit_financial_sensitive_flows",
       "category": "security",
       "statement": "Financial and sensitive actions are audited, emitted to server logs, and protected from audit-log tampering.",
-      "source_refs": ["docs/CRM_CORE_SPEC.md", "swimcrm/tests/test_audit.py"],
+      "source_refs": [
+        "docs/CRM_CORE_SPEC.md",
+        "swimcrm/tests/test_audit.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
           "path": "docs/CRM_CORE_SPEC.md",
-          "patterns": ["audit-sensitive actions"]
+          "patterns": [
+            "audit-sensitive actions"
+          ]
         },
         {
           "type": "test_contains",
@@ -828,7 +689,9 @@
         {
           "type": "test_contains",
           "path": "swimcrm/tests/test_portal_api.py",
-          "patterns": ["test_admin_payment_method_update_is_audited_with_before_after"]
+          "patterns": [
+            "test_admin_payment_method_update_is_audited_with_before_after"
+          ]
         }
       ]
     },
@@ -836,7 +699,10 @@
       "id": "security.production_hardening",
       "category": "security",
       "statement": "Production rejects unsafe settings such as DEBUG enabled, wildcard hosts, weak secrets, source-tree runtime paths, and missing HTTPS reverse-proxy settings.",
-      "source_refs": ["swimcrm/tests/test_hardening.py", "scripts/check-production-env.ps1"],
+      "source_refs": [
+        "swimcrm/tests/test_hardening.py",
+        "scripts/check-production-env.ps1"
+      ],
       "evidence": [
         {
           "type": "test_contains",
@@ -879,18 +745,12 @@
           "patterns": [
             "Assert-RealProductionSecret",
             "Assert-RealProductionSecret -Name \"SECRET_KEY\"",
-            "Assert-RealProductionSecret -Name \"NOCOBASE_BRIDGE_TOKEN\"",
-            "Assert-RealProductionSecret -Name \"NOCOBASE_CONFIG_TOKEN\"",
-            "Assert-RealProductionSecret -Name \"NOCOBASE_APP_KEY\"",
-            "Assert-RealProductionSecret -Name \"NOCOBASE_ROOT_PASSWORD\"",
             "-MinLength 50",
-            "-MinLength 32",
             "SECURE_SSL_REDIRECT must be 1 in production",
             "TRUST_PROXY_SSL_HEADER must be 1",
             "CSRF_TRUSTED_ORIGINS",
             "HTTPS reverse-proxy settings passed",
-            "PostgreSQL production settings passed",
-            "NocoBase production settings passed"
+            "PostgreSQL production settings passed"
           ]
         }
       ]
@@ -898,8 +758,12 @@
     {
       "id": "operations.release_gate",
       "category": "operations",
-      "statement": "A repeatable full-stack release gate validates backend, NocoBase, frontend build, dependency audit, smoke tests, and CI workflow structure.",
-      "source_refs": ["scripts/release-check-full.ps1", "scripts/verify-ci-release-workflow.ps1", ".github/workflows/release-check.yml"],
+      "statement": "A repeatable full-stack release gate validates backend, frontend build, dependency audit, smoke tests, and CI workflow structure.",
+      "source_refs": [
+        "scripts/release-check-full.ps1",
+        "scripts/verify-ci-release-workflow.ps1",
+        ".github/workflows/release-check.yml"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -922,8 +786,7 @@
             "verify-ci-release-workflow.ps1",
             "Operational wrapper guard check",
             "verify-operational-wrappers.ps1",
-            "AllowMissingLocalNocoBaseRuntime",
-            "Hybrid cutover readiness audit",
+            "App cutover readiness audit",
             "-RequireHttps -RequireOpsOk -PlanOnly",
             "AUDIT_LOG_LEVEL",
             "WARNING"
@@ -1074,8 +937,6 @@
             "verify-release-source-archive.ps1",
             "Expand-Archive",
             "ReleaseDir must be empty before extraction",
-            "NOCOBASE_APP_ROOT must be outside the extracted release source tree",
-            "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree",
             "-m venv",
             "pip install -r",
             "npm.cmd ci",
@@ -1083,8 +944,6 @@
             "migrate",
             "--check",
             "Backend dependencies installed",
-            "Root Node tooling installed",
-            "NocoBase CLI package installed",
             "Frontend dependencies installed",
             "Django migrations check passed",
             "Target-host release install completed",
@@ -1108,13 +967,7 @@
             "Installed release tracked file list sha256 mismatch",
             "RequireInstalledDependencies",
             "swimcrm\\\\\\.venv\\\\Scripts\\\\python\\.exe",
-            "node_modules\\\\@nocobase\\\\cli\\\\package\\.json",
-            "Root package.json must pin @nocobase/cli",
-            "Installed @nocobase/cli version mismatch",
-            "NocoBase CLI package installed",
             "frontend\\\\node_modules",
-            "NOCOBASE_APP_ROOT must be outside the extracted release source tree",
-            "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree",
             "Target-host release install verified",
             "tracked_file_count",
             "tracked_file_list_sha256"
@@ -1150,8 +1003,8 @@
             "capture_github_actions_postgres_backend_check_url",
             "install_release_archive_on_target_host",
             "run_target_host_production_env_preflight",
-            "run_target_host_live_hybrid_health",
-            "run_target_host_hybrid_backup_restore_drill",
+            "run_target_host_live_app_health",
+            "run_target_host_backup_restore_drill",
             "fill_docs_production_cutover_evidence_json",
             "run_scripts_verify_production_cutover_evidence_cmd"
           ]
@@ -1207,22 +1060,18 @@
             "Target-host release install completed",
             "Target-host release install verified",
             "Backend dependencies installed",
-            "Root Node tooling installed",
-            "NocoBase CLI package installed",
             "Frontend dependencies installed",
             "Django migrations check passed",
-            "NocoBase app root outside source tree",
             "HTTPS reverse-proxy settings passed",
             "tracked_file_count",
             "tracked_file_list_sha256",
             "real https:// Django production URL",
-            "real https:// NocoBase production URL",
             "64-character SHA256",
             "Rollback plan reviewed",
             "Release source archive contents verified",
             "Release source archive tracked file list verified",
             "migrate --check",
-            "check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
+            "check-app-health.cmd -RequireHttps -RequireOpsOk",
             "HTTPS live endpoint requirement passed",
             "Operations status ok requirement passed"
           ]
@@ -1251,7 +1100,6 @@
             "Target-host release install completed",
             "Target-host release install verified",
             "Backend dependencies installed",
-            "NocoBase storage outside source tree",
             "real https:// Django production URL",
             "64-character SHA256",
             "stop writers",
@@ -1263,10 +1111,8 @@
         },
         {
           "type": "file_contains",
-          "path": "scripts/verify-hybrid-cutover-readiness.ps1",
+          "path": "scripts/verify-app-cutover-readiness.ps1",
           "patterns": [
-            "AllowMissingLocalNocoBaseRuntime",
-            "AllowMissingLocalRuntime",
             "Tracked release source manifests",
             "verify-release-source-manifests.ps1",
             "verify-release-source-archive.ps1",
@@ -1313,7 +1159,10 @@
       "id": "operations.postgresql_ci_gate",
       "category": "operations",
       "statement": "CI includes a PostgreSQL backend test job so production database behavior is verified separately from SQLite convenience tests.",
-      "source_refs": [".github/workflows/release-check.yml", "swimcrm/tests/test_business_rules.py"],
+      "source_refs": [
+        ".github/workflows/release-check.yml",
+        "swimcrm/tests/test_business_rules.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
@@ -1378,60 +1227,20 @@
     {
       "id": "operations.backup_restore_health",
       "category": "operations",
-      "statement": "Production operations include hybrid backup, checksum-guarded restore, and live health checks for Django, NocoBase bridge/config APIs, and the NocoBase process.",
-      "source_refs": ["docs/OPERATIONS.md", "scripts/backup-hybrid.ps1", "scripts/restore-hybrid.ps1", "scripts/verify-hybrid-backup-set.ps1", "docs/PRODUCTION_CUTOVER_EVIDENCE.example.json"],
+      "statement": "Production operations include PostgreSQL backup, checksum-guarded restore, and live health checks for the Django application.",
+      "source_refs": [
+        "docs/OPERATIONS.md",
+        "scripts/backup-pg.ps1",
+        "scripts/verify-pg-restore.ps1",
+        "docs/PRODUCTION_CUTOVER_EVIDENCE.example.json"
+      ],
       "evidence": [
-        {
-          "type": "command_exists",
-          "path": "scripts/backup-hybrid.cmd"
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/restore-hybrid.cmd"
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/verify-hybrid-backup-set.cmd"
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/verify-hybrid-backup-set.ps1",
-          "patterns": [
-            "Get-FileHash",
-            "Assert-FileSha256",
-            "sha256 OK",
-            "Django dump list OK",
-            "NocoBase dump list OK",
-            "Hybrid backup set verification OK",
-            "verify-pg-restore.ps1"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/backup-hybrid.ps1",
-          "patterns": [
-            "django_dump_sha256",
-            "nocobase_dump_sha256",
-            "media_archive_sha256",
-            "nocobase_storage_archive_sha256"
-          ]
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/restore-hybrid.ps1",
-          "patterns": [
-            "Assert-BackupSetIntegrity",
-            "Assert-FileSha256",
-            "sha256 mismatch",
-            "Restore is destructive"
-          ]
-        },
         {
           "type": "file_contains",
           "path": "docs/OPERATIONS.md",
           "patterns": [
             "Before any real restore",
-            "verify-hybrid-backup-set.ps1 -BackupSetDir",
+            "verify-pg-restore.ps1",
             "Rollback plan reviewed",
             "stop writers",
             "verified backup",
@@ -1441,51 +1250,18 @@
         },
         {
           "type": "command_exists",
-          "path": "scripts/check-hybrid-health.cmd"
+          "path": "scripts/check-app-health.cmd"
         },
         {
           "type": "file_contains",
-          "path": "scripts/check-hybrid-health.ps1",
+          "path": "scripts/check-app-health.ps1",
           "patterns": [
-            "NOCOBASE_BRIDGE_TOKEN is required",
-            "NOCOBASE_CONFIG_TOKEN is required",
             "RequireHttps",
             "RequireOpsOk",
             "DJANGO_BASE_URL must use https://",
-            "NOCOBASE_BASE_URL must use https://",
             "Operations status must be ok when -RequireOpsOk is set",
             "Operations status ok requirement passed",
-            "HTTPS live endpoint requirement passed",
-            "nocobase_config_health",
-            "/api/nocobase/config/languages/",
-            "Django NocoBase config health passed"
-          ]
-        },
-        {
-          "type": "test_contains",
-          "path": "swimcrm/tests/test_nocobase_bridge.py",
-          "patterns": [
-            "test_config_health_endpoint_requires_config_token",
-            "/api/nocobase/config/languages/",
-            "BRIDGE_HEADERS",
-            "CONFIG_HEADERS"
-          ]
-        },
-        {
-          "type": "command_exists",
-          "path": "scripts/verify-backup-restore-guards.cmd"
-        },
-        {
-          "type": "file_contains",
-          "path": "scripts/verify-backup-restore-guards.ps1",
-          "patterns": [
-            "NewGuid",
-            "swimcrm-guard-empty-backup",
-            "ErrorAction SilentlyContinue",
-            "Hybrid restore backup-set checksum guard",
-            "Django dump sha256 mismatch",
-            "Hybrid restore confirmation guard",
-            "Restore is destructive.*-ConfirmRestore"
+            "HTTPS live endpoint requirement passed"
           ]
         },
         {
@@ -1531,8 +1307,8 @@
             "HTTPS_URL_PATTERN",
             "NON_PRODUCTION_HOST_PATTERN",
             "SHA256_PATTERN",
-            "evidence must include Django and NocoBase https:// production URLs",
-            "evidence must include Django and NocoBase dump SHA256 values",
+            "evidence must include a Django https:// production URL",
+            "evidence must include a backup dump SHA256 value",
             "release_candidate.commit_sha",
             "expected_commit_sha",
             "expected_archive_sha256",
@@ -1547,11 +1323,8 @@
             "Target-host release install verified",
             "Release archive extracted on target host",
             "Backend dependencies installed",
-            "Root Node tooling installed",
-            "NocoBase CLI package installed",
             "Frontend dependencies installed",
             "Django migrations check passed",
-            "NocoBase app root outside source tree",
             "release_source_archive",
             "build-release-source.cmd",
             "Release source archive written",
@@ -1583,8 +1356,8 @@
             "release_source_archive",
             "target_host_release_install",
             "github_postgres_backend_job",
-            "live_hybrid_health",
-            "hybrid_backup_restore_drill",
+            "live_app_health",
+            "backup_restore_drill",
             "rollback_plan_acknowledged"
           ]
         },
@@ -1607,17 +1380,15 @@
             "-RunInstall",
             "Target-host release install completed",
             "Target-host release install verified",
-            "NocoBase app root outside source tree",
             "swimcrm-release-source-<commit-sha>",
             "Tracked release source manifests",
             "tracked_release_source_guard",
             "github_postgres_backend_job",
-            "live_hybrid_health",
-            "check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
+            "live_app_health",
+            "check-app-health.cmd -RequireHttps -RequireOpsOk",
             "HTTPS live endpoint requirement passed",
             "Operations status ok requirement passed",
             "production-django-host",
-            "production-nocobase-host",
             "<64-hex-sha256>",
             "stop writers",
             "migrate --check",
@@ -1644,12 +1415,12 @@
             "test_cutover_evidence_requires_source_archive_tracked_file_list_verification",
             "test_cutover_evidence_requires_release_archive_artifact_name_in_github_evidence",
             "test_cutover_evidence_requires_postgres_backend_job_name_in_github_evidence",
-            "test_cutover_evidence_requires_hybrid_backup_sha256_values",
+            "test_cutover_evidence_requires_backup_sha256_values",
             "test_cutover_evidence_requires_https_reverse_proxy_preflight_fragment",
             "test_cutover_evidence_requires_https_live_health_fragment",
             "test_cutover_evidence_requires_live_ops_ok_fragment",
-            "test_hybrid_cutover_audit_uses_release_health_plan",
-            "test_cutover_evidence_requires_live_health_production_urls",
+            "test_app_cutover_audit_uses_release_health_plan",
+            "test_cutover_evidence_requires_live_health_production_url",
             "test_cutover_evidence_rejects_localhost_live_health_urls",
             "test_cutover_evidence_requires_complete_rollback_acknowledgement",
             "test_cutover_evidence_requires_rollback_acknowledgement_command",
@@ -1657,7 +1428,7 @@
             "TargetHostReleaseInstallVerifierRule",
             "ProductionRollbackAcknowledgementRule",
             "test_cutover_evidence_rejects_non_github_ci_url_or_missing_release_sha",
-            "test_release_source_manifests_fail_when_root_tooling_is_untracked",
+            "test_release_source_manifests_fail_when_frontend_manifests_are_untracked",
             "test_release_workflow_requires_postgres_manifest_guard",
             "test_release_workflow_requires_manifest_guard_after_python_setup",
             "test_release_workflow_requires_source_archive_builder_after_manifest_guard",
@@ -1666,21 +1437,32 @@
             "test_release_workflow_uploads_verified_source_archive_artifact",
             "test_release_workflow_requires_artifact_upload_after_archive_verifier"
           ]
+        },
+        {
+          "type": "command_exists",
+          "path": "scripts/backup-pg.cmd"
+        },
+        {
+          "type": "command_exists",
+          "path": "scripts/verify-pg-restore.cmd"
         }
       ]
     },
     {
       "id": "operations.readiness_endpoints",
       "category": "operations",
-      "statement": "Readiness and ops endpoints expose backend health, NocoBase blueprint/build-pack status, and operational backlog.",
-      "source_refs": ["swimcrm/common/readiness.py", "swimcrm/tests/test_operations_readiness.py"],
+      "statement": "Readiness and ops endpoints expose backend health and operational backlog.",
+      "source_refs": [
+        "swimcrm/common/readiness.py",
+        "swimcrm/tests/test_operations_readiness.py"
+      ],
       "evidence": [
         {
           "type": "file_contains",
           "path": "swimcrm/common/readiness.py",
           "patterns": [
-            "nocobase_first_screens",
-            "nocobase_screen_build_pack"
+            "default_language",
+            "runtime_dir"
           ]
         },
         {
@@ -1688,7 +1470,7 @@
           "path": "swimcrm/tests/test_operations_readiness.py",
           "patterns": [
             "test_admin_readiness_reports_backend_checks",
-            "test_nocobase_ops_status_uses_bridge_token"
+            "test_production_readiness_report_checks_runtime_placement"
           ]
         }
       ]
@@ -1697,7 +1479,10 @@
       "id": "frontend.production_smoke",
       "category": "frontend",
       "statement": "Frontend production build and basic accessibility smoke are part of the release gate.",
-      "source_refs": ["frontend/package.json", "frontend/tests/smoke.spec.js"],
+      "source_refs": [
+        "frontend/package.json",
+        "frontend/tests/smoke.spec.js"
+      ],
       "evidence": [
         {
           "type": "file_contains",

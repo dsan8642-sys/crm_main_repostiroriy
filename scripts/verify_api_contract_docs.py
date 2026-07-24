@@ -19,7 +19,7 @@ def _contract_paths(contract):
     paths = set()
     for endpoint in contract.get("endpoints", []):
         path = endpoint.get("path", "")
-        if path.startswith("/api/nocobase/"):
+        if path.startswith("/api/admin/settings/"):
             paths.add(path)
     return sorted(paths)
 
@@ -42,7 +42,7 @@ def validate():
     required_companions = [
         "GET /api/admin/api-contract/",
         "swimcrm/portal/contract.py",
-        "swimcrm/portal/nocobase_contract.py",
+        "swimcrm/portal/admin_settings_views.py",
     ]
     for companion in required_companions:
         if companion not in text:
@@ -50,19 +50,16 @@ def validate():
 
     for path in _contract_paths(contract):
         if path not in text:
-            errors.append(f"docs/API_CONTRACT.md missing NocoBase endpoint path: {path}")
+            errors.append(f"docs/API_CONTRACT.md missing admin settings endpoint path: {path}")
 
-    required_nocobase_query_docs = [
-        "`limit` must be an integer from `1` to `500`",
-        "Invalid NocoBase query parameters return JSON `400` errors",
+    required_settings_query_docs = [
         "`template_id`",
-        "`scheme_id`",
-        "`trainer_id`",
-        "Invalid config filters return JSON `400` errors",
+        "`language_code`",
+        "Invalid settings filters return JSON `400` errors",
     ]
-    for snippet in required_nocobase_query_docs:
+    for snippet in required_settings_query_docs:
         if snippet not in text:
-            errors.append(f"docs/API_CONTRACT.md missing NocoBase query validation doc: {snippet}")
+            errors.append(f"docs/API_CONTRACT.md missing admin settings query validation doc: {snippet}")
 
     return errors
 

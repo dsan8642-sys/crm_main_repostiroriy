@@ -13,8 +13,8 @@
       "status": "passed",
       "command": "scripts\\release-check-backend.cmd",
       "captured_at": "2026-07-16T12:01:00+02:00",
-      "summary": "Backend release checks passed; Django tests, NocoBase API smoke, readiness audit, cutover audit, and operational guards passed.",
-      "output_excerpt": "Backend release checks passed. Production readiness audit verified. NocoBase API build-pack smoke check. Tracked release source manifests."
+      "summary": "Backend release checks passed; Django tests, readiness audit, cutover audit, and operational guards passed.",
+      "output_excerpt": "Backend release checks passed. Production readiness audit verified. Tracked release source manifests."
     },
     {
       "id": "local_full_stack_release_gate",
@@ -37,7 +37,7 @@
       "status": "passed",
       "command": "scripts\\verify-release-source-manifests.cmd -RequireTracked",
       "captured_at": "2026-07-16T12:07:00+02:00",
-      "summary": "Tracked release source guard passed after confirming required NocoBase and frontend manifests are tracked by Git.",
+      "summary": "Tracked release source guard passed after confirming required frontend manifests are tracked by Git.",
       "output_excerpt": "Release source manifests verified. Required release manifests are tracked by Git."
     },
     {
@@ -57,34 +57,34 @@
     {
       "id": "target_host_release_install",
       "status": "passed",
-      "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall",
+      "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -RunInstall",
       "captured_at": "2026-07-16T12:18:00+02:00",
       "summary": "Release archive was extracted and installed on the target host from the verified archive SHA256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
-      "output_excerpt": "Target-host release install completed. Target-host release install verified. Release archive extracted on target host. Release source archive manifest verified. Release source archive contents verified. Release source archive tracked file list verified. tracked_file_count: 1234. tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. Backend dependencies installed. Root Node tooling installed. NocoBase CLI package installed. Frontend dependencies installed. Django migrations check passed. NocoBase app root outside source tree. NocoBase storage outside source tree."
+      "output_excerpt": "Target-host release install completed. Target-host release install verified. Release archive extracted on target host. Release source archive manifest verified. Release source archive contents verified. Release source archive tracked file list verified. tracked_file_count: 1234. tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. Backend dependencies installed. Frontend dependencies installed. Django migrations check passed."
     },
     {
       "id": "production_env_preflight",
       "status": "passed",
       "command": "scripts\\check-production-env.cmd",
       "captured_at": "2026-07-16T12:20:00+02:00",
-      "summary": "Production environment check passed with real secrets, runtime paths, PostgreSQL, Celery, NocoBase, and HTTPS reverse-proxy settings.",
-      "output_excerpt": "Runtime path settings passed. PostgreSQL production settings passed. Celery production settings passed. NocoBase production settings passed. HTTPS reverse-proxy settings passed. Production environment check passed."
+      "summary": "Production environment check passed with real secrets, runtime paths, PostgreSQL, Celery, and HTTPS reverse-proxy settings.",
+      "output_excerpt": "Runtime path settings passed. PostgreSQL production settings passed. Celery production settings passed. HTTPS reverse-proxy settings passed. Production environment check passed."
     },
     {
-      "id": "live_hybrid_health",
+      "id": "live_app_health",
       "status": "passed",
-      "command": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
+      "command": "scripts\\check-app-health.cmd -RequireHttps -RequireOpsOk",
       "captured_at": "2026-07-16T12:25:00+02:00",
-      "summary": "Live Django health, NocoBase bridge health, guarded config health, ops status, and NocoBase process health passed on https://crm.swimclub.pl and https://nocobase.swimclub.pl.",
-      "output_excerpt": "Django health check passed: https://crm.swimclub.pl/api/health/. Django operations status: ok. Operations status ok requirement passed. NocoBase process health check passed: https://nocobase.swimclub.pl/api/__health_check. HTTPS live endpoint requirement passed. Hybrid health check passed. nocobase_config_health /api/nocobase/config/languages/"
+      "summary": "Live Django health and ops status passed on https://crm.swimclub.pl.",
+      "output_excerpt": "Django health check passed: https://crm.swimclub.pl/api/health/. Django operations status: ok. Operations status ok requirement passed. HTTPS live endpoint requirement passed. App health check passed."
     },
     {
-      "id": "hybrid_backup_restore_drill",
+      "id": "backup_restore_drill",
       "status": "passed",
-      "command": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
+      "command": "scripts\\backup-pg.cmd; scripts\\verify-pg-restore.cmd",
       "captured_at": "2026-07-16T12:35:00+02:00",
-      "summary": "Latest production backup was created, the hybrid restore plan was inspected, Django and NocoBase dumps were structurally verified, and restore verification completed for the Django PostgreSQL database.",
-      "output_excerpt": "Hybrid backup set written. backup_set_dir nocobase_database. Django dump sha256 OK: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. NocoBase dump sha256 OK: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc. Django dump list OK. NocoBase dump list OK. Restore verification OK. Hybrid backup set verification OK."
+      "summary": "Latest production backup was created, the dump was structurally verified, and restore verification completed for the Django PostgreSQL database.",
+      "output_excerpt": "PostgreSQL backup written. Backup dump sha256 OK: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Backup dump list OK. Restore verification OK. Backup set verification OK."
     },
     {
       "id": "rollback_plan_acknowledged",

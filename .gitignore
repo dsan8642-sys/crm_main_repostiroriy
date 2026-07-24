@@ -27,9 +27,7 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 
-# NocoBase local runtime and installer caches
-.nocobase/
-.nocobase-logs/
+# Local runtime and installer caches
 .npm-cache/
 .yarn-cache/
 swimcrm-hybrid/

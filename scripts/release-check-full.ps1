@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [switch]$Postgres,
-    [switch]$AllowMissingLocalNocoBaseRuntime,
     [switch]$SkipFrontendInstall,
     [switch]$SkipFrontendAudit,
     [switch]$SkipFrontendBrowserInstall,
@@ -13,9 +12,6 @@ $ErrorActionPreference = "Stop"
 $BackendArgs = @()
 if ($Postgres) {
     $BackendArgs += "-Postgres"
-}
-if ($AllowMissingLocalNocoBaseRuntime) {
-    $BackendArgs += "-AllowMissingLocalNocoBaseRuntime"
 }
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "release-check-backend.ps1") @BackendArgs
