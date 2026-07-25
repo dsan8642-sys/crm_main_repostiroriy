@@ -3,7 +3,7 @@ import tempfile
 from datetime import date, timedelta
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Consent, ConsentType, ParentAccount, Role
@@ -1617,6 +1617,90 @@ class AdminPortalApiRule(TestCase):
         )
         self.assertIn('filename="clients.xlsx"', xlsx_response["Content-Disposition"])
         self.assertTrue(xlsx_response.content.startswith(b"PK"))
+
+    def test_admin_import_endpoints_require_admin(self):
+        anon_client = Client()
+        response = anon_client.post("/api/admin/import/attendance/preview/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_import_clients_http_preview_commit_rollback(self):
+        csv_bytes = "Фамилия;Имя;Email\r\nСоколов;Олег;oleg.http@example.com\r\n".encode("utf-8")
+        mapping = {"Фамилия": "last_name", "Имя": "first_name", "Email": "email"}
+        preview_response = self.client.post("/api/admin/import/clients/preview/", {
+            "file": SimpleUploadedFile("clients.csv", csv_bytes, content_type="text/csv"),
+            "mapping": json.dumps(mapping),
+        })
+        self.assertEqual(preview_response.status_code, 200)
+        preview_rows = preview_response.json()["rows"]
+        self.assertEqual(len(preview_rows), 1)
+        self.assertEqual(preview_rows[0]["status"], "new")
+
+        commit_response = self.client.post(
+            "/api/admin/import/clients/commit/",
+            data=json.dumps({"rows": preview_rows, "source_name": "clients.csv"}),
+            content_type="application/json",
+        )
+        self.assertEqual(commit_response.status_code, 201)
+        commit_payload = commit_response.json()
+        self.assertEqual(commit_payload["rows_imported"], 1)
+        self.assertTrue(Student.objects.filter(email="oleg.http@example.com").exists())
+
+        rollback_response = self.client.post(
+            f"/api/admin/import/clients/{commit_payload['batch_id']}/rollback/")
+        self.assertEqual(rollback_response.status_code, 200)
+        self.assertFalse(Student.objects.filter(email="oleg.http@example.com").exists())
+
+    def test_admin_import_clients_rejects_missing_file(self):
+        response = self.client.post("/api/admin/import/clients/preview/", {
+            "mapping": json.dumps({}),
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_admin_import_attendance_http_preview_and_commit(self):
+        trainer = f.make_trainer(username="coach_http")
+        group = f.make_group("Дельфины HTTP")
+        f.make_student(group=group, first="Оля", last="Летняя", email="olya.http@example.com")
+        csv_bytes = (
+            "Дата;Клиент;Группа;Тренер;Статус;Окончание;Локация;Вместимость\r\n"
+            "20.03.2026 09:00;olya.http@example.com;Дельфины HTTP;coach_http;"
+            "present;10:00;Бассейн H;10\r\n"
+        ).encode("utf-8")
+        preview_response = self.client.post("/api/admin/import/attendance/preview/", {
+            "file": SimpleUploadedFile("att.csv", csv_bytes, content_type="text/csv"),
+        })
+        self.assertEqual(preview_response.status_code, 200)
+        rows = preview_response.json()["rows"]
+        self.assertEqual(rows[0]["status"], "will_create_session")
+
+        commit_response = self.client.post(
+            "/api/admin/import/attendance/commit/",
+            data=json.dumps({"rows": rows}),
+            content_type="application/json",
+        )
+        self.assertEqual(commit_response.status_code, 201)
+        self.assertEqual(commit_response.json()["created_records"], 1)
+
+    def test_admin_import_payments_http_preview_and_commit(self):
+        student = f.make_student(first="Стас", last="Быстров", email="stas.http@example.com")
+        csv_bytes = (
+            "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий\r\n"
+            "stas.http@example.com;75;PLN;20.03.2026;cash;confirmed;\r\n"
+        ).encode("utf-8")
+        preview_response = self.client.post("/api/admin/import/payments/preview/", {
+            "file": SimpleUploadedFile("pay.csv", csv_bytes, content_type="text/csv"),
+        })
+        self.assertEqual(preview_response.status_code, 200)
+        rows = preview_response.json()["rows"]
+        self.assertEqual(rows[0]["status"], "new")
+
+        commit_response = self.client.post(
+            "/api/admin/import/payments/commit/",
+            data=json.dumps({"rows": rows}),
+            content_type="application/json",
+        )
+        self.assertEqual(commit_response.status_code, 201)
+        self.assertEqual(commit_response.json()["created"], 1)
+        self.assertTrue(Payment.objects.filter(student=student, amount_minor=7500).exists())
 
     def test_admin_mass_mail_requires_valid_channel_and_body(self):
         bad_channel = self.client.post(

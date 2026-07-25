@@ -6,6 +6,7 @@ import {
   createAdminClientsScreen,
   createAdminDebtorsScreen,
   createAdminGroupsScreen,
+  createAdminImportExportScreen,
   createAdminOverviewScreen,
   createAdminPaymentsScreen,
   createAdminScheduleScreen,
@@ -67,6 +68,7 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
       Payments: createAdminPaymentsScreen(components, icons, reloadRoleData),
       Debtors: createAdminDebtorsScreen(components, icons, reloadRoleData),
       Settings: createAdminSettingsScreen(components, reloadRoleData),
+      ImportExport: createAdminImportExportScreen(components, icons, reloadRoleData),
     },
     TrainerScreens: {
       Sessions: createTrainerSessionsScreen(components, icons),

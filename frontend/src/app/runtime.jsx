@@ -18,6 +18,7 @@ export const ROLE_META = {
       payments: ['Платежи', 'Подтверждения, начисления и баланс клиента'],
       debtors: ['Должники', 'Просрочки и напоминания'],
       settings: ['Настройки и контроль', 'Справочники, уведомления, доступы и журналы'],
+      importExport: ['Импорт и экспорт', 'Загрузка клиентов, посещаемости и оплат, выгрузка отчётов'],
     },
   },
   trainer: {
@@ -76,6 +77,7 @@ export function roleNav(role, icons, data) {
         section: 'Финансы',
       },
       { key: 'settings', label: 'Настройки', icon: <icons.Settings size={17} />, section: 'Система' },
+      { key: 'importExport', label: 'Импорт/экспорт', icon: <icons.Import size={17} />, section: 'Система' },
     ]
   }
 

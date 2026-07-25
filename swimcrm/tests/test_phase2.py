@@ -1,8 +1,10 @@
 import io
+import json
 from datetime import date, datetime, time, timedelta
 
 from django.core import mail
-from django.test import TestCase, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Consent, ConsentType
@@ -202,6 +204,25 @@ class ImportRule(TestCase):
         self.assertTrue(name.endswith(".xlsx"))
         self.assertGreater(len(content), 0)
         self.assertEqual(content[:2], b"PK")  # xlsx is a zip
+
+    def test_preview_and_commit_are_reachable_over_http(self):
+        # The importer above is exercised directly; this confirms the same
+        # pipeline is actually wired to the admin API, not just importable.
+        admin_client = Client()
+        admin_client.force_login(f.make_admin(username="import_http_admin"))
+        preview = admin_client.post("/api/admin/import/clients/preview/", {
+            "file": SimpleUploadedFile("clients.csv", CSV.encode("utf-8"), content_type="text/csv"),
+            "mapping": json.dumps(self.mapping),
+        })
+        self.assertEqual(preview.status_code, 200)
+        rows = preview.json()["rows"]
+        self.assertEqual(sum(1 for r in rows if r["status"] == NEW), 2)
+
+        commit = admin_client.post(
+            "/api/admin/import/clients/commit/",
+            data=json.dumps({"rows": rows}), content_type="application/json")
+        self.assertEqual(commit.status_code, 201)
+        self.assertEqual(commit.json()["rows_imported"], 2)
         name_csv, csv_bytes = exports.export_entity("clients", "csv")
         self.assertIn("Фамилия", csv_bytes.decode("utf-8"))
 
