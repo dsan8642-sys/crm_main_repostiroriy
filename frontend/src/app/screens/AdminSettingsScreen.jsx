@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api.js'
+import { createAdminImportExportPanel } from './AdminImportExportScreen.jsx'
 
 const eventTypes = [
   ['payment_reminder', 'Напоминание об оплате'], ['session_reminder', 'Напоминание о занятии'],
@@ -24,6 +25,8 @@ const resources = [
   { tab: 'localization', id: 'languages', title: 'Языки', endpoint: '/api/admin/settings/languages/', response: 'languages', detail: (id) => `/api/admin/settings/languages/${id}/`, fields: [['code', 'Код'], ['name', 'Название'], ['is_active', 'Активен', 'boolean']] },
   { tab: 'localization', id: 'dictionaryKeys', title: 'Ключи интерфейса', endpoint: '/api/admin/settings/dictionary-keys/', response: 'keys', detail: (id) => `/api/admin/settings/dictionary-keys/${id}/`, fields: [['domain', 'Раздел'], ['code', 'Ключ'], ['is_active', 'Активен', 'boolean']] },
   { tab: 'localization', id: 'dictionaryTranslations', title: 'Переводы интерфейса', endpoint: '/api/admin/settings/dictionary-translations/', response: 'translations', detail: (id) => `/api/admin/settings/dictionary-translations/${id}/`, fields: [['key_id', 'Ключ', 'select-ref', 'dictionaryKeys'], ['language_code', 'Язык', 'select-ref', 'languages', 'code'], ['value', 'Текст', 'textarea']] },
+  // `panel` opts out of the CRUD-table shape: no endpoint to load, custom body.
+  { tab: 'control', id: 'importExport', title: 'Импорт и экспорт', panel: true, readOnly: true },
   { tab: 'control', id: 'audit', title: 'Журнал действий', endpoint: '/api/admin/system/audit/', response: 'entries', readOnly: true },
   { tab: 'control', id: 'imports', title: 'История импортов', endpoint: '/api/admin/system/imports/', response: 'batches', readOnly: true },
   { tab: 'control', id: 'security', title: 'Доступы и 2FA', endpoint: '/api/admin/system/security/', response: 'users', readOnly: true },
@@ -47,7 +50,9 @@ function readOnlyDetails(row) {
   return displayValue(row.entity_type || row.role || row.status || row.channel || row.method || '-')
 }
 
-export function createAdminSettingsScreen(components, reloadRoleData) {
+export function createAdminSettingsScreen(components, reloadRoleData, icons) {
+  const ImportExportPanel = createAdminImportExportPanel(components, icons, reloadRoleData)
+
   const { Button, Banner, Tabs, Table, Input, StatusPill, Dialog } = components
   return function AdminSettingsScreen() {
     const [tab, setTab] = useState('catalog')
@@ -65,7 +70,8 @@ export function createAdminSettingsScreen(components, reloadRoleData) {
     const rows = data[resource.id] || []
 
     const load = async (onlyId) => {
-      const needed = onlyId ? resources.filter((item) => item.id === onlyId) : resources
+      const loadable = resources.filter((item) => item.endpoint)
+      const needed = onlyId ? loadable.filter((item) => item.id === onlyId) : loadable
       setLoading(true)
       try {
         const responses = await Promise.all(needed.map(async (item) => [item.id, await api.get(item.endpoint)]))
@@ -133,14 +139,14 @@ export function createAdminSettingsScreen(components, reloadRoleData) {
       : [{ key: 'name', header: resource.title, render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain)}</span> }, { key: 'details', header: 'Детали', muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from) }, { key: 'active', header: 'Статус', render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>Изменить</Button><Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>Убрать</Button></div> }]
 
     return <div className="page page-wide">
-      <div className="page-head"><div><h2 className="page-title">Настройки и контроль</h2><p className="page-desc">Все служебные функции SwimCRM в одном месте. Django admin больше не нужен для ежедневной работы.</p></div><Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>Обновить</Button></div>
+      <div className="page-head"><div><h2 className="page-title">Настройки и контроль</h2><p className="page-desc">Все служебные функции SwimCRM в одном месте. Django admin больше не нужен для ежедневной работы.</p></div>{!resource.panel && <Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>Обновить</Button>}</div>
       {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
       {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
       <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
       <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => setResourceId(item.id)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>
       <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3></div>{!resource.readOnly && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>
       {editing && <div className="card card-pad ops-edit-panel"><div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div><div className="ops-form-grid">{(resource.fields || []).map((field) => { const [key, label, type = 'text'] = field; const value = form[key] ?? ''; if (type === 'boolean') return <label className="ops-check" key={key}><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} />{label}</label>; if (type === 'textarea') return <label key={key} style={{ gridColumn: '1 / -1' }}>{label}<textarea value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} rows="4" /></label>; if (type === 'select' || type === 'select-ref') return <label key={key}>{label}<select value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>; return <Input key={key} label={label} value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} type={type} /> })}</div><div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => setEditing(null)}>Отмена</Button></div></div>}
-      <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />
+      {resource.panel ? <ImportExportPanel /> : <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />}
       {pendingArchive && <Dialog
         open
         title="Убрать запись из рабочего списка?"

@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { api } from '../api.js'
-import { ROLE_META } from './runtime.jsx'
 
 function EyeIcon({ size = 18 }) {
   return (
@@ -20,33 +19,6 @@ function EyeOffIcon({ size = 18 }) {
       <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
       <line x1="3" y1="3" x2="21" y2="21" />
     </svg>
-  )
-}
-
-export function RoleSwitch({ role, onDevLogin, apiState }) {
-  const [busyRole, setBusyRole] = useState(null)
-
-  async function loginAs(nextRole) {
-    setBusyRole(nextRole)
-    try {
-      await onDevLogin?.(nextRole)
-    } finally {
-      setBusyRole(null)
-    }
-  }
-
-  if (!import.meta.env.DEV) return null
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-      <div className="seg" aria-label="Тестовый вход" style={{ transform: 'scale(.86)', transformOrigin: 'right center' }}>
-        {Object.entries(ROLE_META).map(([key, meta]) => (
-          <button key={key} type="button" className={role === key ? 'on' : ''} title={`Тестовый вход: ${meta.label}`}
-            disabled={busyRole != null || apiState.state === 'loading'} onClick={() => loginAs(key)}>
-            {busyRole === key ? '...' : meta.label}
-          </button>
-        ))}
-      </div>
-    </div>
   )
 }
 

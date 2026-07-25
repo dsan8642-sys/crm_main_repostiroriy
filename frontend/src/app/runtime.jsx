@@ -18,7 +18,6 @@ export const ROLE_META = {
       payments: ['Платежи', 'Подтверждения, начисления и баланс клиента'],
       debtors: ['Должники', 'Просрочки и напоминания'],
       settings: ['Настройки и контроль', 'Справочники, уведомления, доступы и журналы'],
-      importExport: ['Импорт и экспорт', 'Загрузка клиентов, посещаемости и оплат, выгрузка отчётов'],
     },
   },
   trainer: {
@@ -55,7 +54,7 @@ export const ROLE_META = {
 export function roleNav(role, icons, data) {
   if (role === 'admin') {
     return [
-      { key: 'overview', label: 'Пульт', icon: <icons.Home size={17} /> },
+      { key: 'overview', label: 'Главная', icon: <icons.Home size={17} /> },
       { key: 'clients', label: 'Клиенты', icon: <icons.Users size={17} />, count: data.AdminData?.clients?.length },
       { key: 'trainers', label: 'Тренеры', icon: <icons.Whistle size={17} />, count: data.AdminData?.trainers?.length, section: 'Операции' },
       { key: 'groups', label: 'Группы', icon: <icons.Users size={17} />, count: data.AdminData?.groups?.length, section: 'Операции' },
@@ -77,7 +76,6 @@ export function roleNav(role, icons, data) {
         section: 'Финансы',
       },
       { key: 'settings', label: 'Настройки', icon: <icons.Settings size={17} />, section: 'Система' },
-      { key: 'importExport', label: 'Импорт/экспорт', icon: <icons.Import size={17} />, section: 'Система' },
     ]
   }
 

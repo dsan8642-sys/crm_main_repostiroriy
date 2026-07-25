@@ -41,7 +41,7 @@ def admin_audit_log(request):
             Q(actor__username__icontains=q) | Q(actor__first_name__icontains=q) | Q(actor__last_name__icontains=q))
     if request.GET.get("entity_type"):
         qs = qs.filter(entity_type=request.GET["entity_type"])
-    return JsonResponse({"entries": [_audit_payload(entry) for entry in qs[:300]]})
+    return JsonResponse({"entries": [_audit_payload(entry) for entry in qs[:MAX_LIST_ROWS]]})
 
 
 @require_GET

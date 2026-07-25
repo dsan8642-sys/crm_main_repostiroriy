@@ -6,7 +6,6 @@ import {
   createAdminClientsScreen,
   createAdminDebtorsScreen,
   createAdminGroupsScreen,
-  createAdminImportExportScreen,
   createAdminOverviewScreen,
   createAdminPaymentsScreen,
   createAdminScheduleScreen,
@@ -39,7 +38,7 @@ function routeState() {
   }
 }
 
-export function AppShell({ design, health, apiState, initialRole, reloadRoleData, onDevLogin, onLogout }) {
+export function AppShell({ design, health, apiState, initialRole, reloadRoleData, onLogout }) {
   const initialRoute = routeState()
   const [role, setRole] = useState(initialRole || 'admin')
   const [view, setView] = useState(initialRoute.view || ROLE_META[initialRole || 'admin'].initialView)
@@ -49,7 +48,6 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
   const [selectedTrainerSessionId, setSelectedTrainerSessionId] = useState(initialRoute.trainerSessionId)
   const [selectedGroupId, setSelectedGroupId] = useState(initialRoute.groupId)
   const [selectedTab, setSelectedTab] = useState(initialRoute.tab)
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
   const { components, icons, data } = design
@@ -67,8 +65,7 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
       Attendance: createAdminAttendanceScreen(components, icons, reloadRoleData),
       Payments: createAdminPaymentsScreen(components, icons, reloadRoleData),
       Debtors: createAdminDebtorsScreen(components, icons, reloadRoleData),
-      Settings: createAdminSettingsScreen(components, reloadRoleData),
-      ImportExport: createAdminImportExportScreen(components, icons, reloadRoleData),
+      Settings: createAdminSettingsScreen(components, reloadRoleData, icons),
     },
     TrainerScreens: {
       Sessions: createTrainerSessionsScreen(components, icons),
@@ -138,19 +135,6 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     writeRoute(view, { clientId: selectedClientId, sessionId: selectedSessionId, trainerSessionId: selectedTrainerSessionId, groupId: selectedGroupId, tab: selectedTab, kid: nextKid }, true)
   }
 
-  async function switchRole(nextRole) {
-    setProfileMenuOpen(false)
-    setRole(nextRole)
-    setView(ROLE_META[nextRole].initialView)
-    const query = new URLSearchParams({ role: nextRole, view: ROLE_META[nextRole].initialView })
-    window.history.pushState({}, '', `${window.location.pathname}?${query}`)
-    try {
-      await onDevLogin?.(nextRole)
-    } catch {
-      await reloadRoleData?.(nextRole)
-    }
-  }
-
   let lastSection = null
 
   return (
@@ -190,32 +174,13 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
         </nav>
 
         <div className="ops-user-wrap">
-          {profileMenuOpen && (
-            <div className="ops-profile-menu">
-              <div className="ops-profile-menu-title">Переключить вид</div>
-              {Object.entries(ROLE_META).map(([key, item]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`ops-profile-menu-item${role === key ? ' is-active' : ''}`}
-                  onClick={() => switchRole(key)}
-                >
-                  <span className="ops-mini-avatar">{initials(item.user)}</span>
-                  <span>{item.productRole}</span>
-                </button>
-              ))}
-              <button type="button" className="ops-profile-menu-item is-danger" onClick={onLogout}>
-                <span>Выйти</span>
-              </button>
-            </div>
-          )}
-          <button type="button" className="ops-user ops-user-button" onClick={() => setProfileMenuOpen((open) => !open)}>
+          <div className="ops-user">
             <div className="ops-avatar">{initials(meta.user)}</div>
             <div>
               <div className="ops-user-name">{meta.user}</div>
               <div className="ops-user-role">{meta.productRole}</div>
             </div>
-          </button>
+          </div>
           <IconButton label="Выйти" onClick={onLogout}><icons.Logout size={16} /></IconButton>
         </div>
       </aside>
@@ -223,9 +188,7 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
       <div className="ops-main">
         <header className="topbar ops-topbar">
           <div>
-            <button type="button" className="ops-crumb ops-crumb-button" onClick={() => setProfileMenuOpen((open) => !open)}>
-              H2O / {meta.productRole}
-            </button>
+            <div className="ops-crumb">H2O / {meta.productRole}</div>
             <h1>{title}</h1>
             <div className="sub">{subtitle}</div>
           </div>

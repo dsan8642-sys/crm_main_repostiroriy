@@ -18,6 +18,9 @@ class Charge(models.Model):
     student = models.ForeignKey("students.Student", on_delete=models.CASCADE, related_name="charges")
     subscription = models.ForeignKey("subscriptions.Subscription", null=True, blank=True,
                                      on_delete=models.SET_NULL, related_name="charges")
+    attendance = models.ForeignKey("attendance.AttendanceRecord", null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name="charges",
+                                   help_text="Заполняется для платного разового занятия")
     description = models.CharField(max_length=255)
     amount_minor = models.BigIntegerField()
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,

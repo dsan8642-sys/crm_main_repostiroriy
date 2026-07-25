@@ -86,6 +86,13 @@ body {
   flex: 1;
   overflow: auto;
   padding-top: 14px;
+  /* Still scrollable, just without the bar cutting into the dark sidebar. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ops-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .ops-nav-section {
@@ -623,10 +630,10 @@ textarea {
   background: var(--ops-danger-soft);
 }
 
-.ops-brand-button,
-.ops-user-button,
-.ops-crumb-button {
+.ops-brand-button {
+  width: 100%;
   border: 0;
+  border-radius: 12px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -634,81 +641,15 @@ textarea {
   cursor: pointer;
 }
 
-.ops-brand-button {
-  width: 100%;
-  border-radius: 12px;
-}
-
-.ops-brand-button:hover,
-.ops-user-button:hover,
-.ops-crumb-button:hover {
+.ops-brand-button:hover {
   background: rgba(255, 255, 255, 0.06);
 }
 
 .ops-user-wrap {
-  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: center;
-}
-
-.ops-profile-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 10px);
-  z-index: 30;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  background: #0f172a;
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
-}
-
-.ops-profile-menu-title {
-  padding: 4px 7px 8px;
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.ops-profile-menu-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 7px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: #e2e8f0;
-  cursor: pointer;
-  font-weight: 800;
-  text-align: left;
-}
-
-.ops-profile-menu-item:hover,
-.ops-profile-menu-item.is-active {
-  background: rgba(56, 189, 248, 0.14);
-}
-
-.ops-profile-menu-item.is-danger {
-  color: #fecaca;
-}
-
-.ops-mini-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  font-size: 11px;
 }
 
 .ops-action-strip {
@@ -1132,6 +1073,38 @@ button.ops-detail-row:hover,
   padding: 8px;
 }
 
+.ops-schedule-event-wrap {
+  position: relative;
+}
+
+.ops-schedule-event-edit {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.ops-schedule-event-wrap:hover .ops-schedule-event-edit,
+.ops-schedule-event-edit:focus-visible {
+  opacity: 1;
+}
+
+.ops-schedule-event-edit:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
 .ops-schedule-event {
   display: grid;
   gap: 2px;
@@ -1232,14 +1205,6 @@ button.ops-detail-row:hover,
 
   .ops-user-wrap > .swim-iconbtn {
     display: none !important;
-  }
-
-  .ops-profile-menu {
-    position: fixed;
-    top: 132px;
-    right: 12px;
-    bottom: auto;
-    left: 12px;
   }
 
   .ops-nav-button {
@@ -1574,9 +1539,9 @@ button.ops-detail-row:hover,
   bottom: 1px;
   width: 36px;
   border: 0;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-default);
   border-radius: 0 7px 7px 0;
-  background: var(--surface);
+  background: var(--surface-card);
   color: var(--text-muted);
   cursor: pointer;
   font-size: 18px;
@@ -1598,9 +1563,9 @@ button.ops-detail-row:hover,
   margin: 0;
   padding: 5px;
   overflow-y: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--surface-card);
   box-shadow: var(--shadow-lg);
   list-style: none;
 }

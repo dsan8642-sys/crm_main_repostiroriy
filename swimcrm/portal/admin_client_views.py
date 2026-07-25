@@ -36,7 +36,9 @@ def admin_clients(request):
     if request.GET.get("trainer_id"):
         qs = qs.filter(group__default_trainer_id=request.GET["trainer_id"])
     debt = request.GET.get("debt")
-    students = list(qs.order_by("last_name", "first_name", "id")[:200])
+    # distinct(): the `q` filter joins group__default_trainer__user, which can
+    # emit one row per join match and eat slots inside the cap.
+    students = list(qs.distinct().order_by("last_name", "first_name", "id")[:MAX_LIST_ROWS])
     if debt in {"yes", "no"}:
         filtered = []
         for student in students:

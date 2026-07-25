@@ -1,10 +1,12 @@
 """Rule 2 & 5: mark attendance, deduct sessions via the immutable ledger only,
 enforce capacity + no double-enrollment with row locking against races."""
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
 
 from audit.models import audit
+from billing.models import Charge
 from subscriptions.models import (LedgerReason, SessionLedgerEntry,
                                   Subscription, SubscriptionStatus)
 from scheduling.models import Session
@@ -35,6 +37,38 @@ def _deductible_subscription(student, when):
 def _current_effect(record):
     agg = record.ledger_entries.aggregate(total=Sum("delta"))
     return agg["total"] or 0
+
+
+def _reconcile_visit_charge(record, session, *, covered_by_subscription, actor):
+    """Bill an attended session that no subscription paid for (rule: group price).
+
+    Charges are append-only (Charge.delete() raises), so a status change away
+    from PRESENT cannot remove the original row — it posts a negative reversal
+    instead, mirroring how the ledger compensates with CORRECTION entries.
+    """
+    group = session.group
+    charged = record.charges.aggregate(total=Sum("amount_minor"))["total"] or 0
+    should_bill = (
+        record.status == AttendanceStatus.PRESENT
+        and not covered_by_subscription
+        and group is not None
+        and group.price_minor
+    )
+    desired = group.price_minor if should_bill else 0
+    diff = desired - charged
+    if diff == 0:
+        return
+    currency = group.currency if group is not None else settings.DEFAULT_CURRENCY
+    Charge.objects.create(
+        student=record.student,
+        attendance=record,
+        description=(f"Разовое занятие · {session}" if diff > 0
+                     else f"Сторно разового занятия · {session}"),
+        amount_minor=diff,
+        currency=currency,
+        due_date=session.start_at.date(),
+        created_by=actor,
+    )
 
 
 @transaction.atomic
@@ -73,13 +107,14 @@ def set_attendance(*, session_id, student, status, actor=None):
     desired = -1 if status in DEDUCTING_STATUSES else 0
     current = _current_effect(record)
     diff = desired - current
+    existing = record.ledger_entries.select_related("subscription").first()
+    sub = existing.subscription if existing else None
     if diff != 0:
         # A status change reconciles against the SAME subscription the original
         # deduction hit (append-only compensation); a first-time deduction picks
         # a counted subscription that still has sessions left.
-        existing = record.ledger_entries.select_related("subscription").first()
-        sub = existing.subscription if existing else \
-            _deductible_subscription(student, session.start_at.date())
+        if sub is None:
+            sub = _deductible_subscription(student, session.start_at.date())
         if sub is not None:  # unlimited / no sub with balance -> nothing to deduct
             reason = (LedgerReason.ATTENDANCE
                       if existing is None and desired == -1 else LedgerReason.CORRECTION)
@@ -87,6 +122,11 @@ def set_attendance(*, session_id, student, status, actor=None):
                 subscription=sub, delta=diff, reason=reason,
                 attendance=record, created_by=actor,
                 note=f"{record.get_status_display()} · {session}")
+
+    # A subscription that already absorbed this visit keeps absorbing it across
+    # status changes, so bill money only when no subscription ever covered it.
+    _reconcile_visit_charge(record, session, covered_by_subscription=sub is not None,
+                            actor=actor)
     audit(actor, "attendance.marked", record,
           {"status": str(status), "session": session_id})
     return record

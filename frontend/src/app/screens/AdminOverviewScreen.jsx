@@ -29,7 +29,7 @@ export function createAdminOverviewScreen(components, icons) {
         <div className="page-head">
           <div>
             <h2 className="page-title">Рабочий стол</h2>
-            <p className="page-desc">Быстрый вход в ежедневные действия. Карточки и строки кликабельны.</p>
+            <p className="page-desc">Быстрый вход в ежедневные действия.</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Button variant="secondary" iconLeft={<I.Calendar size={15} />} onClick={() => go('schedule')}>Расписание</Button>

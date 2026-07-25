@@ -33,14 +33,20 @@ from scheduling.models import (RecurringTemplate, Session, SessionParticipant,
                                SessionParticipantSource, SessionParticipantStatus,
                                SessionType, WaitlistEntry, WaitlistStatus)
 from scheduling.services import (ScheduleConflict, cancel_series, check_trainer_conflict,
-                                 create_session, edit_single_session, generate_sessions,
-                                 promote_waitlist_entry, session_roster_students)
+                                 create_session, delete_session, edit_single_session,
+                                 generate_sessions, promote_waitlist_entry,
+                                 session_roster_students)
 from students.models import Student
 from students.services import ensure_account_holder_participant
 from subscriptions.models import Subscription, SubscriptionStatus
 from subscriptions.services import create_subscription, freeze_subscription, manual_adjust, renew_subscription
 
 from .contract import API_CONTRACT
+
+# Admin list endpoints return the full working set; the frontend filters client
+# side. The cap only exists so a runaway table cannot exhaust memory, so it must
+# stay well above the real row counts (a 200-row cap silently hid clients 201+).
+MAX_LIST_ROWS = 2000
 
 
 def _error(message, status=400):
@@ -268,6 +274,8 @@ def _group_payload(group):
             "id": group.default_trainer_id,
             "name": str(group.default_trainer),
         } if group.default_trainer_id else None,
+        "price_minor": group.price_minor,
+        "currency": group.currency,
         "is_active": group.is_active,
         "participants_count": group.students.count(),
     }
@@ -440,7 +448,7 @@ def _client_detail_payload(account):
         "subscriptions": [_subscription_detail_payload(subscription) for subscription in subscriptions],
         "charges": [_charge_payload(charge) for charge in charges],
         "payments": [_payment_payload(payment) for payment in payments],
-        "attendance": [_attendance_payload(record) for record in attendance[:200]],
+        "attendance": [_attendance_payload(record) for record in attendance[:MAX_LIST_ROWS]],
         "consents": [_consent_payload(consent) for consent in account.consents.order_by("type", "id")],
         "summary": {
             "participants_count": len(participants),
@@ -652,6 +660,13 @@ def _apply_group_data(group, data):
     if "default_trainer_id" in group_data:
         trainer_id = group_data.get("default_trainer_id")
         group.default_trainer = get_object_or_404(Trainer, pk=trainer_id) if trainer_id else None
+    if "price_minor" in group_data:
+        price_minor = group_data.get("price_minor")
+        group.price_minor = None if price_minor in (None, "") else int(price_minor)
+        if group.price_minor is not None and group.price_minor < 0:
+            raise ValidationError("group price cannot be negative")
+    if "currency" in group_data:
+        group.currency = group_data.get("currency") or settings.DEFAULT_CURRENCY
     if "is_active" in group_data:
         group.is_active = _bool_value(group_data.get("is_active"), True)
     if not group.name:

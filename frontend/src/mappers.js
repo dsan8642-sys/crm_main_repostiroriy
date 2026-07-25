@@ -222,6 +222,10 @@ export function mapAdminPortalData({ clients, trainers, groups, subscriptionType
       defaultTrainerId: group.default_trainer?.id || '',
       trainer: group.default_trainer?.name || '-',
       students: group.participants_count,
+      // null price = the group is never billed per visit
+      price: group.price_minor == null ? null : asMoneyMajor(group.price_minor),
+      priceMinor: group.price_minor,
+      currency: group.currency,
       active: group.is_active,
     })),
     subscriptionTypes: (subscriptionTypes?.subscription_types || []).map((type) => ({

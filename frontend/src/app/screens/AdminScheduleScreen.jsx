@@ -5,7 +5,7 @@ import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminScheduleScreen(components, icons, reloadRoleData) {
-  const { Button, Badge, Banner, Input, Table, StatusPill } = components
+  const { Button, Badge, Banner, Dialog, Input, Table, StatusPill } = components
   const I = icons
   return function ApiAdminSchedule({ go, initialTab }) {
     const sessions = globalThis.AdminData?.sessions || []
@@ -42,6 +42,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       skipConflicts: true,
     })
     const [editingSession, setEditingSession] = useState(null)
+    const [confirmDelete, setConfirmDelete] = useState(null)
     const [sessionEditForm, setSessionEditForm] = useState({
       groupId: '',
       trainerId: '',
@@ -298,6 +299,25 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
         await reloadRoleData?.('admin')
       } catch (err) {
         setError(err.message)
+      } finally {
+        setBusy(false)
+      }
+    }
+
+    // The backend only allows this for a session with no attendance and no
+    // payroll; anything that already happened must be cancelled instead, and
+    // it answers with an explanatory error we surface as-is.
+    async function deleteSession(session) {
+      setBusy(true)
+      setError(null)
+      try {
+        await api.delete(`/api/admin/schedule/sessions/${session.sessionId}/`)
+        setMessage('Занятие удалено.')
+        setConfirmDelete(null)
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(err.message)
+        setConfirmDelete(null)
       } finally {
         setBusy(false)
       }
@@ -633,18 +653,31 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
                   </header>
                   <div className="ops-schedule-day-events">
                     {daySessions.map((session) => (
-                      <button
-                        type="button"
-                        key={session.id}
-                        className={`ops-schedule-event${session.isCancelled ? ' is-cancelled' : ''}`}
-                        onClick={() => go('attendance', { sessionId: session.sessionId })}
-                        title={`${session.start}-${session.end} · ${session.group} · ${session.trainer}`}
-                      >
-                        <span className="mono">{session.start}-{session.end}</span>
-                        <strong>{session.group}</strong>
-                        <small>{session.trainer}</small>
-                        <small><I.Location size={11} /> {session.location}</small>
-                      </button>
+                      <div key={session.id} className="ops-schedule-event-wrap">
+                        <button
+                          type="button"
+                          className={`ops-schedule-event${session.isCancelled ? ' is-cancelled' : ''}`}
+                          onClick={() => go('attendance', { sessionId: session.sessionId })}
+                          title={`${session.start}-${session.end} · ${session.group} · ${session.trainer}`}
+                        >
+                          <span className="mono">{session.start}-{session.end}</span>
+                          <strong>{session.group}</strong>
+                          <small>{session.trainer}</small>
+                          <small><I.Location size={11} /> {session.location}</small>
+                        </button>
+                        {/* Editing used to be reachable only from list mode, so
+                            the trainer of a scheduled class looked unchangeable. */}
+                        <button
+                          type="button"
+                          className="ops-schedule-event-edit"
+                          title="Изменить занятие"
+                          aria-label={`Изменить занятие ${session.start} ${session.group}`}
+                          disabled={busy || session.isCancelled}
+                          onClick={(event) => { event.stopPropagation(); openSessionEdit(session) }}
+                        >
+                          <I.Pencil size={12} />
+                        </button>
+                      </div>
                     ))}
                     {!daySessions.length && <span className="ops-schedule-empty-day">Нет занятий</span>}
                   </div>
@@ -679,10 +712,24 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
               <Button size="sm" variant="subtle" onClick={(event) => { event.stopPropagation(); go('attendance', { sessionId: session.sessionId }) }}>Открыть</Button>
               <Button size="sm" variant="subtle" disabled={busy || session.isCancelled} onClick={(event) => { event.stopPropagation(); openSessionEdit(session) }}>Изменить</Button>
               <Button size="sm" variant="secondary" disabled={busy || session.isCancelled} onClick={(event) => { event.stopPropagation(); cancelSession(session) }}>Отменить</Button>
+              <Button size="sm" variant="danger" disabled={busy} onClick={(event) => { event.stopPropagation(); setConfirmDelete(session) }}>Удалить</Button>
             </div>
           ))}
           {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>В выбранном периоде занятий нет.</div>}
         </div>}
+        <Dialog
+          open={confirmDelete != null}
+          tone="danger"
+          irreversible
+          title="Удалить занятие?"
+          description={confirmDelete
+            ? `${confirmDelete.date} ${confirmDelete.start}-${confirmDelete.end} · ${confirmDelete.group}. Занятие с отметками посещаемости удалить нельзя — его нужно отменить.`
+            : ''}
+          confirmLabel="Удалить"
+          cancelLabel="Отмена"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={() => deleteSession(confirmDelete)}
+        />
       </div>
     )
   }

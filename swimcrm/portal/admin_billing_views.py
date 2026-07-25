@@ -26,7 +26,7 @@ def admin_payments(request):
         qs = qs.filter(student_id=request.GET["participant_id"])
     if request.GET.get("status"):
         qs = qs.filter(status=request.GET["status"])
-    return JsonResponse({"payments": [_payment_payload(payment) for payment in qs[:200]]})
+    return JsonResponse({"payments": [_payment_payload(payment) for payment in qs[:MAX_LIST_ROWS]]})
 
 
 @require_http_methods(["GET", "POST"])

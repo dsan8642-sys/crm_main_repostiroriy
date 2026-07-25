@@ -118,16 +118,19 @@ def admin_schedule_sessions(request):
         qs = qs.filter(group_id=request.GET["group_id"])
     if request.GET.get("cancelled") in {"true", "false"}:
         qs = qs.filter(is_cancelled=request.GET["cancelled"] == "true")
-    return JsonResponse({"sessions": [_session_payload(session) for session in qs[:300]]})
+    return JsonResponse({"sessions": [_session_payload(session) for session in qs[:MAX_LIST_ROWS]]})
 
 
-@require_http_methods(["GET", "POST"])
+@require_http_methods(["GET", "POST", "DELETE"])
 def admin_schedule_session_detail(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(
         Session.objects.select_related(
             "group", "trainer__user", "substitute_trainer__user", "individual_student", "template"
         ), pk=session_id)
+    if request.method == "DELETE":
+        deleted_id = delete_session(session, actor=user)
+        return JsonResponse({"deleted": True, "session_id": deleted_id})
     if request.method == "POST":
         changes = _session_changes_from_data(_json_body(request))
         edit_single_session(session, actor=user, **changes)

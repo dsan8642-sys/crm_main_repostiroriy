@@ -12,7 +12,17 @@ class Group(models.Model):
         "accounts.Trainer", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="default_groups",
     )
+    price_minor = models.BigIntegerField(
+        null=True, blank=True,
+        help_text="Цена одного занятия в минорных единицах; пусто = не начислять")
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
+                                default=settings.DEFAULT_CURRENCY)
     is_active = models.BooleanField(default=True)
+
+    @property
+    def price(self) -> Money | None:
+        """Charged per attended session when no subscription covers it."""
+        return None if self.price_minor is None else Money(self.price_minor, self.currency)
 
     def __str__(self):
         return self.name

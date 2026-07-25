@@ -114,7 +114,7 @@ function useImportTab({ previewUrl, commitUrl, buildFormData, onFileSelected }) 
   return { file, headers, mapping, setMapping, rows, summary, busy, error, selectFile, runPreview, commit }
 }
 
-export function createAdminImportExportScreen(components, icons, reloadRoleData) {
+export function createAdminImportExportPanel(components, icons, reloadRoleData) {
   const { Button, Banner, Tabs, Table } = components
   const I = icons
 
@@ -215,14 +215,8 @@ export function createAdminImportExportScreen(components, icons, reloadRoleData)
       }
     }
 
-    return <div className="page page-wide">
-      <div className="page-head">
-        <div>
-          <h2 className="page-title">Импорт и экспорт</h2>
-          <p className="page-desc">Загрузка клиентов, посещаемости и истории оплат из файла, выгрузка отчётов в XLSX/CSV.</p>
-        </div>
-      </div>
-
+    // Rendered inside Settings → Контроль, which supplies the page header.
+    return <div>
       <Tabs value={tab} onChange={setTab} items={[
         { value: 'export', label: 'Экспорт' },
         { value: 'clients', label: 'Клиенты' },

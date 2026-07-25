@@ -3,7 +3,6 @@ import './design/styles.css'
 import './design/ui_kits/shared/kit.css'
 import './app/ops-redesign.css'
 import {
-  devLogin,
   fetchAdminPortal,
   fetchClientPortal,
   fetchMe,
@@ -88,19 +87,6 @@ export default function App() {
       setApiState({ state: 'error', role, error: error.message, status: error.status })
     }
   }, [applyRoleData])
-
-  const handleDevLogin = useCallback(async (role) => {
-    setApiState({ state: 'loading', role })
-    try {
-      await devLogin(role)
-      setInitialRole(role)
-      await loadRoleData(role)
-      setAuthRequired(false)
-    } catch (error) {
-      setApiState({ state: 'error', role, error: error.message, status: error.status })
-      throw error
-    }
-  }, [loadRoleData])
 
   const handleProductionLogin = useCallback(async (credentials) => {
     setApiState({ state: 'loading', role: 'unknown' })
@@ -191,7 +177,6 @@ export default function App() {
       apiState={apiState}
       initialRole={initialRole}
       reloadRoleData={loadRoleData}
-      onDevLogin={handleDevLogin}
       onLogout={handleProductionLogout}
     />
   )

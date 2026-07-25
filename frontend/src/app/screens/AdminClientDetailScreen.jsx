@@ -444,8 +444,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
             <small>Наличные или bank transfer / IBAN</small>
           </button>
           {[
-            ['charge', 'Добавить начисление', 'Сумма к оплате'],
-            ['issue', 'Выдать абонемент', 'Новый абонемент участнику'],
+            ['charge', 'Добавить списание', 'Сумма к оплате'],
+            ['issue', 'Продать абонемент', 'Новый абонемент участнику'],
             ['renew', 'Продлить абонемент', 'Новый период и остаток'],
             ['freeze', 'Заморозить', 'Приостановить срок действия'],
             ['adjust', 'Скорректировать', 'Изменить остаток занятий'],
@@ -470,7 +470,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         {financeAction && (
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>
-              {{ charge: 'Новое начисление', issue: 'Выдача абонемента', renew: 'Продление абонемента', freeze: 'Заморозка абонемента', adjust: 'Корректировка остатка' }[financeAction]}
+              {{ charge: 'Новое списание', issue: 'Продажа абонемента', renew: 'Продление абонемента', freeze: 'Заморозка абонемента', adjust: 'Корректировка остатка' }[financeAction]}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(160px, 1fr))', gap: 10, alignItems: 'end' }}>
               {(financeAction === 'charge' || financeAction === 'issue') && (

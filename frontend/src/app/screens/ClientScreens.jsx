@@ -273,6 +273,10 @@ export function createClientScreens(components, icons, reloadRoleData) {
     )
   }
 
+  // Sentinel for the busy flag: it holds a consent type, or this while all
+  // consents are being granted in sequence.
+  const ALL_CONSENTS = '__all__'
+
   function Consents() {
     const rows = globalThis.ParentData?.consents || []
     const [localRows, setLocalRows] = useState(rows)
@@ -290,16 +294,40 @@ export function createClientScreens(components, icons, reloadRoleData) {
       setLocalRows(rows)
     }, [rows])
 
+    const pending = localRows.filter((row) => !row.is_active)
+
+    async function saveConsent(row, granted) {
+      const saved = await api.post('/api/client/consents/', {
+        type: row.type,
+        granted,
+        policy_version: row.policy_version || 'v1',
+      })
+      setLocalRows((current) => current.map((item) => item.type === row.type ? saved : item))
+    }
+
     async function setConsent(row, granted) {
       setBusyType(row.type)
       try {
-        const saved = await api.post('/api/client/consents/', {
-          type: row.type,
-          granted,
-          policy_version: row.policy_version || 'v1',
-        })
-        setLocalRows((current) => current.map((item) => item.type === row.type ? saved : item))
+        await saveConsent(row, granted)
         setMessage('Согласие сохранено.')
+        setError(null)
+        reloadRoleData?.('client')
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setBusyType(null)
+      }
+    }
+
+    // One POST per consent is the only option: the API records each type
+    // separately so every grant keeps its own audit trail and policy version.
+    async function grantAll() {
+      setBusyType(ALL_CONSENTS)
+      try {
+        for (const row of pending) {
+          await saveConsent(row, true)
+        }
+        setMessage('Все согласия подтверждены.')
         setError(null)
         reloadRoleData?.('client')
       } catch (err) {
@@ -314,7 +342,17 @@ export function createClientScreens(components, icons, reloadRoleData) {
         <div className="page-head"><div><h2 className="page-title">Согласия</h2><p className="page-desc">Управление согласиями и каналами связи.</p></div></div>
         {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busyType != null}>Сохраняю согласие...</BusyBanner>
+        <BusyBanner Banner={Banner} show={busyType != null}>
+          {busyType === ALL_CONSENTS ? 'Сохраняю согласия...' : 'Сохраняю согласие...'}
+        </BusyBanner>
+        {pending.length > 1 && (
+          <div className="ops-button-row" style={{ marginBottom: 12 }}>
+            <Button variant="primary" loading={busyType === ALL_CONSENTS}
+              disabled={busyType != null} onClick={grantAll}>
+              Подтвердить все ({pending.length})
+            </Button>
+          </div>
+        )}
         <div className="card" style={{ overflow: 'hidden' }}>
           {localRows.map((row, index) => (
             <div key={row.type} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: index < localRows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>

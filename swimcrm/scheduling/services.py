@@ -173,6 +173,29 @@ def cancel_series(template: RecurringTemplate, date_from=None, *, actor=None):
     return count
 
 
+@transaction.atomic
+def delete_session(session: Session, *, actor=None):
+    """Delete a session that carries no history — a mistyped or duplicated entry.
+
+    Attendance is immutable (attendance.signals blocks the cascade) and payroll
+    PROTECTs its session, so both would abort mid-transaction with an opaque
+    error. Check them up front and point the admin at cancellation instead,
+    which is the right tool once a class has actually happened.
+    """
+    if session.attendance.exists():
+        raise ValidationError(
+            "Занятие с отметками посещаемости нельзя удалить — отмените его")
+    if session.payroll_calculations.exists():
+        raise ValidationError(
+            "Занятие с начисленной зарплатой нельзя удалить — отмените его")
+    session_id = session.pk
+    label = str(session)
+    if actor is not None:
+        audit(actor, "session.deleted", session, {"session": session_id, "label": label})
+    session.delete()  # cascades the roster: SessionParticipant + WaitlistEntry
+    return session_id
+
+
 def edit_single_session(session: Session, *, actor=None, **changes):
     """Rule 4: edit ONE class of a series without touching the rest.
     Marks the session as manually modified so future series edits skip it."""

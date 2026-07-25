@@ -4,7 +4,7 @@ import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
 export function createAdminGroupsScreen(components, reloadRoleData) {
-  const { Table, StatusPill, Button, Banner, Input, Avatar, Badge } = components
+  const { Table, StatusPill, Button, Banner, Input, Avatar, Badge, Money } = components
 
   return function ApiAdminGroups({ go, groupId }) {
     const rows = globalThis.AdminData?.groups || []
@@ -16,7 +16,7 @@ export function createAdminGroupsScreen(components, reloadRoleData) {
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState(false)
     const [candidateId, setCandidateId] = useState('')
-    const [form, setForm] = useState({ name: '', description: '', defaultTrainerId: '', isActive: true })
+    const [form, setForm] = useState({ name: '', description: '', defaultTrainerId: '', price: '', isActive: true })
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
@@ -28,13 +28,22 @@ export function createAdminGroupsScreen(components, reloadRoleData) {
 
     function openGroup(row) {
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
-      setForm({ name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', isActive: row.active })
+      setForm({ name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', price: row.price == null ? '' : String(row.price), isActive: row.active })
     }
 
     async function saveGroup(isNew = false) {
       setBusy(true); setError(null)
       try {
-        const payload = { name: form.name, description: form.description, default_trainer_id: form.defaultTrainerId || null, is_active: form.isActive }
+        // Blank price means "never bill per visit", which is not the same as 0.
+        const price = String(form.price).trim().replace(',', '.')
+        const payload = {
+          name: form.name,
+          description: form.description,
+          default_trainer_id: form.defaultTrainerId || null,
+          price_minor: price === '' ? null : Math.round(Number(price) * 100),
+          is_active: form.isActive,
+        }
+        if (price !== '' && !Number.isFinite(Number(price))) throw new Error('Некорректная цена занятия')
         if (isNew) await api.post('/api/admin/groups/', payload)
         else await api.post(`/api/admin/groups/${selected.groupId}/`, payload)
         setMessage(isNew ? 'Группа создана.' : 'Карточка группы обновлена.')
@@ -56,7 +65,7 @@ export function createAdminGroupsScreen(components, reloadRoleData) {
     const editor = (
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>{creating ? 'Новая группа' : 'Редактирование группы'}</div>
-        <div className="ops-form-grid"><Input label="Название" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Input label="Описание" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /><label>Тренер по умолчанию<select value={form.defaultTrainerId} onChange={(event) => setForm({ ...form, defaultTrainerId: event.target.value })}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} />Активна</label></div>
+        <div className="ops-form-grid"><Input label="Название" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Input label="Описание" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /><Input label="Цена занятия" hint="Списывается за посещение без абонемента. Пусто — не списывать." inputMode="decimal" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /><label>Тренер по умолчанию<select value={form.defaultTrainerId} onChange={(event) => setForm({ ...form, defaultTrainerId: event.target.value })}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} />Активна</label></div>
         <div className="ops-button-row"><Button variant="primary" disabled={busy || !form.name} onClick={() => saveGroup(creating)}>Сохранить</Button><Button variant="secondary" onClick={() => { setCreating(false); setEditing(false) }}>Отмена</Button></div>
       </div>
     )
@@ -83,6 +92,7 @@ export function createAdminGroupsScreen(components, reloadRoleData) {
           { key: 'name', header: 'Группа', render: (row) => <button type="button" className="ops-link-button" onClick={() => openGroup(row)}><span className="strong">{row.name}</span></button> },
           { key: 'description', header: 'Описание', muted: true, render: (row) => row.description || '-' },
           { key: 'trainer', header: 'Тренер', muted: true },
+          { key: 'price', header: 'Занятие', align: 'right', width: 110, render: (row) => row.price == null ? <span className="muted">-</span> : <Money value={row.price} currency={row.currency} /> },
           { key: 'students', header: 'Участники', align: 'right', width: 110, render: (row) => <button type="button" className="ops-count-button" onClick={() => openGroup(row)}>{row.students}</button> },
           { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
           { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openGroup(row)}>Карточка</Button> },

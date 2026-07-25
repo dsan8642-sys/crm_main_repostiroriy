@@ -358,13 +358,13 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: /Сохранить оплату/ }).click()
   await expect(page.getByText('Оплата добавлена и подтверждена.')).toBeVisible()
 
-  await page.getByRole('button', { name: /Добавить начисление/ }).click()
+  await page.getByRole('button', { name: /Добавить списание/ }).click()
   await page.getByLabel('Описание').fill('Индивидуальное занятие')
   await page.getByLabel('Сумма').fill('80.00')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Начисление создано.')).toBeVisible()
 
-  await page.getByRole('button', { name: /Выдать абонемент/ }).click()
+  await page.getByRole('button', { name: /Продать абонемент/ }).click()
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент и начисление созданы.')).toBeVisible()
 
