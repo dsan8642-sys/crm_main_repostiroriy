@@ -5,6 +5,7 @@ param(
     [string]$Password = $env:POSTGRES_PASSWORD,
     [string]$HostName = $env:POSTGRES_HOST,
     [string]$Port = $env:POSTGRES_PORT,
+    [string]$PgBin = $(if ($env:PG_BIN) { $env:PG_BIN } else { "C:\Program Files\PostgreSQL\17\bin" }),
     [switch]$PlanOnly
 )
 
@@ -23,7 +24,7 @@ Assert-ProductionValue -Name "POSTGRES_DB" -Value $DbName
 Assert-ProductionValue -Name "POSTGRES_USER" -Value $User
 Assert-ProductionPassword -Name "POSTGRES_PASSWORD" -Value $Password
 
-$pgDump = "C:\Program Files\PostgreSQL\17\bin\pg_dump.exe"
+$pgDump = Join-Path $PgBin "pg_dump.exe"
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $file = Join-Path $OutDir "$DbName-$stamp.dump"
