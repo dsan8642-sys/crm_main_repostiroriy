@@ -172,6 +172,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/schedule/templates/': {
       templates: [{ id: 1, group: { id: 1, name: 'Delfiny' }, trainer: { id: 1, name: 'Marek Zielinski' }, weekday: 4, weekday_label: 'Czwartek', start_time: '17:00', end_time: '18:00', location: 'Basen A', max_participants: 8, is_active: true }],
     },
+    '/api/admin/schedule/plans/': { plans: [] },
     '/api/admin/schedule/sessions/': {
       sessions: [{ id: 1, start_at: now, end_at: '2026-07-21T18:00:00+02:00', location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' }],
     },
@@ -554,7 +555,9 @@ test('admin confirms and rejects pending payments and the nav counter decrements
     '/api/admin/trainers/': { trainers: [] },
     '/api/admin/groups/': { groups: [] },
     '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
     '/api/admin/schedule/templates/': { templates: [] },
+    '/api/admin/schedule/plans/': { plans: [] },
     '/api/admin/schedule/sessions/': { sessions: [] },
     '/api/admin/debtors/': { debtors: [] },
   }

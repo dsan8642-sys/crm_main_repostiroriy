@@ -24,9 +24,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "release_source_archive",
-        "command": "scripts\\build-release-source.cmd",
-        "summary": "Run the release source archive builder from the clean release commit, verify the manifest/checksum, and paste the pass summary plus the release commit SHA here.",
-        "output_excerpt": "Must include: Release source archive written; Release source manifest written; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; release_candidate.commit_sha; sha256.",
+        "command": "scripts\\build-release-artifact.cmd",
+        "summary": "Build and verify the immutable deployment artifact from the clean release commit.",
+        "output_excerpt": "Must include: Immutable release artifact written; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; commit_sha; archive_sha256.",
     },
     {
         "id": "tracked_release_source_guard",
@@ -48,7 +48,7 @@ EVIDENCE_ITEMS = [
         "id": "target_host_release_install",
         "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -RunInstall",
         "summary": "Extract the verified release archive on the target host, install backend/frontend dependencies, and verify migrations.",
-        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed.",
+        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed.",
     },
     {
         "id": "production_env_preflight",
@@ -121,8 +121,9 @@ def _evidence_items(
     manifest_data = _archive_manifest_data(archive_manifest) if release_archive_passed else {}
     if not archive_sha256:
         archive_sha256 = manifest_data.get("archive_sha256", "")
-    tracked_file_count = manifest_data.get("tracked_file_count", "<tracked-file-count>")
-    tracked_file_list_sha256 = manifest_data.get("tracked_file_list_sha256", "<64-hex-sha256>")
+    artifact_file_count = manifest_data.get("artifact_file_count", "<artifact-file-count>")
+    artifact_file_list_sha256 = manifest_data.get("artifact_file_list_sha256", "<64-hex-sha256>")
+    frontend_dist_file_count = manifest_data.get("frontend_dist_file_count", "<frontend-dist-file-count>")
     rows = []
     for template in EVIDENCE_ITEMS:
         item = dict(template)
@@ -141,17 +142,15 @@ def _evidence_items(
         if item["id"] == "release_source_archive" and release_archive_passed:
             item["status"] = "passed"
             item["captured_at"] = now
-            item["summary"] = f"Release source archive was built and verified for commit {release_commit_sha}."
-            manifest_fragment = f" Release source manifest written: {archive_manifest}." if archive_manifest else " Release source manifest written."
+            item["summary"] = f"Immutable deployment artifact was built and verified for commit {release_commit_sha}."
+            manifest_fragment = f" Release artifact manifest written: {archive_manifest}." if archive_manifest else " Release artifact manifest written."
             item["output_excerpt"] = (
-                "Release source archive written."
+                "Immutable release artifact written."
                 f"{manifest_fragment} "
-                f"Release source archive sha256: {archive_sha256}. "
-                "Release source archive manifest verified. "
-                "Release source archive contents verified. "
-                "Release source archive tracked file list verified. "
-                f"tracked_file_count: {tracked_file_count}. "
-                f"tracked_file_list_sha256: {tracked_file_list_sha256}. "
+                "Immutable release artifact verified. "
+                f"artifact_file_count: {artifact_file_count}. "
+                f"artifact_file_list_sha256: {artifact_file_list_sha256}. "
+                f"frontend_dist_file_count: {frontend_dist_file_count}. "
                 f"commit_sha: {release_commit_sha}. "
                 f"archive_sha256: {archive_sha256}."
             )

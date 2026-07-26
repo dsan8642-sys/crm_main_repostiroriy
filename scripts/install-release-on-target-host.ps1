@@ -124,8 +124,6 @@ $plan = [ordered]@{
     commit_sha = $manifestData.commit_sha
     short_sha = $manifestData.short_sha
     archive_sha256 = $manifestData.archive_sha256
-    tracked_file_count = $manifestData.tracked_file_count
-    tracked_file_list_sha256 = $manifestData.tracked_file_list_sha256
     release_dir = $ReleaseDir
     backend_dir = $backendDir
     backend_python = $backendPython
@@ -138,6 +136,15 @@ $plan = [ordered]@{
         "install frontend dependencies with npm ci",
         "run Django migrate --check"
     )
+}
+if ($isDeploymentBundle) {
+    $plan["artifact_file_count"] = $manifestData.artifact_file_count
+    $plan["artifact_file_list_sha256"] = $manifestData.artifact_file_list_sha256
+    $plan["frontend_dist_file_count"] = $manifestData.frontend_dist_file_count
+}
+else {
+    $plan["tracked_file_count"] = $manifestData.tracked_file_count
+    $plan["tracked_file_list_sha256"] = $manifestData.tracked_file_list_sha256
 }
 
 if (-not $RunInstall) {
@@ -230,5 +237,12 @@ Write-Host ""
 Write-Host "Target-host release install completed."
 Write-Host "commit_sha: $($manifestData.commit_sha)"
 Write-Host "archive_sha256: $($manifestData.archive_sha256)"
-Write-Host "tracked_file_count: $($manifestData.tracked_file_count)"
-Write-Host "tracked_file_list_sha256: $($manifestData.tracked_file_list_sha256)"
+if ($isDeploymentBundle) {
+    Write-Host "artifact_file_count: $($manifestData.artifact_file_count)"
+    Write-Host "artifact_file_list_sha256: $($manifestData.artifact_file_list_sha256)"
+    Write-Host "frontend_dist_file_count: $($manifestData.frontend_dist_file_count)"
+}
+else {
+    Write-Host "tracked_file_count: $($manifestData.tracked_file_count)"
+    Write-Host "tracked_file_list_sha256: $($manifestData.tracked_file_list_sha256)"
+}

@@ -44,7 +44,7 @@ EXTERNAL_EVIDENCE_IDS = {
 EXPECTED_COMMANDS = {
     "local_backend_release_gate": "scripts\\release-check-backend.cmd",
     "local_full_stack_release_gate": "scripts\\release-check-full.cmd",
-    "release_source_archive": "scripts\\build-release-source.cmd",
+    "release_source_archive": "scripts\\build-release-artifact.cmd",
     "tracked_release_source_guard": "scripts\\verify-release-source-manifests.cmd -RequireTracked",
     "target_host_release_install": "scripts\\install-release-on-target-host.cmd",
     "production_env_preflight": "scripts\\check-production-env.cmd",
@@ -66,14 +66,12 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "Frontend Playwright smoke tests",
     ],
     "release_source_archive": [
-        "Release source archive written",
-        "Release source manifest written",
-        "Release source archive manifest verified",
-        "Release source archive contents verified",
-        "Release source archive tracked file list verified",
-        "tracked_file_count",
-        "tracked_file_list_sha256",
-        "sha256",
+        "Immutable release artifact written",
+        "Immutable release artifact verified",
+        "artifact_file_count",
+        "artifact_file_list_sha256",
+        "frontend_dist_file_count",
+        "archive_sha256",
     ],
     "tracked_release_source_guard": [
         "Release source manifests verified",
@@ -92,11 +90,10 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "Target-host release install completed",
         "Target-host release install verified",
         "Release archive extracted on target host",
-        "Release source archive manifest verified",
-        "Release source archive contents verified",
-        "Release source archive tracked file list verified",
-        "tracked_file_count",
-        "tracked_file_list_sha256",
+        "Immutable release artifact verified",
+        "artifact_file_count",
+        "artifact_file_list_sha256",
+        "frontend_dist_file_count",
         "Backend dependencies installed",
         "Frontend dependencies installed",
         "Django migrations check passed",
@@ -205,10 +202,12 @@ def _validate_backup_restore_hashes(evidence_id, combined, errors):
 
 
 def _validate_release_archive_file_list_proof(evidence_id, combined, errors):
-    if not re.search(r"tracked_file_count[:=\s]+\d+\b", combined):
-        errors.append(f"{evidence_id}: evidence must include tracked_file_count")
-    if not re.search(r"tracked_file_list_sha256[:=\s]+[0-9a-f]{64}\b", combined, flags=re.IGNORECASE):
-        errors.append(f"{evidence_id}: evidence must include tracked_file_list_sha256")
+    if not re.search(r"artifact_file_count[:=\s]+\d+\b", combined):
+        errors.append(f"{evidence_id}: evidence must include artifact_file_count")
+    if not re.search(r"artifact_file_list_sha256[:=\s]+[0-9a-f]{64}\b", combined, flags=re.IGNORECASE):
+        errors.append(f"{evidence_id}: evidence must include artifact_file_list_sha256")
+    if not re.search(r"frontend_dist_file_count[:=\s]+\d+\b", combined):
+        errors.append(f"{evidence_id}: evidence must include frontend_dist_file_count")
 
 
 def _validate_item(item, errors, release_commit_sha="", expected_archive_sha256=""):

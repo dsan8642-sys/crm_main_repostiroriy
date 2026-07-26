@@ -253,14 +253,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = (
-            "Release source archive written: releases\\swimcrm-release-0123456789ab.zip. "
-            "Release source manifest written: releases\\swimcrm-release-0123456789ab.manifest.json."
+            "Immutable release artifact written: releases\\swimcrm-release-0123456789ab.zip. "
+            "Release artifact manifest written: releases\\swimcrm-release-0123456789ab.manifest.json."
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: sha256",
+            "release_source_archive: missing evidence fragment: archive_sha256",
             errors,
         )
         self.assertIn(
@@ -275,14 +275,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Release source archive manifest verified. ",
+            "Immutable release artifact verified. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: Release source archive manifest verified",
+            "release_source_archive: missing evidence fragment: Immutable release artifact verified",
             errors,
         )
 
@@ -293,14 +293,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Release source archive contents verified. ",
+            "Immutable release artifact written: releases\\swimcrm-release-0123456789ab.zip. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: Release source archive contents verified",
+            "release_source_archive: missing evidence fragment: Immutable release artifact written",
             errors,
         )
 
@@ -311,14 +311,18 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Release source archive tracked file list verified. ",
+            "frontend_dist_file_count: 16. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: Release source archive tracked file list verified",
+            "release_source_archive: missing evidence fragment: frontend_dist_file_count",
+            errors,
+        )
+        self.assertIn(
+            "release_source_archive: evidence must include frontend_dist_file_count",
             errors,
         )
 
@@ -329,29 +333,29 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "tracked_file_count: 1234. ",
+            "artifact_file_count: 1250. ",
             "",
         ).replace(
-            "tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
+            "artifact_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: tracked_file_count",
+            "release_source_archive: missing evidence fragment: artifact_file_count",
             errors,
         )
         self.assertIn(
-            "release_source_archive: evidence must include tracked_file_count",
+            "release_source_archive: evidence must include artifact_file_count",
             errors,
         )
         self.assertIn(
-            "release_source_archive: missing evidence fragment: tracked_file_list_sha256",
+            "release_source_archive: missing evidence fragment: artifact_file_list_sha256",
             errors,
         )
         self.assertIn(
-            "release_source_archive: evidence must include tracked_file_list_sha256",
+            "release_source_archive: evidence must include artifact_file_list_sha256",
             errors,
         )
 
@@ -362,29 +366,29 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "target_host_release_install"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "tracked_file_count: 1234. ",
+            "artifact_file_count: 1250. ",
             "",
         ).replace(
-            "tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
+            "artifact_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "target_host_release_install: missing evidence fragment: tracked_file_count",
+            "target_host_release_install: missing evidence fragment: artifact_file_count",
             errors,
         )
         self.assertIn(
-            "target_host_release_install: evidence must include tracked_file_count",
+            "target_host_release_install: evidence must include artifact_file_count",
             errors,
         )
         self.assertIn(
-            "target_host_release_install: missing evidence fragment: tracked_file_list_sha256",
+            "target_host_release_install: missing evidence fragment: artifact_file_list_sha256",
             errors,
         )
         self.assertIn(
-            "target_host_release_install: evidence must include tracked_file_list_sha256",
+            "target_host_release_install: evidence must include artifact_file_list_sha256",
             errors,
         )
 
@@ -415,14 +419,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "github_full_stack_release_job"
         )
         item["summary"] = item["summary"].replace(
-            " and uploaded artifact swimcrm-release-source-0123456789abcdef0123456789abcdef01234567",
+            " and uploaded immutable artifact swimcrm-release-0123456789abcdef0123456789abcdef01234567",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "github_full_stack_release_job: missing evidence fragment: swimcrm-release-source-",
+            "github_full_stack_release_job: missing evidence fragment: swimcrm-release-",
             errors,
         )
 
@@ -638,13 +642,12 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("release_archive_passed", generator)
         self.assertIn("archive_sha256", generator)
         self.assertIn("_archive_manifest_data", generator)
-        self.assertIn("Release source archive manifest verified", generator)
-        self.assertIn("Release source archive contents verified", generator)
-        self.assertIn("Release source archive tracked file list verified", generator)
-        self.assertIn("tracked_file_count", generator)
-        self.assertIn("tracked_file_list_sha256", generator)
+        self.assertIn("Immutable release artifact verified", generator)
+        self.assertIn("artifact_file_count", generator)
+        self.assertIn("artifact_file_list_sha256", generator)
+        self.assertIn("frontend_dist_file_count", generator)
         self.assertIn("Tracked release-source guard passed", generator)
-        self.assertIn("swimcrm-release-source-<commit-sha>", generator)
+        self.assertIn("swimcrm-release-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
         self.assertIn("check-app-health.cmd -RequireHttps -RequireOpsOk", generator)
@@ -752,111 +755,124 @@ class CiReleaseWorkflowVerifierRule(SimpleTestCase):
             errors,
         )
 
-    def test_release_workflow_requires_source_archive_builder_after_manifest_guard(self):
+    def test_release_workflow_requires_artifact_builder_after_release_gate(self):
         text = self._workflow_text()
         text = text.replace(
-            "\n      - name: Build release source archive\n"
+            "\n      - name: Build immutable release artifact\n"
             "        shell: pwsh\n"
-            "        run: .\\scripts\\build-release-source.ps1\n",
+            "        run: .\\scripts\\build-release-artifact.ps1\n",
             "",
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            r"missing release source archive builder: build-release-source\.ps1",
+            r"missing immutable release artifact builder: build-release-artifact\.ps1",
             errors,
         )
 
-    def test_release_workflow_requires_source_archive_verifier(self):
+    def test_release_workflow_requires_artifact_verifier(self):
         text = self._workflow_text()
         text = text.replace(
-            "\n      - name: Verify release source archive\n"
+            "\n      - name: Verify immutable release artifact\n"
             "        shell: pwsh\n"
             "        run: |\n"
             "          $shortSha = (git rev-parse --short=12 HEAD).Trim()\n"
-            "          .\\scripts\\verify-release-source-archive.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n",
+            "          .\\scripts\\verify-release-artifact.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n",
             "",
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            r"missing release source archive verifier: verify-release-source-archive\.ps1",
+            r"missing immutable release artifact verifier: verify-release-artifact\.ps1",
             errors,
         )
 
-    def test_release_workflow_requires_verified_source_archive_before_node_artifacts(self):
+    def test_release_workflow_requires_verified_artifact_before_upload(self):
         text = self._workflow_text()
         verifier_step = (
-            "\n      - name: Verify release source archive\n"
+            "\n      - name: Verify immutable release artifact\n"
             "        shell: pwsh\n"
             "        run: |\n"
             "          $shortSha = (git rev-parse --short=12 HEAD).Trim()\n"
-            "          .\\scripts\\verify-release-source-archive.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n"
+            "          .\\scripts\\verify-release-artifact.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n"
         )
-        text = text.replace(verifier_step, "", 1)
-        text = text.replace(
-            "        uses: actions/setup-node@v4\n",
-            "        uses: actions/setup-node@v4\n" + verifier_step,
-            1,
-        )
-
-        errors = self.verifier.validate(self._write_workflow(text))
-
-        self.assertIn(
-            "invalid order for verified release source archive before artifact upload: "
-            "expected 'verify-release-source-archive.ps1' before 'actions/upload-artifact@v4'",
-            errors,
-        )
-
-    def test_release_workflow_uploads_verified_source_archive_artifact(self):
-        text = self._workflow_text()
-        text = text.replace(
-            "\n      - name: Upload verified release source archive\n"
+        upload_step = (
+            "\n      - name: Upload immutable release artifact\n"
             "        uses: actions/upload-artifact@v4\n"
             "        with:\n"
-            "          name: swimcrm-release-source-${{ github.sha }}\n"
+            "          name: swimcrm-release-${{ github.sha }}\n"
             "          path: |\n"
             "            releases/swimcrm-release-*.zip\n"
             "            releases/swimcrm-release-*.manifest.json\n"
             "          if-no-files-found: error\n"
-            "          retention-days: 14\n",
+            "          retention-days: 30\n"
+            "          compression-level: 0\n"
+            "          overwrite: false\n"
+        )
+        text = text.replace(verifier_step, "", 1)
+        text = text.replace(upload_step, upload_step + verifier_step, 1)
+
+        errors = self.verifier.validate(self._write_workflow(text))
+
+        self.assertIn(
+            "invalid order for verified immutable artifact before upload: "
+            "expected 'verify-release-artifact.ps1' before 'actions/upload-artifact@v4'",
+            errors,
+        )
+
+    def test_release_workflow_uploads_verified_immutable_artifact(self):
+        text = self._workflow_text()
+        text = text.replace(
+            "\n      - name: Upload immutable release artifact\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: swimcrm-release-${{ github.sha }}\n"
+            "          path: |\n"
+            "            releases/swimcrm-release-*.zip\n"
+            "            releases/swimcrm-release-*.manifest.json\n"
+            "          if-no-files-found: error\n"
+            "          retention-days: 30\n"
+            "          compression-level: 0\n"
+            "          overwrite: false\n",
             "",
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            r"missing release source archive artifact upload: actions/upload-artifact@v4",
+            r"missing immutable release artifact upload: actions/upload-artifact@v4",
             errors,
         )
 
     def test_release_workflow_requires_artifact_upload_after_archive_verifier(self):
         text = self._workflow_text()
         upload_step = (
-            "\n      - name: Upload verified release source archive\n"
+            "\n      - name: Upload immutable release artifact\n"
             "        uses: actions/upload-artifact@v4\n"
             "        with:\n"
-            "          name: swimcrm-release-source-${{ github.sha }}\n"
+            "          name: swimcrm-release-${{ github.sha }}\n"
             "          path: |\n"
             "            releases/swimcrm-release-*.zip\n"
             "            releases/swimcrm-release-*.manifest.json\n"
             "          if-no-files-found: error\n"
-            "          retention-days: 14\n"
+            "          retention-days: 30\n"
+            "          compression-level: 0\n"
+            "          overwrite: false\n"
         )
         text = text.replace(upload_step, "", 1)
         text = text.replace(
-            "\n      - name: Verify release source archive\n",
-            upload_step + "\n      - name: Verify release source archive\n",
+            "\n      - name: Verify immutable release artifact\n",
+            upload_step + "\n      - name: Verify immutable release artifact\n",
             1,
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            "invalid order for verified release source archive before artifact upload: "
-            "expected 'verify-release-source-archive.ps1' before 'actions/upload-artifact@v4'",
+            "invalid order for verified immutable artifact before upload: "
+            "expected 'verify-release-artifact.ps1' before 'actions/upload-artifact@v4'",
             errors,
         )
 
@@ -945,8 +961,8 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn("__pycache__", script)
         self.assertIn("\\.py[co]$", script)
         self.assertIn("Installed release source tree must match the verified release archive", script)
-        self.assertIn("Installed release tracked file count mismatch", script)
-        self.assertIn("Installed release tracked file list sha256 mismatch", script)
+        self.assertIn("Installed release artifact file count mismatch", script)
+        self.assertIn("Installed release artifact file list sha256 mismatch", script)
         self.assertIn("RequireInstalledDependencies", script)
         self.assertIn("swimcrm\\.venv\\Scripts\\python.exe", script)
         self.assertIn('import waitress', script)

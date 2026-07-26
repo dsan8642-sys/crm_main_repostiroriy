@@ -223,10 +223,10 @@ else {
     [string]$manifestData.tracked_file_list_sha256
 }
 if ($releaseEntries.Count -ne $expectedFileCount) {
-    throw "Installed release file count mismatch. Expected $expectedFileCount but got $($releaseEntries.Count)."
+    throw "Installed release artifact file count mismatch. Expected $expectedFileCount but got $($releaseEntries.Count)."
 }
 if ($installedFileListHash -ne $expectedFileListHash.ToLowerInvariant()) {
-    throw "Installed release file list sha256 mismatch. Expected $expectedFileListHash but got $installedFileListHash."
+    throw "Installed release artifact file list sha256 mismatch. Expected $expectedFileListHash but got $installedFileListHash."
 }
 
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\manage.py") -Label "Django manage.py"
@@ -255,5 +255,12 @@ Write-Host "Target-host release install verified."
 Write-Host "release_dir: $releaseDirPath"
 Write-Host "commit_sha: $($manifestData.commit_sha)"
 Write-Host "archive_sha256: $($manifestData.archive_sha256)"
-Write-Host "tracked_file_count: $($releaseEntries.Count)"
-Write-Host "tracked_file_list_sha256: $installedFileListHash"
+if ($isDeploymentBundle) {
+    Write-Host "artifact_file_count: $($releaseEntries.Count)"
+    Write-Host "artifact_file_list_sha256: $installedFileListHash"
+    Write-Host "frontend_dist_file_count: $($manifestData.frontend_dist_file_count)"
+}
+else {
+    Write-Host "tracked_file_count: $($releaseEntries.Count)"
+    Write-Host "tracked_file_list_sha256: $installedFileListHash"
+}
