@@ -893,6 +893,24 @@ class ReleaseSourceArchiveBuilderRule(SimpleTestCase):
         self.assertIn("ls-tree -r --name-only HEAD", script)
 
 
+class ReleaseFileListHashPortabilityRule(SimpleTestCase):
+    def test_release_file_list_hashes_use_ordinal_sorting(self):
+        scripts = (
+            "build-release-artifact.ps1",
+            "build-release-source.ps1",
+            "verify-release-artifact.ps1",
+            "verify-release-source-archive.ps1",
+            "verify-target-host-release-install.ps1",
+        )
+
+        for script_name in scripts:
+            with self.subTest(script=script_name):
+                script = (REPO_ROOT / "scripts" / script_name).read_text(
+                    encoding="utf-8-sig"
+                )
+                self.assertIn("[StringComparer]::Ordinal", script)
+
+
 class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
     def test_release_source_archive_verifier_checks_manifest_and_hash(self):
         script = (REPO_ROOT / "scripts" / "verify-release-source-archive.ps1").read_text(encoding="utf-8-sig")

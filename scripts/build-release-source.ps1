@@ -43,7 +43,9 @@ if ($nonPortablePaths.Count -gt 0) {
 function Get-LineListSha256 {
     param([string[]]$Lines)
 
-    $text = (($Lines | Sort-Object) -join "`n") + "`n"
+    [string[]]$sortedLines = @($Lines)
+    [Array]::Sort($sortedLines, [StringComparer]::Ordinal)
+    $text = ($sortedLines -join "`n") + "`n"
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
