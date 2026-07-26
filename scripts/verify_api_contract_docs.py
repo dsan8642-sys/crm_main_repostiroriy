@@ -1,3 +1,4 @@
+import os
 import re
 import sys
 from pathlib import Path
@@ -10,18 +11,19 @@ DOC_PATH = REPO_ROOT / "docs" / "API_CONTRACT.md"
 
 def _load_contract():
     sys.path.insert(0, str(BACKEND_DIR))
-    from portal.contract import API_CONTRACT  # noqa: PLC0415
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django  # noqa: PLC0415
+    django.setup()
+    from portal.openapi import build_openapi_schema  # noqa: PLC0415
 
-    return API_CONTRACT
+    return build_openapi_schema()
 
 
 def _contract_paths(contract):
-    paths = set()
-    for endpoint in contract.get("endpoints", []):
-        path = endpoint.get("path", "")
-        if path.startswith("/api/admin/settings/"):
-            paths.add(path)
-    return sorted(paths)
+    return sorted(
+        path for path in contract.get("paths", {})
+        if path.startswith("/api/admin/settings/")
+    )
 
 
 def validate():
@@ -31,17 +33,18 @@ def validate():
 
     contract = _load_contract()
     text = DOC_PATH.read_text(encoding="utf-8")
-    version = contract.get("version")
+    version = contract.get("info", {}).get("version")
     if not version:
-        errors.append("API_CONTRACT.version is required")
+        errors.append("OpenAPI info.version is required")
     elif not re.search(rf"Last updated:\s*{re.escape(version)}\b", text):
         errors.append(
-            f"docs/API_CONTRACT.md Last updated must match API_CONTRACT.version {version}"
+            f"docs/API_CONTRACT.md Last updated must match OpenAPI version {version}"
         )
 
     required_companions = [
         "GET /api/admin/api-contract/",
-        "swimcrm/portal/contract.py",
+        "GET /api/openapi.json",
+        "swimcrm/portal/openapi.py",
         "swimcrm/portal/admin_settings_views.py",
     ]
     for companion in required_companions:
@@ -49,8 +52,22 @@ def validate():
             errors.append(f"docs/API_CONTRACT.md missing companion reference: {companion}")
 
     for path in _contract_paths(contract):
-        if path not in text:
+        documented_path = re.sub(r"\{[^}]+\}", "<id>", path)
+        if path not in text and documented_path not in text:
             errors.append(f"docs/API_CONTRACT.md missing admin settings endpoint path: {path}")
+
+    if contract.get("openapi") != "3.1.0":
+        errors.append("Canonical contract must use OpenAPI 3.1.0")
+    operation_ids = [
+        operation.get("operationId")
+        for path_item in contract.get("paths", {}).values()
+        for method, operation in path_item.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+    ]
+    if not operation_ids or None in operation_ids:
+        errors.append("Every OpenAPI operation must have operationId")
+    if len(operation_ids) != len(set(operation_ids)):
+        errors.append("OpenAPI operationId values must be unique")
 
     required_settings_query_docs = [
         "`template_id`",

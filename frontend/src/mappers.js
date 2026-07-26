@@ -201,9 +201,10 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
   }
 }
 
-export function mapAdminPortalData({ clients, trainers, groups, subscriptionTypes, templates, sessions, payments, debtors }) {
+export function mapAdminPortalData({ clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors }) {
   const groupRows = groups.groups || []
   return {
+    sessionTypeConfigs: sessionTypeConfigs?.session_types || [],
     trainers: (trainers.trainers || []).map((trainer) => ({
       id: `t${trainer.id}`,
       trainerId: trainer.id,
@@ -277,6 +278,9 @@ export function mapAdminPortalData({ clients, trainers, groups, subscriptionType
       isCancelled: session.is_cancelled,
       start: formatTime(session.start_at),
       end: formatTime(session.end_at),
+      durationMinutes: session.duration_minutes || 60,
+      priceMinor: session.price_minor,
+      currency: session.currency,
       group: session.group?.name || 'Индивидуальное',
       trainer: session.trainer,
       location: session.location,
@@ -298,6 +302,19 @@ export function mapAdminPortalData({ clients, trainers, groups, subscriptionType
       location: template.location,
       limit: template.max_participants,
       active: template.is_active,
+    })),
+    weeklyPlans: (plans?.plans || []).map((plan) => ({
+      id: `plan${plan.id}`,
+      planId: plan.id,
+      name: plan.name,
+      groupId: plan.group?.id || '',
+      group: plan.group?.name || '-',
+      active: plan.is_active,
+      slots: (plan.slots || []).map((slot) => ({
+        ...slot,
+        trainerId: slot.trainer_id || '',
+        trainer: slot.trainer || '-',
+      })),
     })),
     roster: [],
     payments: (payments.payments || []).map((payment) => ({

@@ -80,7 +80,10 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "tracked",
     ],
     "github_full_stack_release_job": [
-        "swimcrm-release-source-",
+        "swimcrm-release-",
+        "archive_sha256",
+        "artifact_file_list_sha256",
+        "frontend_dist_file_count",
     ],
     "github_postgres_backend_job": [
         "postgres-backend-check",

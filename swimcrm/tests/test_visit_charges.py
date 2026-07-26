@@ -62,11 +62,32 @@ class VisitChargeRule(TestCase):
     def test_group_without_price_is_never_charged(self):
         self.group.price_minor = None
         self.group.save(update_fields=["price_minor"])
+        session = create_session(
+            group=self.group, trainer=self.trainer,
+            start_at=f.dt(2026, 6, 4, 17), end_at=f.dt(2026, 6, 4, 18),
+            location="Бассейн A", max_participants=10, actor=self.admin)
+
+        set_attendance(session_id=session.id, student=self.student,
+                       status=AttendanceStatus.PRESENT, actor=self.admin)
+
+        self.assertEqual(self._charged(), 0)
+
+    def test_session_keeps_price_snapshot_when_group_tariff_changes(self):
+        self.assertEqual(self.session.price_minor, 5000)
+        self.assertEqual(self.session.currency, "PLN")
+        self.group.price_minor = 7500
+        self.group.currency = "EUR"
+        self.group.save(update_fields=["price_minor", "currency"])
 
         set_attendance(session_id=self.session.id, student=self.student,
                        status=AttendanceStatus.PRESENT, actor=self.admin)
 
-        self.assertEqual(self._charged(), 0)
+        charge = Charge.objects.get(student=self.student)
+        self.assertEqual(charge.amount_minor, 5000)
+        self.assertEqual(charge.currency, "PLN")
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.price_minor, 5000)
+        self.assertEqual(self.session.currency, "PLN")
 
     def test_repeated_marking_does_not_duplicate_the_charge(self):
         for _ in range(3):
@@ -79,6 +100,9 @@ class VisitChargeRule(TestCase):
     def test_status_change_away_from_present_posts_a_reversal(self):
         set_attendance(session_id=self.session.id, student=self.student,
                        status=AttendanceStatus.PRESENT, actor=self.admin)
+        self.group.price_minor = 8000
+        self.group.currency = "EUR"
+        self.group.save(update_fields=["price_minor", "currency"])
 
         set_attendance(session_id=self.session.id, student=self.student,
                        status=AttendanceStatus.EXCUSED, actor=self.admin)
@@ -88,6 +112,11 @@ class VisitChargeRule(TestCase):
         self.assertEqual(Charge.objects.filter(student=self.student).count(), 2)
         self.assertTrue(Charge.objects.filter(student=self.student,
                                               amount_minor=-5000).exists())
+        self.assertEqual(
+            set(Charge.objects.filter(student=self.student).values_list(
+                "currency", flat=True)),
+            {"PLN"},
+        )
 
     def test_reversal_is_re_billed_when_the_visit_is_restored(self):
         set_attendance(session_id=self.session.id, student=self.student,
@@ -124,13 +153,13 @@ class SessionDeletionRule(TestCase):
         self.student = f.make_student(group=self.group)
         self.session = create_session(
             group=self.group, trainer=self.trainer,
-            start_at=f.dt(2026, 6, 3, 17), end_at=f.dt(2026, 6, 3, 18),
+            start_at=f.dt(2030, 6, 3, 17), end_at=f.dt(2030, 6, 3, 18),
             location="Бассейн A", max_participants=10, actor=self.admin)
 
     def test_empty_session_is_deleted(self):
         pk = self.session.pk
 
-        session_id = delete_session(self.session, actor=self.admin)
+        session_id = delete_session(self.session, actor=self.admin, force=True)
 
         self.assertEqual(session_id, pk)
         self.assertFalse(Session.objects.filter(pk=pk).exists())

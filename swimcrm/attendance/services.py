@@ -1,6 +1,5 @@
 """Rule 2 & 5: mark attendance, deduct sessions via the immutable ledger only,
 enforce capacity + no double-enrollment with row locking against races."""
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -9,7 +8,7 @@ from audit.models import audit
 from billing.models import Charge
 from subscriptions.models import (LedgerReason, SessionLedgerEntry,
                                   Subscription, SubscriptionStatus)
-from scheduling.models import Session
+from scheduling.models import Session, SessionType
 
 from .models import AttendanceRecord, AttendanceStatus, DEDUCTING_STATUSES
 
@@ -40,39 +39,48 @@ def _current_effect(record):
 
 
 def _reconcile_visit_charge(record, session, *, covered_by_subscription, actor):
-    """Bill an attended session that no subscription paid for (rule: group price).
+    """Bill an attended session using its immutable price snapshot.
 
     Charges are append-only (Charge.delete() raises), so a status change away
     from PRESENT cannot remove the original row — it posts a negative reversal
     instead, mirroring how the ledger compensates with CORRECTION entries.
     """
-    group = session.group
-    charged = record.charges.aggregate(total=Sum("amount_minor"))["total"] or 0
+    foreign_currency_charge = record.charges.exclude(currency=session.currency).exists()
+    if foreign_currency_charge:
+        raise ValidationError(
+            "Visit charge currency conflicts with the session price snapshot")
+    charged = record.charges.filter(currency=session.currency).aggregate(
+        total=Sum("amount_minor"))["total"] or 0
     should_bill = (
         record.status == AttendanceStatus.PRESENT
         and not covered_by_subscription
-        and group is not None
-        and group.price_minor
+        and session.price_minor is not None
+        and session.price_minor > 0
     )
-    desired = group.price_minor if should_bill else 0
+    # A split session has one shared snapshot price. Every attendee gets an
+    # equal, deterministic share; an odd minor unit remains uncharged rather
+    # than silently overcharging the pair.
+    divisor = 2 if session.session_type == SessionType.SPLIT else 1
+    desired = (session.price_minor // divisor) if should_bill else 0
     diff = desired - charged
     if diff == 0:
         return
-    currency = group.currency if group is not None else settings.DEFAULT_CURRENCY
     Charge.objects.create(
         student=record.student,
         attendance=record,
         description=(f"Разовое занятие · {session}" if diff > 0
                      else f"Сторно разового занятия · {session}"),
         amount_minor=diff,
-        currency=currency,
+        currency=session.currency,
         due_date=session.start_at.date(),
         created_by=actor,
     )
 
 
 @transaction.atomic
-def set_attendance(*, session_id, student, status, actor=None):
+def set_attendance(
+        *, session_id, student, status, actor=None,
+        apply_financial_effects=True, source="manual"):
     """Create or update the attendance record and reconcile the ledger (rule 1 & 2).
 
     - PRESENT / ABSENT  -> session consumed (net -1 against the ledger)
@@ -98,11 +106,25 @@ def set_attendance(*, session_id, student, status, actor=None):
             raise ValidationError(
                 f"Превышен лимит участников занятия ({session.max_participants})")
         record = AttendanceRecord.objects.create(
-            session=session, student=student, status=status, marked_by=actor)
+            session=session,
+            student=student,
+            status=status,
+            marked_by=actor,
+            financial_effects_enabled=bool(apply_financial_effects),
+        )
     else:
         record.status = status
         record.marked_by = actor
         record.save(update_fields=["status", "marked_by", "marked_at"])
+
+    if not record.financial_effects_enabled:
+        audit(actor, "attendance.marked", record, {
+            "status": str(status),
+            "session": session_id,
+            "source": source,
+            "financial_effects": record.financial_effects_enabled,
+        })
+        return record
 
     desired = -1 if status in DEDUCTING_STATUSES else 0
     current = _current_effect(record)
@@ -127,6 +149,10 @@ def set_attendance(*, session_id, student, status, actor=None):
     # status changes, so bill money only when no subscription ever covered it.
     _reconcile_visit_charge(record, session, covered_by_subscription=sub is not None,
                             actor=actor)
-    audit(actor, "attendance.marked", record,
-          {"status": str(status), "session": session_id})
+    audit(actor, "attendance.marked", record, {
+        "status": str(status),
+        "session": session_id,
+        "source": source,
+        "financial_effects": record.financial_effects_enabled,
+    })
     return record

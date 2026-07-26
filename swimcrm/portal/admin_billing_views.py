@@ -1,5 +1,6 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 
 @require_http_methods(["GET", "POST"])
 def admin_participant_charges(request, participant_id):
@@ -26,7 +27,8 @@ def admin_payments(request):
         qs = qs.filter(student_id=request.GET["participant_id"])
     if request.GET.get("status"):
         qs = qs.filter(status=request.GET["status"])
-    return JsonResponse({"payments": [_payment_payload(payment) for payment in qs[:MAX_LIST_ROWS]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="payments", serializer=_payment_payload))
 
 
 @require_http_methods(["GET", "POST"])

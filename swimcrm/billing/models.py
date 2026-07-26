@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Q
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -88,6 +89,7 @@ class Payment(models.Model):
                                 default=settings.DEFAULT_CURRENCY)
     paid_at = models.DateField()
     method = models.CharField(max_length=16, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
+    reference_id = models.CharField(max_length=128, blank=True, db_index=True)
     comment = models.TextField(blank=True)
     status = models.CharField(max_length=16, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     source = models.CharField(
@@ -100,6 +102,15 @@ class Payment(models.Model):
                                      on_delete=models.SET_NULL, related_name="confirmed_payments")
     confirmed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reference_id"],
+                condition=~Q(reference_id=""),
+                name="billing_payment_unique_nonempty_reference_id",
+            ),
+        ]
 
     @property
     def amount(self) -> Money:

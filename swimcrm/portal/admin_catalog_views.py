@@ -1,5 +1,6 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 
 @require_http_methods(["GET", "POST"])
 def admin_groups(request):
@@ -15,7 +16,8 @@ def admin_groups(request):
     q = request.GET.get("q", "").strip()
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
-    return JsonResponse({"groups": [_group_payload(group) for group in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="groups", serializer=_group_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
@@ -45,7 +47,8 @@ def admin_subscription_types(request):
     qs = SubscriptionType.objects.order_by("name", "id")
     if request.GET.get("active") in {"true", "false"}:
         qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse({"subscription_types": [_subscription_type_payload(stype) for stype in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="subscription_types", serializer=_subscription_type_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])

@@ -32,6 +32,7 @@ const STATUS_META = {
   matched: ['Занятие найдено', '#1a7f37'],
   will_create_session: ['Будет создано занятие', '#9a6700'],
   duplicate: ['Дубликат', '#9a6700'],
+  possible_duplicate: ['Вероятный дубликат', '#b54708'],
   error: ['Ошибка', '#cf222e'],
 }
 
@@ -58,6 +59,7 @@ function useImportTab({ previewUrl, commitUrl, buildFormData, onFileSelected }) 
   const [headers, setHeaders] = useState([])
   const [mapping, setMapping] = useState({})
   const [rows, setRows] = useState([])
+  const [batchId, setBatchId] = useState(null)
   const [summary, setSummary] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -71,20 +73,28 @@ function useImportTab({ previewUrl, commitUrl, buildFormData, onFileSelected }) 
       const payload = await api.postForm(previewUrl, formData)
       setHeaders(payload.headers || [])
       setRows(payload.rows || [])
+      setBatchId(payload.batch_id || null)
     } catch (err) {
       setError(err.message)
       setRows([])
+      setBatchId(null)
     } finally {
       setBusy(false)
     }
   }
 
-  async function commit() {
+  async function commit(extraPayload = {}) {
+    if (!batchId || rows.length === 0) return
     setBusy(true); setError('')
     try {
-      const payload = await api.post(commitUrl, { rows })
+      const payload = await api.post(commitUrl, {
+        batch_id: batchId,
+        selected_indices: rows.map((row) => row.index),
+        ...extraPayload,
+      })
       setSummary(payload)
       setRows([])
+      setBatchId(null)
       setFile(null)
       setHeaders([])
     } catch (err) {
@@ -97,6 +107,7 @@ function useImportTab({ previewUrl, commitUrl, buildFormData, onFileSelected }) 
   async function selectFile(nextFile) {
     setFile(nextFile)
     setRows([])
+    setBatchId(null)
     setSummary(null)
     setError('')
     if (!nextFile) return
@@ -111,7 +122,7 @@ function useImportTab({ previewUrl, commitUrl, buildFormData, onFileSelected }) 
     }
   }
 
-  return { file, headers, mapping, setMapping, rows, summary, busy, error, selectFile, runPreview, commit }
+  return { file, headers, mapping, setMapping, rows, batchId, summary, busy, error, selectFile, runPreview, commit }
 }
 
 export function createAdminImportExportPanel(components, icons, reloadRoleData) {
@@ -149,6 +160,9 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
     const [exportError, setExportError] = useState('')
     const [batches, setBatches] = useState([])
     const [batchesError, setBatchesError] = useState('')
+    const [attendanceEffectMode, setAttendanceEffectMode] = useState('history_only')
+    const [financialEffectsConfirmed, setFinancialEffectsConfirmed] = useState(false)
+    const [possiblePaymentDuplicatesApproved, setPossiblePaymentDuplicatesApproved] = useState(false)
 
     const clientsImport = useImportTab({
       previewUrl: '/api/admin/import/clients/preview/',
@@ -174,7 +188,12 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
     const attendanceImport = useImportTab({
       previewUrl: '/api/admin/import/attendance/preview/',
       commitUrl: '/api/admin/import/attendance/commit/',
-      buildFormData: (file) => { const fd = new FormData(); fd.set('file', file); return fd },
+      buildFormData: (file) => {
+        const fd = new FormData()
+        fd.set('file', file)
+        fd.set('effect_mode', attendanceEffectMode)
+        return fd
+      },
     })
     const paymentsImport = useImportTab({
       previewUrl: '/api/admin/import/payments/preview/',
@@ -196,7 +215,18 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
     async function rollbackBatch(batchId) {
       setBatchesError('')
       try {
-        await api.post(`/api/admin/import/clients/${batchId}/rollback/`)
+        const preview = await api.get(`/api/admin/import/clients/${batchId}/rollback/`)
+        if (!preview.can_rollback) {
+          const details = (preview.blockers || []).map((item) => item.student).join(', ')
+          throw new Error(`Откат заблокирован зависимыми данными: ${details || 'есть зависимости'}`)
+        }
+        const confirmation = window.prompt(
+          `Откат удалит импортированные записи. Введите ID batch ${batchId} для подтверждения:`)
+        if (confirmation !== String(batchId)) return
+        await api.post(`/api/admin/import/clients/${batchId}/rollback/`, {
+          confirm_batch_id: batchId,
+          confirm_rollback: true,
+        })
         await loadBatches()
       } catch (err) {
         setBatchesError(err.message)
@@ -289,8 +319,28 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
             Колонки: Дата (ДД.ММ.ГГГГ ЧЧ:ММ), Клиент, Группа, Тренер, Статус.
             Для занятий, которых ещё нет в расписании, дополнительно: Окончание (ЧЧ:ММ), Локация, Вместимость.
           </p>
+          <label style={{ display: 'grid', gap: 6, margin: '12px 0' }}>
+            <span className="eyebrow">Режим импорта</span>
+            <select value={attendanceEffectMode} disabled={Boolean(attendanceImport.file)}
+              onChange={(event) => {
+                setAttendanceEffectMode(event.target.value)
+                setFinancialEffectsConfirmed(false)
+              }}>
+              <option value="history_only">Только история, без списаний и начислений</option>
+              <option value="apply_financial">Применить списания абонемента или начисления</option>
+            </select>
+          </label>
+          {attendanceEffectMode === 'history_only' && <Banner tone="info" style={{ margin: '8px 0 12px' }}>
+            Безопасный режим по умолчанию: посещения сохранятся в истории, но баланс абонемента и денежные начисления не изменятся.
+          </Banner>}
+          {attendanceEffectMode === 'apply_financial' && <Banner tone="warning" style={{ margin: '8px 0 12px' }}>
+            Финансовый режим может списать занятия с действующих абонементов или создать начисления по тарифу занятия.
+          </Banner>}
           <input type="file" accept=".xlsx,.xlsm,.csv"
-            onChange={(event) => attendanceImport.selectFile(event.target.files?.[0] || null)} />
+            onChange={(event) => {
+              setFinancialEffectsConfirmed(false)
+              attendanceImport.selectFile(event.target.files?.[0] || null)
+            }} />
         </div>
         {attendanceImport.error && <Banner tone="danger" style={{ marginBottom: 12 }}>{attendanceImport.error}</Banner>}
         <ImportSummary summary={attendanceImport.summary} />
@@ -299,9 +349,20 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
           <Banner tone="warning" style={{ margin: '12px 0' }}>
             Операция необратима: отметки посещаемости нельзя удалить после импорта.
           </Banner>
+          {attendanceEffectMode === 'apply_financial' && <label className="card card-pad"
+            style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+            <input type="checkbox" checked={financialEffectsConfirmed}
+              onChange={(event) => setFinancialEffectsConfirmed(event.target.checked)} />
+            <span>Я подтверждаю списание занятий или создание денежных начислений для выбранных строк.</span>
+          </label>}
           <div className="ops-button-row" style={{ marginBottom: 12 }}>
-            <Button variant="primary" loading={attendanceImport.busy} disabled={attendanceImport.busy}
-              onClick={attendanceImport.commit}>Импортировать</Button>
+            <Button variant="primary" loading={attendanceImport.busy}
+              disabled={attendanceImport.busy || (attendanceEffectMode === 'apply_financial' && !financialEffectsConfirmed)}
+              onClick={() => attendanceImport.commit(
+                attendanceEffectMode === 'apply_financial'
+                  ? { confirm_financial_effects: true }
+                  : {}
+              )}>Импортировать</Button>
           </div>
         </>}
       </div>}
@@ -311,7 +372,7 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
           <div className="eyebrow">Файл оплат (.xlsx / .csv)</div>
           <p className="muted" style={{ margin: '6px 0' }}>
             Колонки: Клиент, Сумма, Валюта (необязательно, по умолчанию PLN), Дата (ДД.ММ.ГГГГ),
-            Способ (наличные/перевод/карта/другое), Статус (необязательно, по умолчанию — подтверждён), Комментарий.
+            Способ (наличные/перевод/карта/другое), Статус (необязательно, по умолчанию — подтверждён), Reference ID (необязательно), Комментарий.
           </p>
           <input type="file" accept=".xlsx,.xlsm,.csv"
             onChange={(event) => paymentsImport.selectFile(event.target.files?.[0] || null)} />
@@ -323,9 +384,18 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
           <Banner tone="warning" style={{ margin: '12px 0' }}>
             Операция необратима: платежи нельзя удалить после импорта (append-only история).
           </Banner>
+          {paymentsImport.rows.some((row) => row.status === 'possible_duplicate') && <label className="card card-pad"
+            style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+            <input type="checkbox" checked={possiblePaymentDuplicatesApproved}
+              onChange={(event) => setPossiblePaymentDuplicatesApproved(event.target.checked)} />
+            <span>Я проверил вероятные дубликаты и разрешаю добавить выбранные платежи без Reference ID.</span>
+          </label>}
           <div className="ops-button-row" style={{ marginBottom: 12 }}>
-            <Button variant="primary" loading={paymentsImport.busy} disabled={paymentsImport.busy}
-              onClick={paymentsImport.commit}>Импортировать</Button>
+            <Button variant="primary" loading={paymentsImport.busy}
+              disabled={paymentsImport.busy || (paymentsImport.rows.some((row) => row.status === 'possible_duplicate') && !possiblePaymentDuplicatesApproved)}
+              onClick={() => paymentsImport.commit({
+                approve_possible_duplicates: possiblePaymentDuplicatesApproved,
+              })}>Импортировать</Button>
           </div>
         </>}
       </div>}

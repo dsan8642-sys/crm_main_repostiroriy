@@ -1,0 +1,12 @@
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies = [("billing", "0005_charge_attendance")]
+    operations = [
+        migrations.AddField(
+            model_name="payment",
+            name="reference_id",
+            field=models.CharField(blank=True, db_index=True, max_length=128),
+        ),
+    ]

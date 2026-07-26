@@ -1,11 +1,26 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+import re
+
 from scheduling.models import Location, SessionTypeConfig
 
 @require_GET
 def admin_api_contract(request):
     _admin_required(request)
-    return JsonResponse(API_CONTRACT)
+    from .openapi import build_openapi_schema
+    schema = build_openapi_schema()
+    # Keep the legacy flat list during the OpenAPI migration so older
+    # operational clients can discover routes without maintaining a second
+    # hand-written contract.
+    schema["endpoints"] = [
+        {
+            "method": method.upper(),
+            "path": re.sub(r"\{[^}]+_id\}", "<id>", path),
+        }
+        for path, operations in schema["paths"].items()
+        for method in operations
+    ]
+    return JsonResponse(schema)
 
 
 @require_GET

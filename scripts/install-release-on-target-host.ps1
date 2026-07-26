@@ -11,7 +11,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$ArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$SourceArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$DeploymentArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-artifact.ps1"
 $InstallVerifier = Join-Path $RepoRoot "scripts\verify-target-host-release-install.ps1"
 
 function Resolve-RequiredPath {
@@ -77,8 +78,11 @@ function Invoke-Step {
     & $Command
 }
 
-if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
-    throw "Release archive verifier not found at $ArchiveVerifier."
+if (-not (Test-Path -LiteralPath $SourceArchiveVerifier)) {
+    throw "Release source archive verifier not found at $SourceArchiveVerifier."
+}
+if (-not (Test-Path -LiteralPath $DeploymentArchiveVerifier)) {
+    throw "Deployment archive verifier not found at $DeploymentArchiveVerifier."
 }
 if (-not (Test-Path -LiteralPath $InstallVerifier)) {
     throw "Target-host release install verifier not found at $InstallVerifier."
@@ -92,6 +96,13 @@ if (-not (Test-Path -LiteralPath $manifestPath)) {
 $manifestDir = Split-Path -Parent $manifestPath
 $manifestData = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $archivePath = Resolve-ArchivePath -ManifestData $manifestData -ManifestDir $manifestDir
+$isDeploymentBundle = $manifestData.artifact_type -eq "swimcrm_deployment_bundle"
+$archiveVerifier = if ($isDeploymentBundle) {
+    $DeploymentArchiveVerifier
+}
+else {
+    $SourceArchiveVerifier
+}
 
 if ([string]::IsNullOrWhiteSpace($InstallRoot) -and [string]::IsNullOrWhiteSpace($ReleaseDir)) {
     throw "InstallRoot or ReleaseDir is required. Set SWIMCRM_RELEASE_ROOT or pass -InstallRoot/-ReleaseDir."
@@ -136,7 +147,7 @@ if (-not $RunInstall) {
 }
 
 Invoke-Step "Verify release source archive" {
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArchiveVerifier $manifestPath
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $archiveVerifier $manifestPath
     if ($LASTEXITCODE -ne 0) {
         throw "Release source archive verification failed with exit code $LASTEXITCODE."
     }
@@ -154,6 +165,10 @@ else {
 
 Invoke-Step "Extract release archive" {
     Expand-Archive -LiteralPath $archivePath -DestinationPath $ReleaseDir
+    if ($isDeploymentBundle -and
+        -not (Test-Path -LiteralPath (Join-Path $ReleaseDir "frontend\dist\index.html") -PathType Leaf)) {
+        throw "Verified deployment bundle did not extract frontend/dist/index.html."
+    }
     Write-Host "Release archive extracted on target host."
 }
 

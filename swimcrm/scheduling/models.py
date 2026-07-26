@@ -1,7 +1,12 @@
+from datetime import timedelta
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone as dj_timezone
+
+from common.money import CURRENCY_CHOICES, Money
 
 
 class Weekday(models.IntegerChoices):
@@ -31,6 +36,76 @@ class RecurringTemplate(models.Model):
 
     def __str__(self):
         return f"{self.group} · {self.get_weekday_display()} {self.start_time:%H:%M}"
+
+
+class WeeklyPlan(models.Model):
+    group = models.ForeignKey(
+        "catalog.Group", on_delete=models.CASCADE, related_name="weekly_plans")
+    name = models.CharField(max_length=120)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=dj_timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["group__name", "name", "id"]
+
+    def clean(self):
+        self.name = (self.name or "").strip()
+        if not self.name:
+            raise ValidationError("weekly plan name is required")
+
+    def __str__(self):
+        return f"{self.group} · {self.name}"
+
+
+class WeeklyPlanSlot(models.Model):
+    plan = models.ForeignKey(
+        WeeklyPlan, on_delete=models.CASCADE, related_name="slots")
+    trainer = models.ForeignKey(
+        "accounts.Trainer", on_delete=models.PROTECT, related_name="weekly_plan_slots")
+    weekday = models.IntegerField(choices=Weekday.choices)
+    start_time = models.TimeField()
+    duration_minutes = models.PositiveSmallIntegerField(default=60)
+    location = models.CharField(max_length=120)
+    max_participants = models.PositiveIntegerField()
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["weekday", "start_time", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["plan", "weekday", "start_time"],
+                name="uniq_weekly_plan_slot_time",
+            ),
+        ]
+
+    def clean(self):
+        if not 15 <= self.duration_minutes <= 480 or self.duration_minutes % 5:
+            raise ValidationError(
+                "duration_minutes must be between 15 and 480 in five-minute increments")
+
+    def __str__(self):
+        return f"{self.plan} · {self.get_weekday_display()} {self.start_time:%H:%M}"
+
+
+class ScheduleBatchStatus(models.TextChoices):
+    PREVIEWED = "previewed", "Previewed"
+    COMMITTED = "committed", "Committed"
+
+
+class ScheduleOperationBatch(models.Model):
+    created_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
+    operation = models.CharField(max_length=32, default="copy_period")
+    status = models.CharField(
+        max_length=16, choices=ScheduleBatchStatus.choices,
+        default=ScheduleBatchStatus.PREVIEWED)
+    input_data = models.JSONField(default=dict)
+    preview = models.JSONField(default=list)
+    result = models.JSONField(default=dict)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(default=dj_timezone.now)
+    committed_at = models.DateTimeField(null=True, blank=True)
 
 
 class SessionType(models.TextChoices):
@@ -66,6 +141,10 @@ class SessionTypeConfig(models.Model):
     code = models.CharField(max_length=16, choices=SessionType.choices, unique=True)
     label = models.CharField(max_length=120)
     default_capacity = models.PositiveIntegerField(null=True, blank=True)
+    default_price_minor = models.BigIntegerField(null=True, blank=True)
+    default_currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
+                                        default=settings.DEFAULT_CURRENCY)
+    default_duration_minutes = models.PositiveSmallIntegerField(default=60)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=dj_timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -79,6 +158,12 @@ class SessionTypeConfig(models.Model):
         self.label = (self.label or "").strip()
         if not self.label:
             raise ValidationError("label is required")
+        if self.default_price_minor is not None and self.default_price_minor < 0:
+            raise ValidationError("default_price_minor cannot be negative")
+        if (not 15 <= self.default_duration_minutes <= 480 or
+                self.default_duration_minutes % 5):
+            raise ValidationError(
+                "default_duration_minutes must be between 15 and 480 in five-minute increments")
 
     def __str__(self):
         return self.label
@@ -188,6 +273,9 @@ class Session(models.Model):
     (incl. individual). Keeps a link to the template and a 'manually modified' flag."""
     template = models.ForeignKey(
         RecurringTemplate, null=True, blank=True, on_delete=models.SET_NULL, related_name="sessions")
+    weekly_plan_slot = models.ForeignKey(
+        WeeklyPlanSlot, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="sessions")
     session_type = models.CharField(max_length=16, choices=SessionType.choices,
                                     default=SessionType.GROUP)
     group = models.ForeignKey("catalog.Group", null=True, blank=True,
@@ -202,8 +290,15 @@ class Session(models.Model):
 
     start_at = models.DateTimeField()
     end_at = models.DateTimeField()
+    duration_minutes = models.PositiveSmallIntegerField(default=60)
     location = models.CharField(max_length=120)
     max_participants = models.PositiveIntegerField()
+    price_minor = models.BigIntegerField(
+        null=True, blank=True, editable=False,
+        help_text="Session price snapshot in minor currency units")
+    currency = models.CharField(
+        max_length=3, choices=CURRENCY_CHOICES, default=settings.DEFAULT_CURRENCY,
+        editable=False)
 
     is_manually_modified = models.BooleanField(default=False)  # rule 4
     is_cancelled = models.BooleanField(default=False)
@@ -226,17 +321,33 @@ class Session(models.Model):
                 condition=(Q(group__isnull=False, individual_student__isnull=True) |
                            Q(group__isnull=True, individual_student__isnull=False)),
                 name="session_group_xor_individual"),
+            models.CheckConstraint(
+                condition=Q(price_minor__isnull=True) | Q(price_minor__gte=0),
+                name="session_price_minor_nonnegative"),
+            models.CheckConstraint(
+                condition=Q(duration_minutes__gte=15) & Q(duration_minutes__lte=480),
+                name="session_duration_minutes_range"),
         ]
 
     @property
     def effective_trainer(self):
         return self.substitute_trainer or self.trainer
 
+    @property
+    def price(self):
+        return None if self.price_minor is None else Money(self.price_minor, self.currency)
+
     def clean(self):
         if self.substitute_trainer_id and self.substitute_trainer_id == self.trainer_id:
             raise ValidationError("substitute trainer must differ from scheduled trainer")
         if self.end_at <= self.start_at:
             raise ValidationError("Время окончания должно быть позже начала")
+        if not 15 <= self.duration_minutes <= 480 or self.duration_minutes % 5:
+            raise ValidationError(
+                "duration_minutes must be between 15 and 480 in five-minute increments")
+        expected_end = self.start_at + timedelta(minutes=self.duration_minutes)
+        if self.end_at != expected_end:
+            raise ValidationError("end_at must equal start_at + duration_minutes")
 
     def __str__(self):
         return f"{self.start_at:%d.%m %H:%M} · {self.location}"

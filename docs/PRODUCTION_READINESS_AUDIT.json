@@ -32,7 +32,7 @@
           "path": "docs/CRM_CORE_SPEC.md",
           "patterns": [
             "Django backend remains the system of record",
-            "Do not do a full rebuild from scratch on NocoBase"
+            "Do not introduce a separate low-code administration layer"
           ]
         }
       ]

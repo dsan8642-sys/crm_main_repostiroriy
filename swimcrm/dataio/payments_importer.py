@@ -32,7 +32,7 @@ from billing.services import confirm_payment, record_admin_payment_created, reje
 from common.money import MINOR_UNITS, Money
 from students.models import Student
 
-NEW, DUPLICATE, ERROR = "new", "duplicate", "error"
+NEW, DUPLICATE, POSSIBLE_DUPLICATE, ERROR = "new", "duplicate", "possible_duplicate", "error"
 
 METHOD_LABELS = {label.lower(): value for value, label in PaymentMethod.choices}
 STATUS_LABELS = {label.lower(): value for value, label in PaymentStatus.choices}
@@ -77,7 +77,10 @@ def _parse_amount_minor(raw, currency):
     if value <= 0:
         return None, "Сумма должна быть положительной"
     minor_units = MINOR_UNITS.get(currency, 2)
-    return int((value * (10 ** minor_units)).to_integral_value()), None
+    scaled = value * (10 ** minor_units)
+    if scaled != scaled.to_integral_value():
+        return None, f"Сумма содержит больше {minor_units} знаков после запятой для {currency}"
+    return int(scaled), None
 
 
 def _parse_method(raw):
@@ -156,15 +159,24 @@ def preview(headers, rows):
             result.append(pr)
             continue
 
-        is_dup = Payment.objects.filter(
+        reference_id = (d.get("Reference ID") or d.get("ID транзакции") or "").strip()[:128]
+        same_payment = Payment.objects.filter(
             student=student, amount_minor=amount_minor, currency=currency,
-            paid_at=paid_at, method=method).exists()
-        pr.status = DUPLICATE if is_dup else NEW
-        if is_dup:
-            pr.errors.append("Похожий платёж уже есть (тот же клиент/сумма/дата/способ)")
+            paid_at=paid_at, method=method)
+        if reference_id:
+            is_dup = Payment.objects.filter(reference_id=reference_id).exists()
+            pr.status = DUPLICATE if is_dup else NEW
+            if is_dup:
+                pr.errors.append("Платёж с таким Reference ID уже существует")
+        elif same_payment.exists():
+            pr.status = POSSIBLE_DUPLICATE
+            pr.errors.append("Вероятный дубликат: подтвердите импорт вручную или укажите Reference ID")
+        else:
+            pr.status = NEW
         pr.resolved = {
             "student_id": student.id, "amount_minor": amount_minor, "currency": currency,
             "paid_at": paid_at.isoformat(), "method": method, "status": status,
+            "reference_id": reference_id,
             "comment": d.get("Комментарий", ""),
         }
         result.append(pr)
@@ -172,14 +184,17 @@ def preview(headers, rows):
 
 
 @transaction.atomic
-def commit(preview_rows, *, actor=None):
+def commit(preview_rows, *, actor=None, approve_possible_duplicates=False):
     """Apply NEW rows. Everything else is skipped. No rollback: Payment/Charge/
     PaymentEvent history is immutable by design — preview is the safety net."""
     created = skipped = 0
     errors = []
 
     for pr in preview_rows:
-        if pr.status != NEW:
+        if pr.status not in (NEW, POSSIBLE_DUPLICATE):
+            skipped += 1
+            continue
+        if pr.status == POSSIBLE_DUPLICATE and not approve_possible_duplicates:
             skipped += 1
             continue
         try:
@@ -189,14 +204,19 @@ def commit(preview_rows, *, actor=None):
                 student = Student.objects.select_related("parent__user").get(pk=r["student_id"])
                 # Re-check the duplicate guard at commit time too: data may have
                 # changed since preview, and a written payment cannot be undone.
-                if Payment.objects.filter(
+                if r.get("reference_id"):
+                    duplicate_exists = Payment.objects.filter(reference_id=r["reference_id"]).exists()
+                else:
+                    duplicate_exists = Payment.objects.filter(
                         student=student, amount_minor=r["amount_minor"], currency=r["currency"],
-                        paid_at=paid_at, method=r["method"]).exists():
+                        paid_at=paid_at, method=r["method"]).exists() and not approve_possible_duplicates
+                if duplicate_exists:
                     skipped += 1
                     continue
                 payment = Payment.objects.create(
                     student=student, amount_minor=r["amount_minor"], currency=r["currency"],
-                    paid_at=paid_at, method=r["method"], comment=r.get("comment", ""),
+                    paid_at=paid_at, method=r["method"], reference_id=r.get("reference_id", ""),
+                    comment=r.get("comment", ""),
                     status=PaymentStatus.PENDING, source=PaymentSource.ADMIN, created_by=actor)
                 record_admin_payment_created(payment, actor)
                 if r["status"] == PaymentStatus.CONFIRMED:

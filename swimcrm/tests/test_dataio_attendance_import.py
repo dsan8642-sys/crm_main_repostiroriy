@@ -2,9 +2,11 @@
 from django.test import TestCase
 
 from attendance.models import AttendanceRecord, AttendanceStatus
+from attendance.services import set_attendance
 from catalog.models import Group
 from dataio import attendance_importer as ai
 from dataio.importer import parse_source
+from dataio.models import ImportEffectMode
 from scheduling.models import Session, SessionParticipant, SessionType
 from scheduling.services import create_session
 from subscriptions.models import LedgerReason, SessionLedgerEntry
@@ -98,13 +100,14 @@ class AttendanceImportCommitTest(TestCase):
         create_subscription(student=self.student, subscription_type=self.sub_type,
                             start_date=date(2026, 1, 1))
 
-    def test_commit_creates_session_marks_attendance_and_deducts_ledger(self):
+    def test_financial_commit_creates_session_marks_attendance_and_deducts_ledger(self):
         row = "10.03.2026 09:00;ewa.ai@example.com;Акулы;coach_commit;present;10:00;Бассейн C;15"
         headers, rows = parse_source(_csv([row]), "att.csv")
         pv = ai.preview(headers, rows)
         self.assertEqual(pv[0].status, ai.WILL_CREATE_SESSION)
 
-        summary = ai.commit(pv, actor=None)
+        summary = ai.commit(
+            pv, actor=None, mode=ImportEffectMode.APPLY_FINANCIAL)
         self.assertEqual(summary["created_sessions"], 1)
         self.assertEqual(summary["created_records"], 1)
         self.assertEqual(summary["skipped"], 0)
@@ -116,6 +119,32 @@ class AttendanceImportCommitTest(TestCase):
         ledger = SessionLedgerEntry.objects.get(attendance=record)
         self.assertEqual(ledger.delta, -1)
         self.assertEqual(ledger.reason, LedgerReason.ATTENDANCE)
+        self.assertTrue(summary["financial_effects_applied"])
+
+    def test_default_commit_records_history_without_financial_effects(self):
+        self.group.price_minor = 6500
+        self.group.save(update_fields=["price_minor"])
+        row = "10.03.2026 11:00;ewa.ai@example.com;Акулы;coach_commit;present;12:00;Бассейн Safe;15"
+        headers, rows = parse_source(_csv([row]), "att.csv")
+        preview_rows = ai.preview(headers, rows)
+
+        summary = ai.commit(preview_rows, actor=None)
+
+        record = AttendanceRecord.objects.get(
+            session__location="Бассейн Safe", student=self.student)
+        self.assertEqual(summary["effect_mode"], ImportEffectMode.HISTORY_ONLY)
+        self.assertFalse(summary["financial_effects_applied"])
+        self.assertFalse(record.financial_effects_enabled)
+        self.assertFalse(SessionLedgerEntry.objects.filter(attendance=record).exists())
+        self.assertFalse(record.charges.exists())
+
+        set_attendance(
+            session_id=record.session_id,
+            student=self.student,
+            status=AttendanceStatus.ABSENT,
+        )
+        self.assertFalse(SessionLedgerEntry.objects.filter(attendance=record).exists())
+        self.assertFalse(record.charges.exists())
 
     def test_commit_matched_row_marks_attendance_without_creating_session(self):
         start = f.dt(2026, 3, 11, 9)

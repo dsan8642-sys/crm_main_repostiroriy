@@ -319,16 +319,26 @@ export function createClientScreens(components, icons, reloadRoleData) {
       }
     }
 
-    // One POST per consent is the only option: the API records each type
-    // separately so every grant keeps its own audit trail and policy version.
     async function grantAll() {
       setBusyType(ALL_CONSENTS)
       try {
-        for (const row of pending) {
-          await saveConsent(row, true)
-        }
-        setMessage('Все согласия подтверждены.')
-        setError(null)
+        const payload = await api.post('/api/client/consents/', {
+          items: pending.map((row) => ({
+            type: row.type,
+            granted: true,
+            policy_version: row.policy_version || 'v1',
+          })),
+        })
+        const successful = payload.results
+          .filter((result) => result.success)
+          .map((result) => result.consent)
+        setLocalRows((current) => current.map(
+          (row) => successful.find((saved) => saved.type === row.type) || row))
+        const failures = payload.results.filter((result) => !result.success)
+        setMessage(`Сохранено согласий: ${payload.summary.succeeded}.`)
+        setError(failures.length
+          ? failures.map((result) => `${result.type || `#${result.index + 1}`}: ${result.error}`).join('; ')
+          : null)
         reloadRoleData?.('client')
       } catch (err) {
         setError(err.message)

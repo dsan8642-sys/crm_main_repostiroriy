@@ -1,5 +1,6 @@
 from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 
 from payroll.models import (PayrollPeriod, PayrollRule, PayrollScheme,
                             TrainerPayrollAssignment)
@@ -139,7 +140,8 @@ def admin_payroll_schemes(request):
     qs = PayrollScheme.objects.order_by("name", "id")
     if request.GET.get("active") in {"true", "false"}:
         qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse({"schemes": [_payroll_scheme_payload(scheme) for scheme in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="schemes", serializer=_payroll_scheme_payload))
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
@@ -164,7 +166,8 @@ def admin_payroll_rules(request):
     qs = PayrollRule.objects.select_related("scheme").order_by("scheme__name", "session_type", "id")
     if request.GET.get("scheme_id"):
         qs = qs.filter(scheme_id=request.GET["scheme_id"])
-    return JsonResponse({"rules": [_payroll_rule_payload(rule) for rule in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="rules", serializer=_payroll_rule_payload))
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
@@ -190,7 +193,8 @@ def admin_payroll_assignments(request):
         "trainer__user", "scheme").order_by("trainer_id", "-effective_from")
     if request.GET.get("trainer_id"):
         qs = qs.filter(trainer_id=request.GET["trainer_id"])
-    return JsonResponse({"assignments": [_payroll_assignment_payload(assignment) for assignment in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="assignments", serializer=_payroll_assignment_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])

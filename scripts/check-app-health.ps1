@@ -3,7 +3,6 @@ param(
     [string]$DjangoBaseUrl = $(if ($env:DJANGO_BASE_URL) { $env:DJANGO_BASE_URL } else { "http://127.0.0.1:8000" }),
     [string]$SessionCookie = $env:SWIMCRM_ADMIN_SESSION_COOKIE,
     [int]$TimeoutSeconds = 10,
-    [switch]$AllowOpsCritical,
     [switch]$RequireHttps,
     [switch]$RequireOpsOk,
     [switch]$PlanOnly
@@ -79,9 +78,6 @@ if ($RequireOpsOk) {
     $opsStatus = Invoke-JsonGet -Url $plan.admin_ops_status -Headers @{ Cookie = $SessionCookie }
     if ($opsStatus.status -ne "ok") {
         throw "Operations status must be ok when -RequireOpsOk is set. Current status: $($opsStatus.status)."
-    }
-    if ($opsStatus.status -eq "critical" -and -not $AllowOpsCritical) {
-        throw "Operations status is critical. Re-run with -AllowOpsCritical only for diagnostics, not for release approval."
     }
     Write-Host "Django operations status: $($opsStatus.status)"
     Write-Host "Operations status ok requirement passed."

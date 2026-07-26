@@ -10,15 +10,18 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
   return function ApiAdminSchedule({ go, initialTab }) {
     const sessions = globalThis.AdminData?.sessions || []
     const templates = globalThis.AdminData?.templates || []
+    const weeklyPlans = globalThis.AdminData?.weeklyPlans || []
     const groups = globalThis.AdminData?.groups || []
     const trainers = globalThis.AdminData?.trainers || []
     const participants = globalThis.AdminData?.clients || []
+    const sessionTypeConfigs = globalThis.AdminData?.sessionTypeConfigs || []
     const [sessionForm, setSessionForm] = useState({
       groupId: groups[0]?.groupId || '',
       trainerId: trainers[0]?.trainerId || '',
       date: new Date().toISOString().slice(0, 10),
       start: '17:00',
-      end: '18:00',
+      durationMinutes: '60',
+      price: '',
       location: 'Бассейн',
       maxParticipants: '10',
       notes: '',
@@ -41,6 +44,20 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       dateTo: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       skipConflicts: true,
     })
+    const [planForm, setPlanForm] = useState({ name: 'Основное расписание', groupId: groups[0]?.groupId || '' })
+    const [slotForm, setSlotForm] = useState({
+      planId: '', trainerId: trainers[0]?.trainerId || '', weekday: '0',
+      start: '17:00', durationMinutes: '60', location: 'Бассейн', maxParticipants: '10',
+    })
+    const [planGenerateForm, setPlanGenerateForm] = useState({
+      planId: '', dateFrom: new Date().toISOString().slice(0, 10),
+      dateTo: new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10), skipConflicts: true,
+    })
+    const [copyForm, setCopyForm] = useState({
+      sourceFrom: '', sourceTo: '', targetFrom: '', targetTo: '',
+      includeGroup: true, includeIndividual: true, includeSplit: true,
+    })
+    const [copyPreview, setCopyPreview] = useState(null)
     const [editingSession, setEditingSession] = useState(null)
     const [confirmDelete, setConfirmDelete] = useState(null)
     const [sessionEditForm, setSessionEditForm] = useState({
@@ -48,7 +65,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       trainerId: '',
       date: '',
       start: '',
-      end: '',
+      durationMinutes: '60',
       location: '',
       maxParticipants: '',
       notes: '',
@@ -81,9 +98,29 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
     const updateGenerateForm = (field, value) => setGenerateForm((current) => ({ ...current, [field]: value }))
     const updateSessionEditForm = (field, value) => setSessionEditForm((current) => ({ ...current, [field]: value }))
     const updateTemplateEditForm = (field, value) => setTemplateEditForm((current) => ({ ...current, [field]: value }))
+    const updatePlanForm = (field, value) => setPlanForm((current) => ({ ...current, [field]: value }))
+    const updateSlotForm = (field, value) => setSlotForm((current) => ({ ...current, [field]: value }))
+    const updatePlanGenerateForm = (field, value) => setPlanGenerateForm((current) => ({ ...current, [field]: value }))
+    const updateCopyForm = (field, value) => setCopyForm((current) => ({ ...current, [field]: value }))
 
     function dateTime(date, time) {
       return `${date}T${time}`
+    }
+
+    function endTime(start, durationMinutes) {
+      const [hours, minutes] = String(start || '00:00').split(':').map(Number)
+      const total = (hours * 60 + minutes + Number(durationMinutes || 60)) % (24 * 60)
+      return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+    }
+
+    function updateSessionType(sessionType) {
+      const defaults = sessionTypeConfigs.find((item) => item.code === sessionType)
+      setSessionForm((current) => ({
+        ...current,
+        sessionType,
+        durationMinutes: String(defaults?.default_duration_minutes || 60),
+        maxParticipants: String(defaults?.default_capacity || (sessionType === 'split' ? 2 : current.maxParticipants)),
+      }))
     }
 
     const locations = [...new Set(sessions.map((session) => session.location).filter(Boolean))]
@@ -150,7 +187,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
         trainerId: session.trainerId || '',
         date: isoDate(session.startAt),
         start: session.start,
-        end: session.end,
+        durationMinutes: String(session.durationMinutes || 60),
+        price: session.priceMinor == null ? '' : String(session.priceMinor / 100),
         location: session.location || '',
         maxParticipants: String(session.limit || 0),
         notes: session.notes || '',
@@ -176,11 +214,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       setError(null)
       try {
         const startAt = dateTime(sessionForm.date, sessionForm.start)
-        const endAt = dateTime(sessionForm.date, sessionForm.end)
         const conflict = await api.post('/api/admin/schedule/check-conflict/', {
           trainer_id: sessionForm.trainerId,
           start_at: startAt,
-          end_at: endAt,
+          duration_minutes: Number(sessionForm.durationMinutes || 60),
         })
         if (conflict.has_conflict) {
           setError(Array.isArray(conflict.error) ? conflict.error.join(', ') : conflict.error)
@@ -192,7 +229,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
           individual_student_id: sessionForm.sessionType !== 'group' ? sessionForm.participantId : null,
           trainer_id: sessionForm.trainerId,
           start_at: startAt,
-          end_at: endAt,
+          duration_minutes: Number(sessionForm.durationMinutes || 60),
           location: sessionForm.location,
           max_participants: Number(sessionForm.maxParticipants || 0),
           notes: sessionForm.notes,
@@ -260,22 +297,22 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       setError(null)
       try {
         const startAt = dateTime(sessionEditForm.date, sessionEditForm.start)
-        const endAt = dateTime(sessionEditForm.date, sessionEditForm.end)
         const conflict = await api.post('/api/admin/schedule/check-conflict/', {
           trainer_id: sessionEditForm.trainerId,
           start_at: startAt,
-          end_at: endAt,
+          duration_minutes: Number(sessionEditForm.durationMinutes || 60),
           exclude_session_id: editingSession.sessionId,
         })
         if (conflict.has_conflict) {
           setError(Array.isArray(conflict.error) ? conflict.error.join(', ') : conflict.error)
           return
         }
-        await api.post(`/api/admin/schedule/sessions/${editingSession.sessionId}/`, {
+        await api.patch(`/api/admin/schedule/sessions/${editingSession.sessionId}/`, {
           group_id: sessionEditForm.groupId,
           trainer_id: sessionEditForm.trainerId,
           start_at: startAt,
-          end_at: endAt,
+          duration_minutes: Number(sessionEditForm.durationMinutes || 60),
+          price_minor: sessionEditForm.price === '' ? null : Math.round(Number(sessionEditForm.price) * 100),
           location: sessionEditForm.location,
           max_participants: Number(sessionEditForm.maxParticipants || 0),
           notes: sessionEditForm.notes,
@@ -311,7 +348,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       setBusy(true)
       setError(null)
       try {
-        await api.delete(`/api/admin/schedule/sessions/${session.sessionId}/`)
+        await api.delete(`/api/admin/schedule/sessions/${session.sessionId}/`, {
+          force: true,
+          confirm_session_id: session.sessionId,
+        })
         setMessage('Занятие удалено.')
         setConfirmDelete(null)
         await reloadRoleData?.('admin')
@@ -364,12 +404,83 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       }
     }
 
+    async function createWeeklyPlan() {
+      setBusy(true); setError(null)
+      try {
+        await api.post('/api/admin/schedule/plans/', { name: planForm.name, group_id: planForm.groupId })
+        setMessage('Недельный план создан.')
+        setActionPanel(null)
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function createWeeklyPlanSlot() {
+      if (!slotForm.planId) return setError('Выберите недельный план.')
+      setBusy(true); setError(null)
+      try {
+        await api.post(`/api/admin/schedule/plans/${slotForm.planId}/slots/`, {
+          trainer_id: slotForm.trainerId,
+          weekday: Number(slotForm.weekday),
+          start_time: slotForm.start,
+          duration_minutes: Number(slotForm.durationMinutes),
+          location: slotForm.location,
+          max_participants: Number(slotForm.maxParticipants),
+        })
+        setMessage('Слот добавлен в недельный план.')
+        setActionPanel(null)
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function generateWeeklyPlan() {
+      if (!planGenerateForm.planId) return setError('Выберите недельный план.')
+      setBusy(true); setError(null)
+      try {
+        const result = await api.post(`/api/admin/schedule/plans/${planGenerateForm.planId}/generate/`, {
+          date_from: planGenerateForm.dateFrom,
+          date_to: planGenerateForm.dateTo,
+          skip_conflicts: planGenerateForm.skipConflicts,
+        })
+        setMessage(`Создано занятий: ${result.created_count}. Пропущено: ${result.skipped_count}.`)
+        setActionPanel(null)
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function previewPeriodCopy() {
+      setBusy(true); setError(null)
+      try {
+        const result = await api.post('/api/admin/schedule/copy/preview/', {
+          source_from: copyForm.sourceFrom, source_to: copyForm.sourceTo,
+          target_from: copyForm.targetFrom, target_to: copyForm.targetTo,
+          include_group: copyForm.includeGroup,
+          include_individual: copyForm.includeIndividual,
+          include_split: copyForm.includeSplit,
+        })
+        setCopyPreview({ ...result, selectedIndices: result.rows.filter((row) => row.status === 'ready').map((row) => row.index) })
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function commitPeriodCopy() {
+      if (!copyPreview) return
+      setBusy(true); setError(null)
+      try {
+        const result = await api.post('/api/admin/schedule/copy/commit/', {
+          batch_id: copyPreview.batch_id,
+          selected_indices: copyPreview.selectedIndices,
+        })
+        setMessage(`Скопировано занятий: ${result.created_count}. Пропущено: ${result.skipped_count}.`)
+        setCopyPreview(null); setActionPanel(null)
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
     return (
       <div className="page page-wide">
         <div className="page-head">
           <div>
             <h2 className="page-title">Расписание</h2>
-            <p className="page-desc">Занятия, регулярные шаблоны и генерация расписания.</p>
+            <p className="page-desc">Занятия, недельные планы групп и безопасное копирование периодов.</p>
           </div>
           <div className="seg" role="group" aria-label="Режим отображения расписания">
             <button type="button" className={displayMode === 'calendar' ? 'on' : ''} aria-pressed={displayMode === 'calendar'} onClick={() => setDisplayMode('calendar')}>
@@ -399,13 +510,21 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
             <span>Новое занятие</span>
             <small>Разовое занятие</small>
           </button>
-          <button type="button" className={`ops-action-card${actionPanel === 'template' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'template' ? null : 'template')}>
-            <span>Новый шаблон</span>
-            <small>Регулярное расписание</small>
+          <button type="button" className={`ops-action-card${actionPanel === 'plan' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'plan' ? null : 'plan')}>
+            <span>Недельный план</span>
+            <small>План для целой группы</small>
           </button>
-          <button type="button" className={`ops-action-card${actionPanel === 'generate' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'generate' ? null : 'generate')}>
-            <span>Сгенерировать</span>
-            <small>Создать занятия из шаблона</small>
+          <button type="button" className={`ops-action-card${actionPanel === 'slot' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'slot' ? null : 'slot')}>
+            <span>Добавить слот</span>
+            <small>День и время в плане</small>
+          </button>
+          <button type="button" className={`ops-action-card${actionPanel === 'plan-generate' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'plan-generate' ? null : 'plan-generate')}>
+            <span>Создать по плану</span>
+            <small>Заполнить выбранный период</small>
+          </button>
+          <button type="button" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'copy' ? null : 'copy')}>
+            <span>Копировать период</span>
+            <small>Предпросмотр перед записью</small>
           </button>
         </div>
 
@@ -415,7 +534,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
           <div className="card card-pad">
             <div className="eyebrow" style={{ marginBottom: 10 }}>Новое занятие</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Тип занятия<select value={sessionForm.sessionType} onChange={(event) => updateSessionForm('sessionType', event.target.value)}><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит для двоих</option></select></label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Тип занятия<select value={sessionForm.sessionType} onChange={(event) => updateSessionType(event.target.value)}><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит для двоих</option></select></label>
               {sessionForm.sessionType !== 'group' && <SearchableSelect label="Участник" value={sessionForm.participantId} onChange={(value) => updateSessionForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant))} />}
               {sessionForm.sessionType === 'group' && (
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
@@ -436,7 +555,18 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
               <Input label="Дата" value={sessionForm.date} onChange={(event) => updateSessionForm('date', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <Input label="Начало" value={sessionForm.start} onChange={(event) => updateSessionForm('start', event.target.value)} placeholder="ЧЧ:ММ" />
-                <Input label="Окончание" value={sessionForm.end} onChange={(event) => updateSessionForm('end', event.target.value)} placeholder="ЧЧ:ММ" />
+                <Input label="Длительность, мин" value={sessionForm.durationMinutes} onChange={(event) => updateSessionForm('durationMinutes', event.target.value)} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div className="muted" style={{ fontSize: 'var(--fs-xs)', marginBottom: 6 }}>
+                  Окончание: {endTime(sessionForm.start, sessionForm.durationMinutes)}
+                </div>
+                <div className="ops-button-row">
+                  {[30, 45, 60, 90, 120].map((minutes) => (
+                    <Button key={minutes} size="sm" variant={Number(sessionForm.durationMinutes) === minutes ? 'primary' : 'subtle'}
+                      onClick={() => updateSessionForm('durationMinutes', String(minutes))}>{minutes} мин</Button>
+                  ))}
+                </div>
               </div>
               <Input label="Место" value={sessionForm.location} onChange={(event) => updateSessionForm('location', event.target.value)} />
               <Input label="Лимит участников" value={sessionForm.maxParticipants} onChange={(event) => updateSessionForm('maxParticipants', event.target.value)} />
@@ -524,6 +654,64 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
         </div>
         )}
 
+        {actionPanel === 'plan' && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Новый недельный план</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
+              <Input label="Название" value={planForm.name} onChange={(event) => updatePlanForm('name', event.target.value)} />
+              <label>Группа<select value={planForm.groupId} onChange={(event) => updatePlanForm('groupId', event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
+              <Button variant="primary" disabled={busy} onClick={createWeeklyPlan}>Создать план</Button>
+            </div>
+          </div>
+        )}
+
+        {actionPanel === 'slot' && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Новый слот плана</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+              <label>План<select value={slotForm.planId} onChange={(event) => updateSlotForm('planId', event.target.value)}><option value="">Выберите план</option>{weeklyPlans.filter((plan) => plan.active).map((plan) => <option key={plan.planId} value={plan.planId}>{plan.group} · {plan.name}</option>)}</select></label>
+              <label>Тренер<select value={slotForm.trainerId} onChange={(event) => updateSlotForm('trainerId', event.target.value)}>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
+              <label>День<select value={slotForm.weekday} onChange={(event) => updateSlotForm('weekday', event.target.value)}>{['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>
+              <Input label="Начало" value={slotForm.start} onChange={(event) => updateSlotForm('start', event.target.value)} />
+              <Input label="Длительность, мин" value={slotForm.durationMinutes} onChange={(event) => updateSlotForm('durationMinutes', event.target.value)} />
+              <Input label="Место" value={slotForm.location} onChange={(event) => updateSlotForm('location', event.target.value)} />
+              <Input label="Лимит" value={slotForm.maxParticipants} onChange={(event) => updateSlotForm('maxParticipants', event.target.value)} />
+              <Button variant="primary" disabled={busy} onClick={createWeeklyPlanSlot}>Добавить слот</Button>
+            </div>
+          </div>
+        )}
+
+        {actionPanel === 'plan-generate' && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Создать занятия по недельному плану</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto auto', gap: 10, alignItems: 'end' }}>
+              <label>План<select value={planGenerateForm.planId} onChange={(event) => updatePlanGenerateForm('planId', event.target.value)}><option value="">Выберите план</option>{weeklyPlans.filter((plan) => plan.active).map((plan) => <option key={plan.planId} value={plan.planId}>{plan.group} · {plan.name}</option>)}</select></label>
+              <Input label="С даты" value={planGenerateForm.dateFrom} onChange={(event) => updatePlanGenerateForm('dateFrom', event.target.value)} />
+              <Input label="По дату" value={planGenerateForm.dateTo} onChange={(event) => updatePlanGenerateForm('dateTo', event.target.value)} />
+              <label><input type="checkbox" checked={planGenerateForm.skipConflicts} onChange={(event) => updatePlanGenerateForm('skipConflicts', event.target.checked)} /> Пропускать конфликты</label>
+              <Button variant="primary" disabled={busy} onClick={generateWeeklyPlan}>Создать занятия</Button>
+            </div>
+          </div>
+        )}
+
+        {actionPanel === 'copy' && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Копирование расписания за период</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+              <Input label="Источник с" value={copyForm.sourceFrom} onChange={(event) => updateCopyForm('sourceFrom', event.target.value)} />
+              <Input label="Источник по" value={copyForm.sourceTo} onChange={(event) => updateCopyForm('sourceTo', event.target.value)} />
+              <Input label="Назначение с" value={copyForm.targetFrom} onChange={(event) => updateCopyForm('targetFrom', event.target.value)} />
+              <Input label="Назначение по" value={copyForm.targetTo} onChange={(event) => updateCopyForm('targetTo', event.target.value)} />
+            </div>
+            <div className="ops-button-row" style={{ marginTop: 10 }}>
+              {[['includeGroup', 'Групповые'], ['includeIndividual', 'Индивидуальные'], ['includeSplit', 'Сплит']].map(([field, label]) => <label key={field}><input type="checkbox" checked={copyForm[field]} onChange={(event) => updateCopyForm(field, event.target.checked)} /> {label}</label>)}
+              <Button variant="primary" disabled={busy} onClick={previewPeriodCopy}>Проверить</Button>
+              {copyPreview && <Button variant="secondary" disabled={busy || !copyPreview.selectedIndices.length} onClick={commitPeriodCopy}>Скопировать {copyPreview.selectedIndices.length}</Button>}
+            </div>
+            {copyPreview && <div className="muted" style={{ marginTop: 10 }}>Готово: {copyPreview.selectedIndices.length}; конфликты или пропуски: {copyPreview.rows.length - copyPreview.selectedIndices.length}. Запись начнётся только после подтверждения.</div>}
+          </div>
+        )}
+
         {editingSession && (
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование занятия</div>
@@ -545,10 +733,22 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
               <Input label="Дата" value={sessionEditForm.date} onChange={(event) => updateSessionEditForm('date', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <Input label="Начало" value={sessionEditForm.start} onChange={(event) => updateSessionEditForm('start', event.target.value)} placeholder="ЧЧ:ММ" />
-                <Input label="Окончание" value={sessionEditForm.end} onChange={(event) => updateSessionEditForm('end', event.target.value)} placeholder="ЧЧ:ММ" />
+                <Input label="Длительность, мин" value={sessionEditForm.durationMinutes} onChange={(event) => updateSessionEditForm('durationMinutes', event.target.value)} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div className="muted" style={{ fontSize: 'var(--fs-xs)', marginBottom: 6 }}>
+                  Окончание: {endTime(sessionEditForm.start, sessionEditForm.durationMinutes)}
+                </div>
+                <div className="ops-button-row">
+                  {[30, 45, 60, 90, 120].map((minutes) => (
+                    <Button key={minutes} size="sm" variant={Number(sessionEditForm.durationMinutes) === minutes ? 'primary' : 'subtle'}
+                      onClick={() => updateSessionEditForm('durationMinutes', String(minutes))}>{minutes} мин</Button>
+                  ))}
+                </div>
               </div>
               <Input label="Место" value={sessionEditForm.location} onChange={(event) => updateSessionEditForm('location', event.target.value)} />
               <Input label="Лимит участников" value={sessionEditForm.maxParticipants} onChange={(event) => updateSessionEditForm('maxParticipants', event.target.value)} />
+              <Input label="Цена, PLN" value={sessionEditForm.price} onChange={(event) => updateSessionEditForm('price', event.target.value)} placeholder="Например, 80" />
               <Input label="Заметки" value={sessionEditForm.notes} onChange={(event) => updateSessionEditForm('notes', event.target.value)} />
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -607,29 +807,15 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
         )}
 
         <div style={{ marginBottom: 16 }}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Шаблоны</div>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>Недельные планы</div>
           <Table
-            rows={templates}
-            emptyLabel="Шаблонов пока нет"
+            rows={weeklyPlans}
+            emptyLabel="Недельных планов пока нет"
             columns={[
               { key: 'group', header: 'Группа' },
-              { key: 'trainer', header: 'Тренер', muted: true },
-              { key: 'weekdayLabel', header: 'День', muted: true },
-              { key: 'time', header: 'Время', render: (row) => <span className="mono">{row.start}-{row.end}</span> },
-              { key: 'location', header: 'Место', muted: true },
-              { key: 'limit', header: 'Лимит', align: 'right', width: 80 },
+              { key: 'name', header: 'Название' },
+              { key: 'slots', header: 'Слоты', render: (row) => row.slots.length ? row.slots.map((slot) => `${slot.weekday_label} ${slot.start_time} · ${slot.trainer}`).join(', ') : 'Нет слотов' },
               { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
-              {
-                key: 'actions',
-                header: '',
-                width: 190,
-                render: (row) => (
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <Button size="sm" variant="subtle" disabled={busy} onClick={() => openTemplateEdit(row)}>Изменить</Button>
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => cancelFutureTemplate(row)}>Отменить будущие</Button>
-                  </div>
-                ),
-              },
             ]}
           />
         </div>

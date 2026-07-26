@@ -4,7 +4,7 @@
 
 ## Идентификация релиза
 
-- Ветка: `codex/hybrid-nocobase-release-candidate`.
+- Ветка: `codex/hybrid-admin-release-candidate`.
 - Production application commit: `10e8022f68fa7250ae48fe33d12defb2c931e1ed`.
 - Release archive: `swimcrm-release-10e8022f68fa.zip`.
 - Archive SHA-256: `f7a2ea5e67b1439a7c354107a9a93f23f4905c244f34af285272efc8291647ee`.
@@ -45,7 +45,7 @@
 - Browser console errors after live load: `0`.
 - Services after cutover: Django running, Caddy running, PostgreSQL running.
 - Django NSSM `AppDirectory` points to the production release above.
-- NocoBase Windows services: `0`; NocoBase is not part of the active UI path.
+- Внешние low-code UI-сервисы: `0`; активный интерфейс построен только на собственном frontend.
 - Django stderr after restart contains only the normal Waitress startup message.
 
 ## Scope note

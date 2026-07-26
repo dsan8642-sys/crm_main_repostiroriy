@@ -139,14 +139,14 @@ developer support.
 
 ### Final Decision
 
-Do not do a full rebuild from scratch on NocoBase.
+Do not introduce a separate low-code administration layer.
 
 Recommended direction:
 
 - keep the current backend as the source of truth;
 - preserve complex business logic in code;
 - modernize and evolve the system through a hybrid rewrite strategy;
-- use NocoBase only where it accelerates CRUD-heavy admin interfaces and
+- use the native administration UI for CRUD-heavy interfaces and
   operational configuration.
 
 ### Why
@@ -911,7 +911,7 @@ low-code source of truth:
 
 ## What Is Managed in the Admin Settings UI
 
-NocoBase was evaluated as a low-code layer for configuration/admin surfaces
+A low-code layer was evaluated for configuration/admin surfaces
 during the hybrid rewrite (see Final Decision above) but was fully removed
 from the running product; these surfaces are managed directly in the SwimCRM
 admin UI (`/api/admin/settings/*` and related `/api/admin/notifications/`,

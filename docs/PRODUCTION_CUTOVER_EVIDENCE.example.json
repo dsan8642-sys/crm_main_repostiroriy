@@ -45,7 +45,7 @@
       "status": "passed",
       "evidence_url": "https://github.com/acme/swimcrm/actions/runs/1234567890",
       "captured_at": "2026-07-16T12:10:00+02:00",
-      "summary": "GitHub Actions release-check job passed on release commit 0123456789abcdef0123456789abcdef01234567 and uploaded artifact swimcrm-release-source-0123456789abcdef0123456789abcdef01234567."
+      "summary": "GitHub Actions release-check job passed on release commit 0123456789abcdef0123456789abcdef01234567 and uploaded immutable artifact swimcrm-release-0123456789abcdef0123456789abcdef01234567; archive_sha256=<64-hex>; artifact_file_list_sha256=<64-hex>; frontend_dist_file_count=<count>."
     },
     {
       "id": "github_postgres_backend_job",

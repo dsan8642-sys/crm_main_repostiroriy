@@ -8,8 +8,11 @@ from dataio.importer import parse_source
 from . import factories as f
 
 
-def _csv(rows):
-    header = "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий\r\n"
+def _csv(rows, *, reference=False):
+    header = "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий"
+    if reference:
+        header += ";Reference ID"
+    header += "\r\n"
     return (header + "\r\n".join(rows) + "\r\n").encode("utf-8")
 
 
@@ -68,6 +71,31 @@ class PaymentsImportPreviewTest(TestCase):
         pv = pi.preview(headers, rows)
         self.assertEqual(pv[0].status, pi.ERROR)
 
+    def test_rejects_amount_with_excess_precision(self):
+        headers, rows = parse_source(
+            _csv(["jan.pi@example.com;50.001;PLN;10.03.2026;cash;;"]), "pay.csv")
+        pv = pi.preview(headers, rows)
+        self.assertEqual(pv[0].status, pi.ERROR)
+        self.assertIn("больше 2", pv[0].errors[0])
+
+    def test_reference_id_prevents_duplicate_without_guessing(self):
+        Payment.objects.create(student=self.student, amount_minor=12000, currency="PLN",
+                               paid_at="2026-03-10", method=PaymentMethod.CASH,
+                               reference_id="bank-123", status=PaymentStatus.CONFIRMED)
+        headers, rows = parse_source(
+            _csv(["jan.pi@example.com;120.00;PLN;10.03.2026;cash;confirmed;;bank-123"], reference=True),
+            "pay.csv")
+        pv = pi.preview(headers, rows)
+        self.assertEqual(pv[0].status, pi.DUPLICATE)
+
+    def test_match_without_reference_requires_manual_decision(self):
+        Payment.objects.create(student=self.student, amount_minor=12000, currency="PLN",
+                               paid_at="2026-03-10", method=PaymentMethod.CASH,
+                               status=PaymentStatus.CONFIRMED)
+        headers, rows = parse_source(
+            _csv(["jan.pi@example.com;120.00;PLN;10.03.2026;cash;confirmed;"]), "pay.csv")
+        self.assertEqual(pi.preview(headers, rows)[0].status, pi.POSSIBLE_DUPLICATE)
+
     def test_bad_date_is_an_error(self):
         row = "jan.pi@example.com;50;PLN;not-a-date;cash;;"
         headers, rows = parse_source(_csv([row]), "pay.csv")
@@ -81,7 +109,7 @@ class PaymentsImportPreviewTest(TestCase):
         row = "jan.pi@example.com;120.00;PLN;10.03.2026;cash;confirmed;"
         headers, rows = parse_source(_csv([row]), "pay.csv")
         pv = pi.preview(headers, rows)
-        self.assertEqual(pv[0].status, pi.DUPLICATE)
+        self.assertEqual(pv[0].status, pi.POSSIBLE_DUPLICATE)
 
 
 class PaymentsImportCommitTest(TestCase):
@@ -132,7 +160,7 @@ class PaymentsImportCommitTest(TestCase):
         # Re-run preview against the now-changed DB state: the same row is a
         # duplicate and commit must not create a second Payment for it.
         pv2 = pi.preview(headers, rows)
-        self.assertEqual(pv2[0].status, pi.DUPLICATE)
+        self.assertEqual(pv2[0].status, pi.POSSIBLE_DUPLICATE)
         summary2 = pi.commit(pv2, actor=None)
         self.assertEqual(summary2["created"], 0)
         self.assertEqual(Payment.objects.filter(student=self.student).count(), 1)
@@ -145,3 +173,14 @@ class PaymentsImportCommitTest(TestCase):
         payment = Payment.objects.get(student=self.student)
         with self.assertRaises(Exception):
             payment.delete()
+
+    def test_possible_duplicate_needs_explicit_approval(self):
+        Payment.objects.create(student=self.student, amount_minor=1000, currency="PLN",
+                               paid_at="2026-03-12", method=PaymentMethod.CASH,
+                               status=PaymentStatus.CONFIRMED)
+        headers, rows = parse_source(
+            _csv(["ewa.pi@example.com;10;PLN;12.03.2026;cash;confirmed;"]), "pay.csv")
+        preview = pi.preview(headers, rows)
+        self.assertEqual(preview[0].status, pi.POSSIBLE_DUPLICATE)
+        self.assertEqual(pi.commit(preview)["created"], 0)
+        self.assertEqual(pi.commit(preview, approve_possible_duplicates=True)["created"], 1)

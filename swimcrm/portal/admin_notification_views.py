@@ -1,5 +1,6 @@
 from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 from django.db.models import ProtectedError
 from notifications.models import (DeliveryStatus, EventType, NotificationLog,
                                   NotificationRule, NotificationTemplate,
@@ -134,7 +135,8 @@ def admin_notification_templates(request):
         qs = qs.filter(event_type=request.GET["event_type"])
     if request.GET.get("channel"):
         qs = qs.filter(channel=request.GET["channel"])
-    return JsonResponse({"templates": [_template_payload(template) for template in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="templates", serializer=_template_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
@@ -165,7 +167,8 @@ def admin_notification_rules(request):
         qs = qs.filter(channel=request.GET["channel"])
     if request.GET.get("active") in {"true", "false"}:
         qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse({"rules": [_rule_payload(rule) for rule in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="rules", serializer=_rule_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
@@ -192,7 +195,8 @@ def admin_quiet_hours_policies(request):
         qs = qs.filter(channel=request.GET["channel"])
     if request.GET.get("active") in {"true", "false"}:
         qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse({"policies": [_quiet_hours_payload(policy) for policy in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="policies", serializer=_quiet_hours_payload))
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])

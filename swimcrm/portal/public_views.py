@@ -1,5 +1,13 @@
 ﻿from .support import *
 
+from .openapi import build_openapi_schema
+
+
+@require_GET
+def openapi_schema(request):
+    return JsonResponse(build_openapi_schema())
+
+
 @require_GET
 def me(request):
     user = _require_user(request)

@@ -27,6 +27,7 @@ from accounts.models import Trainer
 from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
 from catalog.models import Group
+from dataio.models import ImportEffectMode
 from scheduling.models import (Session, SessionParticipant,
                                SessionParticipantSource, SessionParticipantStatus,
                                SessionType)
@@ -103,19 +104,42 @@ def _parse_iso(value):
 
 def _build_lookups():
     trainers_by_key = {}
+    trainers_by_full_name = {}
     for t in Trainer.objects.select_related("user"):
         trainers_by_key[t.user.get_username().lower()] = t
+        if t.user.email:
+            trainers_by_key[t.user.email.lower()] = t
         full = t.user.get_full_name().strip().lower()
         if full:
-            trainers_by_key[full] = t
+            trainers_by_full_name.setdefault(full, []).append(t)
     groups_by_name = {g.name.lower(): g for g in Group.objects.all()}
-    return trainers_by_key, groups_by_name
+    return trainers_by_key, trainers_by_full_name, groups_by_name
+
+
+def _resolve_trainer(raw, trainers_by_key, trainers_by_full_name):
+    value = (raw or "").strip()
+    if not value:
+        return None, None
+    if value.lower().startswith("id:"):
+        try:
+            return Trainer.objects.select_related("user").get(pk=int(value[3:].strip())), None
+        except (Trainer.DoesNotExist, ValueError):
+            return None, f"Тренер не найден по ID: {value}"
+    trainer = trainers_by_key.get(value.lower())
+    if trainer is not None:
+        return trainer, None
+    matches = trainers_by_full_name.get(value.lower(), [])
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        return None, "Тренер неоднозначен: укажите ID, username или email"
+    return None, f"Тренер не найден: {value}"
 
 
 def preview(headers, rows):
     """Classify each row: matched (session exists) / will_create_session /
     duplicate (attendance already recorded) / error. No DB writes."""
-    trainers_by_key, groups_by_name = _build_lookups()
+    trainers_by_key, trainers_by_full_name, groups_by_name = _build_lookups()
     result = []
     for i, row in enumerate(rows, start=2):  # row 1 = header
         d = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
@@ -138,9 +162,10 @@ def preview(headers, rows):
         group = groups_by_name.get(gname.lower()) if gname else None
         if gname and group is None:
             pr.errors.append(f"Группа не найдена: {gname}")
-        trainer = trainers_by_key.get(tname.lower()) if tname else None
-        if tname and trainer is None:
-            pr.errors.append(f"Тренер не найден: {tname}")
+        trainer, trainer_error = _resolve_trainer(
+            tname, trainers_by_key, trainers_by_full_name)
+        if trainer_error:
+            pr.errors.append(trainer_error)
         if not gname and not tname:
             pr.errors.append("Укажите группу или тренера")
 
@@ -232,9 +257,12 @@ def _ensure_roster(session, student, actor):
 
 
 @transaction.atomic
-def commit(preview_rows, *, actor=None):
+def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
     """Apply matched/will_create_session rows. Everything else is skipped.
     No rollback: AttendanceRecord history is immutable by design."""
+    if mode not in (ImportEffectMode.HISTORY_ONLY, ImportEffectMode.APPLY_FINANCIAL):
+        raise ValidationError("Invalid attendance import effect mode")
+    apply_financial_effects = mode == ImportEffectMode.APPLY_FINANCIAL
     created_sessions = created_records = skipped = 0
     errors = []
 
@@ -277,7 +305,14 @@ def commit(preview_rows, *, actor=None):
                     skipped += 1
                     continue
                 _ensure_roster(session, student, actor)
-                set_attendance(session_id=session.id, student=student, status=r["status"], actor=actor)
+                set_attendance(
+                    session_id=session.id,
+                    student=student,
+                    status=r["status"],
+                    actor=actor,
+                    apply_financial_effects=apply_financial_effects,
+                    source="historical_import",
+                )
                 created_records += 1
         except (ValidationError, ScheduleConflict) as exc:
             message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
@@ -285,6 +320,8 @@ def commit(preview_rows, *, actor=None):
             skipped += 1
 
     return {
+        "effect_mode": mode,
+        "financial_effects_applied": apply_financial_effects,
         "created_sessions": created_sessions,
         "created_records": created_records,
         "skipped": skipped,

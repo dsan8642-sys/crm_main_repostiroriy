@@ -41,8 +41,6 @@ from students.services import ensure_account_holder_participant
 from subscriptions.models import Subscription, SubscriptionStatus
 from subscriptions.services import create_subscription, freeze_subscription, manual_adjust, renew_subscription
 
-from .contract import API_CONTRACT
-
 # Admin list endpoints return the full working set; the frontend filters client
 # side. The cap only exists so a runaway table cannot exhaust memory, so it must
 # stay well above the real row counts (a 200-row cap silently hid clients 201+).
@@ -157,6 +155,7 @@ def _session_payload(session):
         "template_id": session.template_id,
         "start_at": timezone.localtime(session.start_at).isoformat(),
         "end_at": timezone.localtime(session.end_at).isoformat(),
+        "duration_minutes": session.duration_minutes,
         "location": session.location,
         "session_type": session.session_type,
         "trainer_id": session.trainer_id,
@@ -170,6 +169,8 @@ def _session_payload(session):
         "is_cancelled": session.is_cancelled,
         "is_manually_modified": session.is_manually_modified,
         "max_participants": session.max_participants,
+        "price_minor": session.price_minor,
+        "currency": session.currency,
         "participants_count": len(_session_roster(session)),
         "waitlist_active_count": waitlist_active_count,
         "notes": session.notes,
@@ -338,6 +339,7 @@ def _payment_payload(payment):
         "currency": payment.currency,
         "paid_at": payment.paid_at.isoformat(),
         "method": payment.method,
+        "reference_id": payment.reference_id,
         "status": payment.status,
         "source": payment.source,
         "affects_balance": payment.status == PaymentStatus.CONFIRMED,
@@ -367,6 +369,7 @@ def _attendance_payload(record):
         "comment": record.comment,
         "marked_at": timezone.localtime(record.marked_at).isoformat(),
         "deducts": record.deducts,
+        "financial_effects_enabled": record.financial_effects_enabled,
     }
 
 
@@ -818,6 +821,21 @@ def _session_changes_from_data(data):
         changes["start_at"] = _parse_datetime(data.get("start_at"), "start_at")
     if "end_at" in data:
         changes["end_at"] = _parse_datetime(data.get("end_at"), "end_at")
+    if "duration_minutes" in data:
+        try:
+            changes["duration_minutes"] = int(data.get("duration_minutes"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("duration_minutes must be an integer") from exc
+    if "price_minor" in data:
+        value = data.get("price_minor")
+        try:
+            changes["price_minor"] = None if value in (None, "") else int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("price_minor must be an integer") from exc
+        if changes["price_minor"] is not None and changes["price_minor"] < 0:
+            raise ValidationError("price_minor cannot be negative")
+    if "currency" in data:
+        changes["currency"] = (data.get("currency") or settings.DEFAULT_CURRENCY).upper()
     if "location" in data:
         changes["location"] = data.get("location", "") or ""
     if "max_participants" in data:
@@ -858,7 +876,8 @@ def _create_session_from_data(data, *, actor=None):
     return create_session(
         trainer=trainer,
         start_at=_parse_datetime(data.get("start_at"), "start_at"),
-        end_at=_parse_datetime(data.get("end_at"), "end_at"),
+        end_at=_parse_datetime(data.get("end_at"), "end_at") if data.get("end_at") else None,
+        duration_minutes=data.get("duration_minutes"),
         location=data.get("location", "") or "",
         max_participants=int(data.get("max_participants")),
         group=group,

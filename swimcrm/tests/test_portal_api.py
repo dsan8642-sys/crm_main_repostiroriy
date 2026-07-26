@@ -14,6 +14,7 @@ from billing.models import (
     Charge, Payment, PaymentEventType, PaymentMethod, PaymentSource, PaymentStatus,
 )
 from billing.services import student_balance
+from dataio.models import ImportBatch, ImportBatchStatus, ImportEffectMode
 from notifications.models import (Channel, DeliveryStatus, EventType, NotificationLog,
                                   NotificationRule, NotificationTemplate, QuietHoursPolicy)
 from scheduling.models import (Location, SessionParticipant, SessionParticipantStatus,
@@ -896,28 +897,27 @@ class AdminPortalApiRule(TestCase):
         self.assertIn(("POST", "/api/admin/settings/session-types/"), routes)
         self.assertIn(("POST", "/api/admin/settings/notification-template-translations/"), routes)
         self.assertIn(("GET", "/api/client/overview/"), routes)
-        self.assertIn("participant", payload["resources"])
-        self.assertIn("waitlist_entry", payload["resources"])
-        self.assertIn("location", payload["resources"])
-        self.assertIn("session_type_config", payload["resources"])
-        self.assertIn("payroll_period", payload["resources"])
-        self.assertIn("dictionary_translation", payload["resources"])
-        by_route = {(row["method"], row["path"]): row for row in payload["endpoints"]}
-        self.assertEqual(by_route[("GET", "/api/admin/settings/locations/")]["query"], ["q", "active"])
-        self.assertEqual(
-            by_route[("GET", "/api/admin/settings/notification-template-translations/")]["query"],
-            ["template_id", "language_code"],
-        )
-        self.assertEqual(by_route[("GET", "/api/admin/payroll/rules/")]["query"], ["scheme_id"])
-        self.assertEqual(
-            by_route[("GET", "/api/admin/payroll/assignments/")]["query"],
-            ["trainer_id"],
-        )
+        self.assertEqual(payload["openapi"], "3.1.0")
+        location_path = payload["paths"]["/api/admin/settings/locations/{location_id}/"]
+        self.assertIn("patch", location_path)
+        self.assertNotIn("post", location_path)
 
         parent = f.make_parent(username="contract_client")
         self.client.force_login(parent.user)
         forbidden = self.client.get("/api/admin/api-contract/")
         self.assertEqual(forbidden.status_code, 403)
+
+    def test_admin_settings_detail_uses_patch_not_post(self):
+        location = Location.objects.create(code="patch-pool", name="Before")
+        url = f"/api/admin/settings/locations/{location.id}/"
+        payload = json.dumps({"name": "After"})
+
+        updated = self.client.patch(url, data=payload, content_type="application/json")
+        rejected = self.client.post(url, data=payload, content_type="application/json")
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["name"], "After")
+        self.assertEqual(rejected.status_code, 405)
 
     def test_admin_trainer_crud(self):
         response = self.client.post(
@@ -1252,6 +1252,9 @@ class AdminPortalApiRule(TestCase):
 
     def test_admin_can_create_move_cancel_and_check_session_conflict(self):
         trainer = f.make_trainer(username="single_session_coach")
+        self.group.price_minor = 4200
+        self.group.currency = "EUR"
+        self.group.save(update_fields=["price_minor", "currency"])
         session = self.client.post(
             "/api/admin/schedule/sessions/",
             data=json.dumps({
@@ -1285,11 +1288,15 @@ class AdminPortalApiRule(TestCase):
         cancelled = self.client.post(f"/api/admin/schedule/sessions/{session.json()['id']}/cancel/")
 
         self.assertEqual(session.status_code, 201)
+        self.assertEqual(session.json()["price_minor"], 4200)
+        self.assertEqual(session.json()["currency"], "EUR")
         self.assertEqual(conflict.status_code, 200)
         self.assertTrue(conflict.json()["has_conflict"])
         self.assertEqual(moved.status_code, 200)
         self.assertTrue(moved.json()["is_manually_modified"])
         self.assertEqual(moved.json()["notes"], "moved by admin")
+        self.assertEqual(moved.json()["price_minor"], 4200)
+        self.assertEqual(moved.json()["currency"], "EUR")
         self.assertEqual(cancelled.status_code, 200)
         self.assertTrue(cancelled.json()["is_cancelled"])
 
@@ -1632,12 +1639,16 @@ class AdminPortalApiRule(TestCase):
         })
         self.assertEqual(preview_response.status_code, 200)
         preview_rows = preview_response.json()["rows"]
+        batch_id = preview_response.json()["batch_id"]
         self.assertEqual(len(preview_rows), 1)
         self.assertEqual(preview_rows[0]["status"], "new")
 
         commit_response = self.client.post(
             "/api/admin/import/clients/commit/",
-            data=json.dumps({"rows": preview_rows, "source_name": "clients.csv"}),
+            data=json.dumps({
+                "batch_id": batch_id,
+                "selected_indices": [row["index"] for row in preview_rows],
+            }),
             content_type="application/json",
         )
         self.assertEqual(commit_response.status_code, 201)
@@ -1645,8 +1656,16 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(commit_payload["rows_imported"], 1)
         self.assertTrue(Student.objects.filter(email="oleg.http@example.com").exists())
 
-        rollback_response = self.client.post(
+        rollback_preview = self.client.get(
             f"/api/admin/import/clients/{commit_payload['batch_id']}/rollback/")
+        self.assertTrue(rollback_preview.json()["can_rollback"])
+        rollback_response = self.client.post(
+            f"/api/admin/import/clients/{commit_payload['batch_id']}/rollback/",
+            data=json.dumps({
+                "confirm_batch_id": commit_payload["batch_id"],
+                "confirm_rollback": True,
+            }),
+            content_type="application/json")
         self.assertEqual(rollback_response.status_code, 200)
         self.assertFalse(Student.objects.filter(email="oleg.http@example.com").exists())
 
@@ -1670,15 +1689,90 @@ class AdminPortalApiRule(TestCase):
         })
         self.assertEqual(preview_response.status_code, 200)
         rows = preview_response.json()["rows"]
+        batch_id = preview_response.json()["batch_id"]
         self.assertEqual(rows[0]["status"], "will_create_session")
 
         commit_response = self.client.post(
             "/api/admin/import/attendance/commit/",
-            data=json.dumps({"rows": rows}),
+            data=json.dumps({
+                "batch_id": batch_id,
+                "selected_indices": [row["index"] for row in rows],
+            }),
             content_type="application/json",
         )
         self.assertEqual(commit_response.status_code, 201)
         self.assertEqual(commit_response.json()["created_records"], 1)
+        self.assertEqual(
+            commit_response.json()["effect_mode"], ImportEffectMode.HISTORY_ONLY)
+        batch = ImportBatch.objects.get(pk=batch_id)
+        self.assertEqual(batch.effect_mode, ImportEffectMode.HISTORY_ONLY)
+        self.assertFalse(Charge.objects.filter(
+            attendance__session__group=group,
+            attendance__student__email="olya.http@example.com",
+        ).exists())
+        self.assertTrue(AuditLogEntry.objects.filter(
+            action="attendance.import_committed",
+            entity_type="ImportBatch",
+            entity_id=str(batch_id),
+            changes__effect_mode=ImportEffectMode.HISTORY_ONLY,
+        ).exists())
+
+    def test_attendance_financial_import_requires_explicit_commit_confirmation(self):
+        trainer = f.make_trainer(username="coach_financial_import")
+        group = f.make_group("Финансовый импорт")
+        group.price_minor = 7200
+        group.save(update_fields=["price_minor"])
+        student = f.make_student(
+            group=group,
+            first="Финансовый",
+            last="Клиент",
+            email="financial.import@example.com",
+        )
+        csv_bytes = (
+            "Дата;Клиент;Группа;Тренер;Статус;Окончание;Локация;Вместимость\r\n"
+            "21.03.2026 09:00;financial.import@example.com;Финансовый импорт;"
+            "coach_financial_import;present;10:00;Бассейн Finance;10\r\n"
+        ).encode("utf-8")
+        preview = self.client.post("/api/admin/import/attendance/preview/", {
+            "file": SimpleUploadedFile("att-financial.csv", csv_bytes, content_type="text/csv"),
+            "effect_mode": ImportEffectMode.APPLY_FINANCIAL,
+        }).json()
+        commit_data = {
+            "batch_id": preview["batch_id"],
+            "selected_indices": [preview["rows"][0]["index"]],
+        }
+
+        missing_confirmation = self.client.post(
+            "/api/admin/import/attendance/commit/",
+            data=json.dumps(commit_data),
+            content_type="application/json",
+        )
+        self.assertEqual(missing_confirmation.status_code, 400)
+        self.assertEqual(
+            ImportBatch.objects.get(pk=preview["batch_id"]).status,
+            ImportBatchStatus.PREVIEWED,
+        )
+        self.assertFalse(Charge.objects.filter(student=student, attendance__isnull=False).exists())
+
+        committed = self.client.post(
+            "/api/admin/import/attendance/commit/",
+            data=json.dumps({
+                **commit_data,
+                "confirm_financial_effects": True,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(committed.status_code, 201)
+        self.assertEqual(
+            committed.json()["effect_mode"], ImportEffectMode.APPLY_FINANCIAL)
+        self.assertTrue(committed.json()["financial_effects_applied"])
+        charge = Charge.objects.get(student=student, attendance__isnull=False)
+        self.assertEqual(charge.amount_minor, 7200)
+        self.assertTrue(AuditLogEntry.objects.filter(
+            action="attendance.import_committed",
+            entity_id=str(preview["batch_id"]),
+            changes__financial_effects_applied=True,
+        ).exists())
 
     def test_admin_import_payments_http_preview_and_commit(self):
         student = f.make_student(first="Стас", last="Быстров", email="stas.http@example.com")
@@ -1691,16 +1785,156 @@ class AdminPortalApiRule(TestCase):
         })
         self.assertEqual(preview_response.status_code, 200)
         rows = preview_response.json()["rows"]
+        batch_id = preview_response.json()["batch_id"]
         self.assertEqual(rows[0]["status"], "new")
 
         commit_response = self.client.post(
             "/api/admin/import/payments/commit/",
-            data=json.dumps({"rows": rows}),
+            data=json.dumps({
+                "batch_id": batch_id,
+                "selected_indices": [row["index"] for row in rows],
+            }),
             content_type="application/json",
         )
         self.assertEqual(commit_response.status_code, 201)
         self.assertEqual(commit_response.json()["created"], 1)
         self.assertTrue(Payment.objects.filter(student=student, amount_minor=7500).exists())
+
+        batch = ImportBatch.objects.get(pk=batch_id)
+        self.assertEqual(batch.status, ImportBatchStatus.COMMITTED)
+        self.assertEqual(batch.input_data, {})
+
+    def test_admin_import_commit_rejects_browser_supplied_rows(self):
+        student = f.make_student(
+            first="Secure", last="Import", email="secure.import@example.com")
+        csv_bytes = (
+            "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий\r\n"
+            "secure.import@example.com;75;PLN;20.03.2026;cash;confirmed;\r\n"
+        ).encode("utf-8")
+        preview = self.client.post("/api/admin/import/payments/preview/", {
+            "file": SimpleUploadedFile("pay.csv", csv_bytes, content_type="text/csv"),
+        }).json()
+
+        tampered = self.client.post(
+            "/api/admin/import/payments/commit/",
+            data=json.dumps({
+                "batch_id": preview["batch_id"],
+                "selected_indices": [preview["rows"][0]["index"]],
+                "rows": [{
+                    **preview["rows"][0],
+                    "resolved": {
+                        **preview["rows"][0]["resolved"],
+                        "amount_minor": -999999,
+                    },
+                }],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(tampered.status_code, 400)
+        self.assertFalse(Payment.objects.filter(student=student).exists())
+        self.assertEqual(
+            ImportBatch.objects.get(pk=preview["batch_id"]).status,
+            ImportBatchStatus.PREVIEWED,
+        )
+
+    def test_admin_import_batch_is_single_use_and_owner_bound(self):
+        student = f.make_student(
+            first="Owned", last="Import", email="owned.import@example.com")
+        csv_bytes = (
+            "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий\r\n"
+            "owned.import@example.com;50;PLN;20.03.2026;cash;confirmed;\r\n"
+        ).encode("utf-8")
+        preview = self.client.post("/api/admin/import/payments/preview/", {
+            "file": SimpleUploadedFile("pay.csv", csv_bytes, content_type="text/csv"),
+        }).json()
+        commit_data = json.dumps({
+            "batch_id": preview["batch_id"],
+            "selected_indices": [preview["rows"][0]["index"]],
+        })
+
+        other_client = Client()
+        other_client.force_login(f.make_admin(username="other_import_admin"))
+        wrong_owner = other_client.post(
+            "/api/admin/import/payments/commit/",
+            data=commit_data,
+            content_type="application/json",
+        )
+        committed = self.client.post(
+            "/api/admin/import/payments/commit/",
+            data=commit_data,
+            content_type="application/json",
+        )
+        repeated = self.client.post(
+            "/api/admin/import/payments/commit/",
+            data=commit_data,
+            content_type="application/json",
+        )
+
+        self.assertEqual(wrong_owner.status_code, 400)
+        self.assertEqual(committed.status_code, 201)
+        self.assertEqual(repeated.status_code, 400)
+        self.assertEqual(Payment.objects.filter(student=student).count(), 1)
+
+    def test_admin_import_commit_revalidates_current_database_state(self):
+        student = f.make_student(
+            first="Current", last="State", email="current.state@example.com")
+        csv_bytes = (
+            "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий\r\n"
+            "current.state@example.com;50;PLN;20.03.2026;cash;confirmed;\r\n"
+        ).encode("utf-8")
+        preview = self.client.post("/api/admin/import/payments/preview/", {
+            "file": SimpleUploadedFile("pay.csv", csv_bytes, content_type="text/csv"),
+        }).json()
+        Payment.objects.create(
+            student=student,
+            amount_minor=5000,
+            currency="PLN",
+            paid_at=date(2026, 3, 20),
+            method=PaymentMethod.CASH,
+            status=PaymentStatus.CONFIRMED,
+            source=PaymentSource.ADMIN,
+            created_by=self.admin,
+        )
+
+        committed = self.client.post(
+            "/api/admin/import/payments/commit/",
+            data=json.dumps({
+                "batch_id": preview["batch_id"],
+                "selected_indices": [preview["rows"][0]["index"]],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(committed.status_code, 201)
+        self.assertEqual(committed.json()["created"], 0)
+        self.assertEqual(committed.json()["skipped"], 1)
+        self.assertEqual(Payment.objects.filter(student=student).count(), 1)
+
+    def test_admin_import_commit_rejects_expired_batch(self):
+        student = f.make_student(
+            first="Expired", last="Batch", email="expired.batch@example.com")
+        csv_bytes = (
+            "Клиент;Сумма;Валюта;Дата;Способ;Статус;Комментарий\r\n"
+            "expired.batch@example.com;50;PLN;20.03.2026;cash;confirmed;\r\n"
+        ).encode("utf-8")
+        preview = self.client.post("/api/admin/import/payments/preview/", {
+            "file": SimpleUploadedFile("pay.csv", csv_bytes, content_type="text/csv"),
+        }).json()
+        ImportBatch.objects.filter(pk=preview["batch_id"]).update(
+            preview_expires_at=timezone.now() - timedelta(seconds=1))
+
+        committed = self.client.post(
+            "/api/admin/import/payments/commit/",
+            data=json.dumps({
+                "batch_id": preview["batch_id"],
+                "selected_indices": [preview["rows"][0]["index"]],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(committed.status_code, 400)
+        self.assertFalse(Payment.objects.filter(student=student).exists())
 
     def test_admin_mass_mail_requires_valid_channel_and_body(self):
         bad_channel = self.client.post(

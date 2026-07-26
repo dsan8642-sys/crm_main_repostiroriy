@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import { api, fetchAllPages } from '../../api.js'
 import { createAdminImportExportPanel } from './AdminImportExportScreen.jsx'
 
 const eventTypes = [
@@ -13,7 +13,7 @@ const sessionTypes = [['group', 'Групповое'], ['individual', 'Инди�
 const resources = [
   { tab: 'catalog', id: 'subscriptionTypes', title: 'Типы абонементов', endpoint: '/api/admin/subscription-types/', response: 'subscription_types', detail: (id) => `/api/admin/subscription-types/${id}/`, fields: [['name', 'Название'], ['price_minor', 'Цена, гроши', 'number'], ['currency', 'Валюта'], ['duration_days', 'Срок, дней', 'number'], ['sessions_count', 'Занятий', 'number'], ['is_individual', 'Индивидуальный', 'boolean'], ['is_active', 'Активен', 'boolean']] },
   { tab: 'catalog', id: 'locations', title: 'Локации', endpoint: '/api/admin/settings/locations/', response: 'locations', detail: (id) => `/api/admin/settings/locations/${id}/`, fields: [['code', 'Код'], ['name', 'Название'], ['address', 'Адрес'], ['timezone', 'Часовой пояс'], ['is_active', 'Активна', 'boolean']] },
-  { tab: 'catalog', id: 'sessionTypes', title: 'Типы занятий', endpoint: '/api/admin/settings/session-types/', response: 'session_types', detail: (id) => `/api/admin/settings/session-types/${id}/`, fields: [['code', 'Тип', 'select', sessionTypes], ['label', 'Название'], ['default_capacity', 'Лимит по умолчанию', 'number'], ['is_active', 'Активен', 'boolean']] },
+  { tab: 'catalog', id: 'sessionTypes', title: 'Типы занятий', endpoint: '/api/admin/settings/session-types/', response: 'session_types', detail: (id) => `/api/admin/settings/session-types/${id}/`, fields: [['code', 'Тип', 'select', sessionTypes], ['label', 'Название'], ['default_capacity', 'Лимит по умолчанию', 'number'], ['default_price_minor', 'Цена по умолчанию, гроши', 'number'], ['default_currency', 'Валюта'], ['default_duration_minutes', 'Длительность, мин', 'number'], ['is_active', 'Активен', 'boolean']] },
   { tab: 'notifications', id: 'templates', title: 'Шаблоны уведомлений', endpoint: '/api/admin/notifications/templates/', response: 'templates', detail: (id) => `/api/admin/notifications/templates/${id}/`, fields: [['event_type', 'Событие', 'select', eventTypes], ['channel', 'Канал', 'select', channels], ['subject', 'Тема'], ['body', 'Текст', 'textarea']] },
   { tab: 'notifications', id: 'rules', title: 'Правила отправки', endpoint: '/api/admin/notifications/rules/', response: 'rules', detail: (id) => `/api/admin/notifications/rules/${id}/`, fields: [['event_type', 'Событие', 'select', eventTypes], ['channel', 'Канал', 'select', channels], ['template_id', 'Шаблон', 'select-ref', 'templates'], ['offset_minutes', 'Сдвиг, минут', 'number'], ['is_active', 'Активно', 'boolean']] },
   { tab: 'notifications', id: 'quietHours', title: 'Тихие часы', endpoint: '/api/admin/notifications/quiet-hours/', response: 'policies', detail: (id) => `/api/admin/notifications/quiet-hours/${id}/`, fields: [['channel', 'Канал', 'select', channels], ['starts_at', 'С', 'time'], ['ends_at', 'До', 'time'], ['timezone', 'Часовой пояс'], ['is_active', 'Активно', 'boolean']] },
@@ -74,10 +74,12 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
       const needed = onlyId ? loadable.filter((item) => item.id === onlyId) : loadable
       setLoading(true)
       try {
-        const responses = await Promise.all(needed.map(async (item) => [item.id, await api.get(item.endpoint)]))
-        setData((current) => ({ ...current, ...Object.fromEntries(responses.map(([id, payload]) => [id, payload[resources.find((item) => item.id === id).response] || []])) }))
-      } catch (err) {
-        setError(err.message)
+        const results = await Promise.allSettled(
+          needed.map(async (item) => [item, await fetchAllPages(item.endpoint, item.response)]))
+        const loaded = results.filter((result) => result.status === 'fulfilled').map((result) => result.value)
+        setData((current) => ({ ...current, ...Object.fromEntries(loaded.map(([item, payload]) => [item.id, payload[item.response] || []])) }))
+        const failed = results.filter((result) => result.status === 'rejected')
+        if (failed.length) setError(`Не удалось загрузить ${failed.length} раздел(а): ${failed.map((result) => result.reason.message).join('; ')}`)
       } finally {
         setLoading(false)
       }
@@ -112,7 +114,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
       const payload = Object.fromEntries((resource.fields || []).map(([key, , type]) => [key, coerce(form[key], type)]))
       setLoading(true); setError(null)
       try {
-        if (editing?.id) await api.post(resource.detail(editing.id), payload)
+        if (editing?.id) await api.patch(resource.detail(editing.id), payload)
         else await api.post(resource.endpoint, payload)
         setMessage(editing?.id ? 'Изменения сохранены.' : 'Запись создана.')
         setEditing(null)

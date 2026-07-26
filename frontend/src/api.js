@@ -48,8 +48,22 @@ async function request(path, options = {}) {
 export const api = {
   get: (path) => request(path),
   post: (path, body = {}) => request(path, { method: 'POST', body: JSON.stringify(body) }),
-  delete: (path) => request(path, { method: 'DELETE' }),
+  patch: (path, body = {}) => request(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  delete: (path, body = {}) => request(path, { method: 'DELETE', body: JSON.stringify(body) }),
   postForm: (path, formData) => request(path, { method: 'POST', body: formData }),
+}
+
+export async function fetchAllPages(path, key, pageSize = 200) {
+  const separator = path.includes('?') ? '&' : '?'
+  let page = 1
+  let rows = []
+  let lastPayload = {}
+  do {
+    lastPayload = await api.get(`${path}${separator}page=${page}&page_size=${pageSize}`)
+    rows = rows.concat(lastPayload[key] || [])
+    page += 1
+  } while (lastPayload.pagination?.has_next)
+  return { ...lastPayload, [key]: rows }
 }
 
 export async function downloadFile(path, fallbackName) {
@@ -128,17 +142,19 @@ export async function fetchTrainerPortal() {
 
 export async function fetchAdminPortal() {
   const today = new Date().toISOString().slice(0, 10)
-  const [dashboard, reference, clients, trainers, groups, subscriptionTypes, templates, sessions, payments, debtors] = await Promise.all([
+  const [dashboard, reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors] = await Promise.all([
     api.get('/api/admin/dashboard/'),
     api.get('/api/admin/reference/'),
-    api.get('/api/admin/clients/'),
-    api.get('/api/admin/trainers/'),
-    api.get('/api/admin/groups/'),
-    api.get('/api/admin/subscription-types/'),
-    api.get('/api/admin/schedule/templates/'),
-    api.get('/api/admin/schedule/sessions/'),
-    api.get('/api/admin/payments/'),
+    fetchAllPages('/api/admin/clients/', 'clients'),
+    fetchAllPages('/api/admin/trainers/', 'trainers'),
+    fetchAllPages('/api/admin/groups/', 'groups'),
+    fetchAllPages('/api/admin/subscription-types/', 'subscription_types'),
+    fetchAllPages('/api/admin/settings/session-types/', 'session_types'),
+    fetchAllPages('/api/admin/schedule/templates/', 'templates'),
+    fetchAllPages('/api/admin/schedule/plans/', 'plans'),
+    fetchAllPages('/api/admin/schedule/sessions/', 'sessions'),
+    fetchAllPages('/api/admin/payments/', 'payments'),
     api.get('/api/admin/debtors/'),
   ])
-  return { dashboard, reference, clients, trainers, groups, subscriptionTypes, templates, sessions, payments, debtors }
+  return { dashboard, reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors }
 }

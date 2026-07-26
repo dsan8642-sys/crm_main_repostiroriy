@@ -1,5 +1,6 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 
 @require_http_methods(["GET", "POST"])
 def admin_clients(request):
@@ -38,7 +39,7 @@ def admin_clients(request):
     debt = request.GET.get("debt")
     # distinct(): the `q` filter joins group__default_trainer__user, which can
     # emit one row per join match and eat slots inside the cap.
-    students = list(qs.distinct().order_by("last_name", "first_name", "id")[:MAX_LIST_ROWS])
+    students = list(qs.distinct().order_by("last_name", "first_name", "id"))
     if debt in {"yes", "no"}:
         filtered = []
         for student in students:
@@ -46,7 +47,8 @@ def admin_clients(request):
             if (debt == "yes" and has_debt) or (debt == "no" and not has_debt):
                 filtered.append(student)
         students = filtered
-    return JsonResponse({"clients": [_student_payload(student) for student in students]})
+    return JsonResponse(paginated_payload(
+        request, students, key="clients", serializer=_student_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])

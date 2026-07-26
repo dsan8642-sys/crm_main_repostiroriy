@@ -198,6 +198,24 @@ class ImportRule(TestCase):
         headers, rows = importer.parse_source(buf.getvalue(), "c.xlsx")
         self.assertEqual(rows[0]["Email"], "t@example.com")
 
+    def test_parse_rejects_excessive_rows_and_columns(self):
+        too_many_columns = ";".join(f"C{i}" for i in range(51)) + "\n"
+        with self.assertRaisesMessage(Exception, "50 столбцов"):
+            importer.parse_source(too_many_columns.encode("utf-8"), "columns.csv")
+        header = "Имя\n"
+        too_many_rows = header + "\n".join("Ян" for _ in range(importer.MAX_IMPORT_ROWS + 1))
+        with self.assertRaisesMessage(Exception, "5 000 строк"):
+            importer.parse_source(too_many_rows.encode("utf-8"), "rows.csv")
+
+    def test_rollback_preview_blocks_later_financial_data(self):
+        headers, rows = importer.parse_source(CSV.encode("utf-8"), "clients.csv")
+        batch = importer.commit(importer.preview(headers, rows, self.mapping))
+        student = Student.objects.get(email="jan@example.com")
+        Payment.objects.create(student=student, amount_minor=100, currency="PLN", paid_at=date.today())
+        preview = importer.rollback_preview(batch)
+        self.assertFalse(preview["can_rollback"])
+        self.assertIn("payments", preview["blockers"][0]["dependencies"])
+
     def test_entity_export_xlsx_and_csv(self):
         f.make_student(first="Ан", last="Ков")
         name, content = exports.export_entity("clients", "xlsx")
@@ -220,7 +238,11 @@ class ImportRule(TestCase):
 
         commit = admin_client.post(
             "/api/admin/import/clients/commit/",
-            data=json.dumps({"rows": rows}), content_type="application/json")
+            data=json.dumps({
+                "batch_id": preview.json()["batch_id"],
+                "selected_indices": [row["index"] for row in rows],
+            }),
+            content_type="application/json")
         self.assertEqual(commit.status_code, 201)
         self.assertEqual(commit.json()["rows_imported"], 2)
         name_csv, csv_bytes = exports.export_entity("clients", "csv")

@@ -52,4 +52,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "pg_dump failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Backup written: $file"
+$sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+$hashFile = "$file.sha256"
+Set-Content -LiteralPath $hashFile -Value "$sha256  $(Split-Path -Leaf $file)" -NoNewline -Encoding ascii
+Write-Host "PostgreSQL backup written: $file"
+Write-Host "Backup dump SHA-256: $sha256"
+Write-Host "Backup checksum file: $hashFile"

@@ -1,5 +1,6 @@
 ﻿from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 
 @require_http_methods(["GET", "POST"])
 def admin_trainers(request):
@@ -19,7 +20,8 @@ def admin_trainers(request):
             Q(user__username__icontains=q) | Q(user__email__icontains=q) |
             Q(phone__icontains=q)
         )
-    return JsonResponse({"trainers": [_trainer_payload(trainer) for trainer in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="trainers", serializer=_trainer_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])

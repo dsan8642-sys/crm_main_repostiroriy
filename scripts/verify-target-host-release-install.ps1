@@ -10,7 +10,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$ArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$SourceArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$DeploymentArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-artifact.ps1"
 $BlockedGeneratedPrefixes = @(
     ".venv/",
     "node_modules/",
@@ -159,8 +160,11 @@ function Assert-PathExists {
     }
 }
 
-if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
-    throw "Release archive verifier not found at $ArchiveVerifier."
+if (-not (Test-Path -LiteralPath $SourceArchiveVerifier)) {
+    throw "Release source archive verifier not found at $SourceArchiveVerifier."
+}
+if (-not (Test-Path -LiteralPath $DeploymentArchiveVerifier)) {
+    throw "Deployment archive verifier not found at $DeploymentArchiveVerifier."
 }
 
 $manifestPath = Resolve-RequiredPath -Path $Manifest -Label "Manifest"
@@ -170,9 +174,22 @@ Assert-PathExists -Path $manifestPath -Label "Release source archive manifest"
 Assert-PathExists -Path $releaseDirPath -Label "Release directory"
 
 $manifestData = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$isDeploymentBundle = $manifestData.artifact_type -eq "swimcrm_deployment_bundle"
+if ($isDeploymentBundle) {
+    $BlockedGeneratedPrefixes = @(
+        $BlockedGeneratedPrefixes |
+            Where-Object { $_ -ne "frontend/dist/" }
+    )
+}
+$archiveVerifier = if ($isDeploymentBundle) {
+    $DeploymentArchiveVerifier
+}
+else {
+    $SourceArchiveVerifier
+}
 $archivePath = Resolve-ArchivePath -ManifestData $manifestData -ManifestDir (Split-Path -Parent $manifestPath)
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArchiveVerifier $manifestPath
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $archiveVerifier $manifestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Release source archive verification failed with exit code $LASTEXITCODE."
 }
@@ -193,17 +210,33 @@ if ($missingEntries.Count -gt 0 -or $unexpectedEntries.Count -gt 0) {
 }
 
 $installedFileListHash = Get-LineListSha256 -Lines $releaseEntries
-if ($releaseEntries.Count -ne [int]$manifestData.tracked_file_count) {
-    throw "Installed release tracked file count mismatch. Expected $($manifestData.tracked_file_count) but got $($releaseEntries.Count)."
+$expectedFileCount = if ($isDeploymentBundle) {
+    [int]$manifestData.artifact_file_count
 }
-if ($installedFileListHash -ne ([string]$manifestData.tracked_file_list_sha256).ToLowerInvariant()) {
-    throw "Installed release tracked file list sha256 mismatch. Expected $($manifestData.tracked_file_list_sha256) but got $installedFileListHash."
+else {
+    [int]$manifestData.tracked_file_count
+}
+$expectedFileListHash = if ($isDeploymentBundle) {
+    [string]$manifestData.artifact_file_list_sha256
+}
+else {
+    [string]$manifestData.tracked_file_list_sha256
+}
+if ($releaseEntries.Count -ne $expectedFileCount) {
+    throw "Installed release file count mismatch. Expected $expectedFileCount but got $($releaseEntries.Count)."
+}
+if ($installedFileListHash -ne $expectedFileListHash.ToLowerInvariant()) {
+    throw "Installed release file list sha256 mismatch. Expected $expectedFileListHash but got $installedFileListHash."
 }
 
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\manage.py") -Label "Django manage.py"
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\requirements.txt") -Label "Backend requirements.txt"
 Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package.json") -Label "Frontend package.json"
 Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package-lock.json") -Label "Frontend package-lock.json"
+if ($isDeploymentBundle) {
+    Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\dist\index.html") -Label "Bundled frontend index.html"
+    Assert-PathExists -Path (Join-Path $releaseDirPath "RELEASE_PROVENANCE.json") -Label "Release provenance"
+}
 
 if ($RequireInstalledDependencies) {
     $backendPython = Join-Path $releaseDirPath "swimcrm\.venv\Scripts\python.exe"

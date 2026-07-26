@@ -22,15 +22,62 @@ def client_consents(request):
     account = _client_account_from_request(request)
     if request.method == "POST":
         data = _json_body(request)
-        consent_type = data.get("type")
-        if consent_type not in ConsentType.values:
-            raise ValidationError("invalid consent type")
-        consent, _ = Consent.objects.get_or_create(parent=account, type=consent_type)
-        if _bool_value(data.get("granted")):
-            consent.grant(data.get("policy_version", "") or "")
-        else:
-            consent.revoke()
-        return JsonResponse(_consent_payload(consent))
+        items = data.get("items")
+        if items is None:
+            items = [data]
+        if not isinstance(items, list) or not items:
+            raise ValidationError("items must be a non-empty list")
+        if len(items) > len(ConsentType.values):
+            raise ValidationError("too many consent items")
+
+        results = []
+        seen_types = set()
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                results.append({
+                    "index": index, "type": None, "success": False,
+                    "error": "consent item must be an object",
+                })
+                continue
+            consent_type = item.get("type")
+            try:
+                if consent_type not in ConsentType.values:
+                    raise ValidationError("invalid consent type")
+                if consent_type in seen_types:
+                    raise ValidationError("duplicate consent type")
+                seen_types.add(consent_type)
+                with transaction.atomic():
+                    consent, _ = Consent.objects.get_or_create(
+                        parent=account, type=consent_type)
+                    if _bool_value(item.get("granted")):
+                        consent.grant(item.get("policy_version", "") or "")
+                    else:
+                        consent.revoke()
+                results.append({
+                    "index": index, "type": consent_type, "success": True,
+                    "consent": _consent_payload(consent),
+                })
+            except ValidationError as exc:
+                results.append({
+                    "index": index, "type": consent_type, "success": False,
+                    "error": "; ".join(exc.messages),
+                })
+
+        if data.get("items") is None:
+            result = results[0]
+            if not result["success"]:
+                raise ValidationError(result["error"])
+            return JsonResponse(result["consent"])
+        succeeded = sum(1 for result in results if result["success"])
+        payload = {
+            "results": results,
+            "summary": {
+                "total": len(results),
+                "succeeded": succeeded,
+                "failed": len(results) - succeeded,
+            },
+        }
+        return JsonResponse(payload, status=200 if succeeded == len(results) else 207)
 
     existing = {consent.type: consent for consent in account.consents.all()}
     labels = dict(ConsentType.choices)

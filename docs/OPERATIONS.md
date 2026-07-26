@@ -123,8 +123,7 @@ The script verifies:
 
 For release approval, `-RequireOpsOk` requires the operations snapshot to be
 exactly `status=ok`. Without that release flag, `status=critical` still fails
-the smoke check by default. Use `-AllowOpsCritical` only when diagnosing an
-incident, not as a release approval shortcut.
+the smoke check by default and cannot be bypassed.
 
 ## Production cutover evidence
 
@@ -140,10 +139,11 @@ release evidence:
 - tracked release-source guard output proving required frontend manifests are
   Git-tracked;
 - GitHub Actions run URL proving `release-check` passed on the release commit
-  and evidence text naming `swimcrm-release-source-<commit-sha>`;
+  and evidence text naming `swimcrm-release-<commit-sha>`;
 - GitHub Actions `release-check` run artifact named
-  `swimcrm-release-source-<commit-sha>` containing the verified source zip and
-  manifest;
+  `swimcrm-release-<commit-sha>` containing the verified deployment zip and
+  manifest. The zip includes `frontend/dist`, `RELEASE_PROVENANCE.json`, source
+  files from the exact commit, and per-file frontend SHA-256 values;
 - GitHub Actions run URL proving `postgres-backend-check` passed on the release commit;
 - production environment preflight output;
 - live `scripts\check-app-health.cmd -RequireHttps -RequireOpsOk` output from the target host;
@@ -196,6 +196,9 @@ not just `status=passed`:
   verified`, `tracked_file_count`, `tracked_file_list_sha256`, exact
   `release_candidate.commit_sha`, and archive `sha256`;
 - tracked release-source guard: `Release source manifests verified`, `tracked`;
+- GitHub Actions immutable deployment artifact: `Immutable release artifact
+  verified`, exact `commit_sha`, `archive_sha256`, `artifact_file_list_sha256`,
+  and `frontend_dist_file_count`;
 - target-host release install: `Target-host release install completed`,
   `Target-host release install verified`, `Release archive extracted on target
   host`, `Release source archive manifest verified`, `Release source archive

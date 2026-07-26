@@ -1,16 +1,17 @@
 # SwimCRM API contract
 
-Last updated: 2026-07-15
+Last updated: 2026-07-26
 
 This document is the human-readable companion to:
 
-- `GET /api/admin/api-contract/`
-- `swimcrm/portal/contract.py`
+- `GET /api/openapi.json`
+- `GET /api/admin/api-contract/` (authenticated compatibility endpoint)
+- `swimcrm/portal/openapi.py`
 - `swimcrm/portal/admin_settings_views.py` for the admin settings API
   handlers
 
-The endpoint is admin-only and returns the machine-readable route list, resource fields,
-roles and basic request hints.
+The public OpenAPI endpoint is the canonical machine-readable route and method
+contract. The authenticated compatibility endpoint returns the same schema.
 
 ## Conventions
 
@@ -76,6 +77,29 @@ Settings query validation:
 - `/api/admin/settings/dictionary-translations/`: `language_code` filters
   case-insensitively and `domain` filters by dictionary key domain.
 - Invalid settings filters return JSON `400` errors and do not mutate data.
+
+## Admin Import API
+
+Imports use a server-owned two-phase batch:
+
+- `POST /api/admin/import/<kind>/preview/` accepts the source file and returns
+  `batch_id`, `expires_at`, headers, and display-only preview rows.
+- `POST /api/admin/import/<kind>/commit/` accepts only `batch_id` and
+  `selected_indices`.
+- Preview batches expire after 30 minutes, belong to the administrator who
+  created them, and can be committed once.
+- Commit rebuilds and validates the preview from server-held source data inside
+  a database transaction. Browser-supplied `rows`, `status`, `data`, or
+  `resolved` fields are rejected.
+- Server-held source rows are removed from the batch after a successful commit.
+- Attendance preview accepts `effect_mode=history_only|apply_financial`; the
+  default is `history_only`.
+- `history_only` creates immutable attendance history without changing
+  subscription balances or creating visit charges. This policy remains attached
+  to the attendance record during later status corrections.
+- `apply_financial` is stored in the server-owned batch and commit additionally
+  requires `confirm_financial_effects=true`. The committed mode, result, and
+  acting administrator are recorded in the audit log.
 
 Notification delivery chooses `NotificationTemplateTranslation` by
 `ParentAccount.preferred_language`, then falls back to the default language and
@@ -293,7 +317,8 @@ payroll calculation results remain Django-owned.
 - `GET /api/admin/reference/` returns active trainers, groups, subscription types,
   participant search results, and enum choices for forms.
 - `GET /api/admin/dashboard/` returns fast aggregate metrics for the admin dashboard.
-- `GET /api/admin/api-contract/` returns this contract in machine-readable form.
+- `GET /api/openapi.json` and `GET /api/admin/api-contract/` return the canonical
+  OpenAPI 3.1 contract.
 
 ## Validation Notes
 

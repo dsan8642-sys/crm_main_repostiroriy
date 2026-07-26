@@ -6,6 +6,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("openapi.json", views.openapi_schema, name="api-openapi-schema"),
     path("csrf/", views.csrf, name="api-csrf"),
     path("auth/login/", views.auth_login, name="api-auth-login"),
     path("auth/activate/", views.auth_activate, name="api-auth-activate"),
@@ -80,6 +81,20 @@ urlpatterns = [
          name="api-admin-schedule-template-generate"),
     path("admin/schedule/templates/<int:template_id>/cancel-future/", views.admin_schedule_template_cancel_future,
          name="api-admin-schedule-template-cancel-future"),
+    path("admin/schedule/plans/", views.admin_schedule_weekly_plans,
+         name="api-admin-schedule-weekly-plans"),
+    path("admin/schedule/plans/<int:plan_id>/", views.admin_schedule_weekly_plan_detail,
+         name="api-admin-schedule-weekly-plan-detail"),
+    path("admin/schedule/plans/<int:plan_id>/slots/", views.admin_schedule_weekly_plan_slots,
+         name="api-admin-schedule-weekly-plan-slots"),
+    path("admin/schedule/plan-slots/<int:slot_id>/", views.admin_schedule_weekly_plan_slot_detail,
+         name="api-admin-schedule-weekly-plan-slot-detail"),
+    path("admin/schedule/plans/<int:plan_id>/generate/", views.admin_schedule_weekly_plan_generate,
+         name="api-admin-schedule-weekly-plan-generate"),
+    path("admin/schedule/copy-period/preview/", views.admin_schedule_copy_preview,
+         name="api-admin-schedule-copy-preview"),
+    path("admin/schedule/copy-period/commit/", views.admin_schedule_copy_commit,
+         name="api-admin-schedule-copy-commit"),
     path("admin/schedule/sessions/", views.admin_schedule_sessions,
          name="api-admin-schedule-sessions"),
     path("admin/schedule/sessions/<int:session_id>/", views.admin_schedule_session_detail,

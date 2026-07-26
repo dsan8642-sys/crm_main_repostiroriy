@@ -22,6 +22,7 @@ class AttendanceRecord(models.Model):
     comment = models.TextField(blank=True)
     marked_by = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
     marked_at = models.DateTimeField(default=timezone.now)
+    financial_effects_enabled = models.BooleanField(default=True, editable=False)
 
     class Meta:
         constraints = [
