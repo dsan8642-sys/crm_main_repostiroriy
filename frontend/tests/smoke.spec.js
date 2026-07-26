@@ -37,7 +37,9 @@ test.beforeEach(async ({ page }) => {
 test('SPA renders without a blank shell', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.app')).toBeVisible()
-  await expect(page.getByText('SwimCRM').first()).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'SwimCRM', exact: true }),
+  ).toBeVisible({ timeout: 15_000 })
 
   const bodyText = (await page.locator('body').innerText()).trim()
   expect(bodyText.length).toBeGreaterThan(20)
