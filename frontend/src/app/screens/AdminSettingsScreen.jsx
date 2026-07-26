@@ -25,6 +25,7 @@ const resources = [
   { tab: 'localization', id: 'languages', title: 'Языки', endpoint: '/api/admin/settings/languages/', response: 'languages', detail: (id) => `/api/admin/settings/languages/${id}/`, fields: [['code', 'Код'], ['name', 'Название'], ['is_active', 'Активен', 'boolean']] },
   { tab: 'localization', id: 'dictionaryKeys', title: 'Ключи интерфейса', endpoint: '/api/admin/settings/dictionary-keys/', response: 'keys', detail: (id) => `/api/admin/settings/dictionary-keys/${id}/`, fields: [['domain', 'Раздел'], ['code', 'Ключ'], ['is_active', 'Активен', 'boolean']] },
   { tab: 'localization', id: 'dictionaryTranslations', title: 'Переводы интерфейса', endpoint: '/api/admin/settings/dictionary-translations/', response: 'translations', detail: (id) => `/api/admin/settings/dictionary-translations/${id}/`, fields: [['key_id', 'Ключ', 'select-ref', 'dictionaryKeys'], ['language_code', 'Язык', 'select-ref', 'languages', 'code'], ['value', 'Текст', 'textarea']] },
+  { tab: 'control', id: 'credentials', title: 'Логин и пароль администратора', panel: true, readOnly: true },
   // `panel` opts out of the CRUD-table shape: no endpoint to load, custom body.
   { tab: 'control', id: 'importExport', title: 'Импорт и экспорт', panel: true, readOnly: true },
   { tab: 'control', id: 'audit', title: 'Журнал действий', endpoint: '/api/admin/system/audit/', response: 'entries', readOnly: true },
@@ -32,6 +33,11 @@ const resources = [
   { tab: 'control', id: 'security', title: 'Доступы и 2FA', endpoint: '/api/admin/system/security/', response: 'users', readOnly: true },
   { tab: 'control', id: 'logs', title: 'Журнал уведомлений', endpoint: '/api/admin/notifications/logs/', response: 'logs', readOnly: true },
 ]
+
+const resourceHelp = {
+  locations: 'Активные локации доступны для выбора в занятиях, шаблонах и слотах недельных планов. Новая локация не меняет старые записи автоматически.',
+  sessionTypes: 'Поддерживаются только системные типы group, individual и split. Название используется в интерфейсе, а цена, длительность и лимит подставляются только в новые занятия; существующие занятия сохраняют snapshot.',
+}
 
 const tabs = [
   ['catalog', 'Справочники'], ['notifications', 'Уведомления'], ['payroll', 'Зарплата'], ['localization', 'Языки'], ['control', 'Контроль'],
@@ -64,6 +70,9 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
     const [editing, setEditing] = useState(null)
     const [pendingArchive, setPendingArchive] = useState(null)
     const [form, setForm] = useState({})
+    const [credentials, setCredentials] = useState({
+      username: '', currentPassword: '', newPassword: '', confirmPassword: '',
+    })
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
     const tabResources = useMemo(() => resources.filter((item) => item.tab === tab), [tab])
@@ -89,6 +98,12 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
     useEffect(() => {
       if (!tabResources.some((item) => item.id === resourceId)) setResourceId(tabResources[0]?.id || 'subscriptionTypes')
     }, [tab, tabResources, resourceId])
+    useEffect(() => {
+      if (resourceId !== 'credentials') return
+      api.get('/api/admin/system/credentials/')
+        .then((payload) => setCredentials((current) => ({ ...current, username: payload.username || '' })))
+        .catch((err) => setError(err.message))
+    }, [resourceId])
 
     function startEdit(row = null) {
       const initial = {}
@@ -136,9 +151,35 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
       } catch (err) { setError(err.message) } finally { setLoading(false) }
     }
 
+    async function saveCredentials() {
+      if (credentials.newPassword !== credentials.confirmPassword) {
+        setError('Новые пароли не совпадают.')
+        return
+      }
+      setLoading(true); setError(null)
+      try {
+        const payload = await api.patch('/api/admin/system/credentials/', {
+          username: credentials.username,
+          current_password: credentials.currentPassword,
+          new_password: credentials.newPassword,
+        })
+        setCredentials({
+          username: payload.username,
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: '',
+        })
+        setMessage('Логин и пароль администратора обновлены. Текущая сессия сохранена.')
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
     const columns = resource.readOnly
       ? [{ key: 'created_at', header: 'Когда', render: (row) => displayValue(row.created_at) }, { key: 'name', header: 'Запись', render: (row) => <span className="strong">{displayValue(row.full_name || row.source_name || row.action || row.recipient || row.date_from || row.username)}</span> }, { key: 'details', header: 'Детали', muted: true, render: readOnlyDetails }]
-      : [{ key: 'name', header: resource.title, render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain)}</span> }, { key: 'details', header: 'Детали', muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from) }, { key: 'active', header: 'Статус', render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>Изменить</Button><Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>Убрать</Button></div> }]
+      : [{ key: 'name', header: resource.title, render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain)}</span> }, { key: 'details', header: 'Детали', muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from) }, { key: 'active', header: 'Статус', render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>Изменить</Button>{resource.id !== 'sessionTypes' && <Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>Убрать</Button>}</div> }]
 
     return <div className="page page-wide">
       <div className="page-head"><div><h2 className="page-title">Настройки и контроль</h2><p className="page-desc">Все служебные функции SwimCRM в одном месте. Django admin больше не нужен для ежедневной работы.</p></div>{!resource.panel && <Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>Обновить</Button>}</div>
@@ -146,9 +187,19 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
       {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
       <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
       <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => setResourceId(item.id)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>
-      <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3></div>{!resource.readOnly && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>
+      <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{resourceHelp[resource.id]}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>
       {editing && <div className="card card-pad ops-edit-panel"><div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div><div className="ops-form-grid">{(resource.fields || []).map((field) => { const [key, label, type = 'text'] = field; const value = form[key] ?? ''; if (type === 'boolean') return <label className="ops-check" key={key}><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} />{label}</label>; if (type === 'textarea') return <label key={key} style={{ gridColumn: '1 / -1' }}>{label}<textarea value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} rows="4" /></label>; if (type === 'select' || type === 'select-ref') return <label key={key}>{label}<select value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>; return <Input key={key} label={label} value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} type={type} /> })}</div><div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => setEditing(null)}>Отмена</Button></div></div>}
-      {resource.panel ? <ImportExportPanel /> : <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />}
+      {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
+        <p className="page-desc">Изменяются данные текущего администратора. Для подтверждения обязательно введите действующий пароль. Пароль хранится только как Django hash и не выводится в журнал.</p>
+        <div className="ops-form-grid">
+          <Input label="Новый логин" value={credentials.username} onChange={(event) => setCredentials({ ...credentials, username: event.target.value })} autoComplete="username" />
+          <Input label="Текущий пароль" type="password" value={credentials.currentPassword} onChange={(event) => setCredentials({ ...credentials, currentPassword: event.target.value })} autoComplete="current-password" />
+          <Input label="Новый пароль (необязательно)" type="password" value={credentials.newPassword} onChange={(event) => setCredentials({ ...credentials, newPassword: event.target.value })} autoComplete="new-password" />
+          <Input label="Повторите новый пароль" type="password" value={credentials.confirmPassword} onChange={(event) => setCredentials({ ...credentials, confirmPassword: event.target.value })} autoComplete="new-password" />
+        </div>
+        <Button variant="primary" disabled={loading || !credentials.currentPassword} onClick={saveCredentials}>Обновить данные входа</Button>
+      </div>}
+      {resource.panel && resource.id === 'importExport' ? <ImportExportPanel /> : !resource.panel && <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />}
       {pendingArchive && <Dialog
         open
         title="Убрать запись из рабочего списка?"

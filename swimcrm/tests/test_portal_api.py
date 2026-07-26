@@ -1320,6 +1320,57 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.json()["individual_student_id"], self.student.id)
         self.assertIsNone(response.json()["group"])
 
+    def test_admin_can_override_individual_session_price_including_zero(self):
+        trainer = f.make_trainer(username="individual_price_coach")
+        SessionTypeConfig.objects.update_or_create(
+            code=SessionType.INDIVIDUAL,
+            defaults={
+                "label": "Individual",
+                "default_capacity": 1,
+                "default_price_minor": 9000,
+                "default_currency": "PLN",
+                "default_duration_minutes": 60,
+            },
+        )
+        common = {
+            "session_type": "individual",
+            "individual_student_id": self.student.id,
+            "trainer_id": trainer.id,
+            "duration_minutes": 60,
+            "location": "Lane 1",
+            "max_participants": 1,
+        }
+        default_price = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({**common, "start_at": "2026-06-04T17:00:00+02:00"}),
+            content_type="application/json",
+        )
+        custom_price = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                **common,
+                "start_at": "2026-06-04T19:00:00+02:00",
+                "price_minor": 12500,
+            }),
+            content_type="application/json",
+        )
+        free = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                **common,
+                "start_at": "2026-06-04T21:00:00+02:00",
+                "price_minor": 0,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(default_price.status_code, 201)
+        self.assertEqual(custom_price.status_code, 201)
+        self.assertEqual(free.status_code, 201)
+        self.assertEqual(default_price.json()["price_minor"], 9000)
+        self.assertEqual(custom_price.json()["price_minor"], 12500)
+        self.assertEqual(free.json()["price_minor"], 0)
+
     def test_admin_can_create_split_session_for_two_clients(self):
         trainer = f.make_trainer(username="split_session_coach")
         response = self.client.post(

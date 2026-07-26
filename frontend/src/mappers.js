@@ -201,10 +201,11 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
   }
 }
 
-export function mapAdminPortalData({ clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors }) {
+export function mapAdminPortalData({ reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors }) {
   const groupRows = groups.groups || []
   return {
     sessionTypeConfigs: sessionTypeConfigs?.session_types || [],
+    locations: (reference?.locations || []).filter((location) => location.is_active !== false),
     trainers: (trainers.trainers || []).map((trainer) => ({
       id: `t${trainer.id}`,
       trainerId: trainer.id,

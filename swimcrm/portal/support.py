@@ -885,6 +885,8 @@ def _create_session_from_data(data, *, actor=None):
         session_type=session_type,
         individual_student=individual_student,
         manually_modified=_bool_value(data.get("is_manually_modified")),
+        price_minor=data.get("price_minor"),
+        currency=data.get("currency"),
         actor=actor,
     )
 

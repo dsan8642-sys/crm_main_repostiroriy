@@ -2,6 +2,7 @@ import json
 from datetime import date, time, timedelta
 
 from django.test import TestCase
+from django.utils import timezone
 
 from scheduling.models import (
     ScheduleBatchStatus,
@@ -46,6 +47,60 @@ class WeeklyPlanApiTest(TestCase):
             set(Session.objects.values_list("duration_minutes", flat=True)),
             {45, 60},
         )
+
+    def test_plan_and_slot_edits_do_not_mutate_generated_sessions(self):
+        plan = WeeklyPlan.objects.create(group=self.group, name="Original")
+        slot = WeeklyPlanSlot.objects.create(
+            plan=plan, trainer=self.trainer, weekday=0, start_time=time(17),
+            duration_minutes=45, location="Pool A", max_participants=10)
+        generated = self.client.post(
+            f"/api/admin/schedule/plans/{plan.id}/generate/",
+            data=json.dumps({
+                "date_from": "2026-08-03",
+                "date_to": "2026-08-03",
+                "skip_conflicts": False,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(generated.status_code, 201)
+        session = Session.objects.get()
+
+        plan_update = self.client.patch(
+            f"/api/admin/schedule/plans/{plan.id}/",
+            data=json.dumps({"name": "Updated"}),
+            content_type="application/json",
+        )
+        slot_update = self.client.patch(
+            f"/api/admin/schedule/plan-slots/{slot.id}/",
+            data=json.dumps({
+                "start_time": "19:00",
+                "duration_minutes": 60,
+                "location": "Pool B",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(plan_update.status_code, 200)
+        self.assertEqual(slot_update.status_code, 200)
+        session.refresh_from_db()
+        self.assertEqual(timezone.localtime(session.start_at).hour, 17)
+        self.assertEqual(session.duration_minutes, 45)
+        self.assertEqual(session.location, "Pool A")
+
+        archived = self.client.delete(f"/api/admin/schedule/plans/{plan.id}/")
+        self.assertEqual(archived.status_code, 200)
+        plan.refresh_from_db()
+        self.assertFalse(plan.is_active)
+        self.assertTrue(Session.objects.filter(pk=session.pk).exists())
+        blocked = self.client.post(
+            f"/api/admin/schedule/plans/{plan.id}/generate/",
+            data=json.dumps({
+                "date_from": "2026-08-10",
+                "date_to": "2026-08-10",
+                "skip_conflicts": False,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(blocked.status_code, 400)
 
     def test_period_copy_uses_server_owned_batch_once(self):
         source_start = f.dt(2026, 8, 10, 17)

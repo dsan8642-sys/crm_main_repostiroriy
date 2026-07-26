@@ -1,3 +1,7 @@
+from django.contrib.auth import password_validation, update_session_auth_hash
+from django.core.exceptions import ValidationError
+from django.db import transaction
+
 from audit.models import AuditLogEntry
 from accounts.models import AdminOTPDevice, Role, User
 from dataio.models import ImportBatch
@@ -71,3 +75,50 @@ def admin_security_status(request):
         "otp_configured": user.id in otp_by_user,
         "otp_confirmed": bool(otp_by_user.get(user.id) and otp_by_user[user.id].is_confirmed),
     } for user in users]})
+
+
+@require_http_methods(["GET", "PATCH"])
+def admin_credentials(request):
+    authenticated_user = _admin_required(request)
+    user = User.objects.get(pk=authenticated_user.pk)
+    if request.method == "GET":
+        return JsonResponse({
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+        })
+
+    data = _json_body(request)
+    current_password = str(data.get("current_password") or "")
+    if not current_password or not user.check_password(current_password):
+        raise ValidationError("Current password is incorrect")
+
+    old_username = user.username
+    new_username = str(data.get("username") or old_username).strip()
+    new_password = str(data.get("new_password") or "")
+    if not new_username:
+        raise ValidationError("username cannot be empty")
+    User._meta.get_field("username").run_validators(new_username)
+    if User.objects.exclude(pk=user.pk).filter(username__iexact=new_username).exists():
+        raise ValidationError("username already exists")
+    if new_username == old_username and not new_password:
+        raise ValidationError("Provide a new username or password")
+
+    password_changed = bool(new_password)
+    with transaction.atomic():
+        user.username = new_username
+        if password_changed:
+            password_validation.validate_password(new_password, user=user)
+            user.set_password(new_password)
+        user.save(update_fields=["username", "password"] if password_changed else ["username"])
+        audit(user, "admin.credentials.updated", user, {
+            "username_changed": new_username != old_username,
+            "password_changed": password_changed,
+        })
+    if password_changed:
+        update_session_auth_hash(request, user)
+    return JsonResponse({
+        "ok": True,
+        "username": user.username,
+        "role": user.role,
+    })

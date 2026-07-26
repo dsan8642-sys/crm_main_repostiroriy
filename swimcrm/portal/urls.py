@@ -196,6 +196,8 @@ urlpatterns = [
     path("admin/system/audit/", views.admin_audit_log, name="api-admin-system-audit"),
     path("admin/system/imports/", views.admin_import_batches, name="api-admin-system-imports"),
     path("admin/system/security/", views.admin_security_status, name="api-admin-system-security"),
+    path("admin/system/credentials/", views.admin_credentials,
+         name="api-admin-system-credentials"),
     path("admin/privacy/clients/<int:client_id>/anonymize/", views.admin_anonymize_client,
          name="api-admin-anonymize-client"),
     path("admin/privacy/clients/<int:client_id>/export/", views.admin_export_client_data,

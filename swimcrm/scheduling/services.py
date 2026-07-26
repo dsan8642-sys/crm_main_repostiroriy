@@ -148,7 +148,7 @@ def _session_type_defaults(session_type):
 def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, location, max_participants,
                    group=None, template=None, session_type=SessionType.GROUP,
                    individual_student=None, manually_modified=False, actor=None,
-                   weekly_plan_slot=None, notes=""):
+                   weekly_plan_slot=None, notes="", price_minor=None, currency=None):
     defaults = _session_type_defaults(session_type)
     if duration_minutes is None and end_at is None:
         duration_minutes = defaults.default_duration_minutes if defaults else 60
@@ -156,7 +156,17 @@ def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, loc
         start_at=start_at, end_at=end_at, duration_minutes=duration_minutes)
     end_at = start_at + timedelta(minutes=duration_minutes)
     check_trainer_conflict(trainer, start_at, end_at)
-    price_minor, currency = _tariff_snapshot(session_type, group)
+    default_price_minor, default_currency = _tariff_snapshot(session_type, group)
+    if price_minor is None:
+        price_minor = default_price_minor
+    else:
+        try:
+            price_minor = int(price_minor)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("price_minor must be an integer") from exc
+        if price_minor < 0:
+            raise ValidationError("price_minor cannot be negative")
+    currency = (currency or default_currency or settings.DEFAULT_CURRENCY).upper()
     session = Session(
         trainer=trainer, start_at=start_at, end_at=end_at, location=location,
         max_participants=max_participants, group=group, template=template,
@@ -480,8 +490,20 @@ def edit_single_session(session: Session, *, actor=None, **changes):
     new_end = new_start + timedelta(minutes=duration_minutes)
     changes["end_at"] = new_end
     changes["duration_minutes"] = duration_minutes
-    if "price_minor" in changes and session.start_at <= timezone.now():
-        raise ValidationError("Цена занятия блокируется после его начала")
+    price_is_changing = "price_minor" in changes or "currency" in changes
+    has_financial_effect = (
+        session.attendance.filter(charges__isnull=False).exists() or
+        session.attendance.filter(ledger_entries__isnull=False).exists()
+    )
+    if price_is_changing and has_financial_effect:
+        raise ValidationError("Session price is locked after a financial operation")
+    if "price_minor" in changes and changes["price_minor"] is None:
+        default_price, default_currency = _tariff_snapshot(
+            changes.get("session_type", session.session_type),
+            changes.get("group", session.group),
+        )
+        changes["price_minor"] = default_price
+        changes.setdefault("currency", default_currency)
     if new_trainer is not None:
         check_trainer_conflict(new_trainer, new_start, new_end, exclude_session_id=session.pk)
     for field, value in changes.items():

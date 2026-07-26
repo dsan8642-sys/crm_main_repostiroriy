@@ -15,6 +15,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
     const trainers = globalThis.AdminData?.trainers || []
     const participants = globalThis.AdminData?.clients || []
     const sessionTypeConfigs = globalThis.AdminData?.sessionTypeConfigs || []
+    const configuredLocations = globalThis.AdminData?.locations || []
     const [sessionForm, setSessionForm] = useState({
       groupId: groups[0]?.groupId || '',
       trainerId: trainers[0]?.trainerId || '',
@@ -22,7 +23,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       start: '17:00',
       durationMinutes: '60',
       price: '',
-      location: 'Бассейн',
+      location: configuredLocations[0]?.name || '',
       maxParticipants: '10',
       notes: '',
       sessionType: 'group',
@@ -34,7 +35,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       weekday: '0',
       start: '17:00',
       end: '18:00',
-      location: 'Бассейн',
+      location: configuredLocations[0]?.name || '',
       maxParticipants: '10',
       isActive: true,
     })
@@ -47,7 +48,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
     const [planForm, setPlanForm] = useState({ name: 'Основное расписание', groupId: groups[0]?.groupId || '' })
     const [slotForm, setSlotForm] = useState({
       planId: '', trainerId: trainers[0]?.trainerId || '', weekday: '0',
-      start: '17:00', durationMinutes: '60', location: 'Бассейн', maxParticipants: '10',
+      start: '17:00', durationMinutes: '60', location: configuredLocations[0]?.name || '', maxParticipants: '10',
     })
     const [planGenerateForm, setPlanGenerateForm] = useState({
       planId: '', dateFrom: new Date().toISOString().slice(0, 10),
@@ -66,6 +67,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       date: '',
       start: '',
       durationMinutes: '60',
+      price: '',
       location: '',
       maxParticipants: '',
       notes: '',
@@ -81,6 +83,15 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       maxParticipants: '',
       isActive: true,
     })
+    const [editingPlan, setEditingPlan] = useState(null)
+    const [planEditForm, setPlanEditForm] = useState({ name: '', groupId: '', isActive: true })
+    const [editingSlot, setEditingSlot] = useState(null)
+    const [slotEditForm, setSlotEditForm] = useState({
+      trainerId: '', weekday: '0', start: '', durationMinutes: '60',
+      location: '', maxParticipants: '10', isActive: true,
+    })
+    const [pendingPlanArchive, setPendingPlanArchive] = useState(null)
+    const [pendingSlotArchive, setPendingSlotArchive] = useState(null)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
@@ -115,15 +126,43 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
 
     function updateSessionType(sessionType) {
       const defaults = sessionTypeConfigs.find((item) => item.code === sessionType)
+      const group = groups.find((item) => String(item.groupId) === String(sessionForm.groupId))
+      const defaultPriceMinor = sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor
       setSessionForm((current) => ({
         ...current,
         sessionType,
         durationMinutes: String(defaults?.default_duration_minutes || 60),
         maxParticipants: String(defaults?.default_capacity || (sessionType === 'split' ? 2 : current.maxParticipants)),
+        price: defaultPriceMinor == null ? '' : String(defaultPriceMinor / 100),
       }))
     }
 
-    const locations = [...new Set(sessions.map((session) => session.location).filter(Boolean))]
+    const locations = [...new Set([
+      ...configuredLocations.map((location) => location.name),
+      ...sessions.map((session) => session.location),
+    ].filter(Boolean))]
+    const supportedSessionTypes = sessionTypeConfigs.filter((item) => item.is_active !== false)
+    const sessionTypeOptions = supportedSessionTypes.length
+      ? supportedSessionTypes
+      : [
+          { code: 'group', label: 'Групповое' },
+          { code: 'individual', label: 'Индивидуальное' },
+          { code: 'split', label: 'Сплит для двоих' },
+        ]
+
+    function locationField(label, value, onChange) {
+      const hasLegacyValue = value && !locations.includes(value)
+      return (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
+          {label}
+          <select value={value} onChange={(event) => onChange(event.target.value)} style={{ minHeight: 36 }}>
+            <option value="">Выберите локацию</option>
+            {hasLegacyValue && <option value={value}>{value} (сохранённое значение)</option>}
+            {locations.map((location) => <option key={location} value={location}>{location}</option>)}
+          </select>
+        </label>
+      )
+    }
     const visibleSessions = sessions.filter((session) => {
       const date = String(session.startAt || '').slice(0, 10)
       const anchor = new Date(`${focusDate}T12:00:00`)
@@ -233,6 +272,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
           location: sessionForm.location,
           max_participants: Number(sessionForm.maxParticipants || 0),
           notes: sessionForm.notes,
+          ...(sessionForm.price === ''
+            ? {}
+            : { price_minor: Math.round(Number(sessionForm.price) * 100) }),
         })
         setMessage('Занятие создано.')
         setActionPanel(null)
@@ -447,6 +489,80 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
       } catch (err) { setError(err.message) } finally { setBusy(false) }
     }
 
+    function openPlanEdit(plan) {
+      setEditingPlan(plan)
+      setPlanEditForm({
+        name: plan.name,
+        groupId: plan.groupId || '',
+        isActive: plan.active,
+      })
+    }
+
+    function openSlotEdit(slot) {
+      setEditingSlot(slot)
+      setSlotEditForm({
+        trainerId: slot.trainerId || '',
+        weekday: String(slot.weekday ?? 0),
+        start: slot.start_time || '',
+        durationMinutes: String(slot.duration_minutes || 60),
+        location: slot.location || '',
+        maxParticipants: String(slot.max_participants || 0),
+        isActive: slot.is_active !== false,
+      })
+    }
+
+    async function savePlanEdit() {
+      setBusy(true); setError(null)
+      try {
+        await api.patch(`/api/admin/schedule/plans/${editingPlan.planId}/`, {
+          name: planEditForm.name,
+          group_id: planEditForm.groupId,
+          is_active: planEditForm.isActive,
+        })
+        setEditingPlan(null)
+        setMessage('Недельный план обновлён. Уже созданные занятия не изменены.')
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function saveSlotEdit() {
+      setBusy(true); setError(null)
+      try {
+        await api.patch(`/api/admin/schedule/plan-slots/${editingSlot.id}/`, {
+          trainer_id: slotEditForm.trainerId,
+          weekday: Number(slotEditForm.weekday),
+          start_time: slotEditForm.start,
+          duration_minutes: Number(slotEditForm.durationMinutes),
+          location: slotEditForm.location,
+          max_participants: Number(slotEditForm.maxParticipants),
+          is_active: slotEditForm.isActive,
+        })
+        setEditingSlot(null)
+        setMessage('Слот недельного плана обновлён. Уже созданные занятия не изменены.')
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function archiveWeeklyPlan() {
+      setBusy(true); setError(null)
+      try {
+        await api.delete(`/api/admin/schedule/plans/${pendingPlanArchive.planId}/`)
+        setPendingPlanArchive(null)
+        setMessage('Недельный план деактивирован. Связанные занятия сохранены.')
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
+    async function archiveWeeklyPlanSlot() {
+      setBusy(true); setError(null)
+      try {
+        await api.delete(`/api/admin/schedule/plan-slots/${pendingSlotArchive.id}/`)
+        setPendingSlotArchive(null)
+        setMessage('Слот деактивирован. Связанные занятия сохранены.')
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(err.message) } finally { setBusy(false) }
+    }
+
     async function previewPeriodCopy() {
       setBusy(true); setError(null)
       try {
@@ -534,7 +650,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
           <div className="card card-pad">
             <div className="eyebrow" style={{ marginBottom: 10 }}>Новое занятие</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Тип занятия<select value={sessionForm.sessionType} onChange={(event) => updateSessionType(event.target.value)}><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит для двоих</option></select></label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Тип занятия<select value={sessionForm.sessionType} onChange={(event) => updateSessionType(event.target.value)}>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}</select></label>
               {sessionForm.sessionType !== 'group' && <SearchableSelect label="Участник" value={sessionForm.participantId} onChange={(value) => updateSessionForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant))} />}
               {sessionForm.sessionType === 'group' && (
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
@@ -568,8 +684,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
                   ))}
                 </div>
               </div>
-              <Input label="Место" value={sessionForm.location} onChange={(event) => updateSessionForm('location', event.target.value)} />
+              {locationField('Локация', sessionForm.location, (value) => updateSessionForm('location', value))}
               <Input label="Лимит участников" value={sessionForm.maxParticipants} onChange={(event) => updateSessionForm('maxParticipants', event.target.value)} />
+              {sessionForm.sessionType !== 'group' && <Input label="Цена занятия, PLN" value={sessionForm.price} onChange={(event) => updateSessionForm('price', event.target.value)} placeholder="Пусто = тариф типа, 0 = бесплатно" />}
               <Input label="Заметки" value={sessionForm.notes} onChange={(event) => updateSessionForm('notes', event.target.value)} />
             </div>
             <div style={{ marginTop: 12 }}>
@@ -613,7 +730,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
                 <Input label="Начало" value={templateForm.start} onChange={(event) => updateTemplateForm('start', event.target.value)} placeholder="ЧЧ:ММ" />
                 <Input label="Окончание" value={templateForm.end} onChange={(event) => updateTemplateForm('end', event.target.value)} placeholder="ЧЧ:ММ" />
               </div>
-              <Input label="Место" value={templateForm.location} onChange={(event) => updateTemplateForm('location', event.target.value)} />
+              {locationField('Локация', templateForm.location, (value) => updateTemplateForm('location', value))}
               <Input label="Лимит участников" value={templateForm.maxParticipants} onChange={(event) => updateTemplateForm('maxParticipants', event.target.value)} />
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 'var(--fs-sm)' }}>
@@ -674,7 +791,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
               <label>День<select value={slotForm.weekday} onChange={(event) => updateSlotForm('weekday', event.target.value)}>{['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>
               <Input label="Начало" value={slotForm.start} onChange={(event) => updateSlotForm('start', event.target.value)} />
               <Input label="Длительность, мин" value={slotForm.durationMinutes} onChange={(event) => updateSlotForm('durationMinutes', event.target.value)} />
-              <Input label="Место" value={slotForm.location} onChange={(event) => updateSlotForm('location', event.target.value)} />
+              {locationField('Локация', slotForm.location, (value) => updateSlotForm('location', value))}
               <Input label="Лимит" value={slotForm.maxParticipants} onChange={(event) => updateSlotForm('maxParticipants', event.target.value)} />
               <Button variant="primary" disabled={busy} onClick={createWeeklyPlanSlot}>Добавить слот</Button>
             </div>
@@ -746,7 +863,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
                   ))}
                 </div>
               </div>
-              <Input label="Место" value={sessionEditForm.location} onChange={(event) => updateSessionEditForm('location', event.target.value)} />
+              {locationField('Локация', sessionEditForm.location, (value) => updateSessionEditForm('location', value))}
               <Input label="Лимит участников" value={sessionEditForm.maxParticipants} onChange={(event) => updateSessionEditForm('maxParticipants', event.target.value)} />
               <Input label="Цена, PLN" value={sessionEditForm.price} onChange={(event) => updateSessionEditForm('price', event.target.value)} placeholder="Например, 80" />
               <Input label="Заметки" value={sessionEditForm.notes} onChange={(event) => updateSessionEditForm('notes', event.target.value)} />
@@ -792,7 +909,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
                 <Input label="Начало" value={templateEditForm.start} onChange={(event) => updateTemplateEditForm('start', event.target.value)} placeholder="ЧЧ:ММ" />
                 <Input label="Окончание" value={templateEditForm.end} onChange={(event) => updateTemplateEditForm('end', event.target.value)} placeholder="ЧЧ:ММ" />
               </div>
-              <Input label="Место" value={templateEditForm.location} onChange={(event) => updateTemplateEditForm('location', event.target.value)} />
+              {locationField('Локация', templateEditForm.location, (value) => updateTemplateEditForm('location', value))}
               <Input label="Лимит участников" value={templateEditForm.maxParticipants} onChange={(event) => updateTemplateEditForm('maxParticipants', event.target.value)} />
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                 <input type="checkbox" checked={templateEditForm.isActive} onChange={(event) => updateTemplateEditForm('isActive', event.target.checked)} />
@@ -806,6 +923,40 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
           </div>
         )}
 
+        {editingPlan && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование недельного плана</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
+              <Input label="Название" value={planEditForm.name} onChange={(event) => setPlanEditForm({ ...planEditForm, name: event.target.value })} />
+              <label>Группа<select value={planEditForm.groupId} onChange={(event) => setPlanEditForm({ ...planEditForm, groupId: event.target.value })}>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
+              <label><input type="checkbox" checked={planEditForm.isActive} onChange={(event) => setPlanEditForm({ ...planEditForm, isActive: event.target.checked })} /> Активен</label>
+            </div>
+            <div className="ops-button-row" style={{ marginTop: 12 }}>
+              <Button variant="primary" disabled={busy} onClick={savePlanEdit}>Сохранить план</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setEditingPlan(null)}>Закрыть</Button>
+            </div>
+          </div>
+        )}
+
+        {editingSlot && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование слота плана</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+              <label>Тренер<select value={slotEditForm.trainerId} onChange={(event) => setSlotEditForm({ ...slotEditForm, trainerId: event.target.value })}>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
+              <label>День<select value={slotEditForm.weekday} onChange={(event) => setSlotEditForm({ ...slotEditForm, weekday: event.target.value })}>{['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>
+              <Input label="Начало" value={slotEditForm.start} onChange={(event) => setSlotEditForm({ ...slotEditForm, start: event.target.value })} />
+              <Input label="Длительность, мин" value={slotEditForm.durationMinutes} onChange={(event) => setSlotEditForm({ ...slotEditForm, durationMinutes: event.target.value })} />
+              {locationField('Локация', slotEditForm.location, (value) => setSlotEditForm({ ...slotEditForm, location: value }))}
+              <Input label="Лимит" value={slotEditForm.maxParticipants} onChange={(event) => setSlotEditForm({ ...slotEditForm, maxParticipants: event.target.value })} />
+              <label><input type="checkbox" checked={slotEditForm.isActive} onChange={(event) => setSlotEditForm({ ...slotEditForm, isActive: event.target.checked })} /> Активен</label>
+            </div>
+            <div className="ops-button-row" style={{ marginTop: 12 }}>
+              <Button variant="primary" disabled={busy} onClick={saveSlotEdit}>Сохранить слот</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setEditingSlot(null)}>Закрыть</Button>
+            </div>
+          </div>
+        )}
+
         <div style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Недельные планы</div>
           <Table
@@ -814,8 +965,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
             columns={[
               { key: 'group', header: 'Группа' },
               { key: 'name', header: 'Название' },
-              { key: 'slots', header: 'Слоты', render: (row) => row.slots.length ? row.slots.map((slot) => `${slot.weekday_label} ${slot.start_time} · ${slot.trainer}`).join(', ') : 'Нет слотов' },
+              { key: 'slots', header: 'Слоты', render: (row) => row.slots.length ? <div className="ops-button-row">{row.slots.map((slot) => <span key={slot.id}><button type="button" className="ops-link-button" onClick={() => openSlotEdit(slot)}>{slot.weekday_label} {slot.start_time} · {slot.trainer}</button>{slot.is_active !== false && <Button size="sm" variant="subtle" onClick={() => setPendingSlotArchive(slot)}>Убрать</Button>}</span>)}</div> : 'Нет слотов' },
               { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
+              { key: 'actions', header: 'Действия', width: 190, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" onClick={() => openPlanEdit(row)}>Изменить</Button>{row.active && <Button size="sm" variant="danger" onClick={() => setPendingPlanArchive(row)}>Удалить</Button>}</div> },
             ]}
           />
         </div>
@@ -915,6 +1067,26 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData) {
           cancelLabel="Отмена"
           onClose={() => setConfirmDelete(null)}
           onConfirm={() => deleteSession(confirmDelete)}
+        />
+        <Dialog
+          open={pendingPlanArchive != null}
+          tone="danger"
+          title="Удалить недельный план?"
+          description={pendingPlanArchive ? `${pendingPlanArchive.group} · ${pendingPlanArchive.name}. План будет деактивирован, уже созданные занятия и история сохранятся.` : ''}
+          confirmLabel="Удалить план"
+          cancelLabel="Отмена"
+          onClose={() => setPendingPlanArchive(null)}
+          onConfirm={archiveWeeklyPlan}
+        />
+        <Dialog
+          open={pendingSlotArchive != null}
+          tone="danger"
+          title="Убрать слот из плана?"
+          description="Слот будет деактивирован. Уже созданные по нему занятия останутся без изменений."
+          confirmLabel="Убрать слот"
+          cancelLabel="Отмена"
+          onClose={() => setPendingSlotArchive(null)}
+          onConfirm={archiveWeeklyPlanSlot}
         />
       </div>
     )

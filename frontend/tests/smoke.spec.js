@@ -61,7 +61,9 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const now = '2026-07-21T17:00:00+02:00'
   const seenAdminEndpoints = new Set()
   const seenClientFinanceActions = new Set()
+  const seenScheduleMutations = new Set()
   const submittedSettings = []
+  const submittedCredentials = []
   const requiredAdminBootstrapEndpoints = [
     '/api/admin/dashboard/',
     '/api/admin/reference/',
@@ -172,7 +174,26 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/schedule/templates/': {
       templates: [{ id: 1, group: { id: 1, name: 'Delfiny' }, trainer: { id: 1, name: 'Marek Zielinski' }, weekday: 4, weekday_label: 'Czwartek', start_time: '17:00', end_time: '18:00', location: 'Basen A', max_participants: 8, is_active: true }],
     },
-    '/api/admin/schedule/plans/': { plans: [] },
+    '/api/admin/schedule/plans/': {
+      plans: [{
+        id: 4,
+        name: 'Основной план',
+        group: { id: 1, name: 'Delfiny' },
+        is_active: true,
+        slots: [{
+          id: 7,
+          trainer_id: 1,
+          trainer: 'Marek Zielinski',
+          weekday: 0,
+          weekday_label: 'Понедельник',
+          start_time: '17:00',
+          duration_minutes: 60,
+          location: 'Basen A',
+          max_participants: 8,
+          is_active: true,
+        }],
+      }],
+    },
     '/api/admin/schedule/sessions/': {
       sessions: [{ id: 1, start_at: now, end_at: '2026-07-21T18:00:00+02:00', location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' }],
     },
@@ -222,6 +243,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/system/audit/': { entries: [] },
     '/api/admin/system/imports/': { batches: [] },
     '/api/admin/system/security/': { users: [] },
+    '/api/admin/system/credentials/': { username: 'admin', role: 'admin' },
   }
 
   await page.route('**/api/**', async (route) => {
@@ -270,6 +292,33 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
         status: 201,
         contentType: 'application/json',
         body: JSON.stringify({ id: 2, ...submitted }),
+      })
+      return
+    }
+    if (method === 'PATCH' && url.pathname === '/api/admin/schedule/plans/4/') {
+      seenScheduleMutations.add('plan.patch')
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 4, ...route.request().postDataJSON() }),
+      })
+      return
+    }
+    if (method === 'DELETE' && url.pathname === '/api/admin/schedule/plans/4/') {
+      seenScheduleMutations.add('plan.delete')
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 4, is_active: false }),
+      })
+      return
+    }
+    if (method === 'PATCH' && url.pathname === '/api/admin/system/credentials/') {
+      submittedCredentials.push(route.request().postDataJSON())
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, username: 'admin-renamed', role: 'admin' }),
       })
       return
     }
@@ -347,6 +396,25 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByTestId('schedule-list')).toBeVisible()
   await expect(page.locator('.ops-session-row').first()).toContainText('Basen A')
   await expect(page.getByRole('button', { name: /Новое занятие/ })).toBeVisible()
+  await page.getByRole('button', { name: /Новое занятие/ }).click()
+  const createSessionCard = page.locator('.card').filter({
+    has: page.getByText('Новое занятие', { exact: true }),
+  })
+  await createSessionCard.getByLabel('Тип занятия').selectOption('individual')
+  await expect(createSessionCard.getByLabel('Цена занятия, PLN')).toBeVisible()
+  await expect(createSessionCard.getByLabel('Локация').locator('option', { hasText: 'Basen A' })).toHaveCount(1)
+  await createSessionCard.getByRole('button', { name: 'Закрыть', exact: true }).click()
+
+  const planRow = page.getByRole('row', { name: /Основной план/ })
+  await planRow.getByRole('button', { name: 'Изменить' }).click()
+  await page.getByLabel('Название').fill('План после проверки')
+  await page.getByRole('button', { name: 'Сохранить план' }).click()
+  await expect(page.getByText('Недельный план обновлён. Уже созданные занятия не изменены.')).toBeVisible()
+  await page.getByRole('row', { name: /Основной план/ }).getByRole('button', { name: 'Удалить' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Удалить план' }).click()
+  await expect(page.getByText('Недельный план деактивирован. Связанные занятия сохранены.')).toBeVisible()
+  expect(seenScheduleMutations).toEqual(new Set(['plan.patch', 'plan.delete']))
+
   await page.locator('.ops-session-row').first().click()
   await expect(page.locator('h2.page-title', { hasText: 'Занятие' })).toBeVisible()
   await expect(page.getByText('Jan Kowalski').first()).toBeVisible()
@@ -413,6 +481,19 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Запись создана.')).toBeVisible()
   expect(submittedSettings).toEqual([expect.objectContaining({ code: 'pool-b', name: 'Бассейн B', address: 'Варшава' })])
+  await page.getByRole('tab', { name: 'Контроль' }).click()
+  await page.getByRole('button', { name: /Логин и пароль администратора/ }).click()
+  await page.getByLabel('Новый логин').fill('admin-renamed')
+  await page.getByLabel('Текущий пароль').fill('Str0ngPass!123')
+  await page.getByLabel('Новый пароль (необязательно)').fill('DifferentStrongPass!456')
+  await page.getByLabel('Повторите новый пароль').fill('DifferentStrongPass!456')
+  await page.getByRole('button', { name: 'Обновить данные входа' }).click()
+  await expect(page.getByText('Логин и пароль администратора обновлены. Текущая сессия сохранена.')).toBeVisible()
+  expect(submittedCredentials).toEqual([{
+    username: 'admin-renamed',
+    current_password: 'Str0ngPass!123',
+    new_password: 'DifferentStrongPass!456',
+  }])
 
   const pageHasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(pageHasHorizontalOverflow).toBe(false)

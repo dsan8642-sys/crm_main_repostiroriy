@@ -52,6 +52,29 @@ class SessionTariffAndDurationTest(TestCase):
         self.assertEqual(session.price_minor, 9000)
         self.assertEqual(session.currency, "PLN")
 
+    def test_explicit_zero_and_custom_price_override_type_default(self):
+        start = timezone.now() + timedelta(days=2)
+        free_session = create_session(
+            trainer=self.trainer,
+            start_at=start,
+            location="Pool",
+            max_participants=1,
+            session_type=SessionType.INDIVIDUAL,
+            individual_student=self.student,
+            price_minor=0,
+        )
+        custom_session = create_session(
+            trainer=self.trainer,
+            start_at=start + timedelta(hours=2),
+            location="Pool",
+            max_participants=1,
+            session_type=SessionType.INDIVIDUAL,
+            individual_student=self.student,
+            price_minor=12500,
+        )
+        self.assertEqual(free_session.price_minor, 0)
+        self.assertEqual(custom_session.price_minor, 12500)
+
     def test_rejects_conflicting_end_and_duration(self):
         start = timezone.now() + timedelta(days=3)
         with self.assertRaisesMessage(ValidationError, "conflicts"):
@@ -85,7 +108,7 @@ class SessionTariffAndDurationTest(TestCase):
         self.assertEqual(self.student.charges.get().amount_minor, 5000)
         self.assertEqual(second.charges.get().amount_minor, 5000)
 
-    def test_price_can_change_only_before_start(self):
+    def test_price_can_change_until_financial_effect_exists(self):
         start = timezone.now() + timedelta(days=5)
         future = create_session(
             trainer=self.trainer,
@@ -110,5 +133,13 @@ class SessionTariffAndDurationTest(TestCase):
             session_type=SessionType.INDIVIDUAL,
             individual_student=past_student,
         )
-        with self.assertRaisesMessage(ValidationError, "блокируется"):
-            edit_single_session(past, price_minor=9500)
+        edit_single_session(past, price_minor=9500)
+        self.assertEqual(past.price_minor, 9500)
+
+        set_attendance(
+            session_id=past.id,
+            student=past_student,
+            status=AttendanceStatus.PRESENT,
+        )
+        with self.assertRaisesMessage(ValidationError, "locked"):
+            edit_single_session(past, price_minor=10000)
