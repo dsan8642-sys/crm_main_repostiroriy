@@ -35,6 +35,10 @@ $trackedEntries = @(
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         Sort-Object
 )
+$nonPortablePaths = @($trackedEntries | Where-Object { $_ -match "[^\x00-\x7F]" })
+if ($nonPortablePaths.Count -gt 0) {
+    throw "Release source paths must use ASCII for cross-host verification: $($nonPortablePaths -join ', ')"
+}
 
 function Get-LineListSha256 {
     param([string[]]$Lines)
