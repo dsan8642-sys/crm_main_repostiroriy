@@ -1,18 +1,27 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
+import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
+import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 
-export function createClientScreens(components, icons, reloadRoleData) {
+export function createClientScreens(components, icons, reloadRoleData, parentData = {}) {
   const { Table, StatusPill, Money, Button, Banner, Avatar, Input } = components
   const I = icons
 
+  function ReceiptAction({ payment }) {
+    const [error, setError] = useState(null)
+    if (!payment.receiptUrl) return <span className="muted">Нет файла</span>
+    return <span><button type="button" className="ops-link-button" onClick={async () => { try { setError(null); await downloadFile(payment.receiptUrl, payment.receipt) } catch (err) { setError(err.status === 403 ? 'Нет доступа к документу.' : 'Документ больше недоступен.') } }}>{payment.receipt || 'Скачать подтверждение'}</button>{error && <small role="alert" className="muted">{error}</small>}</span>
+  }
+
   function ChildButtons({ kid, setKid }) {
-    const children = globalThis.ParentData?.children || []
+    const children = parentData.children || []
     return (
       <div style={{ display: 'flex', gap: 8 }}>
         {children.map((child) => (
-          <button key={child.id} type="button" className={child.id === kid ? 'on' : ''} onClick={() => setKid(child.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '5px 12px 5px 6px', cursor: 'pointer', border: `1px solid ${child.id === kid ? 'var(--primary)' : 'var(--border-default)'}`, background: child.id === kid ? 'var(--primary-soft)' : 'var(--surface-card)', borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-sans)' }}>
+          <button key={child.id} type="button" aria-pressed={child.id === kid} className={child.id === kid ? 'on' : ''} onClick={() => setKid(child.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '5px 12px 5px 6px', cursor: 'pointer', border: `1px solid ${child.id === kid ? 'var(--primary)' : 'var(--border-default)'}`, background: child.id === kid ? 'var(--primary-soft)' : 'var(--surface-card)', borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-sans)' }}>
             <Avatar name={child.name} size={26} />
             <span>{child.name.split(' ')[0]}</span>
           </button>
@@ -22,7 +31,7 @@ export function createClientScreens(components, icons, reloadRoleData) {
   }
 
   function Home({ kid, setKid, go }) {
-    const data = globalThis.ParentData || {}
+    const data = parentData
     const child = data.children?.find((item) => item.id === kid) || data.children?.[0]
     const next = child ? (data.schedule?.[child.id] || []).find((session) => session.status === 'planned') : null
     return (
@@ -56,37 +65,92 @@ export function createClientScreens(components, icons, reloadRoleData) {
   }
 
   function Schedule({ kid, setKid, initialTab }) {
-    const rows = globalThis.ParentData?.schedule?.[kid] || []
+    const child = (parentData.children || []).find((item) => item.id === kid)
+    const normalize = (session) => session.startAt ? session : ({
+      id: String(session.id),
+      sessionId: session.id,
+      date: formatShortDate(session.start_at),
+      rawDate: session.start_at?.slice(0, 10) || '',
+      startAt: session.start_at,
+      endAt: session.end_at,
+      start: formatTime(session.start_at),
+      end: formatTime(session.end_at),
+      group: session.group?.name || 'Индивидуальное',
+      trainer: session.effective_trainer || session.trainer,
+      location: session.location,
+      status: session.is_cancelled ? 'cancelled' : 'planned',
+      sessionType: session.session_type || 'group',
+      individualParticipant: session.individual_participant || null,
+      deductsExpected: session.is_cancelled ? 0 : 1,
+    })
+    const [rows, setRows] = useState(() => (parentData.schedule?.[kid] || []).map(normalize))
     const [selectedId, setSelectedId] = useState(initialTab || null)
+    const [displayMode, setDisplayMode] = useState('calendar')
+    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
+    const [focusDate, setFocusDate] = useState(localToday())
+    const [error, setError] = useState(null)
+    const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
     useEffect(() => { if (initialTab) setSelectedId(initialTab) }, [initialTab])
+    useEffect(() => {
+      setRows((parentData.schedule?.[kid] || []).map(normalize))
+    }, [kid, parentData.schedule])
+    useEffect(() => {
+      if (!child?.studentId) return undefined
+      let active = true
+      const query = new URLSearchParams({
+        student_id: String(child.studentId),
+        date_from: range.dateFrom,
+        date_to: range.dateTo,
+      })
+      api.get(`/api/client/schedule/?${query}`)
+        .then((payload) => {
+          if (active) setRows((payload.sessions || []).map(normalize))
+        })
+        .catch((err) => {
+          if (active) setError(err.message)
+        })
+      return () => { active = false }
+    }, [child?.studentId, range.dateFrom, range.dateTo])
     const selected = rows.find((row) => String(row.sessionId) === String(selectedId))
     return (
-      <div className="page" style={{ maxWidth: 900 }}>
-        <div className="page-head"><div><h2 className="page-title">Расписание</h2><p className="page-desc">Предстоящие и отменённые занятия.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+      <div className="page page-wide">
+        <div className="page-head"><div><h2 className="page-title">Расписание</h2><p className="page-desc">Календарь занятий выбранного участника.</p></div><div className="ops-page-actions"><ChildButtons kid={kid} setKid={setKid} /><ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} /></div></div>
+        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        <div className="card card-pad" style={{ marginBottom: 14 }}>
+          <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} />
+        </div>
         {selected && <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Детали занятия</div><h3>{selected.group}</h3></div><Button size="sm" variant="subtle" onClick={() => setSelectedId(null)}>Закрыть</Button></div><div className="ops-summary-grid"><div><span>Дата и время</span><strong>{selected.date} · {selected.start}-{selected.end}</strong></div><div><span>Тренер</span><strong>{selected.trainer}</strong></div><div><span>Место</span><strong>{selected.location}</strong></div><div><span>Списание</span><strong>{selected.deductsExpected ? '-1 занятие' : '0 занятий'}</strong></div></div><StatusPill status={selected.status} /></div>}
-        <div className="ops-card-list">{rows.map((row) => <button type="button" className="ops-session-tile" key={row.id} onClick={() => setSelectedId(row.sessionId)}><span><strong>{row.date} · {row.start}-{row.end}</strong><small>{row.group} · {row.trainer} · {row.location}</small></span><span><StatusPill status={row.status} size="sm" /><small>Списание: {row.deductsExpected ? '-1' : '0'}</small></span></button>)}{!rows.length && <div className="empty">Занятий пока нет.</div>}</div>
+        {displayMode === 'calendar' && <ScheduleCalendar sessions={rows} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(row) => setSelectedId(row.sessionId)} ariaLabel={`Календарь занятий: ${child?.name || 'участник'}`} />}
+        {displayMode === 'list' && <ScheduleList sessions={rows} testId="client-schedule-list" onOpenSession={(row) => setSelectedId(row.sessionId)} renderStatus={(row) => <span><StatusPill status={row.status} size="sm" /><small>Списание: {row.deductsExpected ? '-1' : '0'}</small></span>} />}
       </div>
     )
   }
 
-  function Payments({ kid }) {
+  function Payments({ kid, setKid }) {
+    const fileInputRef = useRef(null)
     const [file, setFile] = useState(null)
     const [amount, setAmount] = useState('')
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
-    const child = (globalThis.ParentData?.children || []).find((item) => item.id === kid)
-    const charges = globalThis.ParentData?.charges || []
-    const payments = globalThis.ParentData?.payments || []
+    const child = (parentData.children || []).find((item) => item.id === kid)
+    const charges = (parentData.charges || []).filter(
+      (charge) => !child?.studentId || charge.studentId === child.studentId,
+    )
+    const payments = (parentData.payments || []).filter(
+      (payment) => !child?.studentId || payment.studentId === child.studentId,
+    )
 
     async function createTopUpRequest() {
       const amountNumber = Number(amount)
       if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
         setError('Укажите сумму пополнения больше нуля.')
+        document.getElementById('client-top-up-amount')?.focus()
         return
       }
       if (!file) {
         setError('Приложите подтверждение банковского перевода: PDF, JPG или PNG.')
+        fileInputRef.current?.focus()
         return
       }
       setBusy(true)
@@ -111,18 +175,19 @@ export function createClientScreens(components, icons, reloadRoleData) {
 
     return (
       <div className="page" style={{ maxWidth: 900 }}>
-        <div className="page-head"><div><h2 className="page-title">Платежи</h2><p className="page-desc">Начисления, история операций и запросы на пополнение баланса.</p></div></div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <div className="page-head"><div><h2 className="page-title">Платежи</h2><p className="page-desc">Начисления, история операций и запросы на пополнение баланса.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <ToastNotice id="client-payment-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Отправляю запрос на пополнение...</BusyBanner>
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div className="eyebrow">Запрос на пополнение</div>
+          <div className="ops-inline-note" role="status">Участник: <strong>{child?.name || 'не выбран'}</strong> · текущий баланс: <Money amount={child?.balance || 0} signed /></div>
           <p className="muted" style={{ margin: '6px 0 14px' }}>Запрос не меняет баланс автоматически. Администратор проверит перевод, после чего сумма будет зачислена или запрос будет отклонён.</p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
-            <Input label="Сумма пополнения" type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="240.00" />
+            <Input id="client-top-up-amount" label="Сумма пополнения" type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="240.00" />
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               Файл подтверждения
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+              <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setFile(event.target.files?.[0] || null)} />
             </label>
             <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>Отправить запрос</Button>
           </div>
@@ -143,34 +208,31 @@ export function createClientScreens(components, icons, reloadRoleData) {
           { key: 'amount', header: 'Сумма', align: 'right', render: (row) => <Money amount={row.amount} /> },
           { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status} size="sm" /> },
           { key: 'effect', header: 'Баланс', muted: true, render: (row) => row.affectsBalance ? 'Зачислено' : 'Не влияет' },
+          { key: 'receipt', header: 'Документ', render: (row) => <ReceiptAction payment={row} /> },
         ]} />
       </div>
     )
   }
 
   function Subscription({ kid, setKid }) {
-    const child = (globalThis.ParentData?.children || []).find((item) => item.id === kid)
+    const child = (parentData.children || []).find((item) => item.id === kid)
     const subscription = child?.subscription
-    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h2 className="page-title">Абонемент</h2><p className="page-desc">Срок действия, остаток занятий и льготный период.</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <><div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Текущий абонемент</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>Оформлен</span><strong>{formatDate(subscription.created_at)}</strong></div><div><span>Начало</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>Действует до</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>Льготный период</span><strong>до {formatDate(subscription.grace_end_date)}</strong></div></div><div className="ops-inline-note">Осталось занятий: {subscription.remaining_sessions == null ? 'без лимита' : subscription.remaining_sessions}. После окончания доступ сохраняется только до +7 дней.</div></div><div className="card card-pad"><div className="eyebrow">История списаний и корректировок</div>{(subscription.ledger || []).map((entry) => <div className="ops-detail-row" key={entry.id}><strong>{entry.reason === 'attendance' ? 'Списание за занятие' : entry.reason}</strong><span>{entry.delta > 0 ? '+' : ''}{entry.delta} · {formatDate(entry.created_at)}{entry.note ? ` · ${entry.note}` : ''}</span></div>)}{!(subscription.ledger || []).length && <div className="empty">Списаний пока нет.</div>}</div></> : <div className="card card-pad empty">Активного абонемента нет. Обратитесь к администратору клуба.</div>}</div>
+    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h2 className="page-title">Абонемент</h2><p className="page-desc">Срок действия, статус и остаток занятий.</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Текущий абонемент</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>Осталось занятий</span><strong>{subscription.remaining_sessions == null ? 'Без лимита' : subscription.remaining_sessions}</strong></div><div><span>Начало</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>Действует до</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>Статус</span><strong>{subscription.status}</strong></div></div></div> : <div className="card card-pad empty">Активного абонемента нет. Обратитесь к администратору клуба.</div>}</div>
   }
 
   function History({ kid, setKid }) {
-    const attendance = globalThis.ParentData?.attendance?.[kid] || []
-    const child = (globalThis.ParentData?.children || []).find((item) => item.id === kid)
-    const payments = (globalThis.ParentData?.payments || []).filter((payment) => !child?.studentId || payment.studentId === child.studentId)
-    const [historyType, setHistoryType] = useState('all')
+    const attendance = parentData.attendance?.[kid] || []
+    const notifications = parentData.notifications || []
     const [days, setDays] = useState('90')
     const [selectedHistory, setSelectedHistory] = useState(null)
     const cutoff = new Date(Date.now() - Number(days || 36500) * 86400000)
     const visibleAttendance = attendance.filter((row) => new Date(row.date) >= cutoff)
-    const visiblePayments = payments.filter((row) => new Date(row.date) >= cutoff)
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h2 className="page-title">История</h2><p className="page-desc">Посещения и платежи выбранного участника.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
-        <div className="toolbar"><div className="seg">{[['all', 'Всё'], ['attendance', 'Посещения'], ['payments', 'Платежи']].map(([value, label]) => <button key={value} type="button" className={historyType === value ? 'on' : ''} onClick={() => setHistoryType(value)}>{label}</button>)}</div><span className="spacer" /><label>Период <select value={days} onChange={(event) => setDays(event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Всё время</option></select></label></div>
+        <div className="page-head"><div><h2 className="page-title">История</h2><p className="page-desc">Посещения и история доставки сообщений выбранного участника.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="toolbar"><span className="spacer" /><label>Период <select value={days} onChange={(event) => setDays(event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Всё время</option></select></label></div>
         {selectedHistory && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="ops-section-head"><div><div className="eyebrow">Детали операции</div><strong>{selectedHistory.label || selectedHistory.method}</strong></div><Button size="sm" variant="subtle" onClick={() => setSelectedHistory(null)}>Закрыть</Button></div><div className="muted">Дата: {selectedHistory.date} · сумма/списание и статус сохранены в истории.</div></div>}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(320px, 1fr)', gap: 14 }}>
-          {historyType !== 'payments' && <div>
+        <div>
             <div className="eyebrow" style={{ marginBottom: 10 }}>Посещения</div>
             <Table rows={visibleAttendance} emptyLabel="Посещений пока нет" columns={[
               { key: 'date', header: 'Дата', muted: true },
@@ -178,30 +240,24 @@ export function createClientScreens(components, icons, reloadRoleData) {
               { key: 'trainer', header: 'Тренер', muted: true },
               { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status === 'rescheduled' ? 'moved' : row.status} size="sm" /> },
             ]} />
-          </div>}
-          {historyType !== 'attendance' && <div>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Платежи</div>
-            <Table rows={visiblePayments} emptyLabel="Платежей пока нет" columns={[
-              { key: 'date', header: 'Дата', muted: true },
-              { key: 'method', header: 'Способ', render: (row) => <button type="button" className="ops-link-button" onClick={() => setSelectedHistory(row)}>{row.method}</button> },
-              { key: 'amount', header: 'Сумма', align: 'right', render: (row) => <Money amount={row.amount} /> },
-              { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status} size="sm" /> },
-            ]} />
-          </div>}
+        </div>
+        <div className="card card-pad" style={{ marginTop: 14 }}>
+          <div className="eyebrow">История доставки сообщений</div>
+          {notifications.map((notification) => <div className="ops-detail-row" key={`notification-${notification.id}`}><strong>{notification.subject || notification.event_type}</strong><span>{notification.channel} · {notification.status} · {notification.language_code || '—'} · {formatDate(notification.sent_at || notification.scheduled_at)}</span></div>)}
+          {!notifications.length && <div className="empty">Сообщений пока нет.</div>}
         </div>
       </div>
     )
   }
 
   function Profile({ kid, setKid }) {
-    const account = globalThis.ParentData?.account || {}
-    const participants = globalThis.ParentData?.profileParticipants || []
+    const account = parentData.account || {}
+    const participants = parentData.profileParticipants || []
     const [form, setForm] = useState({
       firstName: account.first_name || '',
       lastName: account.last_name || '',
       email: account.email || '',
       phone: account.phone || '',
-      telegram: account.telegram_chat_id || '',
       language: account.preferred_language || 'ru',
     })
     const [message, setMessage] = useState(null)
@@ -215,10 +271,9 @@ export function createClientScreens(components, icons, reloadRoleData) {
         lastName: account.last_name || '',
         email: account.email || '',
         phone: account.phone || '',
-        telegram: account.telegram_chat_id || '',
         language: account.preferred_language || 'ru',
       })
-    }, [account.first_name, account.last_name, account.email, account.phone, account.telegram_chat_id, account.preferred_language])
+    }, [account.first_name, account.last_name, account.email, account.phone, account.preferred_language])
 
     async function saveProfile() {
       setBusy(true)
@@ -229,13 +284,12 @@ export function createClientScreens(components, icons, reloadRoleData) {
             last_name: form.lastName,
             email: form.email,
             phone: form.phone,
-            telegram_chat_id: form.telegram,
             preferred_language: form.language,
           },
         })
         setMessage('Профиль сохранён.')
         setError(null)
-        reloadRoleData?.('client')
+        reloadRoleData?.('client', { studentId: (parentData.children || []).find((item) => item.id === kid)?.studentId })
       } catch (err) {
         setError(err.message)
       } finally {
@@ -246,7 +300,7 @@ export function createClientScreens(components, icons, reloadRoleData) {
     return (
       <div className="page page-wide">
         <div className="page-head"><div><h2 className="page-title">Профиль</h2><p className="page-desc">Контактные данные аккаунта и участники.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="client-profile-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Сохраняю профиль...</BusyBanner>
         <div className="card card-pad" style={{ marginBottom: 16 }}>
@@ -255,15 +309,15 @@ export function createClientScreens(components, icons, reloadRoleData) {
             <Input label="Фамилия" value={form.lastName} onChange={(event) => update('lastName', event.target.value)} />
             <Input label="Email" value={form.email} onChange={(event) => update('email', event.target.value)} />
             <Input label="Телефон" value={form.phone} onChange={(event) => update('phone', event.target.value)} />
-            <Input label="Telegram chat ID" value={form.telegram} onChange={(event) => update('telegram', event.target.value)} />
-            <label>Язык интерфейса и уведомлений<select value={form.language} onChange={(event) => update('language', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></select></label>
+            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? 'Подключён' : 'Не подключён'}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={async () => { await api.post('/api/client/profile/', { account: { telegram_disconnect: true } }); reloadRoleData?.('client') }}>Отключить</Button>}</div>
+            <label>Язык интерфейса<select value={form.language} onChange={(event) => update('language', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></select><small className="muted">Язык доставки указан в истории сообщений.</small></label>
           </div>
           <div style={{ marginTop: 12 }}>
             <Button variant="primary" loading={busy} disabled={busy} onClick={saveProfile}>Сохранить профиль</Button>
           </div>
         </div>
         <Table rows={participants} emptyLabel="Участников нет" columns={[
-          { key: 'full_name', header: 'Участник', render: (row) => <button type="button" className="ops-link-button" onClick={() => { const child = (globalThis.ParentData?.children || []).find((item) => item.studentId === row.id); if (child) setKid(child.id) }}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
+          { key: 'full_name', header: 'Участник', render: (row) => <button type="button" className="ops-link-button" onClick={() => { const child = (parentData.children || []).find((item) => item.studentId === row.id); if (child) setKid(child.id) }}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
           { key: 'birth_date', header: 'Дата рождения', muted: true, render: (row) => row.birth_date || '-' },
           { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
           { key: 'group', header: 'Группа', render: (row) => row.group?.name || 'Индивидуально' },
@@ -278,7 +332,7 @@ export function createClientScreens(components, icons, reloadRoleData) {
   const ALL_CONSENTS = '__all__'
 
   function Consents() {
-    const rows = globalThis.ParentData?.consents || []
+    const rows = parentData.consents || []
     const [localRows, setLocalRows] = useState(rows)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
@@ -339,7 +393,7 @@ export function createClientScreens(components, icons, reloadRoleData) {
         setError(failures.length
           ? failures.map((result) => `${result.type || `#${result.index + 1}`}: ${result.error}`).join('; ')
           : null)
-        reloadRoleData?.('client')
+        reloadRoleData?.('client', { studentId: child?.studentId })
       } catch (err) {
         setError(err.message)
       } finally {
@@ -350,7 +404,7 @@ export function createClientScreens(components, icons, reloadRoleData) {
     return (
       <div className="page" style={{ maxWidth: 760 }}>
         <div className="page-head"><div><h2 className="page-title">Согласия</h2><p className="page-desc">Управление согласиями и каналами связи.</p></div></div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="client-consent-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busyType != null}>
           {busyType === ALL_CONSENTS ? 'Сохраняю согласия...' : 'Сохраняю согласие...'}

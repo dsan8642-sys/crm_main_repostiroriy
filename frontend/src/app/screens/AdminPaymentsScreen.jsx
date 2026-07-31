@@ -2,21 +2,23 @@
 import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
-export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
+export function createAdminPaymentsScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Dialog, Avatar, Input } = components
   const I = icons
 
   return function ApiAdminPayments({ go, initialTab }) {
-    const participants = globalThis.AdminData?.clients || []
-    const subscriptionTypes = globalThis.AdminData?.subscriptionTypes || []
+    const participants = adminData.clients || []
+    const subscriptionTypes = adminData.subscriptionTypes || []
     const [tab, setTab] = useState('review')
     const [methodFilter, setMethodFilter] = useState('')
     const [reject, setReject] = useState(null)
+    const [confirm, setConfirm] = useState(null)
     const [editingPayment, setEditingPayment] = useState(null)
     const [paymentEditForm, setPaymentEditForm] = useState({ method: 'cash', comment: '' })
-    const [rows, setRows] = useState(() => [...(globalThis.AdminData?.payments || [])])
+    const [rows, setRows] = useState(() => [...(adminData.payments || [])])
     const [subscriptions, setSubscriptions] = useState([])
     const [financeForm, setFinanceForm] = useState({
       participantId: participants[0]?.studentId || '',
@@ -88,8 +90,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
     }))
 
     useEffect(() => {
-      setRows([...(globalThis.AdminData?.payments || [])])
-    }, [globalThis.AdminData?.payments])
+      setRows([...(adminData.payments || [])])
+    }, [adminData.payments])
 
     useEffect(() => {
       if (initialTab) setTab(initialTab)
@@ -143,6 +145,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           ? { ...item, status: action === 'confirm' ? 'paid' : 'rejected' }
           : item))
         setReject(null)
+        setConfirm(null)
         setMessage(action === 'confirm' ? 'Платёж подтверждён.' : 'Платёж отклонён.')
         reloadRoleData?.('admin')
       } catch (err) {
@@ -409,7 +412,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
           </div>
         </div>
 
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="admin-payments-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busyId != null}>Сохраняю операцию...</BusyBanner>
         {participants.length === 0 && <Banner tone="warning" style={{ marginBottom: 12 }}>Сначала добавьте клиента или участника.</Banner>}
@@ -597,7 +600,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
             { value: 'rejected', label: 'Отклонённые', count: counts.rejected },
           ]} />
           <span className="spacer" />
-          <label>Способ оплаты <select aria-label="Способ оплаты" value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option></select></label>
+          <label>Способ оплаты <select aria-label="Способ оплаты" value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label>
         </div>
 
         {editingPayment && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="eyebrow">Чувствительное действие: реквизиты платежа</div><p className="muted">Сумма, время и сама запись не удаляются. Изменение способа и комментария попадёт в журнал действий.</p><div className="ops-form-grid"><label>Способ оплаты<select value={paymentEditForm.method} onChange={(event) => setPaymentEditForm({ ...paymentEditForm, method: event.target.value })}><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label><Input label="Комментарий" value={paymentEditForm.comment} onChange={(event) => setPaymentEditForm({ ...paymentEditForm, comment: event.target.value })} /></div><div className="ops-button-row"><Button variant="primary" disabled={busyId != null} onClick={savePaymentEdit}>Сохранить изменение</Button><Button variant="secondary" onClick={() => setEditingPayment(null)}>Отмена</Button></div></div>}
@@ -621,7 +624,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
                 <div className="row-actions" onClick={(event) => event.stopPropagation()}>
                   <Button size="sm" variant="subtle" disabled={busyId != null} onClick={() => openPaymentEdit(payment)}>Изменить</Button>
                   {payment.status === 'pending' && <>
-                  <IconButton label="Подтвердить" size="sm" disabled={busyId === payment.id} onClick={() => updatePayment(payment, 'confirm')}><I.Check size={16} /></IconButton>
+                  <IconButton label="Подтвердить" size="sm" disabled={busyId === payment.id} onClick={() => setConfirm(payment)}><I.Check size={16} /></IconButton>
                   <IconButton label="Отклонить" size="sm" variant="danger" disabled={busyId === payment.id} onClick={() => setReject(payment)}><I.X size={16} /></IconButton>
                   </>}
                 </div>
@@ -629,6 +632,18 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData) {
             },
           ]}
         />
+
+        {confirm && (
+          <Dialog
+            open
+            title="Подтвердить платёж?"
+            confirmLabel="Подтвердить"
+            cancelLabel="Отмена"
+            onClose={() => setConfirm(null)}
+            onConfirm={() => updatePayment(confirm, 'confirm')}
+            description={`${confirm.source === 'client_top_up' ? 'Запрос на пополнение' : 'Платёж'} · участник ${confirm.child} · сумма ${confirm.amount}. После подтверждения платёж повлияет на баланс.`}
+          />
+        )}
 
         {reject && (
           <Dialog

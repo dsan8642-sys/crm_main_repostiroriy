@@ -16,8 +16,7 @@ from billing.services import (charge_statuses, confirm_payment,
                               student_balance)
 from notifications.models import validate_sms_template
 from scheduling.models import Session
-from scheduling.services import (ScheduleConflict, create_session,
-                                 generate_sessions)
+from scheduling.services import ScheduleConflict, create_session
 from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription
 from subscriptions.services import (create_subscription, freeze_subscription,
                                     manual_adjust)
@@ -282,13 +281,14 @@ class FreezeRule(TestCase):
 
 
 class ScheduleConflictRule(TestCase):
-    """Rules 4 & 5: generate from template; trainer can't double-book; capacity limit."""
-    def test_generate_from_template(self):
+    """Rules 4 & 5: concrete sessions, trainer conflicts and capacity."""
+    def test_concrete_session_has_no_schedule_template(self):
         tr = f.make_trainer(); g = f.make_group()
-        tpl = f.make_template(g, tr)  # Mondays
-        created, skipped = generate_sessions(tpl, date(2026, 6, 1), date(2026, 6, 30))
-        self.assertEqual(len(created), 5)  # 5 Mondays in June 2026
-        self.assertTrue(all(s.template_id == tpl.id for s in created))
+        session = create_session(
+            trainer=tr, group=g, start_at=f.dt(2026, 6, 1, 17),
+            duration_minutes=60, location="A", max_participants=10,
+        )
+        self.assertIsNone(session.template_id)
 
     def test_trainer_double_booking_blocked(self):
         tr = f.make_trainer(); g = f.make_group()

@@ -24,12 +24,7 @@ export function formatTime(iso) {
 }
 
 export function paymentMethodLabel(method) {
-  return {
-    cash: 'Наличные',
-    bank_transfer: 'Bank transfer / IBAN',
-    card: 'Карта',
-    other: 'Другое',
-  }[method] || method || '-'
+  return contractPaymentMethodLabel(method, 'ru')
 }
 
 export function paymentSourceLabel(source) {
@@ -48,7 +43,7 @@ function sessionStatus(session) {
   return 'planned'
 }
 
-export function mapClientPortalData({ overview, profile, consents, schedule, attendance, payments }) {
+export function mapClientPortalData({ overview, profile, consents, schedule, attendance, payments, notifications, resourceStates, resolvedStudentId: requestedStudentId }) {
   const account = overview.account || {}
   const participants = overview.participants || overview.students || []
   const profileSubscriptions = profile?.subscriptions || []
@@ -82,14 +77,17 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
       }]
 
   const sessions = schedule.sessions || []
+  const resolvedStudentId = schedule.student_id || attendance.student_id || payments.student_id || requestedStudentId
   const byChild = Object.fromEntries(children.map((child) => [
     child.id,
-    sessions
-      .filter((session) => !session.individual_student_id || session.individual_student_id === child.studentId)
+    child.studentId === resolvedStudentId ? sessions
       .map((session) => ({
         id: String(session.id),
         sessionId: session.id,
         date: formatShortDate(session.start_at),
+        rawDate: session.start_at?.slice(0, 10) || '',
+        startAt: session.start_at,
+        endAt: session.end_at,
         start: formatTime(session.start_at),
         end: formatTime(session.end_at),
         group: session.group?.name || 'Индивидуальное',
@@ -97,13 +95,14 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         location: session.location,
         status: sessionStatus(session),
         sessionType: session.session_type || 'group',
+        individualParticipant: session.individual_participant || null,
         deductsExpected: session.is_cancelled ? 0 : 1,
-      })),
+      })) : [],
   ]))
 
   const attendanceByChild = Object.fromEntries(children.map((child) => [
     child.id,
-    (attendance.attendance || [])
+    child.studentId === resolvedStudentId ? (attendance.attendance || [])
       .filter((record) => record.student?.id === child.studentId)
       .map((record) => ({
         id: String(record.id),
@@ -115,7 +114,7 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         comment: record.comment || '',
         group: record.session?.group?.name || 'Индивидуальное',
         trainer: record.session?.trainer || '',
-      })),
+      })) : [],
   ]))
 
   return {
@@ -150,15 +149,19 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
       receiptUrl: payment.receipt?.download_url || null,
       studentId: payment.student_id,
     })),
+    notifications: notifications?.notifications || [],
+    resourceStates: resourceStates || {},
   }
 }
 
-function mapTrainerSession(session) {
+export function mapTrainerSession(session) {
   return {
     id: String(session.id),
     sessionId: session.id,
     date: formatShortDate(session.start_at),
     rawDate: session.start_at?.slice(0, 10) || '',
+    startAt: session.start_at,
+    endAt: session.end_at,
     start: formatTime(session.start_at),
     end: formatTime(session.end_at),
     groupId: session.group?.id || '',
@@ -166,6 +169,9 @@ function mapTrainerSession(session) {
     location: session.location,
     count: session.max_participants || 0,
     status: sessionStatus(session),
+    sessionType: session.session_type || 'group',
+    individualParticipant: session.individual_participant || null,
+    trainer: session.effective_trainer || session.trainer,
   }
 }
 
@@ -179,6 +185,9 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
     activeSessionTitle: detailSession
       ? `${detailSession.group?.name || 'Индивидуальное'} · ${formatTime(detailSession.start_at)}-${formatTime(detailSession.end_at)}`
       : 'Занятие',
+    activeSessionDate: detailSession ? formatShortDate(detailSession.start_at) : '',
+    activeSessionStatus: detailSession ? sessionStatus(detailSession) : null,
+    activeSessionCancelled: Boolean(detailSession?.is_cancelled),
     roster: (detail?.students || []).map((student) => ({
       id: String(student.id),
       studentId: student.id,
@@ -201,7 +210,7 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
   }
 }
 
-export function mapAdminPortalData({ reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors }) {
+export function mapAdminPortalData({ reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, sessions, payments, debtors }) {
   const groupRows = groups.groups || []
   return {
     sessionTypeConfigs: sessionTypeConfigs?.session_types || [],
@@ -214,6 +223,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       email: trainer.email || '',
       phone: trainer.phone,
       active: trainer.is_active,
+      accessActivated: trainer.access_activated,
+      portalAccess: trainer.portal_access,
       groups: trainer.groups_count,
     })),
     groups: groupRows.map((group) => ({
@@ -244,7 +255,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       active: type.is_active,
     })),
     clients: (clients.clients || []).map((client) => ({
-      id: `c${client.id}`,
+      id: participantKey(client.client_id, client.id),
       clientId: client.client_id,
       studentId: client.id,
       first: client.first_name,
@@ -257,7 +268,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       group: client.group?.name || 'Индивидуально',
       trainer: '',
       isActive: client.is_active,
-      accountActive: client.client_is_active !== false,
+      accountActive: client.is_active !== false,
       status: client.client_is_active === false ? 'blacklisted' : (client.is_active ? 'active' : 'inactive'),
       balance: 0,
       sub: '',
@@ -288,34 +299,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       count: session.participants_count || 0,
       limit: session.max_participants || 0,
       status: sessionStatus(session),
-    })),
-    templates: (templates?.templates || []).map((template) => ({
-      id: `tpl${template.id}`,
-      templateId: template.id,
-      groupId: template.group?.id || '',
-      trainerId: template.trainer?.id || '',
-      group: template.group?.name || '-',
-      trainer: template.trainer?.name || '-',
-      weekday: template.weekday,
-      weekdayLabel: template.weekday_label,
-      start: template.start_time,
-      end: template.end_time,
-      location: template.location,
-      limit: template.max_participants,
-      active: template.is_active,
-    })),
-    weeklyPlans: (plans?.plans || []).map((plan) => ({
-      id: `plan${plan.id}`,
-      planId: plan.id,
-      name: plan.name,
-      groupId: plan.group?.id || '',
-      group: plan.group?.name || '-',
-      active: plan.is_active,
-      slots: (plan.slots || []).map((slot) => ({
-        ...slot,
-        trainerId: slot.trainer_id || '',
-        trainer: slot.trainer || '-',
-      })),
+      individualParticipant: session.individual_participant || null,
     })),
     roster: [],
     payments: (payments.payments || []).map((payment) => ({
@@ -353,3 +337,4 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
     })),
   }
 }
+import { participantKey, paymentMethodLabel as contractPaymentMethodLabel } from './contracts.js'

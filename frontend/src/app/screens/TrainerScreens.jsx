@@ -1,26 +1,35 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api.js'
-import { formatDate, formatShortDate, formatTime } from '../../mappers.js'
+import { formatDate, formatShortDate, formatTime, mapTrainerSession } from '../../mappers.js'
+import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
+import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 
-export function createTrainerSessionScreen(components, icons, reloadRoleData) {
-  const { Button, Avatar, Banner } = components
+export function createTrainerSessionScreen(components, icons, reloadRoleData, trainerData = {}) {
+  const { Button, Avatar, Banner, Dialog, StatusPill } = components
   const I = icons
   const options = ['present', 'absent', 'excused', 'rescheduled']
   const labels = { present: 'Был', absent: 'Не был', excused: 'Уважительная', rescheduled: 'Перенос' }
 
   return function ApiTrainerSession({ go, trainerSessionId }) {
-    const [rows, setRows] = useState(() => [...(globalThis.TrainerData?.roster || [])])
-    const [title, setTitle] = useState(globalThis.TrainerData?.activeSessionTitle || 'Посещаемость')
+    const [rows, setRows] = useState(() => [...(trainerData.roster || [])])
+    const [title, setTitle] = useState(trainerData.activeSessionTitle || 'Посещаемость')
+    const [sessionMeta, setSessionMeta] = useState({
+      date: trainerData.activeSessionDate || '',
+      status: trainerData.activeSessionStatus,
+      cancelled: Boolean(trainerData.activeSessionCancelled),
+    })
+    const [bulkPending, setBulkPending] = useState(false)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busyId, setBusyId] = useState(null)
     const [loading, setLoading] = useState(false)
-    const sessionId = trainerSessionId || globalThis.TrainerData?.activeSessionId
+    const sessionId = trainerSessionId || trainerData.activeSessionId
 
     useEffect(() => {
-      setRows([...(globalThis.TrainerData?.roster || [])])
-    }, [globalThis.TrainerData?.roster])
+      setRows([...(trainerData.roster || [])])
+    }, [trainerData.roster])
 
     useEffect(() => {
       if (!trainerSessionId) return
@@ -30,6 +39,11 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
         .then((payload) => {
           if (!alive) return
           setTitle(`${payload.session?.group?.name || 'Индивидуальное'} · ${formatTime(payload.session?.start_at)}-${formatTime(payload.session?.end_at)}`)
+          setSessionMeta({
+            date: formatShortDate(payload.session?.start_at),
+            status: payload.session?.is_cancelled ? 'cancelled' : 'planned',
+            cancelled: Boolean(payload.session?.is_cancelled),
+          })
           setRows((payload.students || []).map((student) => ({
             id: String(student.id),
             studentId: student.id,
@@ -49,7 +63,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
     }, [trainerSessionId])
 
     async function mark(row, status) {
-      if (!sessionId || !row.studentId) return
+      if (!sessionId || !row.studentId || sessionMeta.cancelled) return
       setBusyId(row.id)
       setError(null)
       try {
@@ -58,7 +72,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
           status,
         })
         setRows((current) => current.map((item) => item.id === row.id ? { ...item, status } : item))
-        setMessage('Посещаемость сохранена.')
+        setMessage(`${row.name}: ${labels[status]}. Влияние на абонемент: ${status === 'present' || status === 'absent' ? '-1 занятие' : 'без списания'}.`)
         reloadRoleData?.('trainer')
       } catch (err) {
         setError(err.message)
@@ -70,9 +84,11 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
     async function markAllPresent() {
       setBusyId('all'); setError(null)
       try {
-        await Promise.all(rows.map((row) => api.post(`/api/trainer/sessions/${sessionId}/attendance/`, { student_id: row.studentId, status: 'present' })))
+        const result = await api.post(`/api/trainer/sessions/${sessionId}/attendance/bulk/`, {
+          items: rows.map((row) => ({ student_id: row.studentId, status: 'present' })),
+        })
         setRows((current) => current.map((row) => ({ ...row, status: 'present' })))
-        setMessage(`Отмечены присутствующими: ${rows.length}.`)
+        setMessage(`Отмечены присутствующими: ${result.updated_count}. Списывается по одному занятию у каждого участника.`)
       } catch (err) { setError(err.message) } finally { setBusyId(null) }
     }
 
@@ -82,25 +98,27 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
           <div>
             <button onClick={() => go('sessions')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Мои занятия</button>
             <h2 className="page-title">{title}</h2>
+            <p className="page-desc">{sessionMeta.date} · <StatusPill status={sessionMeta.status || 'planned'} size="sm" /></p>
             <p className="page-desc">Отметьте посещаемость каждого ученика.</p>
           </div>
-          <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={markAllPresent}>Все присутствовали</Button>
+          <Button variant="primary" disabled={sessionMeta.cancelled || !rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>Все присутствовали</Button>
         </div>
 
-        {message && <Banner tone="success" style={{ marginBottom: 14 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="trainer-attendance-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 14 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={loading}>Загружаю состав занятия...</BusyBanner>
         <BusyBanner Banner={Banner} show={busyId != null}>Сохраняю посещаемость...</BusyBanner>
 
-        <div className="card" style={{ overflow: 'hidden' }}>
+        {sessionMeta.cancelled && <Banner tone="warning" title="Занятие отменено" style={{ marginBottom: 14 }}>Посещаемость доступна только для чтения. История занятия сохранена.</Banner>}
+        <div className="card ops-attendance-list" style={{ overflow: 'hidden' }}>
           {rows.map((row, index) => (
-            <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none', background: row.status ? 'transparent' : 'var(--amber-50)' }}>
+            <div key={row.id} className="ops-attendance-card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none', background: row.status ? 'transparent' : 'var(--amber-50)' }}>
               <Avatar name={row.name} size={32} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="strong">{row.name}</div>
                 <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>Данные доступны только в рамках занятия</div>
               </div>
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div className="ops-attendance-actions" style={{ display: 'flex', gap: 4 }}>
                 {options.map((status) => {
                   const on = row.status === status
                   const consumes = status === 'present' || status === 'absent'
@@ -110,7 +128,8 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
                       size="sm"
                       variant={on ? 'primary' : 'secondary'}
                       loading={busyId === row.id}
-                      disabled={busyId === row.id}
+                      disabled={sessionMeta.cancelled || busyId === row.id}
+                      aria-pressed={on}
                       onClick={() => mark(row, status)}
                     >
                       {labels[status]}{consumes ? ' -1' : ''}
@@ -122,40 +141,68 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData) {
           ))}
           {rows.length === 0 && <div className="muted" style={{ padding: 16 }}>На этом занятии пока нет участников.</div>}
         </div>
+        <Dialog
+          open={bulkPending}
+          title="Отметить всех присутствующими?"
+          description={`${title} · ${sessionMeta.date}. Будет обновлено участников: ${rows.length}; у каждого спишется одно занятие.`}
+          confirmLabel="Подтвердить отметку"
+          cancelLabel="Отмена"
+          onClose={() => setBulkPending(false)}
+          onConfirm={async () => { setBulkPending(false); await markAllPresent() }}
+        />
       </div>
     )
   }
 }
 
-export function createTrainerSessionsScreen(components, icons) {
-  const { Button, Badge } = components
+export function createTrainerSessionsScreen(components, icons, trainerData = {}) {
+  const { Badge, Banner } = components
   const I = icons
 
   return function ApiTrainerSessions({ go }) {
-    const sessions = globalThis.TrainerData?.sessions || []
-    const groups = globalThis.TrainerData?.groups || []
-    const [filters, setFilters] = useState({ groupId: '', status: 'all', period: 'week' })
+    const groups = trainerData.groups || []
+    const [sessions, setSessions] = useState(() => [...(trainerData.sessions || [])])
+    const [displayMode, setDisplayMode] = useState('calendar')
+    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
+    const [focusDate, setFocusDate] = useState(localToday())
+    const [error, setError] = useState(null)
+    const [filters, setFilters] = useState({ groupId: '', status: 'all' })
+    const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
+
+    useEffect(() => {
+      let active = true
+      const query = new URLSearchParams({
+        date_from: range.dateFrom,
+        date_to: range.dateTo,
+      })
+      api.get(`/api/trainer/sessions/?${query}`)
+        .then((payload) => {
+          if (active) setSessions((payload.sessions || []).map(mapTrainerSession))
+        })
+        .catch((err) => {
+          if (active) setError(err.message)
+        })
+      return () => { active = false }
+    }, [range.dateFrom, range.dateTo])
+
     const visibleSessions = sessions.filter((session) => {
       if (filters.groupId && String(session.groupId) !== String(filters.groupId)) return false
       if (filters.status !== 'all' && session.status !== filters.status) return false
-      const date = new Date(`${session.rawDate}T12:00:00`)
-      const now = new Date()
-      if (filters.period === 'today' && session.rawDate !== now.toISOString().slice(0, 10)) return false
-      if (filters.period === 'week' && date > new Date(now.getTime() + 7 * 86400000)) return false
       return true
     })
     return (
-      <div className="page">
+      <div className="page page-wide">
         <div className="page-head">
           <div>
             <h2 className="page-title">Мои занятия</h2>
             <p className="page-desc">Ближайшие, завершённые и отменённые занятия.</p>
           </div>
+          <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
         </div>
-
+        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="card card-pad" style={{ marginBottom: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(160px, 1fr))', gap: 10 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>Период<select value={filters.period} onChange={(event) => setFilters((current) => ({ ...current, period: event.target.value }))}><option value="today">Сегодня</option><option value="week">7 дней</option><option value="all">Все ближайшие</option></select></label>
+          <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} />
+          <div className="ops-form-grid" style={{ marginTop: 10 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               Группа
               <select value={filters.groupId} onChange={(event) => setFilters((current) => ({ ...current, groupId: event.target.value }))} style={{ minHeight: 36 }}>
@@ -174,31 +221,29 @@ export function createTrainerSessionsScreen(components, icons) {
             </label>
           </div>
         </div>
-
-        <div className="card" style={{ overflow: 'hidden' }}>
-          {visibleSessions.map((session, index) => (
-            <div key={session.id} role="button" tabIndex={0} className="ops-session-row" onClick={() => go('session', { trainerSessionId: session.sessionId })} onKeyDown={(event) => { if (event.key === 'Enter') go('session', { trainerSessionId: session.sessionId }) }} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', opacity: session.status === 'cancelled' ? 0.58 : 1, cursor: 'pointer' }}>
-              <span className="mono" style={{ width: 120, fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)' }}>{session.date}</span>
-              <span className="mono" style={{ width: 104, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{session.start}-{session.end}</span>
-              <span className="strong" style={{ width: 140 }}>{session.group}</span>
-              <span className="muted" style={{ flex: 1, fontSize: 'var(--fs-xs)', display: 'inline-flex', alignItems: 'center', gap: 5 }}><I.Location size={13} />{session.location}</span>
-              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : session.status === 'done' ? 'Завершено' : 'Запланировано'}</Badge>
-              <span className="ops-muted-chip">Открыть</span>
-            </div>
-          ))}
-          {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>Занятий по выбранным фильтрам нет.</div>}
-        </div>
+        {displayMode === 'calendar' && (
+          <ScheduleCalendar
+            sessions={visibleSessions}
+            focusDate={focusDate}
+            viewMode={viewMode}
+            setFocusDate={setFocusDate}
+            setViewMode={setViewMode}
+            onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })}
+            ariaLabel="Календарь моих занятий"
+          />
+        )}
+        {displayMode === 'list' && <ScheduleList sessions={visibleSessions} testId="trainer-schedule-list" onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} emptyLabel="Занятий по выбранным фильтрам нет." renderStatus={(session) => <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : session.status === 'done' ? 'Завершено' : 'Запланировано'}</Badge>} />}
       </div>
     )
   }
 }
 
-export function createTrainerHistoryScreen(components, icons) {
+export function createTrainerHistoryScreen(components, icons, trainerData = {}) {
   const { Button, Badge } = components
   const I = icons
   return function ApiTrainerHistory({ go }) {
-    const sessions = globalThis.TrainerData?.history || []
-    const groups = globalThis.TrainerData?.groups || []
+    const sessions = trainerData.history || []
+    const groups = trainerData.groups || []
     const [groupId, setGroupId] = useState('')
     const [period, setPeriod] = useState('90')
     const visibleSessions = (groupId ? sessions.filter((session) => String(session.groupId) === String(groupId)) : sessions).filter((session) => !period || new Date(session.rawDate) >= new Date(Date.now() - Number(period) * 86400000))
@@ -237,13 +282,13 @@ export function createTrainerHistoryScreen(components, icons) {
   }
 }
 
-export function createTrainerGroupsScreen(components, icons) {
+export function createTrainerGroupsScreen(components, icons, trainerData = {}) {
   const { Badge } = components
   const I = icons
 
   return function ApiTrainerGroups({ go }) {
-    const groups = globalThis.TrainerData?.groups || []
-    const sessions = globalThis.TrainerData?.sessions || []
+    const groups = trainerData.groups || []
+    const sessions = trainerData.sessions || []
     const [selectedGroupId, setSelectedGroupId] = useState(null)
     return (
       <div className="page">

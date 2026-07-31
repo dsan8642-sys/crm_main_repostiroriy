@@ -3,7 +3,7 @@ import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 
-export function createAdminOverviewScreen(components, icons) {
+export function createAdminOverviewScreen(components, icons, adminData = {}) {
   const { Money, Button, Banner, Badge } = components
   const I = icons
 
@@ -18,7 +18,7 @@ export function createAdminOverviewScreen(components, icons) {
   }
 
   return function ApiAdminOverview({ go }) {
-    const data = globalThis.AdminData || {}
+    const data = adminData
     const sessions = data.sessions || []
     const pending = (data.payments || []).filter((payment) => payment.status === 'pending')
     const debtors = data.debtors || []
@@ -62,7 +62,7 @@ export function createAdminOverviewScreen(components, icons) {
               onClick={() => go('attendance', { sessionId: session.sessionId })}
               style={{ borderBottom: index < list.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}
             >
-              <span className="mono" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)', width: 96 }}>{session.start}-{session.end}</span>
+              <span className="mono" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)', width: 190 }}>{session.date} · {session.start}-{session.end}</span>
               <span className="strong" style={{ flex: 1 }}>{session.group}</span>
               <span className="muted" style={{ fontSize: 'var(--fs-sm)', width: 150 }}>{session.trainer}</span>
               <span className="muted" style={{ fontSize: 'var(--fs-xs)', width: 150 }}>{session.location}</span>

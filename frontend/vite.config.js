@@ -6,6 +6,9 @@ import react from '@vitejs/plugin-react'
 // behind the same reverse proxy as the API.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    manifest: true,
+  },
   server: {
     port: 5173,
     proxy: {

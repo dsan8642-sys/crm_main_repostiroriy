@@ -3,13 +3,16 @@ import { api, downloadFile } from '../../api.js'
 import { asAccountBalance, asMoneyMajor, formatDate, formatShortDate, formatTime, paymentMethodLabel } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { DateField } from '../DateTimeField.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
+import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
 
-export function createAdminClientDetailScreen(components, icons, reloadRoleData) {
+export function createAdminClientDetailScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Tabs, Money, Badge, Dialog, Input } = components
   const I = icons
 
   return function ApiAdminClientDetail({ go, clientId, initialTab }) {
-    const fallbackClientId = clientId || globalThis.AdminData?.clients?.find((row) => row.clientId)?.clientId
+    const fallbackClientId = clientId || adminData.clients?.find((row) => row.clientId)?.clientId
     const [tab, setTab] = useState('participants')
     const [detail, setDetail] = useState(null)
     const [error, setError] = useState(null)
@@ -76,9 +79,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     const attendance = detail?.attendance || []
     const consents = detail?.consents || []
     const summary = detail?.summary || {}
-    const accountArchived = account.is_active === false
-    const subscriptionTypes = globalThis.AdminData?.subscriptionTypes || []
-    const groups = globalThis.AdminData?.groups || []
+    const accountArchived = participants.length > 0 && participants.every((item) => item.is_active === false)
+    const subscriptionTypes = adminData.subscriptionTypes || []
+    const groups = adminData.groups || []
 
     useEffect(() => {
       if (initialTab) setTab(initialTab)
@@ -107,13 +110,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     const updatePaymentForm = (field, value) => setPaymentForm((current) => ({ ...current, [field]: value }))
     const updateFinanceForm = (field, value) => setFinanceForm((current) => ({ ...current, [field]: value }))
 
-    async function createActivation() {
+    async function accessAction(action) {
       setError(null)
       setActivationInfo(null)
-      setActionBusy('activation')
+      setActionBusy(`access-${action}`)
       try {
-        const payload = await api.post(`/api/admin/clients/${fallbackClientId}/activation/`)
-        setActivationInfo(payload)
+        const payload = await api.post(`/api/admin/clients/${fallbackClientId}/access/${action}/`)
+        if (action === 'revoke') {
+          setMessage('Portal-доступ клиента отозван. Профиль и участники не архивированы.')
+        } else {
+          setActivationInfo(payload)
+        }
+        refreshDetail()
       } catch (err) {
         setError(err.message)
       } finally {
@@ -374,7 +382,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
             <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
           </div>
           <div className="ops-button-row ops-page-actions">
-            {!accountArchived && !account.access_activated && <Button variant="secondary" loading={actionBusy === 'activation'} disabled={loading || actionBusy != null} onClick={createActivation}>Выдать доступ</Button>}
+            {!accountArchived && !loading && <AccessButtons Button={Button} portalAccess={account.portal_access} accessActivated={account.access_activated} busy={Boolean(actionBusy)} onAction={accessAction} />}
             {!accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>Редактировать клиента</Button>}
             {accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>Восстановить</Button>}
             <Button variant="secondary" disabled={loading} onClick={refreshDetail}>Обновить</Button>
@@ -382,11 +390,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         </div>
 
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
-        {activationInfo && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setActivationInfo(null)}>
-          Передайте клиенту одноразовый код активации <strong style={{ wordBreak: 'break-all' }}>{activationInfo.activation_token}</strong>. Код действует 72 часа.
-        </Banner>}
-        {loading && <Banner tone="info" style={{ marginBottom: 12 }}>Загружаю карточку клиента...</Banner>}
+        <ToastNotice id="admin-client-detail-result" message={message} />
+        {activationInfo && <div style={{ marginBottom: 12 }}><AccessCodeCard info={activationInfo} Button={Button} onClose={() => setActivationInfo(null)} /></div>}
+        <BusyBanner id="admin-client-detail-busy" show={loading}>Загружаю карточку клиента...</BusyBanner>
         {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>Клиент находится в чёрном списке.</strong> Данные и история доступны только для просмотра. Восстановите клиента, чтобы снова выполнять действия.</Banner>}
 
         {editingAccount && (
@@ -503,8 +509,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
                       {subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price} {type.currency}</option>)}
                     </select>
                   </label>
-                  <Input label="Дата начала" value={financeForm.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                  <Input label="Срок оплаты" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                  <DateField label="Дата начала" value={financeForm.startDate} onChange={(value) => updateFinanceForm('startDate', value)} />
+                  <DateField label="Срок оплаты" value={financeForm.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, fontSize: 'var(--fs-sm)' }}>
                     <input type="checkbox" checked={financeForm.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} />
                     Создать начисление
@@ -515,13 +521,13 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
                 <>
                   <Input label="Описание" value={financeForm.description} onChange={(event) => updateFinanceForm('description', event.target.value)} />
                   <Input label="Сумма" value={financeForm.amount} onChange={(event) => updateFinanceForm('amount', event.target.value)} placeholder="240.00" />
-                  <Input label="Срок оплаты" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                  <DateField label="Срок оплаты" value={financeForm.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                 </>
               )}
               {financeAction === 'freeze' && (
                 <>
-                  <Input label="С даты" value={financeForm.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                  <Input label="По дату" value={financeForm.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                  <DateField label="С даты" value={financeForm.freezeStart} onChange={(value) => updateFinanceForm('freezeStart', value)} />
+                  <DateField label="По дату" value={financeForm.freezeEnd} onChange={(value) => updateFinanceForm('freezeEnd', value)} />
                   <Input label="Причина" value={financeForm.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
                 </>
               )}
@@ -552,7 +558,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
 
         {tab === 'participants' && (
           <div>
-          {editingParticipant && <div className="card card-pad" style={{ marginBottom: 12 }}><div className="eyebrow">Редактирование участника</div><div className="ops-form-grid"><Input label="Имя" value={participantForm.firstName} onChange={(event) => setParticipantForm({ ...participantForm, firstName: event.target.value })} /><Input label="Фамилия" value={participantForm.lastName} onChange={(event) => setParticipantForm({ ...participantForm, lastName: event.target.value })} /><Input label="Дата рождения" value={participantForm.birthDate} onChange={(event) => setParticipantForm({ ...participantForm, birthDate: event.target.value })} /><Input label="Email" value={participantForm.email} onChange={(event) => setParticipantForm({ ...participantForm, email: event.target.value })} /><label>Группа<select value={participantForm.groupId} onChange={(event) => setParticipantForm({ ...participantForm, groupId: event.target.value })}><option value="">Индивидуально</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={participantForm.isActive} onChange={(event) => setParticipantForm({ ...participantForm, isActive: event.target.checked })} />Активен</label></div><div className="ops-button-row"><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>Сохранить</Button><Button variant="secondary" onClick={() => setEditingParticipant(null)}>Отмена</Button></div></div>}
+          {editingParticipant && <div className="card card-pad" style={{ marginBottom: 12 }}><div className="eyebrow">Редактирование участника</div><div className="ops-form-grid"><Input label="Имя" value={participantForm.firstName} onChange={(event) => setParticipantForm({ ...participantForm, firstName: event.target.value })} /><Input label="Фамилия" value={participantForm.lastName} onChange={(event) => setParticipantForm({ ...participantForm, lastName: event.target.value })} /><DateField label="Дата рождения" value={participantForm.birthDate} onChange={(value) => setParticipantForm({ ...participantForm, birthDate: value })} /><Input label="Email" value={participantForm.email} onChange={(event) => setParticipantForm({ ...participantForm, email: event.target.value })} /><label>Группа<select value={participantForm.groupId} onChange={(event) => setParticipantForm({ ...participantForm, groupId: event.target.value })}><option value="">Индивидуально</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={participantForm.isActive} onChange={(event) => setParticipantForm({ ...participantForm, isActive: event.target.checked })} />Активен</label></div><div className="ops-button-row"><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>Сохранить</Button><Button variant="secondary" onClick={() => setEditingParticipant(null)}>Отмена</Button></div></div>}
           <Table
             rows={participants}
             emptyLabel="Участников нет"
@@ -597,12 +603,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
                     options={participants.map((participant) => clientSelectOption(participant))}
                   />
                   <Input label="Сумма" value={paymentForm.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240.00" />
-                  <Input label="Дата оплаты" value={paymentForm.paidAt} onChange={(event) => updatePaymentForm('paidAt', event.target.value)} placeholder="YYYY-MM-DD" />
+                  <DateField label="Дата оплаты" value={paymentForm.paidAt} onChange={(value) => updatePaymentForm('paidAt', value)} />
                   <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
                     Способ
                     <select value={paymentForm.method} onChange={(event) => updatePaymentForm('method', event.target.value)} style={{ minHeight: 36 }}>
                       <option value="cash">Наличные</option>
                       <option value="bank_transfer">Bank transfer / IBAN</option>
+                      <option value="card">Карта</option>
+                      <option value="other">Другое</option>
                       <option value="card">Карта</option>
                       <option value="other">Другое</option>
                     </select>

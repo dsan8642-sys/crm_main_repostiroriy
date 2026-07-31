@@ -1,152 +1,14 @@
-﻿from .support import *
+﻿from datetime import timedelta
+
+from .support import *
 from .admin_support import _admin_required
 from .pagination import paginated_payload
 from audit.models import AuditLogEntry
-from scheduling.models import WeeklyPlan, WeeklyPlanSlot
 from scheduling.services import (
     commit_copy_period,
-    generate_weekly_plan,
     preview_copy_period,
+    restore_session,
 )
-
-
-def _weekly_plan_slot_payload(slot):
-    return {
-        "id": slot.id,
-        "trainer_id": slot.trainer_id,
-        "trainer": str(slot.trainer),
-        "weekday": slot.weekday,
-        "weekday_label": slot.get_weekday_display(),
-        "start_time": slot.start_time.isoformat(timespec="minutes"),
-        "duration_minutes": slot.duration_minutes,
-        "location": slot.location,
-        "max_participants": slot.max_participants,
-        "is_active": slot.is_active,
-    }
-
-
-def _weekly_plan_payload(plan):
-    return {
-        "id": plan.id,
-        "name": plan.name,
-        "group": {"id": plan.group_id, "name": plan.group.name},
-        "is_active": plan.is_active,
-        "slots": [_weekly_plan_slot_payload(slot) for slot in plan.slots.all()],
-    }
-
-
-def _apply_weekly_plan(plan, data):
-    if "group_id" in data:
-        plan.group = get_object_or_404(Group, pk=data.get("group_id"))
-    if "name" in data:
-        plan.name = data.get("name", "") or ""
-    if "is_active" in data:
-        plan.is_active = _bool_value(data.get("is_active"), True)
-    plan.full_clean()
-    plan.save()
-    return plan
-
-
-def _apply_weekly_plan_slot(slot, data):
-    if "trainer_id" in data:
-        slot.trainer = get_object_or_404(Trainer, pk=data.get("trainer_id"))
-    if "weekday" in data:
-        slot.weekday = int(data.get("weekday"))
-    if "start_time" in data:
-        slot.start_time = _parse_time(data.get("start_time"), "start_time")
-    if "duration_minutes" in data:
-        slot.duration_minutes = int(data.get("duration_minutes"))
-    if "location" in data:
-        slot.location = data.get("location", "") or ""
-    if "max_participants" in data:
-        slot.max_participants = int(data.get("max_participants"))
-    if "is_active" in data:
-        slot.is_active = _bool_value(data.get("is_active"), True)
-    slot.full_clean()
-    slot.save()
-    return slot
-
-
-@require_http_methods(["GET", "POST"])
-def admin_schedule_weekly_plans(request):
-    user = _admin_required(request)
-    if request.method == "POST":
-        with transaction.atomic():
-            plan = _apply_weekly_plan(WeeklyPlan(), _json_body(request))
-            audit(user, "weekly_plan.created", plan, {"source": "api"})
-        return JsonResponse(_weekly_plan_payload(plan), status=201)
-    qs = WeeklyPlan.objects.select_related("group").prefetch_related(
-        "slots__trainer__user").order_by("group__name", "name", "id")
-    if request.GET.get("group_id"):
-        qs = qs.filter(group_id=request.GET["group_id"])
-    if request.GET.get("active") in {"true", "false"}:
-        qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse(paginated_payload(
-        request, qs, key="plans", serializer=_weekly_plan_payload))
-
-
-@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
-def admin_schedule_weekly_plan_detail(request, plan_id):
-    user = _admin_required(request)
-    plan = get_object_or_404(
-        WeeklyPlan.objects.select_related("group").prefetch_related(
-            "slots__trainer__user"),
-        pk=plan_id,
-    )
-    if request.method in {"POST", "PATCH"}:
-        _apply_weekly_plan(plan, _json_body(request))
-        audit(user, "weekly_plan.updated", plan, {"source": "api"})
-    elif request.method == "DELETE":
-        plan.is_active = False
-        plan.save(update_fields=["is_active"])
-        audit(user, "weekly_plan.archived", plan, {"source": "api"})
-    return JsonResponse(_weekly_plan_payload(plan))
-
-
-@require_POST
-def admin_schedule_weekly_plan_slots(request, plan_id):
-    user = _admin_required(request)
-    plan = get_object_or_404(WeeklyPlan, pk=plan_id)
-    slot = _apply_weekly_plan_slot(WeeklyPlanSlot(plan=plan), _json_body(request))
-    audit(user, "weekly_plan_slot.created", slot, {"plan_id": plan.id})
-    plan = WeeklyPlan.objects.select_related("group").prefetch_related(
-        "slots__trainer__user").get(pk=plan.id)
-    return JsonResponse(_weekly_plan_payload(plan), status=201)
-
-
-@require_http_methods(["PATCH", "DELETE"])
-def admin_schedule_weekly_plan_slot_detail(request, slot_id):
-    user = _admin_required(request)
-    slot = get_object_or_404(WeeklyPlanSlot.objects.select_related("plan"), pk=slot_id)
-    if request.method == "PATCH":
-        _apply_weekly_plan_slot(slot, _json_body(request))
-        audit(user, "weekly_plan_slot.updated", slot, {"plan_id": slot.plan_id})
-    else:
-        slot.is_active = False
-        slot.save(update_fields=["is_active"])
-        audit(user, "weekly_plan_slot.archived", slot, {"plan_id": slot.plan_id})
-    return JsonResponse(_weekly_plan_slot_payload(slot))
-
-
-@require_POST
-def admin_schedule_weekly_plan_generate(request, plan_id):
-    user = _admin_required(request)
-    plan = get_object_or_404(
-        WeeklyPlan.objects.select_related("group").prefetch_related("slots"), pk=plan_id)
-    data = _json_body(request)
-    created, skipped = generate_weekly_plan(
-        plan,
-        _parse_date(data.get("date_from"), "date_from"),
-        _parse_date(data.get("date_to"), "date_to"),
-        skip_conflicts=_bool_value(data.get("skip_conflicts")),
-        actor=user,
-    )
-    return JsonResponse({
-        "created": [_session_payload(session) for session in created],
-        "created_count": len(created),
-        "skipped": skipped,
-        "skipped_count": len(skipped),
-    }, status=201)
 
 
 @require_POST
@@ -191,6 +53,20 @@ def admin_schedule_copy_commit(request):
 
 
 def _session_attendance_payload(session):
+    roster = list(_session_roster(session))
+    student_ids = [student.id for student in roster]
+    charge_totals = {
+        row["student_id"]: row["total"] or 0
+        for row in Charge.objects.filter(student_id__in=student_ids)
+        .values("student_id").annotate(total=Sum("amount_minor"))
+    }
+    payment_totals = {
+        row["student_id"]: row["total"] or 0
+        for row in Payment.objects.filter(
+            student_id__in=student_ids,
+            status=PaymentStatus.CONFIRMED,
+        ).values("student_id").annotate(total=Sum("amount_minor"))
+    }
     attendance = {record.student_id: record for record in session.attendance.select_related("student")}
     one_off_participants = {
         participant.student_id: participant
@@ -210,6 +86,8 @@ def _session_attendance_payload(session):
         } for entry in history],
         "students": [{
             **_student_payload(student),
+            "balance_minor": charge_totals.get(student.id, 0) - payment_totals.get(student.id, 0),
+            "currency": settings.DEFAULT_CURRENCY,
             "attendance": _attendance_payload(attendance[student.id]) if student.id in attendance else None,
             "session_participant": {
                 "id": one_off_participants[student.id].id,
@@ -218,71 +96,8 @@ def _session_attendance_payload(session):
                 "note": one_off_participants[student.id].note,
             } if student.id in one_off_participants else None,
             "can_remove_from_session": student.id in one_off_participants,
-        } for student in _session_roster(session)],
+        } for student in roster],
     }
-
-@require_http_methods(["GET", "POST"])
-def admin_schedule_templates(request):
-    user = _admin_required(request)
-    if request.method == "POST":
-        template = RecurringTemplate()
-        _apply_template_data(template, _json_body(request))
-        audit(user, "template.created", template, {"source": "api"})
-        return JsonResponse(_template_payload(template), status=201)
-    qs = RecurringTemplate.objects.select_related("group", "trainer__user").order_by("weekday", "start_time", "id")
-    if request.GET.get("active") in {"true", "false"}:
-        qs = qs.filter(is_active=request.GET["active"] == "true")
-    if request.GET.get("group_id"):
-        qs = qs.filter(group_id=request.GET["group_id"])
-    if request.GET.get("trainer_id"):
-        qs = qs.filter(trainer_id=request.GET["trainer_id"])
-    return JsonResponse(paginated_payload(
-        request, qs, key="templates", serializer=_template_payload))
-
-
-@require_http_methods(["GET", "POST"])
-def admin_schedule_template_detail(request, template_id):
-    user = _admin_required(request)
-    template = get_object_or_404(
-        RecurringTemplate.objects.select_related("group", "trainer__user"), pk=template_id)
-    if request.method == "POST":
-        _apply_template_data(template, _json_body(request))
-        audit(user, "template.updated", template, {"source": "api"})
-        return JsonResponse(_template_payload(template))
-    return JsonResponse(_template_payload(template))
-
-
-@require_POST
-def admin_schedule_template_generate(request, template_id):
-    user = _admin_required(request)
-    template = get_object_or_404(RecurringTemplate.objects.select_related("group", "trainer__user"), pk=template_id)
-    data = _json_body(request)
-    created, skipped = generate_sessions(
-        template,
-        _parse_date(data.get("date_from"), "date_from"),
-        _parse_date(data.get("date_to"), "date_to"),
-        skip_conflicts=_bool_value(data.get("skip_conflicts")),
-        actor=user,
-    )
-    return JsonResponse({
-        "created": [_session_payload(session) for session in created],
-        "created_count": len(created),
-        "skipped": [day.isoformat() for day in skipped],
-        "skipped_count": len(skipped),
-    }, status=201)
-
-
-@require_POST
-def admin_schedule_template_cancel_future(request, template_id):
-    user = _admin_required(request)
-    template = get_object_or_404(RecurringTemplate, pk=template_id)
-    data = _json_body(request)
-    count = cancel_series(
-        template,
-        date_from=_parse_date(data.get("date_from"), "date_from") or timezone.localdate(),
-        actor=user,
-    )
-    return JsonResponse({"cancelled": count})
 
 
 @require_http_methods(["GET", "POST"])
@@ -324,7 +139,7 @@ def admin_schedule_session_detail(request, session_id):
         deleted_id = delete_session(session, actor=user, force=True)
         return JsonResponse({"deleted": True, "session_id": deleted_id})
     if request.method in {"POST", "PATCH"}:
-        changes = _session_changes_from_data(_json_body(request))
+        changes = _session_changes_from_data(_json_body(request), current_session=session)
         edit_single_session(session, actor=user, **changes)
         return JsonResponse(_session_payload(session))
     return JsonResponse(_session_payload(session))
@@ -354,6 +169,50 @@ def admin_schedule_session_attendance(request, session_id):
         return JsonResponse(_attendance_payload(record))
 
     return JsonResponse(_session_attendance_payload(session))
+
+
+@require_POST
+@transaction.atomic
+def admin_schedule_session_attendance_bulk(request, session_id):
+    user = _admin_required(request)
+    session = get_object_or_404(Session.objects.select_for_update(), pk=session_id)
+    if session.is_cancelled:
+        raise ValidationError("cancelled session is read-only")
+    items = _json_body(request).get("items")
+    if not isinstance(items, list) or not items:
+        raise ValidationError("items must be a non-empty list")
+    allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+    normalized = []
+    seen = set()
+    for item in items:
+        try:
+            student_id = int(item.get("student_id"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValidationError("student_id is required") from exc
+        status = item.get("status")
+        if student_id in seen:
+            raise ValidationError("duplicate student_id")
+        if student_id not in allowed_student_ids:
+            raise PermissionDenied("student is not in this session roster")
+        if status not in AttendanceStatus.values:
+            raise ValidationError("invalid attendance status")
+        seen.add(student_id)
+        normalized.append((student_id, status))
+    students = Student.objects.in_bulk(seen)
+    records = [
+        set_attendance(
+            session_id=session.id,
+            student=students[student_id],
+            status=status,
+            actor=user,
+        )
+        for student_id, status in normalized
+    ]
+    return JsonResponse({
+        "session_id": session.id,
+        "updated_count": len(records),
+        "results": [_attendance_payload(record) for record in records],
+    })
 
 
 @require_POST
@@ -501,6 +360,16 @@ def admin_schedule_session_cancel(request, session_id):
         notes = f"{notes}\nПричина отмены: {reason}".strip()
     session = edit_single_session(session, actor=user, is_cancelled=True, notes=notes)
     return JsonResponse(_session_payload(session))
+
+
+@require_POST
+def admin_schedule_session_restore(request, session_id):
+    user = _admin_required(request)
+    session = get_object_or_404(Session, pk=session_id)
+    session, restored = restore_session(session, actor=user)
+    payload = _session_payload(session)
+    payload["restored"] = restored
+    return JsonResponse(payload)
 
 
 @require_POST

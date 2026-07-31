@@ -55,6 +55,7 @@ Supported write surfaces:
 - `GET|PATCH|PUT|DELETE /api/admin/settings/locations/<id>/`
 - `GET|POST /api/admin/settings/session-types/`
 - `GET|PATCH|PUT|DELETE /api/admin/settings/session-types/<id>/`
+- `POST /api/admin/settings/session-types/split/restore/`
 - `GET|POST /api/admin/settings/languages/`
 - `GET|PATCH|PUT|DELETE /api/admin/settings/languages/<id>/`
 - `GET|POST /api/admin/settings/dictionary-keys/`

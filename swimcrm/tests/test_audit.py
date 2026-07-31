@@ -12,7 +12,7 @@ from audit.models import AuditLogEntry
 from billing.models import Payment, PaymentStatus
 from billing.services import confirm_payment, reject_payment
 from dataio import importer
-from scheduling.services import create_session, generate_sessions
+from scheduling.services import create_session
 from students.admin import StudentAdmin
 from students.models import Student
 from subscriptions.services import create_subscription, freeze_subscription
@@ -64,19 +64,23 @@ class AuditLogRule(TestCase):
         self.assertIn("subscription.created", actions)
         self.assertIn("subscription.frozen", actions)
 
-    def test_schedule_generation_is_audited_with_actor(self):
-        tpl = f.make_template(self.group, self.trainer)
-        start = date.today()
-        generate_sessions(tpl, start, start + timedelta(days=14),
-                          skip_conflicts=True, actor=self.admin)
+    def test_concrete_session_creation_is_audited_with_actor(self):
+        start = timezone.now() + timedelta(days=1)
+        create_session(
+            trainer=self.trainer, group=self.group, start_at=start,
+            duration_minutes=60, location="Pool", max_participants=8,
+            actor=self.admin,
+        )
         self.assertTrue(AuditLogEntry.objects.filter(
-            action="schedule.generated", actor=self.admin).exists())
+            action="session.created", actor=self.admin).exists())
 
     def test_no_audit_without_actor(self):
-        tpl = f.make_template(self.group, self.trainer)
-        start = date.today()
-        generate_sessions(tpl, start, start + timedelta(days=14), skip_conflicts=True)
-        self.assertFalse(AuditLogEntry.objects.filter(action="schedule.generated").exists())
+        start = timezone.now() + timedelta(days=1)
+        create_session(
+            trainer=self.trainer, group=self.group, start_at=start,
+            duration_minutes=60, location="Pool", max_participants=8,
+        )
+        self.assertFalse(AuditLogEntry.objects.filter(action="session.created").exists())
 
     def test_attendance_marking_is_audited(self):
         now = timezone.now()

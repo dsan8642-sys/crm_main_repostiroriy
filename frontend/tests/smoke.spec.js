@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test'
 async function mockPortal(page, routes) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
-    const payload = routes[url.pathname]
+    const payload = url.pathname === '/api/health/'
+      ? { status: 'ok', service: 'swimcrm' }
+      : routes[url.pathname]
     await route.fulfill({
       status: payload ? 200 : 404,
       contentType: 'application/json',
@@ -15,6 +17,11 @@ async function mockPortal(page, routes) {
 function collectPageErrors(page) {
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'warning' || message.type() === 'error') {
+      errors.push(`console ${message.type()}: ${message.text()} ${message.location().url}`)
+    }
+  })
   return errors
 }
 
@@ -41,8 +48,44 @@ test('SPA renders without a blank shell', async ({ page }) => {
     page.getByRole('heading', { name: 'SwimCRM', exact: true }),
   ).toBeVisible({ timeout: 15_000 })
 
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const motionDurations = await page.locator('.app').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return [style.transitionDuration, style.animationDuration].map((duration) => {
+      const first = duration.split(',')[0].trim()
+      return first.endsWith('ms') ? Number.parseFloat(first) / 1000 : Number.parseFloat(first)
+    })
+  })
+  expect(Math.max(...motionDurations)).toBeLessThanOrEqual(0.001)
+
   const bodyText = (await page.locator('body').innerText()).trim()
   expect(bodyText.length).toBeGreaterThan(20)
+})
+
+test('IBM Plex assets are local and cover RU, PL and EN samples', async ({ page }) => {
+  const externalFontRequests = []
+  page.on('request', (request) => {
+    const hostname = new URL(request.url()).hostname
+    if (hostname === 'fonts.googleapis.com' || hostname === 'fonts.gstatic.com') {
+      externalFontRequests.push(request.url())
+    }
+  })
+
+  await page.goto('/')
+  const fontState = await page.evaluate(async () => {
+    await Promise.all([
+      document.fonts.load('16px "IBM Plex Sans"', 'Zażółć gęślą jaźń — Привет — SwimCRM'),
+      document.fonts.load('16px "IBM Plex Mono"', 'PLN 12345 / ID-42'),
+    ])
+    await document.fonts.ready
+    return {
+      sans: document.fonts.check('16px "IBM Plex Sans"', 'Zażółć gęślą jaźń — Привет — SwimCRM'),
+      mono: document.fonts.check('16px "IBM Plex Mono"', 'PLN 12345 / ID-42'),
+    }
+  })
+
+  expect(fontState).toEqual({ sans: true, mono: true })
+  expect(externalFontRequests).toEqual([])
 })
 
 test('icon-only buttons have accessible names', async ({ page }) => {
@@ -60,12 +103,17 @@ test('icon-only buttons have accessible names', async ({ page }) => {
 })
 
 test('admin critical screens render with API-backed data', async ({ page }) => {
-  const now = '2026-07-21T17:00:00+02:00'
+  const errors = collectPageErrors(page)
+  const fixtureStart = new Date(Date.now() + 24 * 60 * 60 * 1000)
+  fixtureStart.setHours(17, 0, 0, 0)
+  const now = fixtureStart.toISOString()
+  const fixtureEnd = new Date(fixtureStart.getTime() + 60 * 60 * 1000).toISOString()
   const seenAdminEndpoints = new Set()
   const seenClientFinanceActions = new Set()
-  const seenScheduleMutations = new Set()
   const submittedSettings = []
   const submittedCredentials = []
+  const submittedSessions = []
+  const schedulePageSizes = []
   const requiredAdminBootstrapEndpoints = [
     '/api/admin/dashboard/',
     '/api/admin/reference/',
@@ -73,7 +121,6 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/trainers/',
     '/api/admin/groups/',
     '/api/admin/subscription-types/',
-    '/api/admin/schedule/templates/',
     '/api/admin/schedule/sessions/',
     '/api/admin/payments/',
     '/api/admin/debtors/',
@@ -155,7 +202,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       ],
     },
     '/api/admin/clients/10/': {
-      account: { id: 10, username: 'jan-parent', full_name: 'Anna Kowalska', email: 'anna@example.com', phone: '+48111222333', is_active: true },
+      account: { id: 10, username: 'jan-parent', full_name: 'Anna Kowalska', email: 'anna@example.com', phone: '+48111222333', is_active: true, access_activated: true, portal_access: 'active' },
       participants: [{ id: 1, client_id: 10, first_name: 'Jan', last_name: 'Kowalski', full_name: 'Jan Kowalski', birth_date: '2016-05-10', is_active: true, group: { id: 1, name: 'Delfiny' }, balance_minor: 0 }],
       subscriptions: [{ id: 1, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, type: '8 wejsc', status: 'active', remaining_sessions: 7, start_date: '2026-07-01', effective_end_date: '2026-07-31', created_at: '2026-07-01T10:00:00+02:00' }],
       charges: [],
@@ -165,7 +212,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       summary: { participants_count: 1, active_participants: 1, balance_minor: 0, active_subscriptions: 1, pending_payments: 0 },
     },
     '/api/admin/trainers/': {
-      trainers: [{ id: 1, username: 'marek', full_name: 'Marek Zielinski', email: 'm@example.com', phone: '+48000111222', is_active: true, groups_count: 1 }],
+      trainers: [{ id: 1, username: 'marek', full_name: 'Marek Zielinski', email: 'm@example.com', phone: '+48000111222', is_active: true, user_is_active: true, access_activated: true, portal_access: 'active', groups_count: 1 }],
     },
     '/api/admin/groups/': {
       groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, participants_count: 1, is_active: true }],
@@ -173,34 +220,14 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/subscription-types/': {
       subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN', duration_days: 30, sessions_count: 8, is_unlimited: false, is_individual: false, is_active: true }],
     },
-    '/api/admin/schedule/templates/': {
-      templates: [{ id: 1, group: { id: 1, name: 'Delfiny' }, trainer: { id: 1, name: 'Marek Zielinski' }, weekday: 4, weekday_label: 'Czwartek', start_time: '17:00', end_time: '18:00', location: 'Basen A', max_participants: 8, is_active: true }],
-    },
-    '/api/admin/schedule/plans/': {
-      plans: [{
-        id: 4,
-        name: 'Основной план',
-        group: { id: 1, name: 'Delfiny' },
-        is_active: true,
-        slots: [{
-          id: 7,
-          trainer_id: 1,
-          trainer: 'Marek Zielinski',
-          weekday: 0,
-          weekday_label: 'Понедельник',
-          start_time: '17:00',
-          duration_minutes: 60,
-          location: 'Basen A',
-          max_participants: 8,
-          is_active: true,
-        }],
-      }],
-    },
     '/api/admin/schedule/sessions/': {
-      sessions: [{ id: 1, start_at: now, end_at: '2026-07-21T18:00:00+02:00', location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' }],
+      sessions: [
+        { id: 1, start_at: now, end_at: fixtureEnd, location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' },
+        { id: 2, start_at: new Date(fixtureStart.getTime() + 2 * 60 * 60 * 1000).toISOString(), end_at: new Date(fixtureStart.getTime() + 3 * 60 * 60 * 1000).toISOString(), location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: true, max_participants: 8, participants_count: 1, notes: 'cancelled' },
+      ],
     },
     '/api/admin/schedule/sessions/1/attendance/': {
-      session: { id: 1, start_at: now, end_at: '2026-07-21T18:00:00+02:00', location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' },
+      session: { id: 1, start_at: now, end_at: fixtureEnd, location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' },
       history: [{ id: 1, action: 'session.created', actor: 'admin', changes: {}, created_at: now }],
       students: [{
         id: 1,
@@ -209,6 +236,8 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
         last_name: 'Kowalski',
         full_name: 'Jan Kowalski',
         client_phone: '+48111222333',
+        balance_minor: 24000,
+        currency: 'PLN',
         group: { id: 1, name: 'Delfiny' },
         attendance: null,
         session_participant: null,
@@ -258,6 +287,58 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       '/api/admin/subscriptions/1/freeze/': { days: 7 },
       '/api/admin/subscriptions/1/adjust/': { subscription: { id: 1, remaining_sessions: 8 } },
     }
+    const accessResponses = {
+      '/api/admin/clients/10/access/issue/': {
+        purpose: 'recovery',
+        login: 'anna@example.com',
+        activation_code: 'synthetic-client-recovery-code',
+        expires_at: '2026-08-01T12:00:00+02:00',
+      },
+      '/api/admin/trainers/1/access/issue/': {
+        purpose: 'recovery',
+        login: 'marek',
+        activation_code: 'synthetic-trainer-recovery-code',
+        expires_at: '2026-08-01T12:00:00+02:00',
+      },
+    }
+    if (method === 'POST' && accessResponses[url.pathname]) {
+      seenAdminEndpoints.add(url.pathname)
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify(accessResponses[url.pathname]),
+      })
+      return
+    }
+    if (method === 'GET' && url.pathname === '/api/admin/schedule/sessions/') {
+      schedulePageSizes.push(Number(url.searchParams.get('page_size')))
+    }
+    if (method === 'POST' && url.pathname === '/api/admin/schedule/check-conflict/') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ has_conflict: false }),
+      })
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/admin/schedule/sessions/') {
+      const submitted = route.request().postDataJSON()
+      submittedSessions.push(submitted)
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 3, ...submitted, is_cancelled: false }),
+      })
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/admin/schedule/sessions/2/restore/') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...routes['/api/admin/schedule/sessions/'].sessions[1], is_cancelled: false, restored: true }),
+      })
+      return
+    }
     if (method === 'POST' && financeResponses[url.pathname]) {
       seenAdminEndpoints.add(url.pathname)
       seenClientFinanceActions.add(url.pathname)
@@ -294,24 +375,6 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
         status: 201,
         contentType: 'application/json',
         body: JSON.stringify({ id: 2, ...submitted }),
-      })
-      return
-    }
-    if (method === 'PATCH' && url.pathname === '/api/admin/schedule/plans/4/') {
-      seenScheduleMutations.add('plan.patch')
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ id: 4, ...route.request().postDataJSON() }),
-      })
-      return
-    }
-    if (method === 'DELETE' && url.pathname === '/api/admin/schedule/plans/4/') {
-      seenScheduleMutations.add('plan.delete')
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ id: 4, is_active: false }),
       })
       return
     }
@@ -353,6 +416,13 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page).toHaveURL(/client=10/)
   await page.reload()
   await expect(page.locator('h2.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
+  await page.getByRole('button', { name: 'Восстановить доступ', exact: true }).click()
+  await expect(page.getByText('Код восстановления доступа')).toBeVisible()
+  await expect(page.getByText('synthetic-client-recovery-code')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Копировать логин' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Копировать код' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Копировать всё' })).toBeVisible()
+  await page.getByRole('button', { name: 'Закрыть', exact: true }).click()
   await page.getByRole('button', { name: 'Редактировать клиента' }).click()
   await page.getByLabel('Телефон', { exact: true }).fill('+48999999999')
   await page.getByRole('button', { name: 'Сохранить изменения' }).click()
@@ -376,6 +446,12 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
   await page.getByRole('button', { name: /Marek Zielinski/ }).first().click()
   await expect(page.getByRole('region', { name: /Профиль тренера/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Восстановить доступ', exact: true }).click()
+  await expect(page.getByText('Код восстановления доступа')).toBeVisible()
+  await expect(page.getByText('synthetic-trainer-recovery-code')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Копировать логин' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Копировать код' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Копировать всё' })).toBeVisible()
   await page.getByRole('tab', { name: 'Зарплата и ставки' }).click()
   await expect(page.getByText('Ставки по типам занятий')).toBeVisible()
 
@@ -393,33 +469,78 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.locator('.ops-nav-button[title="Расписание"]').click()
   await expect(page.locator('h2.page-title', { hasText: 'Расписание' })).toBeVisible()
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Календарь', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'Неделя', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText('За неделю: 2')).toBeVisible()
+  await expect(page.getByText(/Шаблоны расписания|Создать из шаблона/)).toHaveCount(0)
+  expect(schedulePageSizes.every((size) => size > 0 && size <= 200)).toBe(true)
+  const filterDetails = page.locator('.ops-filter-disclosure')
+  const filterBox = await filterDetails.boundingBox()
+  const pageBox = await page.locator('.page').boundingBox()
+  expect(filterBox?.height).toBeLessThanOrEqual(50)
+  expect(filterBox?.width).toBeLessThan(pageBox?.width || 10000)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  const referencePickerButton = page.getByRole('button', { name: 'Открыть календарь: Опорная дата' })
+  const referencePickerBox = await referencePickerButton.boundingBox()
+  expect(referencePickerBox?.width).toBeGreaterThanOrEqual(44)
+  expect(referencePickerBox?.height).toBeGreaterThanOrEqual(44)
+  await referencePickerButton.click()
+  await expect(page.getByRole('dialog', { name: 'Открыть календарь: Опорная дата' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(referencePickerButton).toBeFocused()
+  await page.getByRole('button', { name: 'Месяц', exact: true }).click()
+  await expect(page.getByText('За месяц: 0')).toBeVisible()
+  const marker = page.locator('.ops-calendar-marker').first()
+  await expect(marker).toContainText('2')
+  await expect(marker).toHaveAttribute('aria-label', 'Занятий: 2')
+  await page.getByRole('button', { name: 'День', exact: true }).click()
+  await expect(page.getByText('За день: 0')).toBeVisible()
+  await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+  await expect(page.getByText('За неделю: 2')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Уведомления' })).toHaveAttribute('aria-live', 'polite')
   await expect(page.getByTestId('schedule-list')).toHaveCount(0)
   await page.locator('[aria-label="Режим отображения расписания"] button').nth(1).click()
   await expect(page.getByTestId('schedule-list')).toBeVisible()
   await expect(page.locator('.ops-session-row').first()).toContainText('Basen A')
-  await expect(page.getByRole('button', { name: /Новое занятие/ })).toBeVisible()
-  await page.getByRole('button', { name: /Новое занятие/ }).click()
+  await expect(page.getByRole('button', { name: 'Восстановить тренировку', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Восстановить тренировку', exact: true }).click()
+  await expect(page.getByText('Тренировка восстановлена.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Групповая тренировка/ })).toBeVisible()
+  await page.getByRole('button', { name: /Групповая тренировка/ }).click()
   const createSessionCard = page.locator('.card').filter({
     has: page.getByText('Новое занятие', { exact: true }),
   })
   await createSessionCard.getByLabel('Тип занятия').selectOption('individual')
   await expect(createSessionCard.getByLabel('Цена занятия, PLN')).toBeVisible()
+  await createSessionCard.getByRole('combobox', { name: 'Участник' }).fill('Jan Kowalski')
+  await page.getByRole('option', { name: /Kowalski Jan/ }).click()
   await expect(createSessionCard.getByLabel('Локация').locator('option', { hasText: 'Basen A' })).toHaveCount(1)
-  await createSessionCard.getByRole('button', { name: 'Закрыть', exact: true }).click()
+  const timePickerButton = createSessionCard.getByRole('button', { name: 'Открыть выбор времени: Начало' })
+  await timePickerButton.click()
+  await expect(page.getByRole('dialog', { name: 'Открыть выбор времени: Начало' })).toBeVisible()
+  await expect(page.getByLabel('24-часовой выбор времени')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(timePickerButton).toBeFocused()
+  await createSessionCard.getByRole('button', { name: 'Создать занятие' }).click()
+  await expect(page.getByText(/Создано:.*Индивидуальное/)).toBeVisible()
+  expect(submittedSessions[0].notes).toBe('')
+  expect(submittedSessions[0].individual_student_id).toBe('1')
 
-  const planRow = page.getByRole('row', { name: /Основной план/ })
-  await planRow.getByRole('button', { name: 'Изменить' }).click()
-  await page.getByLabel('Название').fill('План после проверки')
-  await page.getByRole('button', { name: 'Сохранить план' }).click()
-  await expect(page.getByText('Недельный план обновлён. Уже созданные занятия не изменены.')).toBeVisible()
-  await page.getByRole('row', { name: /Основной план/ }).getByRole('button', { name: 'Удалить' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Удалить план' }).click()
-  await expect(page.getByText('Недельный план деактивирован. Связанные занятия сохранены.')).toBeVisible()
-  expect(seenScheduleMutations).toEqual(new Set(['plan.patch', 'plan.delete']))
+  await page.getByRole('button', { name: /Групповая тренировка/ }).click()
+  const invalidCard = page.locator('.card').filter({ has: page.getByText('Новое занятие', { exact: true }) })
+  await invalidCard.getByLabel('Тренер').selectOption('')
+  await invalidCard.getByRole('button', { name: 'Создать занятие' }).click()
+  await expect(invalidCard.getByLabel('Тренер')).toHaveAttribute('aria-invalid', 'true')
+  await expect(invalidCard.getByLabel('Тренер')).toBeFocused()
+  await invalidCard.getByRole('button', { name: 'Закрыть', exact: true }).click()
+
+  await expect(page.getByText(/Недельный план|Weekly plan/i)).toHaveCount(0)
 
   await page.locator('.ops-session-row').first().click()
   await expect(page.locator('h2.page-title', { hasText: 'Занятие' })).toBeVisible()
   await expect(page.getByText('Jan Kowalski').first()).toBeVisible()
+  await expect(page.getByText(/Долг:.*PLN/)).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Телефон' })).toHaveCount(0)
   await page.getByRole('button', { name: /Профиль/ }).click()
   await expect(page.getByText('Anna Kowalska').first()).toBeVisible()
   await page.getByRole('tab', { name: /Платежи/ }).click()
@@ -444,7 +565,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Абонемент продлён с начислением.')).toBeVisible()
 
   await page.getByRole('button', { name: /Заморозить/ }).click()
-  await page.getByLabel('По дату').fill('2026-07-23')
+  await page.getByRole('textbox', { name: 'По дату', exact: true }).fill('2026-07-23')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент заморожен на 7 дней.')).toBeVisible()
 
@@ -466,7 +587,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   await page.locator('.ops-nav-button[title="Платежи"]').click()
   await expect(page.locator('h2.page-title', { hasText: 'Платежи' })).toBeVisible()
-  await expect(page.locator('td').filter({ hasText: 'Bank transfer / IBAN' }).first()).toBeVisible()
+  await expect(page.locator('td').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Должники"]').click()
   await expect(page.locator('h2.page-title', { hasText: 'Должники' })).toBeVisible()
@@ -500,12 +621,14 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const pageHasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(pageHasHorizontalOverflow).toBe(false)
   if ((page.viewportSize()?.width || 0) <= 960) {
-    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toBeVisible()
   }
 
   for (const endpoint of requiredAdminBootstrapEndpoints) {
     expect(seenAdminEndpoints, `admin bootstrap should request ${endpoint}`).toContain(endpoint)
   }
+  expect(errors).toEqual([])
 })
 
 test('trainer can open every menu screen without runtime errors', async ({ page }) => {
@@ -531,7 +654,9 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   })
 
   await page.goto('/')
+  await expect(page.locator('main:visible')).toHaveCount(1)
   await expect(page.locator('.ops-sidebar')).toBeVisible()
+  await expect(page.locator('main:visible')).toHaveCount(1)
 
   for (const label of ['Мои занятия', 'Посещаемость', 'Мои группы', 'История']) {
     await page.locator(`.ops-nav-button[title="${label}"]`).click()
@@ -582,10 +707,12 @@ test('client can open every menu screen without runtime errors', async ({ page }
     '/api/client/schedule/': { sessions: [session] },
     '/api/client/attendance/': { attendance: [{ student: { id: 5 }, session, status: 'present', deducts: true }] },
     '/api/client/payments/': { charges: [], payments: [] },
+    '/api/client/notifications/': { notifications: [] },
   })
 
   await page.goto('/')
   await expect(page.locator('.ops-sidebar')).toBeVisible()
+  await expect(page.locator('main:visible')).toHaveCount(1)
 
   for (const label of ['Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль', 'Согласия']) {
     await page.locator(`.ops-nav-button[title="${label}"]`).click()
@@ -594,11 +721,14 @@ test('client can open every menu screen without runtime errors', async ({ page }
   }
 
   await page.locator('.ops-nav-button[title="Расписание"]').click()
-  await page.locator('.ops-session-tile').first().click()
+  await page.getByRole('button', { name: 'Список', exact: true }).click()
+  await page.locator('[data-testid="client-schedule-list"] .ops-session-tile').first().click()
   await expect(page.getByText('-1 занятие')).toBeVisible()
   await page.locator('.ops-nav-button[title="Абонемент"]').click()
-  await expect(page.getByText(/\+7 дней/)).toBeVisible()
-  await expect(page.getByText('Списание за занятие')).toBeVisible()
+  await expect(page.getByText('Осталось занятий')).toBeVisible()
+  await expect(page.getByText('Оформлен')).toHaveCount(0)
+  await expect(page.getByText('Льготный период')).toHaveCount(0)
+  await expect(page.getByText(/История списаний и корректировок/)).toHaveCount(0)
   await page.locator('.ops-nav-button[title="Согласия"]').click()
 
   await page.reload()
@@ -639,9 +769,8 @@ test('admin confirms and rejects pending payments and the nav counter decrements
     '/api/admin/groups/': { groups: [] },
     '/api/admin/subscription-types/': { subscription_types: [] },
     '/api/admin/settings/session-types/': { session_types: [] },
-    '/api/admin/schedule/templates/': { templates: [] },
-    '/api/admin/schedule/plans/': { plans: [] },
     '/api/admin/schedule/sessions/': { sessions: [] },
+    '/api/admin/participants/1/subscriptions/': { subscriptions: [] },
     '/api/admin/debtors/': { debtors: [] },
   }
 
@@ -673,6 +802,7 @@ test('admin confirms and rejects pending payments and the nav counter decrements
   })
 
   await page.goto('/')
+  await expect(page.locator('main:visible')).toHaveCount(1)
   await expect(page.locator('h2.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
 
   const counter = page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')
@@ -682,7 +812,17 @@ test('admin confirms and rejects pending payments and the nav counter decrements
   await expect(page.locator('h2.page-title', { hasText: 'Платежи' })).toBeVisible()
 
   // Confirm the first pending payment: balance-affecting action, counter must drop 2 -> 1.
-  await page.getByRole('row', { name: /Kowalski/ }).getByRole('button', { name: 'Подтвердить' }).click()
+  const confirmTrigger = page.getByRole('row', { name: /Kowalski/ }).getByRole('button', { name: 'Подтвердить' })
+  await confirmTrigger.click()
+  const confirmDialog = page.getByRole('dialog', { name: 'Подтвердить платёж?' })
+  await expect(confirmDialog).toBeVisible()
+  await expect(confirmDialog).toContainText('Jan Kowalski')
+  await expect(confirmDialog.getByRole('button', { name: 'Отмена' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(confirmDialog).toBeHidden()
+  await expect(confirmTrigger).toBeFocused()
+  await confirmTrigger.click()
+  await page.getByRole('dialog', { name: 'Подтвердить платёж?' }).getByRole('button', { name: 'Подтвердить' }).click()
   await expect(page.getByText('Платёж подтверждён.')).toBeVisible()
   await expect(counter).toHaveText('1')
 

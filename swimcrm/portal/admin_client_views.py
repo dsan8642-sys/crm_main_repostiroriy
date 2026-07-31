@@ -60,7 +60,11 @@ def admin_client_detail(request, client_id):
             account.user.is_active = False
             account.user.save(update_fields=["is_active"])
             account.students.update(is_active=False)
-            audit(user, "client_account.archived", account, {"source": "api"})
+            invalidated = _invalidate_access_codes(account.user)
+            audit(user, "client_account.archived", account, {
+                "source": "api",
+                "invalidated_codes": invalidated,
+            })
         return JsonResponse(_client_detail_payload(account))
     if request.method != "GET":
         if not account.user.is_active:

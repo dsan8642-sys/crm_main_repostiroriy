@@ -1,4 +1,6 @@
 ﻿from .support import *
+from .pagination import paginated_payload
+
 
 @require_http_methods(["GET", "POST"])
 def client_profile(request):
@@ -7,14 +9,14 @@ def client_profile(request):
         data = _json_body(request)
         with transaction.atomic():
             if _account_data(data):
-                _apply_account_data(account, data)
+                _apply_client_account_data(account, data)
             participant_data = _participant_data(data)
             if participant_data:
                 participant_id = participant_data.get("id") or data.get("participant_id")
                 participant = _student_owned_by_client(account, participant_id)
-                _apply_participant_data(participant, {"participant": participant_data})
-        return JsonResponse(_client_detail_payload(account))
-    return JsonResponse(_client_detail_payload(account))
+                _apply_client_participant_data(participant, {"participant": participant_data})
+        return JsonResponse(_client_safe_detail_payload(account))
+    return JsonResponse(_client_safe_detail_payload(account))
 
 
 @require_http_methods(["GET", "POST"])
@@ -109,11 +111,12 @@ def client_overview(request):
         latest_payment = student.payments.order_by("-paid_at", "-id").first()
         balance = student_balance(student)
         payload.append({
-            **_student_payload(student),
+            **_client_student_payload(student),
             "balance": balance.format(),
             "balance_minor": balance.amount_minor,
             "current_subscription": _subscription_payload(subscriptions[0]) if subscriptions else None,
-            "next_session": _session_payload(next_session) if next_session else None,
+            "next_session": _role_session_payload(
+                next_session, participant=student) if next_session else None,
             "last_payment": {
                 "id": latest_payment.id,
                 "amount": latest_payment.amount.format(),
@@ -122,7 +125,7 @@ def client_overview(request):
             } if latest_payment else None,
         })
     return JsonResponse({
-        "account": _client_account_payload(account),
+        "account": _client_safe_account_payload(account),
         "participants": payload,
         "students": payload,
     })
@@ -131,27 +134,30 @@ def client_overview(request):
 @require_GET
 def client_schedule(request):
     account = _client_account_from_request(request)
+    student = _participant_for_client_request(request, account)
     date_from = _parse_date(request.GET.get("date_from"), "date_from") or timezone.localdate()
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
-    students = list(_student_queryset_for_client(account))
     return JsonResponse({
-        "sessions": [_session_payload(session) for session in _visible_client_sessions(students, date_from, date_to)]
+        **_participant_context(account, student),
+        "sessions": [
+            _role_session_payload(session, participant=student)
+            for session in _visible_client_sessions([student], date_from, date_to)
+        ],
     })
 
 
 @require_GET
 def client_attendance(request):
     account = _client_account_from_request(request)
-    qs = AttendanceRecord.objects.filter(student__parent=account).select_related(
+    student = _participant_for_client_request(request, account)
+    qs = AttendanceRecord.objects.filter(student=student).select_related(
         "student", "session", "session__group", "session__trainer__user")
-    student_id = request.GET.get("student_id")
-    if student_id:
-        _student_owned_by_client(account, student_id)
-        qs = qs.filter(student_id=student_id)
-    return JsonResponse({"attendance": [{
+    return JsonResponse({
+        **_participant_context(account, student),
+        "attendance": [{
         "id": record.id,
-        "student": _student_payload(record.student),
-        "session": _session_payload(record.session),
+        "student": _client_student_payload(record.student),
+        "session": _role_session_payload(record.session, participant=student),
         "status": record.status,
         "deducts": record.deducts,
         "marked_at": timezone.localtime(record.marked_at).isoformat(),
@@ -162,13 +168,13 @@ def client_attendance(request):
 @require_GET
 def client_payments(request):
     account = _client_account_from_request(request)
-    students = list(_student_queryset_for_client(account))
-    student_ids = [s.id for s in students]
-    charges = Charge.objects.filter(student_id__in=student_ids).select_related("student").order_by("-due_date", "-id")
-    payments = Payment.objects.filter(student_id__in=student_ids).select_related(
+    student = _participant_for_client_request(request, account)
+    charges = Charge.objects.filter(student=student).select_related("student").order_by("-due_date", "-id")
+    payments = Payment.objects.filter(student=student).select_related(
         "student", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     return JsonResponse({
+        **_participant_context(account, student),
         "charges": [{
             "id": charge.id,
             "student_id": charge.student_id,
@@ -185,6 +191,29 @@ def client_payments(request):
             "student": payment.student.full_name,
         } for payment in payments],
     })
+
+
+@require_GET
+def client_notifications(request):
+    account = _client_account_from_request(request)
+    rows = NotificationLog.objects.filter(recipient=account).order_by("-created_at", "-id")
+
+    def serialize(log):
+        return {
+            "id": log.id,
+            "event_type": log.event_type,
+            "channel": log.channel,
+            "status": log.status,
+            "language_code": log.language_code,
+            "subject": log.subject,
+            "body": log.body,
+            "scheduled_at": log.scheduled_at.isoformat(),
+            "sent_at": log.sent_at.isoformat() if log.sent_at else None,
+            "delivered_at": log.delivered_at.isoformat() if log.delivered_at else None,
+        }
+
+    return JsonResponse(paginated_payload(
+        request, rows, key="notifications", serializer=serialize))
 
 
 @require_POST

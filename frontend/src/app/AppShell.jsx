@@ -1,24 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ROLE_META, roleNav, screenFor } from './runtime.jsx'
-import {
-  createAdminAttendanceScreen,
-  createAdminClientDetailScreen,
-  createAdminClientsScreen,
-  createAdminDebtorsScreen,
-  createAdminGroupsScreen,
-  createAdminOverviewScreen,
-  createAdminPaymentsScreen,
-  createAdminScheduleScreen,
-  createAdminSettingsScreen,
-  createAdminTrainersScreen,
-} from './screens/AdminScreens.jsx'
-import {
-  createTrainerGroupsScreen,
-  createTrainerHistoryScreen,
-  createTrainerSessionScreen,
-  createTrainerSessionsScreen,
-} from './screens/TrainerScreens.jsx'
-import { createClientScreens } from './screens/ClientScreens.jsx'
+import { useLocale } from '../i18n.jsx'
+
+const ROLE_SCREEN_LOADERS = {
+  admin: () => import('./screens/AdminScreens.jsx'),
+  trainer: () => import('./screens/TrainerScreens.jsx'),
+  client: () => import('./screens/ClientScreens.jsx'),
+}
 
 function initials(name) {
   return String(name || 'H2O')
@@ -39,6 +27,7 @@ function routeState() {
 }
 
 export function AppShell({ design, health, apiState, initialRole, reloadRoleData, onLogout }) {
+  const { t } = useLocale()
   const initialRoute = routeState()
   const [role, setRole] = useState(initialRole || 'admin')
   const [view, setView] = useState(initialRoute.view || ROLE_META[initialRole || 'admin'].initialView)
@@ -49,34 +38,55 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
   const [selectedGroupId, setSelectedGroupId] = useState(initialRoute.groupId)
   const [selectedTab, setSelectedTab] = useState(initialRoute.tab)
   const [searchQuery, setSearchQuery] = useState('')
+  const [roleScreenBundle, setRoleScreenBundle] = useState({
+    role: null,
+    module: null,
+    error: null,
+  })
 
   const { components, icons, data } = design
+  const roleDataRefs = useRef({ AdminData: {}, TrainerData: {}, ParentData: {} })
+  Object.assign(roleDataRefs.current.AdminData, data.AdminData)
+  Object.assign(roleDataRefs.current.TrainerData, data.TrainerData)
+  Object.assign(roleDataRefs.current.ParentData, data.ParentData)
   const { IconButton } = components
   const meta = ROLE_META[role]
   const nav = useMemo(() => roleNav(role, icons, data), [role, icons, data])
-  const runtimeScreens = useMemo(() => ({
-    AdminScreens: {
-      Overview: createAdminOverviewScreen(components, icons),
-      Clients: createAdminClientsScreen(components, reloadRoleData),
-      ClientDetail: createAdminClientDetailScreen(components, icons, reloadRoleData),
-      Trainers: createAdminTrainersScreen(components, reloadRoleData),
-      Groups: createAdminGroupsScreen(components, reloadRoleData),
-      Schedule: createAdminScheduleScreen(components, icons, reloadRoleData),
-      Attendance: createAdminAttendanceScreen(components, icons, reloadRoleData),
-      Payments: createAdminPaymentsScreen(components, icons, reloadRoleData),
-      Debtors: createAdminDebtorsScreen(components, icons, reloadRoleData),
-      Settings: createAdminSettingsScreen(components, reloadRoleData, icons),
-    },
-    TrainerScreens: {
-      Sessions: createTrainerSessionsScreen(components, icons),
-      Session: createTrainerSessionScreen(components, icons, reloadRoleData),
-      Groups: createTrainerGroupsScreen(components, icons),
-      History: createTrainerHistoryScreen(components, icons),
-    },
-    ParentScreens: {
-      ...createClientScreens(components, icons, reloadRoleData),
-    },
-  }), [components, icons, reloadRoleData])
+  const runtimeScreens = useMemo(() => {
+    if (roleScreenBundle.role !== role || !roleScreenBundle.module) return {}
+    const factories = roleScreenBundle.module
+    if (role === 'admin') {
+      return {
+        AdminScreens: {
+          Overview: factories.createAdminOverviewScreen(components, icons, roleDataRefs.current.AdminData),
+          Clients: factories.createAdminClientsScreen(components, reloadRoleData, roleDataRefs.current.AdminData),
+          ClientDetail: factories.createAdminClientDetailScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
+          Trainers: factories.createAdminTrainersScreen(components, reloadRoleData, roleDataRefs.current.AdminData),
+          Groups: factories.createAdminGroupsScreen(components, reloadRoleData, roleDataRefs.current.AdminData),
+          Schedule: factories.createAdminScheduleScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
+          Attendance: factories.createAdminAttendanceScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
+          Payments: factories.createAdminPaymentsScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
+          Debtors: factories.createAdminDebtorsScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
+          Settings: factories.createAdminSettingsScreen(components, reloadRoleData, icons, roleDataRefs.current.AdminData),
+        },
+      }
+    }
+    if (role === 'trainer') {
+      return {
+        TrainerScreens: {
+          Sessions: factories.createTrainerSessionsScreen(components, icons, roleDataRefs.current.TrainerData),
+          Session: factories.createTrainerSessionScreen(components, icons, reloadRoleData, roleDataRefs.current.TrainerData),
+          Groups: factories.createTrainerGroupsScreen(components, icons, roleDataRefs.current.TrainerData),
+          History: factories.createTrainerHistoryScreen(components, icons, roleDataRefs.current.TrainerData),
+        },
+      }
+    }
+    return {
+      ParentScreens: {
+        ...factories.createClientScreens(components, icons, reloadRoleData, roleDataRefs.current.ParentData),
+      },
+    }
+  }, [components, icons, reloadRoleData, role, roleScreenBundle])
   const Screen = screenFor(role, view, runtimeScreens)
   const [title, subtitle] = meta.titles[view] || Object.values(meta.titles)[0]
   const clientItems = data.ParentData?.children || []
@@ -98,6 +108,19 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     const route = routeState()
     setView(route.role === initialRole && route.view ? route.view : ROLE_META[initialRole].initialView)
   }, [initialRole])
+
+  useEffect(() => {
+    let active = true
+    setRoleScreenBundle({ role, module: null, error: null })
+    ROLE_SCREEN_LOADERS[role]().then((module) => {
+      if (active) setRoleScreenBundle({ role, module, error: null })
+    }).catch((error) => {
+      if (active) setRoleScreenBundle({ role, module: null, error })
+    })
+    return () => {
+      active = false
+    }
+  }, [role])
 
   useEffect(() => {
     const onPopState = () => {
@@ -132,13 +155,22 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
 
   function changeKid(nextKid) {
     setKid(nextKid)
+    const participant = clientItems.find((item) => item.id === nextKid)
+    if (participant?.studentId) reloadRoleData?.('client', { studentId: participant.studentId })
     writeRoute(view, { clientId: selectedClientId, sessionId: selectedSessionId, trainerSessionId: selectedTrainerSessionId, groupId: selectedGroupId, tab: selectedTab, kid: nextKid }, true)
   }
 
   let lastSection = null
+  const mobileKeys = role === 'admin'
+    ? ['overview', 'schedule', 'attendance', 'clients', 'settings']
+    : role === 'trainer'
+      ? ['sessions', 'session', 'groups', 'history']
+      : ['home', 'schedule', 'payments', 'history', 'profile']
+  const mobileNav = mobileKeys.map((key) => nav.find((item) => item.key === key)).filter(Boolean)
 
   return (
     <div className="app">
+      <a className="ops-skip-link" href="#main-content">{t('shell.skip')}</a>
       <aside className="ops-sidebar">
         <button type="button" className="ops-brand ops-brand-button" onClick={() => navigate(ROLE_META[role].initialView)}>
           <div className="ops-brand-mark">H2O</div>
@@ -159,11 +191,12 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
                 <button
                   type="button"
                   className={`ops-nav-button${view === item.key ? ' is-active' : ''}`}
+                  aria-current={view === item.key ? 'page' : undefined}
                   onClick={() => navigate(item.key)}
                   title={item.label}
                 >
                   <span>{item.icon}</span>
-                  <span>{item.label}</span>
+                  <span>{t(`nav.${role}.${item.key}`, item.label)}</span>
                   {item.count != null && (
                     <span className={`ops-nav-count${item.countTone === 'danger' ? ' is-danger' : ''}`}>{item.count}</span>
                   )}
@@ -198,17 +231,28 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
           <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>Данные</span>
         </header>
 
-        <div className="scroll">
+        <main className="scroll" id="main-content" tabIndex={-1}>
           {apiState.state === 'loading' && <div className="ops-api-state" role="status"><strong>Загружаю рабочие данные...</strong><span>Экран обновится автоматически.</span></div>}
-          {apiState.state !== 'ok' && apiState.state !== 'loading' && <div className="ops-api-state is-error" role="alert"><span><strong>Не удалось загрузить данные.</strong><small>{apiState.message || 'Проверьте соединение с сервером.'}</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>Повторить</button></div>}
-          {Screen ? (
+          {apiState.state === 'partial' && <div className="ops-api-state is-error" role="status"><span><strong>{t('shell.partial')}</strong><small>Доступные разделы сохранены.</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>{t('shell.retry')}</button></div>}
+          {apiState.state === 'error' && <div className="ops-api-state is-error" role="alert"><span><strong>{t('shell.failed')}</strong><small>{apiState.error || 'Проверьте соединение с сервером.'}</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>{t('shell.retry')}</button></div>}
+          {roleScreenBundle.error ? (
+            <div className="page">
+              <div className="card card-pad" role="alert">
+                <strong>{t('shell.failed')}</strong>
+                <button type="button" onClick={() => window.location.reload()}>{t('shell.retry')}</button>
+              </div>
+            </div>
+          ) : Screen ? (
             <Screen go={navigate} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} />
           ) : (
             <div className="page">
               <div className="card card-pad">Экран пока не подключен.</div>
             </div>
           )}
-        </div>
+        </main>
+        <nav className="ops-mobile-nav" aria-label="Основная мобильная навигация">
+          {mobileNav.map((item, index) => <button key={`mobile-${item.key}`} type="button" aria-current={view === item.key ? 'page' : undefined} className={view === item.key ? 'is-active' : ''} onClick={() => navigate(item.key)}><span>{item.icon}</span><small>{index === mobileNav.length - 1 ? t('shell.more') : t(`nav.${role}.${item.key}`, item.label.replace('Мои ', ''))}</small></button>)}
+        </nav>
       </div>
     </div>
   )

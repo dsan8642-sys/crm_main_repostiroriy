@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api, fetchAllPages } from '../../api.js'
+import { DateField, TimeField } from '../DateTimeField.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 import { createAdminImportExportPanel } from './AdminImportExportScreen.jsx'
 
 const eventTypes = [
@@ -56,14 +58,14 @@ function readOnlyDetails(row) {
   return displayValue(row.entity_type || row.role || row.status || row.channel || row.method || '-')
 }
 
-export function createAdminSettingsScreen(components, reloadRoleData, icons) {
+export function createAdminSettingsScreen(components, reloadRoleData, icons, adminData = {}) {
   const ImportExportPanel = createAdminImportExportPanel(components, icons, reloadRoleData)
 
-  const { Button, Banner, Tabs, Table, Input, StatusPill, Dialog } = components
+  const { Button, Badge, Banner, Tabs, Table, Input, StatusPill, Dialog } = components
   return function AdminSettingsScreen() {
     const [tab, setTab] = useState('catalog')
     const [resourceId, setResourceId] = useState('subscriptionTypes')
-    const [data, setData] = useState(() => ({ trainers: globalThis.AdminData?.trainers || [] }))
+    const [data, setData] = useState(() => ({ trainers: adminData.trainers || [] }))
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
     const [message, setMessage] = useState(null)
@@ -177,18 +179,41 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons) {
       }
     }
 
-    const columns = resource.readOnly
+    async function restoreSplit() {
+      setLoading(true); setError(null)
+      try {
+        const payload = await api.post('/api/admin/settings/session-types/split/restore/')
+        setMessage(payload.created ? 'Системный тип split восстановлен.' : 'Системный тип split уже настроен.')
+        await load('sessionTypes')
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    const columns = resource.id === 'sessionTypes'
+      ? [
+          { key: 'label', header: 'Системный тип', render: (row) => <span className="strong">{row.label} <small className="muted">({row.code})</small></span> },
+          { key: 'details', header: 'Значения по умолчанию', muted: true, render: (row) => `${row.default_duration_minutes || 60} мин · лимит ${row.default_capacity ?? '—'}` },
+          { key: 'active', header: 'Статус', render: (row) => row.configured === false ? <Badge tone="warning">Не настроен</Badge> : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
+          { key: 'actions', header: '', width: 210, render: (row) => row.configured === false
+            ? <Button size="sm" variant="primary" disabled={loading || row.code !== 'split'} onClick={restoreSplit}>Восстановить системный тип</Button>
+            : <Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>Изменить</Button> },
+        ]
+      : resource.readOnly
       ? [{ key: 'created_at', header: 'Когда', render: (row) => displayValue(row.created_at) }, { key: 'name', header: 'Запись', render: (row) => <span className="strong">{displayValue(row.full_name || row.source_name || row.action || row.recipient || row.date_from || row.username)}</span> }, { key: 'details', header: 'Детали', muted: true, render: readOnlyDetails }]
       : [{ key: 'name', header: resource.title, render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain)}</span> }, { key: 'details', header: 'Детали', muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from) }, { key: 'active', header: 'Статус', render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>Изменить</Button>{resource.id !== 'sessionTypes' && <Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>Убрать</Button>}</div> }]
 
     return <div className="page page-wide">
       <div className="page-head"><div><h2 className="page-title">Настройки и контроль</h2><p className="page-desc">Все служебные функции SwimCRM в одном месте. Django admin больше не нужен для ежедневной работы.</p></div>{!resource.panel && <Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>Обновить</Button>}</div>
       {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-      {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+      <ToastNotice id="admin-settings-result" message={message} tone="success" />
       <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
       <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => setResourceId(item.id)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>
       <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{resourceHelp[resource.id]}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>
-      {editing && <div className="card card-pad ops-edit-panel"><div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div><div className="ops-form-grid">{(resource.fields || []).map((field) => { const [key, label, type = 'text'] = field; const value = form[key] ?? ''; if (type === 'boolean') return <label className="ops-check" key={key}><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} />{label}</label>; if (type === 'textarea') return <label key={key} style={{ gridColumn: '1 / -1' }}>{label}<textarea value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} rows="4" /></label>; if (type === 'select' || type === 'select-ref') return <label key={key}>{label}<select value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>; return <Input key={key} label={label} value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} type={type} /> })}</div><div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => setEditing(null)}>Отмена</Button></div></div>}
+      {editing && <div className="card card-pad ops-edit-panel"><div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div><div className="ops-form-grid">{(resource.fields || []).map((field) => { const [key, label, type = 'text'] = field; const value = form[key] ?? ''; if (type === 'boolean') return <label className="ops-check" key={key}><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} />{label}</label>; if (type === 'textarea') return <label key={key} style={{ gridColumn: '1 / -1' }}>{label}<textarea value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} rows="4" /></label>; if (type === 'select' || type === 'select-ref') return <label key={key}>{label}<select value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>; if (type === 'date') return <DateField key={key} label={label} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />; if (type === 'time') return <TimeField key={key} label={label} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />; return <Input key={key} label={label} value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} type={type} /> })}</div><div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => setEditing(null)}>Отмена</Button></div></div>}
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">Изменяются данные текущего администратора. Для подтверждения обязательно введите действующий пароль. Пароль хранится только как Django hash и не выводится в журнал.</p>
         <div className="ops-form-grid">

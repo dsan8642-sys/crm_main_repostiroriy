@@ -1,3 +1,5 @@
+import { safeErrorMessage } from './contracts.js'
+
 function getCookie(name) {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
   return match ? decodeURIComponent(match[1]) : ''
@@ -27,17 +29,27 @@ async function request(path, options = {}) {
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(path, {
-    ...options,
-    method,
-    headers,
-    credentials: 'same-origin',
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      ...options,
+      method,
+      headers,
+      credentials: 'same-origin',
+    })
+  } catch {
+    const locale = document.documentElement.lang?.split('-')[0] || 'ru'
+    const error = new Error(safeErrorMessage(0, locale))
+    error.code = 'NETWORK'
+    error.status = 0
+    throw error
+  }
   const contentType = response.headers.get('content-type') || ''
   const payload = contentType.includes('application/json') ? await response.json() : await response.text()
   if (!response.ok) {
-    const message = typeof payload === 'object' && payload?.error ? payload.error : `HTTP ${response.status}`
-    const error = new Error(Array.isArray(message) ? message.join(', ') : String(message))
+    const locale = document.documentElement.lang?.split('-')[0] || 'ru'
+    const error = new Error(safeErrorMessage(response.status, locale))
+    error.code = `HTTP_${response.status || 'NETWORK'}`
     error.status = response.status
     error.payload = payload
     throw error
@@ -66,14 +78,36 @@ export async function fetchAllPages(path, key, pageSize = 200) {
   return { ...lastPayload, [key]: rows }
 }
 
+export function apiErrorMessage(error, fallback = 'Не удалось выполнить запрос.') {
+  const payload = error?.payload
+  if (typeof payload === 'string' && payload.trim()) return payload.trim()
+  if (Array.isArray(payload?.error)) return payload.error.filter(Boolean).join(', ')
+  if (typeof payload?.error === 'string' && payload.error.trim()) return payload.error.trim()
+  if (typeof payload?.detail === 'string' && payload.detail.trim()) return payload.detail.trim()
+  return fallback
+}
+
 export async function downloadFile(path, fallbackName) {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    headers: { Accept: '*/*' },
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      credentials: 'same-origin',
+      headers: { Accept: '*/*' },
+    })
+  } catch {
+    const locale = document.documentElement.lang?.split('-')[0] || 'ru'
+    const error = new Error(safeErrorMessage(0, locale))
+    error.code = 'NETWORK'
+    error.status = 0
+    throw error
+  }
   if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `HTTP ${response.status}`)
+    await response.text()
+    const locale = document.documentElement.lang?.split('-')[0] || 'ru'
+    const error = new Error(safeErrorMessage(response.status, locale))
+    error.code = `HTTP_${response.status || 'NETWORK'}`
+    error.status = response.status
+    throw error
   }
   const blob = await response.blob()
   const disposition = response.headers.get('content-disposition') || ''
@@ -116,45 +150,79 @@ export async function devLogout() {
   return api.post('/api/dev-logout/')
 }
 
-export async function fetchClientPortal() {
-  const [overview, profile, consents, schedule, attendance, payments] = await Promise.all([
-    api.get('/api/client/overview/'),
-    api.get('/api/client/profile/'),
-    api.get('/api/client/consents/'),
-    api.get('/api/client/schedule/'),
-    api.get('/api/client/attendance/'),
-    api.get('/api/client/payments/'),
-  ])
-  return { overview, profile, consents, schedule, attendance, payments }
+export async function fetchResourceMap(loaders) {
+  const entries = Object.entries(loaders)
+  const settled = await Promise.all(entries.map(async ([key, loader]) => {
+    try {
+      return [key, { state: 'ok', data: await loader() }]
+    } catch (error) {
+      return [key, { state: 'error', error, status: error.status || 0 }]
+    }
+  }))
+  const resourceStates = Object.fromEntries(settled)
+  const authFailure = Object.values(resourceStates).find(
+    (state) => state.status === 401 || state.status === 403,
+  )
+  if (authFailure) {
+    authFailure.error.resourceStates = resourceStates
+    throw authFailure.error
+  }
+  return {
+    resourceStates,
+    values: Object.fromEntries(Object.entries(resourceStates).map(
+      ([key, state]) => [key, state.state === 'ok' ? state.data : {}],
+    )),
+  }
+}
+
+export async function fetchClientPortal({ studentId } = {}) {
+  const overview = await api.get('/api/client/overview/')
+  const participants = overview.participants || overview.students || []
+  const resolvedStudentId = studentId || participants[0]?.id || null
+  const target = resolvedStudentId ? `?student_id=${encodeURIComponent(resolvedStudentId)}` : ''
+  const { values, resourceStates } = await fetchResourceMap({
+    profile: () => api.get('/api/client/profile/'),
+    consents: () => api.get('/api/client/consents/'),
+    schedule: () => api.get(`/api/client/schedule/${target}`),
+    attendance: () => api.get(`/api/client/attendance/${target}`),
+    payments: () => api.get(`/api/client/payments/${target}`),
+    notifications: () => fetchAllPages('/api/client/notifications/', 'notifications'),
+  })
+  return { overview, ...values, resourceStates, resolvedStudentId }
 }
 
 export async function fetchTrainerPortal() {
   const today = new Date().toISOString().slice(0, 10)
-  const [sessions, groups, history] = await Promise.all([
-    api.get('/api/trainer/sessions/'),
-    api.get('/api/trainer/groups/'),
-    api.get(`/api/trainer/history/?date_to=${today}`),
-  ])
+  const result = await fetchResourceMap({
+    sessions: () => api.get('/api/trainer/sessions/'),
+    groups: () => api.get('/api/trainer/groups/'),
+    history: () => api.get(`/api/trainer/history/?date_to=${today}`),
+  })
+  const { sessions, groups, history } = result.values
   const firstSession = sessions.sessions?.find((session) => !session.is_cancelled) || sessions.sessions?.[0]
-  const detail = firstSession ? await api.get(`/api/trainer/sessions/${firstSession.id}/`) : null
-  return { sessions, groups, history, detail }
+  let detail = null
+  if (firstSession) {
+    const detailResult = await fetchResourceMap({
+      detail: () => api.get(`/api/trainer/sessions/${firstSession.id}/`),
+    })
+    detail = detailResult.values.detail
+    result.resourceStates.detail = detailResult.resourceStates.detail
+  }
+  return { sessions, groups, history, detail, resourceStates: result.resourceStates }
 }
 
 export async function fetchAdminPortal() {
-  const today = new Date().toISOString().slice(0, 10)
-  const [dashboard, reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors] = await Promise.all([
-    api.get('/api/admin/dashboard/'),
-    api.get('/api/admin/reference/'),
-    fetchAllPages('/api/admin/clients/', 'clients'),
-    fetchAllPages('/api/admin/trainers/', 'trainers'),
-    fetchAllPages('/api/admin/groups/', 'groups'),
-    fetchAllPages('/api/admin/subscription-types/', 'subscription_types'),
-    fetchAllPages('/api/admin/settings/session-types/', 'session_types'),
-    fetchAllPages('/api/admin/schedule/templates/', 'templates'),
-    fetchAllPages('/api/admin/schedule/plans/', 'plans'),
-    fetchAllPages('/api/admin/schedule/sessions/', 'sessions'),
-    fetchAllPages('/api/admin/payments/', 'payments'),
-    api.get('/api/admin/debtors/'),
-  ])
-  return { dashboard, reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, templates, plans, sessions, payments, debtors }
+  const result = await fetchResourceMap({
+    dashboard: () => api.get('/api/admin/dashboard/'),
+    reference: () => api.get('/api/admin/reference/'),
+    clients: () => fetchAllPages('/api/admin/clients/', 'clients'),
+    trainers: () => fetchAllPages('/api/admin/trainers/', 'trainers'),
+    groups: () => fetchAllPages('/api/admin/groups/', 'groups'),
+    subscriptionTypes: () => fetchAllPages('/api/admin/subscription-types/', 'subscription_types'),
+    sessionTypeConfigs: () => fetchAllPages('/api/admin/settings/session-types/', 'session_types'),
+    sessions: () => fetchAllPages('/api/admin/schedule/sessions/', 'sessions'),
+    payments: () => fetchAllPages('/api/admin/payments/', 'payments'),
+    debtors: () => api.get('/api/admin/debtors/'),
+  })
+  return { ...result.values, resourceStates: result.resourceStates }
 }

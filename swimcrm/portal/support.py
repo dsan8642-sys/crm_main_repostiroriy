@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
-from accounts.models import Consent, ConsentType, ParentAccount, Role, Trainer, User
+from accounts.models import AccountActivation, Consent, ConsentType, ParentAccount, Role, Trainer, User
 from accounts.privacy import anonymize_parent_account
 from analytics.debtors import debtors, upcoming
 from analytics.reports import income_by_group, income_by_trainer, income_for_period
@@ -27,14 +27,14 @@ from billing.services import (
 from catalog.models import Group, SubscriptionType
 from common.money import Money
 from dataio.exports import export_entity
-from notifications.models import Channel
+from notifications.models import Channel, NotificationLog
 from notifications.services import queue_mass_mailing
-from scheduling.models import (RecurringTemplate, Session, SessionParticipant,
+from scheduling.models import (Session, SessionParticipant,
                                SessionParticipantSource, SessionParticipantStatus,
                                SessionType, WaitlistEntry, WaitlistStatus)
-from scheduling.services import (ScheduleConflict, cancel_series, check_trainer_conflict,
+from scheduling.services import (ScheduleConflict, check_trainer_conflict,
                                  create_session, delete_session, edit_single_session,
-                                 generate_sessions, promote_waitlist_entry,
+                                 promote_waitlist_entry,
                                  session_roster_students)
 from students.models import Student
 from students.services import ensure_account_holder_participant
@@ -123,6 +123,39 @@ def _unique_username(base):
     return username
 
 
+def _portal_identity(email, username, *, exclude_user_id=None):
+    email = str(email or "").strip().lower()
+    username = str(username or "").strip()
+    if not email and not username:
+        raise ValidationError("email or explicit username is required")
+
+    users = User.objects.all()
+    accounts = ParentAccount.objects.all()
+    if exclude_user_id is not None:
+        users = users.exclude(pk=exclude_user_id)
+        accounts = accounts.exclude(user_id=exclude_user_id)
+    if email and (users.filter(email__iexact=email).exists() or accounts.filter(email__iexact=email).exists()):
+        raise ValidationError("email already exists")
+
+    login = username or email
+    if users.filter(username__iexact=login).exists():
+        raise ValidationError("username already exists")
+    return email, login
+
+
+def _portal_access_state(user):
+    if not user.is_active:
+        return "revoked"
+    return "active" if user.has_usable_password() else "not_activated"
+
+
+def _invalidate_access_codes(user):
+    return AccountActivation.objects.filter(
+        Q(user=user) | Q(parent__user=user),
+        used_at__isnull=True,
+    ).update(used_at=timezone.now())
+
+
 def _student_payload(student):
     return {
         "id": student.id,
@@ -146,13 +179,40 @@ def _student_payload(student):
     }
 
 
+def _client_student_payload(student):
+    """Explicit allowlist for a participant viewing their own client account."""
+    return {
+        "id": student.id,
+        "first_name": student.first_name,
+        "last_name": student.last_name,
+        "full_name": student.full_name,
+        "birth_date": student.birth_date.isoformat() if student.birth_date else None,
+        "email": student.email,
+        "medical_info": student.medical_info,
+        "contraindications": student.contraindications,
+        "is_active": student.is_active,
+        "is_account_holder": student.is_account_holder,
+        "group": {"id": student.group_id, "name": student.group.name} if student.group else None,
+        "emergency_contact_name": student.emergency_contact_name,
+        "emergency_contact_phone": student.emergency_contact_phone,
+    }
+
+
 def _session_payload(session):
     waitlist_active_count = getattr(session, "waitlist_active_count", None)
     if waitlist_active_count is None and session.pk:
         waitlist_active_count = session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).count()
+    individual_participant = None
+    if (
+        session.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
+        and session.individual_student_id
+    ):
+        individual_participant = {
+            "id": session.individual_student_id,
+            "full_name": session.individual_student.full_name,
+        }
     return {
         "id": session.id,
-        "template_id": session.template_id,
         "start_at": timezone.localtime(session.start_at).isoformat(),
         "end_at": timezone.localtime(session.end_at).isoformat(),
         "duration_minutes": session.duration_minutes,
@@ -166,6 +226,7 @@ def _session_payload(session):
         "effective_trainer": str(session.effective_trainer),
         "group": {"id": session.group_id, "name": session.group.name} if session.group else None,
         "individual_student_id": session.individual_student_id,
+        "individual_participant": individual_participant,
         "is_cancelled": session.is_cancelled,
         "is_manually_modified": session.is_manually_modified,
         "max_participants": session.max_participants,
@@ -175,6 +236,37 @@ def _session_payload(session):
         "waitlist_active_count": waitlist_active_count,
         "notes": session.notes,
     }
+
+
+_ROLE_SESSION_FIELDS = (
+    "id", "start_at", "end_at", "duration_minutes", "location", "session_type",
+    "trainer_id", "trainer", "substitute_trainer_id", "substitute_trainer",
+    "effective_trainer_id", "effective_trainer", "group",
+    "individual_student_id", "individual_participant", "is_cancelled", "max_participants",
+    "participants_count",
+)
+
+
+def _role_session_payload(session, *, participant=None):
+    """Client/trainer session allowlist. Staff notes never cross this boundary."""
+    admin_payload = _session_payload(session)
+    if participant is not None:
+        owns_individual_context = (
+            session.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
+            and (
+                session.individual_student_id == participant.id
+                or any(
+                    row.student_id == participant.id
+                    and row.status == SessionParticipantStatus.ACTIVE
+                    for row in session.participants.all()
+                )
+            )
+        )
+        admin_payload["individual_participant"] = (
+            {"id": participant.id, "full_name": participant.full_name}
+            if owns_individual_context else None
+        )
+    return {field: admin_payload[field] for field in _ROLE_SESSION_FIELDS}
 
 
 def _waitlist_payload(entry):
@@ -219,21 +311,6 @@ def _apply_waitlist_data(entry, data):
     return entry
 
 
-def _template_payload(template):
-    return {
-        "id": template.id,
-        "group": {"id": template.group_id, "name": template.group.name},
-        "trainer": {"id": template.trainer_id, "name": str(template.trainer)},
-        "weekday": template.weekday,
-        "weekday_label": template.get_weekday_display(),
-        "start_time": template.start_time.isoformat(timespec="minutes"),
-        "end_time": template.end_time.isoformat(timespec="minutes"),
-        "location": template.location,
-        "max_participants": template.max_participants,
-        "is_active": template.is_active,
-    }
-
-
 def _trainer_payload(trainer):
     user = trainer.user
     return {
@@ -246,6 +323,8 @@ def _trainer_payload(trainer):
         "phone": trainer.phone,
         "is_active": trainer.is_active,
         "user_is_active": user.is_active,
+        "access_activated": user.has_usable_password(),
+        "portal_access": _portal_access_state(user),
         "groups_count": trainer.default_groups.count(),
     }
 
@@ -426,7 +505,33 @@ def _client_account_payload(account):
         "preferred_language": account.preferred_language,
         "is_active": user.is_active,
         "access_activated": user.has_usable_password(),
+        "portal_access": _portal_access_state(user),
         "created_at": timezone.localtime(account.created_at).isoformat(),
+    }
+
+
+def _client_safe_account_payload(account):
+    user = account.user
+    return {
+        "id": account.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "full_name": user.get_full_name() or user.username,
+        "email": account.email or user.email,
+        "phone": account.phone,
+        "preferred_language": account.preferred_language,
+        "telegram": {"connected": bool(account.telegram_chat_id)},
+        "created_at": timezone.localtime(account.created_at).isoformat(),
+    }
+
+
+def _client_safe_detail_payload(account):
+    participants = list(_student_queryset_for_client(account).order_by("id"))
+    participant_rows = [_client_student_payload(student) for student in participants]
+    return {
+        "account": _client_safe_account_payload(account),
+        "participants": participant_rows,
+        "students": participant_rows,
     }
 
 
@@ -474,6 +579,10 @@ def _account_data(data):
 def _apply_account_data(account, data):
     account_data = _account_data(data)
     user = account.user
+    if "email" in account_data:
+        email, _ = _portal_identity(
+            account_data.get("email"), user.username, exclude_user_id=user.id)
+        account_data = {**account_data, "email": email}
     for field in ("first_name", "last_name", "email"):
         if field in account_data:
             setattr(user, field, account_data.get(field, "") or "")
@@ -483,7 +592,7 @@ def _apply_account_data(account, data):
         username = str(account_data["username"]).strip()
         if not username:
             raise ValidationError("username cannot be empty")
-        if User.objects.exclude(pk=user.pk).filter(username=username).exists():
+        if User.objects.exclude(pk=user.pk).filter(username__iexact=username).exists():
             raise ValidationError("username already exists")
         user.username = username
     user.role = Role.PARENT
@@ -505,15 +614,61 @@ def _apply_account_data(account, data):
     return account
 
 
+def _apply_client_account_data(account, data):
+    """Client write allowlist; raw provider IDs can be removed but never set."""
+    account_data = _account_data(data)
+    user = account.user
+    if "email" in account_data:
+        email, _ = _portal_identity(
+            account_data.get("email"), user.username, exclude_user_id=user.id)
+        account_data = {**account_data, "email": email}
+    for field in ("first_name", "last_name", "email"):
+        if field in account_data:
+            setattr(user, field, account_data.get(field, "") or "")
+    user.save(update_fields=["first_name", "last_name", "email"])
+    if "phone" in account_data:
+        phone = account_data.get("phone", "") or ""
+        if phone and ParentAccount.objects.exclude(pk=account.pk).filter(phone=phone).exists():
+            raise ValidationError("phone already exists")
+        account.phone = phone
+    if "email" in account_data:
+        account.email = account_data.get("email", "") or ""
+    if "preferred_language" in account_data:
+        language = (account_data.get("preferred_language", "") or "").lower()
+        if language not in {"ru", "pl", "en"}:
+            raise ValidationError("unsupported preferred_language")
+        account.preferred_language = language
+    if _bool_value(account_data.get("telegram_disconnect")):
+        account.telegram_chat_id = ""
+    account.full_clean(exclude=["user"])
+    account.save()
+    return account
+
+
+def _apply_client_participant_data(participant, data):
+    participant_data = _participant_data(data)
+    for field in (
+        "first_name", "last_name", "email", "medical_info", "contraindications",
+        "emergency_contact_name", "emergency_contact_phone",
+    ):
+        if field in participant_data:
+            setattr(participant, field, participant_data.get(field, "") or "")
+    if "birth_date" in participant_data:
+        participant.birth_date = _parse_date(participant_data.get("birth_date"), "birth_date")
+    participant.full_clean(exclude=["parent", "group"])
+    participant.save()
+    return participant
+
+
 def _create_account(data):
     account_data = _account_data(data)
-    email = account_data.get("email", "") or ""
+    email, username = _portal_identity(
+        account_data.get("email"), account_data.get("username"))
     phone = account_data.get("phone", "") or ""
     if phone and ParentAccount.objects.filter(phone=phone).exists():
         raise ValidationError("phone already exists")
-    username = account_data.get("username") or email or phone or "client"
     user = User.objects.create_user(
-        username=_unique_username(username),
+        username=username,
         role=Role.PARENT,
         first_name=account_data.get("first_name", "") or "",
         last_name=account_data.get("last_name", "") or "",
@@ -610,10 +765,10 @@ def _positive_int(value, field):
 
 def _create_trainer(data):
     trainer_data = _trainer_data(data)
-    email = trainer_data.get("email", "") or ""
-    username = trainer_data.get("username") or email or trainer_data.get("phone") or "trainer"
+    email, username = _portal_identity(
+        trainer_data.get("email"), trainer_data.get("username"))
     user = User.objects.create_user(
-        username=_unique_username(username),
+        username=username,
         role=Role.TRAINER,
         first_name=trainer_data.get("first_name", "") or "",
         last_name=trainer_data.get("last_name", "") or "",
@@ -631,6 +786,10 @@ def _create_trainer(data):
 def _apply_trainer_data(trainer, data):
     trainer_data = _trainer_data(data)
     user = trainer.user
+    if "email" in trainer_data:
+        email, _ = _portal_identity(
+            trainer_data.get("email"), user.username, exclude_user_id=user.id)
+        trainer_data = {**trainer_data, "email": email}
     for field in ("first_name", "last_name", "email"):
         if field in trainer_data:
             setattr(user, field, trainer_data.get(field, "") or "")
@@ -640,7 +799,7 @@ def _apply_trainer_data(trainer, data):
         username = str(trainer_data["username"]).strip()
         if not username:
             raise ValidationError("username cannot be empty")
-        if User.objects.exclude(pk=user.pk).filter(username=username).exists():
+        if User.objects.exclude(pk=user.pk).filter(username__iexact=username).exists():
             raise ValidationError("username already exists")
         user.username = username
     user.role = Role.TRAINER
@@ -788,32 +947,17 @@ def _create_payment_for_participant(participant, data, *, actor=None):
     return payment
 
 
-def _apply_template_data(template, data):
-    if "group_id" in data:
-        template.group = get_object_or_404(Group, pk=data.get("group_id"))
-    if "trainer_id" in data:
-        template.trainer = get_object_or_404(Trainer, pk=data.get("trainer_id"))
-    if "weekday" in data:
-        template.weekday = int(data.get("weekday"))
-    if "start_time" in data:
-        template.start_time = _parse_time(data.get("start_time"), "start_time")
-    if "end_time" in data:
-        template.end_time = _parse_time(data.get("end_time"), "end_time")
-    if "location" in data:
-        template.location = data.get("location", "") or ""
-    if "max_participants" in data:
-        template.max_participants = int(data.get("max_participants"))
-    if "is_active" in data:
-        template.is_active = _bool_value(data.get("is_active"), True)
-    template.full_clean()
-    template.save()
-    return template
-
-
-def _session_changes_from_data(data):
+def _session_changes_from_data(data, *, current_session=None):
     changes = {}
     if "trainer_id" in data:
-        changes["trainer"] = get_object_or_404(Trainer, pk=data.get("trainer_id"))
+        trainer_id = data.get("trainer_id")
+        if current_session is not None and str(current_session.trainer_id) == str(trainer_id):
+            changes["trainer"] = current_session.trainer
+        else:
+            changes["trainer"] = get_object_or_404(
+                Trainer.objects.filter(is_active=True, user__is_active=True),
+                pk=trainer_id,
+            )
     if "substitute_trainer_id" in data:
         trainer_id = data.get("substitute_trainer_id")
         changes["substitute_trainer"] = get_object_or_404(Trainer, pk=trainer_id) if trainer_id else None
@@ -861,7 +1005,12 @@ def _session_changes_from_data(data):
 
 
 def _create_session_from_data(data, *, actor=None):
-    trainer = get_object_or_404(Trainer, pk=data.get("trainer_id"))
+    if "template_id" in data:
+        raise ValidationError("template_id is no longer supported")
+    trainer = get_object_or_404(
+        Trainer.objects.filter(is_active=True, user__is_active=True),
+        pk=data.get("trainer_id"),
+    )
     group = None
     individual_student = None
     session_type = data.get("session_type") or SessionType.GROUP
@@ -872,7 +1021,6 @@ def _create_session_from_data(data, *, actor=None):
     else:
         group = get_object_or_404(Group, pk=data.get("group_id"))
         session_type = SessionType.GROUP
-    template = get_object_or_404(RecurringTemplate, pk=data.get("template_id")) if data.get("template_id") else None
     return create_session(
         trainer=trainer,
         start_at=_parse_datetime(data.get("start_at"), "start_at"),
@@ -881,12 +1029,12 @@ def _create_session_from_data(data, *, actor=None):
         location=data.get("location", "") or "",
         max_participants=int(data.get("max_participants")),
         group=group,
-        template=template,
         session_type=session_type,
         individual_student=individual_student,
         manually_modified=_bool_value(data.get("is_manually_modified")),
         price_minor=data.get("price_minor"),
         currency=data.get("currency"),
+        notes=data.get("notes", "") or "",
         actor=actor,
     )
 
@@ -941,6 +1089,21 @@ def _student_owned_by_client(account, student_id):
     return _student_owned_by_parent(account, student_id)
 
 
+def _participant_for_client_request(request, account):
+    student_id = request.GET.get("student_id")
+    if student_id:
+        return _student_owned_by_client(account, student_id)
+    return _default_billing_student_for_client(account)
+
+
+def _participant_context(account, student):
+    return {
+        "participant": _client_student_payload(student),
+        "student_id": student.id,
+        "selection_required": account.students.count() > 1,
+    }
+
+
 def _session_roster(session):
     return session_roster_students(session)
 
@@ -948,9 +1111,14 @@ def _session_roster(session):
 def _visible_parent_sessions(students, date_from=None, date_to=None):
     group_ids = [s.group_id for s in students if s.group_id]
     student_ids = [s.id for s in students]
-    qs = Session.objects.filter(is_cancelled=False).select_related(
-        "group", "trainer__user", "individual_student")
-    qs = qs.filter(Q(group_id__in=group_ids) | Q(individual_student_id__in=student_ids))
+    qs = Session.objects.select_related(
+        "group", "trainer__user", "substitute_trainer__user", "individual_student"
+    ).prefetch_related("participants")
+    qs = qs.filter(
+        Q(group_id__in=group_ids)
+        | Q(individual_student_id__in=student_ids)
+        | Q(participants__student_id__in=student_ids)
+    ).distinct()
     if date_from:
         qs = qs.filter(start_at__date__gte=date_from)
     if date_to:

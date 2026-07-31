@@ -1,0 +1,13 @@
+{
+  "baseline": {
+    "commit": "148f23616fe7956a149383d2b756eaa8ee719c1f",
+    "javascriptRawBytes": 549850,
+    "javascriptGzipBytes": 142030,
+    "cssRawBytes": 34770
+  },
+  "maximum": {
+    "javascriptRawBytes": 590000,
+    "javascriptGzipBytes": 155000,
+    "cssRawBytes": 40000
+  }
+}

@@ -29,11 +29,16 @@ def admin_trainer_detail(request, trainer_id):
     user = _admin_required(request)
     trainer = get_object_or_404(Trainer.objects.select_related("user"), pk=trainer_id)
     if request.method == "DELETE":
-        trainer.is_active = False
-        trainer.user.is_active = False
-        trainer.user.save(update_fields=["is_active"])
-        trainer.save(update_fields=["is_active"])
-        audit(user, "trainer.archived", trainer, {"source": "api"})
+        with transaction.atomic():
+            trainer.is_active = False
+            trainer.user.is_active = False
+            trainer.user.save(update_fields=["is_active"])
+            trainer.save(update_fields=["is_active"])
+            invalidated = _invalidate_access_codes(trainer.user)
+            audit(user, "trainer.archived", trainer, {
+                "source": "api",
+                "invalidated_codes": invalidated,
+            })
         return JsonResponse(_trainer_payload(trainer))
     if request.method != "GET":
         _apply_trainer_data(trainer, _json_body(request))

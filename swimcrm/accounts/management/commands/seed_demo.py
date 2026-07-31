@@ -1,5 +1,5 @@
 """Populate a small demo world so the admin panel has something to show."""
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -12,8 +12,8 @@ from billing.services import confirm_payment
 from catalog.models import Group, SubscriptionType
 from notifications.models import (Channel, EventType, NotificationRule,
                                   NotificationTemplate)
-from scheduling.models import Weekday
-from scheduling.services import generate_sessions
+from scheduling.models import Session, SessionType
+from scheduling.services import create_session
 from students.models import Student
 from subscriptions.services import create_subscription, freeze_subscription
 
@@ -62,13 +62,22 @@ class Command(BaseCommand):
             Payment.objects.create(student=student, amount_minor=24000, currency="PLN",
                                    paid_at=date.today(), status=PaymentStatus.PENDING)
 
-        # Schedule from a Monday template for the next 4 weeks
-        from scheduling.models import RecurringTemplate
-        tpl, _ = RecurringTemplate.objects.get_or_create(
-            group=group, trainer=trainer, weekday=Weekday.MON,
-            defaults={"start_time": time(17, 0), "end_time": time(18, 0),
-                      "location": "Бассейн A", "max_participants": 10})
-        generate_sessions(tpl, date.today(), date.today() + timedelta(days=28), skip_conflicts=True)
+        # Concrete demo sessions; recurring schedule templates are retired.
+        for offset in range(29):
+            day = date.today() + timedelta(days=offset)
+            if day.weekday() != 0:
+                continue
+            start_at = timezone.make_aware(datetime.combine(day, time(17, 0)))
+            if not Session.objects.filter(trainer=trainer, start_at=start_at).exists():
+                create_session(
+                    trainer=trainer,
+                    group=group,
+                    session_type=SessionType.GROUP,
+                    start_at=start_at,
+                    duration_minutes=60,
+                    location="Бассейн A",
+                    max_participants=10,
+                )
 
         # A configurable notification rule (timing not hardcoded)
         tmpl, _ = NotificationTemplate.objects.get_or_create(

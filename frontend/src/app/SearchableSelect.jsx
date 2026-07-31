@@ -38,6 +38,8 @@ export function SearchableSelect({
   disabled = false,
   className = '',
   inputAriaLabel,
+  inputId,
+  error,
 }) {
   const id = useId().replace(/:/g, '')
   const rootRef = useRef(null)
@@ -110,6 +112,8 @@ export function SearchableSelect({
     }
   }
 
+  const controlId = inputId || `${id}-input`
+  const errorId = `${controlId}-error`
   const listboxId = `${id}-listbox`
   const activeOption = open && activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined
 
@@ -118,6 +122,7 @@ export function SearchableSelect({
       {label && <span className="ops-search-select-label">{label}</span>}
       <span className="ops-search-select-control">
         <input
+          id={controlId}
           ref={inputRef}
           type="text"
           value={query}
@@ -129,6 +134,8 @@ export function SearchableSelect({
           aria-controls={listboxId}
           aria-expanded={open}
           aria-activedescendant={activeOption}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
           autoComplete="off"
           onChange={handleInput}
           onFocus={openList}
@@ -153,6 +160,7 @@ export function SearchableSelect({
           <span aria-hidden="true">⌄</span>
         </button>
       </span>
+      {error && <small id={errorId} className="ops-field-error" role="alert">{error}</small>}
       {open && (
         <ul id={listboxId} className="ops-search-select-list" role="listbox">
           {filteredOptions.map((option, index) => (

@@ -13,8 +13,8 @@
   };
 
   const path = (d, key) => React.createElement('path', { key: key || d.slice(0, 6), d });
-  const circle = (cx, cy, r, key) => React.createElement('circle', { key: key || 'c' + cx, cx, cy, r });
-  const rect = (x, y, w, h, rx, key) => React.createElement('rect', { key: key || 'r' + x, x, y, width: w, height: h, rx });
+  const circle = (cx, cy, r, key) => React.createElement('circle', { key: key || 'c' + cx + cy, cx, cy, r });
+  const rect = (x, y, w, h, rx, key) => React.createElement('rect', { key: key || 'r' + x + y, x, y, width: w, height: h, rx });
   const line = (x1, y1, x2, y2, key) => React.createElement('line', { key: key || 'l' + x1 + y1, x1, y1, x2, y2 });
 
   window.SwimIcons = {

@@ -2,11 +2,11 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from localization.models import DictionaryKey, DictionaryTranslation, Language
 from notifications.models import NotificationTemplateTranslation
-from scheduling.models import Location, SessionTypeConfig
+from scheduling.models import Location, SessionType, SessionTypeConfig
 
 from .support import _json_body
 from .admin_support import _admin_required
@@ -68,18 +68,83 @@ def admin_settings_location_detail(request, location_id):
     return JsonResponse(location_payload(location))
 
 
-@require_http_methods(["GET", "POST"])
+SYSTEM_SESSION_TYPE_DEFAULTS = {
+    SessionType.GROUP: {
+        "label": "Групповое",
+        "default_capacity": 10,
+        "default_duration_minutes": 60,
+    },
+    SessionType.INDIVIDUAL: {
+        "label": "Индивидуальное",
+        "default_capacity": 1,
+        "default_duration_minutes": 60,
+    },
+    SessionType.SPLIT: {
+        "label": "Сплит",
+        "default_capacity": 2,
+        "default_duration_minutes": 60,
+    },
+}
+
+
+@require_GET
 def admin_settings_session_types(request):
     require_admin_settings(request)
-    if request.method == "POST":
-        session_type = apply_session_type(SessionTypeConfig(), _json_body(request))
-        audit_admin_settings(_admin_required(request), session_type, "created")
-        return JsonResponse(session_type_payload(session_type), status=201)
-    qs = SessionTypeConfig.objects.order_by("code", "id")
-    if request.GET.get("active") in {"true", "false"}:
-        qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse(paginated_payload(
-        request, qs, key="session_types", serializer=session_type_payload))
+    configured = {
+        row.code: row
+        for row in SessionTypeConfig.objects.filter(
+            code__in=SYSTEM_SESSION_TYPE_DEFAULTS).order_by("code", "id")
+    }
+    rows = []
+    for code, defaults in SYSTEM_SESSION_TYPE_DEFAULTS.items():
+        row = configured.get(code)
+        if row:
+            rows.append({**session_type_payload(row), "configured": True})
+        else:
+            rows.append({
+                "id": None,
+                "code": code,
+                "label": defaults["label"],
+                "default_capacity": defaults["default_capacity"],
+                "default_price_minor": None,
+                "default_currency": "PLN",
+                "default_duration_minutes": defaults["default_duration_minutes"],
+                "is_active": False,
+                "configured": False,
+                "repair_available": code == SessionType.SPLIT,
+            })
+    return JsonResponse({"session_types": rows})
+
+
+@require_POST
+def admin_settings_restore_split(request):
+    require_admin_settings(request)
+    actor = _admin_required(request)
+    defaults = {
+        **SYSTEM_SESSION_TYPE_DEFAULTS[SessionType.SPLIT],
+        "default_price_minor": None,
+        "default_currency": "PLN",
+        "is_active": True,
+    }
+    session_type, created = SessionTypeConfig.objects.get_or_create(
+        code=SessionType.SPLIT,
+        defaults=defaults,
+    )
+    changed = []
+    if not session_type.is_active:
+        session_type.is_active = True
+        session_type.save(update_fields=["is_active", "updated_at"])
+        changed.append("is_active")
+    audit_admin_settings(actor, session_type, "system_type_restored", {
+        "code": SessionType.SPLIT,
+        "created": created,
+        "changed_fields": changed,
+        "idempotent_replay": not created and not changed,
+    })
+    return JsonResponse(
+        {**session_type_payload(session_type), "configured": True, "created": created},
+        status=201 if created else 200,
+    )
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
@@ -225,6 +290,7 @@ def admin_settings_notification_template_translation_detail(request, translation
 __all__ = [
     "admin_settings_locations", "admin_settings_location_detail",
     "admin_settings_session_types", "admin_settings_session_type_detail",
+    "admin_settings_restore_split",
     "admin_settings_languages", "admin_settings_language_detail",
     "admin_settings_dictionary_keys", "admin_settings_dictionary_key_detail",
     "admin_settings_dictionary_translations", "admin_settings_dictionary_translation_detail",

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import './design/styles.css'
 import './design/ui_kits/shared/kit.css'
 import './app/ops-redesign.css'
@@ -16,8 +16,42 @@ import {
   mapTrainerPortalData,
 } from './mappers.js'
 import { LoginScreen } from './app/Auth.jsx'
-import { AppShell } from './app/AppShell.jsx'
-import { ROLE_META, ensureDesignDataRefs } from './app/runtime.jsx'
+import { ROLE_META } from './app/runtime.jsx'
+import { useLocale } from './i18n.jsx'
+
+const LazyAppShell = React.lazy(() => import('./app/AppShell.jsx').then(
+  (module) => ({ default: module.AppShell }),
+))
+
+const EMPTY_PORTAL_DATA = {
+  AdminData: { trainers: [], groups: [], subscriptionTypes: [], clients: [], sessions: [], roster: [], payments: [], debtors: [] },
+  TrainerData: { sessions: [], roster: [], groups: [] },
+  ParentData: { account: {}, children: [], profileParticipants: [], consents: [], schedule: {}, ledger: {}, attendance: {}, charges: [], payments: [], notifications: [] },
+}
+
+class ChunkErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="app" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div className="card card-pad" role="alert">
+          <h1>Экран роли не загрузился</h1>
+          <p>Повторите загрузку страницы. Автоматические повторы отключены.</p>
+          <button type="button" onClick={() => window.location.reload()}>Повторить</button>
+        </div>
+      </div>
+    )
+  }
+}
 
 const STATUS_LABELS = {
   active: 'Активен',
@@ -50,43 +84,59 @@ function localizedComponents(source) {
 }
 
 export default function App() {
+  const { setLocale } = useLocale()
   const [design, setDesign] = useState(null)
+  const [portalData, setPortalData] = useState(EMPTY_PORTAL_DATA)
   const [health, setHealth] = useState({ state: 'loading' })
   const [apiState, setApiState] = useState({ state: 'loading' })
   const [initialRole, setInitialRole] = useState('admin')
   const [authRequired, setAuthRequired] = useState(null)
+  const [bootstrapError, setBootstrapError] = useState(null)
 
   const applyRoleData = useCallback((role, mapped) => {
-    const refs = ensureDesignDataRefs()
-    if (role === 'admin') Object.assign(refs.AdminData, mapped)
-    if (role === 'trainer') Object.assign(refs.TrainerData, mapped)
-    if (role === 'client') Object.assign(refs.ParentData, mapped)
-
-    setDesign((current) => current ? ({
-      ...current,
-      data: {
-        AdminData: refs.AdminData,
-        TrainerData: refs.TrainerData,
-        ParentData: refs.ParentData,
-      },
-    }) : current)
+    const key = role === 'admin' ? 'AdminData' : role === 'trainer' ? 'TrainerData' : 'ParentData'
+    setPortalData((current) => {
+      const previous = current[key]
+      const next = role === 'client'
+        ? {
+            ...previous,
+            ...mapped,
+            schedule: { ...previous.schedule, ...mapped.schedule },
+            attendance: { ...previous.attendance, ...mapped.attendance },
+          }
+        : { ...previous, ...mapped }
+      return { ...current, [key]: next }
+    })
   }, [])
 
-  const loadRoleData = useCallback(async (role) => {
+  const loadRoleData = useCallback(async (role, options = {}) => {
     setApiState({ state: 'loading', role })
     try {
+      let payload
       if (role === 'admin') {
-        applyRoleData(role, mapAdminPortalData(await fetchAdminPortal()))
+        payload = await fetchAdminPortal()
+        applyRoleData(role, mapAdminPortalData(payload))
       } else if (role === 'trainer') {
-        applyRoleData(role, mapTrainerPortalData(await fetchTrainerPortal()))
+        payload = await fetchTrainerPortal()
+        applyRoleData(role, mapTrainerPortalData(payload))
       } else {
-        applyRoleData(role, mapClientPortalData(await fetchClientPortal()))
+        payload = await fetchClientPortal(options)
+        applyRoleData(role, mapClientPortalData(payload))
+        setLocale(payload.profile?.account?.preferred_language || payload.overview?.account?.preferred_language || 'ru')
       }
-      setApiState({ state: 'ok', role })
+      const failures = Object.entries(payload.resourceStates || {})
+        .filter(([, state]) => state.state === 'error')
+        .map(([resource, state]) => ({ resource, status: state.status }))
+      setApiState({ state: failures.length ? 'partial' : 'ok', role, failures })
     } catch (error) {
+      if (error.status === 401 || error.status === 403) {
+        setPortalData(EMPTY_PORTAL_DATA)
+        window.history.replaceState({}, '', window.location.pathname)
+        setAuthRequired(true)
+      }
       setApiState({ state: 'error', role, error: error.message, status: error.status })
     }
-  }, [applyRoleData])
+  }, [applyRoleData, setLocale])
 
   const handleProductionLogin = useCallback(async (credentials) => {
     setApiState({ state: 'loading', role: 'unknown' })
@@ -103,6 +153,8 @@ export default function App() {
     try {
       await productionLogout()
     } finally {
+      setPortalData(EMPTY_PORTAL_DATA)
+      window.history.replaceState({}, '', window.location.pathname)
       setAuthRequired(true)
       setApiState({ state: 'error', role: 'unknown', error: 'Требуется вход', status: 403 })
     }
@@ -111,20 +163,10 @@ export default function App() {
   useEffect(() => {
     let alive = true
     globalThis.React = React
-    const refs = ensureDesignDataRefs()
     import('./design/_ds_bundle.js').then(async () => {
-      globalThis.AdminData = refs.AdminData
-      globalThis.TrainerData = refs.TrainerData
-      globalThis.ParentData = refs.ParentData
-
       const nextDesign = {
         components: localizedComponents(globalThis.SwimCRMDesignSystem_546643),
         icons: globalThis.SwimIcons,
-        data: {
-          AdminData: refs.AdminData,
-          TrainerData: refs.TrainerData,
-          ParentData: refs.ParentData,
-        },
       }
       if (alive) setDesign(nextDesign)
 
@@ -142,6 +184,11 @@ export default function App() {
           setApiState({ state: 'error', role: 'unknown', error: error.message, status: error.status })
         }
       }
+    }).catch((error) => {
+      if (alive) {
+        setBootstrapError(error)
+        setAuthRequired(false)
+      }
     })
     return () => {
       alive = false
@@ -158,6 +205,18 @@ export default function App() {
       .catch((error) => setHealth({ state: 'error', error: String(error) }))
   }, [])
 
+  if (bootstrapError) {
+    return (
+      <div className="app" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div className="card card-pad" role="alert">
+          <h1>Не удалось загрузить интерфейс</h1>
+          <p>Обновите локальную страницу. Повтор не выполняется автоматически.</p>
+          <button type="button" onClick={() => window.location.reload()}>Повторить загрузку</button>
+        </div>
+      </div>
+    )
+  }
+
   if (!design || authRequired === null) {
     return (
       <div className="app" style={{ alignItems: 'center', justifyContent: 'center' }}>
@@ -171,13 +230,17 @@ export default function App() {
   }
 
   return (
-    <AppShell
-      design={design}
-      health={health}
-      apiState={apiState}
-      initialRole={initialRole}
-      reloadRoleData={loadRoleData}
-      onLogout={handleProductionLogout}
-    />
+    <ChunkErrorBoundary>
+      <Suspense fallback={<div className="card card-pad" role="status">Загружаю экран роли...</div>}>
+        <LazyAppShell
+          design={{ ...design, data: portalData }}
+          health={health}
+          apiState={apiState}
+          initialRole={initialRole}
+          reloadRoleData={loadRoleData}
+          onLogout={handleProductionLogout}
+        />
+      </Suspense>
+    </ChunkErrorBoundary>
   )
 }

@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect, useId } from 'react'
+import { useToast } from './ToastProvider.jsx'
 
 export const ROLE_META = {
   admin: {
@@ -45,7 +46,7 @@ export const ROLE_META = {
       subscription: ['Абонемент', 'Остаток занятий и срок действия'],
       payments: ['Платежи', 'Начисления и подтверждения'],
       consents: ['Согласия', 'RODO и каналы связи'],
-      history: ['История', 'Платежи и посещаемость'],
+      history: ['История', 'Посещаемость и сообщения'],
       profile: ['Профиль', 'Данные аккаунта'],
     },
   },
@@ -106,20 +107,17 @@ export function screenFor(role, view, screens) {
   return screens.ParentScreens?.[cap] || screens.ParentScreens?.Home
 }
 
-export function ensureDesignDataRefs() {
-  if (!globalThis.__SwimCRMDataRefs) {
-    globalThis.__SwimCRMDataRefs = {
-      AdminData: { trainers: [], groups: [], subscriptionTypes: [], clients: [], sessions: [], roster: [], payments: [], debtors: [] },
-      TrainerData: { sessions: [], roster: [], groups: [] },
-      ParentData: { account: {}, children: [], profileParticipants: [], consents: [], schedule: {}, ledger: {}, attendance: {}, charges: [], payments: [] },
+export function BusyBanner({ show, children, id }) {
+  const generatedId = useId()
+  const toast = useToast()
+  const toastId = id || `busy-${generatedId}`
+  useEffect(() => {
+    if (show) {
+      toast.show({ id: toastId, message: children, tone: 'loading', duration: 0 })
+    } else {
+      toast.dismiss(toastId)
     }
-  }
-  globalThis.AdminData = globalThis.__SwimCRMDataRefs.AdminData
-  globalThis.TrainerData = globalThis.__SwimCRMDataRefs.TrainerData
-  globalThis.ParentData = globalThis.__SwimCRMDataRefs.ParentData
-  return globalThis.__SwimCRMDataRefs
-}
-
-export function BusyBanner({ Banner, show, children }) {
-  return show ? <Banner tone="info" style={{ marginBottom: 12 }}>{children}</Banner> : null
+    return () => toast.dismiss(toastId)
+  }, [show, children, toast, toastId])
+  return null
 }

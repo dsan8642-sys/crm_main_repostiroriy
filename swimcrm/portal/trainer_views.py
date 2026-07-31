@@ -27,7 +27,7 @@ def trainer_sessions(request):
         qs = qs.filter(is_cancelled=True)
     elif request.GET.get("status") == "active":
         qs = qs.filter(is_cancelled=False)
-    return JsonResponse({"sessions": [_session_payload(session) for session in qs[:300]]})
+    return JsonResponse({"sessions": [_role_session_payload(session) for session in qs[:300]]})
 
 
 @require_GET
@@ -49,7 +49,7 @@ def trainer_groups(request):
             "description": group.description,
             "students_count": group.students.filter(is_active=True).count(),
             "is_active": group.is_active,
-            "next_session": _session_payload(next_session) if next_session else None,
+            "next_session": _role_session_payload(next_session) if next_session else None,
             "students": [{"id": student.id, "full_name": student.full_name} for student in group.students.filter(is_active=True).order_by("last_name", "first_name")],
         })
     return JsonResponse({"groups": payload})
@@ -71,7 +71,7 @@ def trainer_history(request):
         qs = qs.filter(start_at__date__gte=date_from)
     if date_to:
         qs = qs.filter(start_at__date__lte=date_to)
-    return JsonResponse({"sessions": [_session_payload(session) for session in qs[:300]]})
+    return JsonResponse({"sessions": [_role_session_payload(session) for session in qs[:300]]})
 
 
 @require_GET
@@ -85,7 +85,7 @@ def trainer_session_detail(request, session_id):
     )
     attendance = {record.student_id: record for record in session.attendance.all()}
     return JsonResponse({
-        "session": _session_payload(session),
+        "session": _role_session_payload(session),
         "students": [{
             "id": student.id,
             "full_name": student.full_name,
@@ -122,4 +122,61 @@ def trainer_mark_attendance(request, session_id):
         "session_id": record.session_id,
         "status": record.status,
         "deducts": record.deducts,
+    })
+
+
+@require_POST
+@transaction.atomic
+def trainer_bulk_attendance(request, session_id):
+    trainer = _trainer_from_request(request)
+    session = get_object_or_404(
+        Session.objects.select_for_update().filter(_effective_trainer_filter(trainer)),
+        pk=session_id,
+    )
+    if session.is_cancelled:
+        raise ValidationError("cancelled session is read-only")
+    data = _json_body(request)
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValidationError("items must be a non-empty list")
+    if len(items) > 500:
+        raise ValidationError("too many attendance items")
+    allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+    normalized = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValidationError("attendance item must be an object")
+        try:
+            student_id = int(item.get("student_id"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("student_id is required") from exc
+        status = item.get("status")
+        if student_id in seen:
+            raise ValidationError("duplicate student_id")
+        if student_id not in allowed_student_ids:
+            raise PermissionDenied("student is not in this trainer session")
+        if status not in AttendanceStatus.values:
+            raise ValidationError("invalid attendance status")
+        seen.add(student_id)
+        normalized.append((student_id, status))
+    students = Student.objects.in_bulk(seen)
+    results = []
+    for student_id, status in normalized:
+        record = set_attendance(
+            session_id=session.id,
+            student=students[student_id],
+            status=status,
+            actor=request.user,
+        )
+        results.append({
+            "id": record.id,
+            "student_id": record.student_id,
+            "status": record.status,
+            "deducts": record.deducts,
+        })
+    return JsonResponse({
+        "session_id": session.id,
+        "updated_count": len(results),
+        "results": results,
     })

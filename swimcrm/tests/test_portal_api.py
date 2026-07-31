@@ -17,7 +17,7 @@ from billing.services import student_balance
 from dataio.models import ImportBatch, ImportBatchStatus, ImportEffectMode
 from notifications.models import (Channel, DeliveryStatus, EventType, NotificationLog,
                                   NotificationRule, NotificationTemplate, QuietHoursPolicy)
-from scheduling.models import (Location, SessionParticipant, SessionParticipantStatus,
+from scheduling.models import (Location, Session, SessionParticipant, SessionParticipantStatus,
                                SessionType, SessionTypeConfig, WaitlistEntry,
                                WaitlistStatus)
 from scheduling.services import create_session
@@ -894,7 +894,8 @@ class AdminPortalApiRule(TestCase):
         self.assertIn(("POST", "/api/admin/payroll/rules/"), routes)
         self.assertIn(("POST", "/api/admin/settings/languages/"), routes)
         self.assertIn(("POST", "/api/admin/settings/locations/"), routes)
-        self.assertIn(("POST", "/api/admin/settings/session-types/"), routes)
+        self.assertIn(("GET", "/api/admin/settings/session-types/"), routes)
+        self.assertIn(("POST", "/api/admin/settings/session-types/split/restore/"), routes)
         self.assertIn(("POST", "/api/admin/settings/notification-template-translations/"), routes)
         self.assertIn(("GET", "/api/client/overview/"), routes)
         self.assertEqual(payload["openapi"], "3.1.0")
@@ -1217,38 +1218,114 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(rejected.status_code, 200)
         self.assertEqual(rejected.json()["status"], PaymentStatus.REJECTED)
 
-    def test_admin_can_generate_and_cancel_schedule_from_template(self):
-        trainer = f.make_trainer(username="schedule_coach")
-        template = self.client.post(
-            "/api/admin/schedule/templates/",
+    def test_schedule_template_routes_are_removed(self):
+        self.assertEqual(self.client.get("/api/admin/schedule/templates/").status_code, 404)
+        self.assertEqual(self.client.post("/api/admin/schedule/templates/1/generate/").status_code, 404)
+        self.assertEqual(self.client.post("/api/admin/schedule/templates/1/cancel-future/").status_code, 404)
+
+    def test_session_api_rejects_template_id_and_keeps_historical_session_readable(self):
+        trainer = f.make_trainer(username="legacy_schedule_coach")
+        template = f.make_template(self.group, trainer)
+        session = create_session(
+            trainer=trainer, group=self.group,
+            start_at=timezone.now() + timedelta(days=5),
+            duration_minutes=60, location="Legacy Pool", max_participants=8,
+        )
+        Session.objects.filter(pk=session.pk).update(template=template)
+
+        historical = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        rejected = self.client.post(
+            "/api/admin/schedule/sessions/",
             data=json.dumps({
+                "template_id": template.id,
                 "group_id": self.group.id,
                 "trainer_id": trainer.id,
-                "weekday": 0,
-                "start_time": "17:00",
-                "end_time": "18:00",
-                "location": "Pool A",
+                "start_at": "2026-06-01T17:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Pool",
                 "max_participants": 8,
             }),
             content_type="application/json",
         )
-        self.assertEqual(template.status_code, 201)
 
-        generated = self.client.post(
-            f"/api/admin/schedule/templates/{template.json()['id']}/generate/",
-            data=json.dumps({"date_from": "2026-06-01", "date_to": "2026-06-30"}),
-            content_type="application/json",
+        self.assertEqual(historical.status_code, 200)
+        self.assertNotIn("template_id", historical.json())
+        self.assertEqual(rejected.status_code, 400)
+
+    def test_schedule_pagination_accepts_at_most_200(self):
+        self.assertEqual(
+            self.client.get("/api/admin/schedule/sessions/", {"page_size": 200}).status_code,
+            200,
         )
-        cancelled = self.client.post(
-            f"/api/admin/schedule/templates/{template.json()['id']}/cancel-future/",
-            data=json.dumps({"date_from": "2026-06-15"}),
-            content_type="application/json",
+        self.assertEqual(
+            self.client.get("/api/admin/schedule/sessions/", {"page_size": 201}).status_code,
+            400,
         )
 
-        self.assertEqual(generated.status_code, 201)
-        self.assertEqual(generated.json()["created_count"], 5)
-        self.assertEqual(cancelled.status_code, 200)
-        self.assertEqual(cancelled.json()["cancelled"], 3)
+    def test_admin_restores_cancelled_session_idempotently_and_audits_once(self):
+        trainer = f.make_trainer(username="restore_schedule_coach")
+        session = create_session(
+            trainer=trainer, group=self.group,
+            start_at=timezone.now() + timedelta(days=6),
+            duration_minutes=60, location="Restore Pool", max_participants=8,
+        )
+        self.client.post(f"/api/admin/schedule/sessions/{session.id}/cancel/")
+
+        first = self.client.post(f"/api/admin/schedule/sessions/{session.id}/restore/")
+        second = self.client.post(f"/api/admin/schedule/sessions/{session.id}/restore/")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(first.json()["restored"])
+        self.assertFalse(first.json()["is_cancelled"])
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.json()["restored"])
+        self.assertEqual(AuditLogEntry.objects.filter(
+            action="session.restored", entity_id=str(session.id),
+        ).count(), 1)
+
+    def test_restore_rechecks_conflict_and_requires_admin(self):
+        trainer = f.make_trainer(username="restore_conflict_coach")
+        start_at = timezone.now() + timedelta(days=7)
+        cancelled = create_session(
+            trainer=trainer, group=self.group, start_at=start_at,
+            duration_minutes=60, location="Restore Pool", max_participants=8,
+        )
+        self.client.post(f"/api/admin/schedule/sessions/{cancelled.id}/cancel/")
+        create_session(
+            trainer=trainer, group=self.group, start_at=start_at + timedelta(minutes=15),
+            duration_minutes=60, location="Other Pool", max_participants=8,
+        )
+
+        conflict = self.client.post(f"/api/admin/schedule/sessions/{cancelled.id}/restore/")
+        self.client.force_login(self.student.parent.user)
+        forbidden = self.client.post(f"/api/admin/schedule/sessions/{cancelled.id}/restore/")
+
+        self.assertEqual(conflict.status_code, 400)
+        self.assertIn("Конфликт", " ".join(conflict.json()["error"]))
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_admin_attendance_payload_has_bulk_balance_statuses(self):
+        trainer = f.make_trainer(username="balance_schedule_coach")
+        zero = f.make_student(group=self.group, first="Zero", last="Balance")
+        overpaid = f.make_student(group=self.group, first="Over", last="Paid")
+        Payment.objects.create(
+            student=overpaid, amount_minor=5000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.CONFIRMED,
+        )
+        session = create_session(
+            trainer=trainer, group=self.group,
+            start_at=timezone.now() + timedelta(days=8),
+            duration_minutes=60, location="Balance Pool", max_participants=8,
+        )
+
+        response = self.client.get(f"/api/admin/schedule/sessions/{session.id}/attendance/")
+        students = {row["id"]: row for row in response.json()["students"]}
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(students[self.student.id]["balance_minor"], 24000)
+        self.assertEqual(students[zero.id]["balance_minor"], 0)
+        self.assertEqual(students[overpaid.id]["balance_minor"], -5000)
+        self.assertTrue(all(row["currency"] == "PLN" for row in students.values()))
 
     def test_admin_can_create_move_cancel_and_check_session_conflict(self):
         trainer = f.make_trainer(username="single_session_coach")
@@ -1319,6 +1396,8 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.json()["session_type"], "individual")
         self.assertEqual(response.json()["individual_student_id"], self.student.id)
         self.assertIsNone(response.json()["group"])
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.group_id, self.group.id)
 
     def test_admin_can_override_individual_session_price_including_zero(self):
         trainer = f.make_trainer(username="individual_price_coach")

@@ -67,7 +67,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
       <form className="card card-pad" style={{ width: 'min(420px, 100%)', display: 'grid', gap: 14 }} onSubmit={submit}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24 }}>SwimCRM</h1>
-          <div className="muted" style={{ marginTop: 4 }}>{activationMode ? 'Активация доступа существующего клиента' : 'Вход в систему'}</div>
+          <div className="muted" style={{ marginTop: 4 }}>{activationMode ? 'Активация или восстановление доступа' : 'Вход в систему'}</div>
         </div>
         {message && <Banner tone="success" onClose={() => setMessage('')}>{message}</Banner>}
         {error && <Banner tone="danger" onClose={() => setError('')}>{error}</Banner>}
@@ -82,7 +82,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
         )}
         {activationMode && (
           <label style={{ display: 'grid', gap: 6 }}>
-            <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Код активации</span>
+            <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Одноразовый код доступа</span>
             <input className="input" autoComplete="one-time-code" value={activationToken} onChange={(event) => setActivationToken(event.target.value)} />
           </label>
         )}
@@ -106,10 +106,10 @@ export function LoginScreen({ design, apiState, onLogin }) {
         <Button type="submit" loading={busy}
           disabled={busy || !password || (activationMode ? !activationToken : !loginValue)}>
           <icons.Logout size={16} style={{ transform: 'rotate(180deg)' }} />
-          {activationMode ? 'Активировать доступ' : 'Войти'}
+          {activationMode ? 'Установить новый пароль' : 'Войти'}
         </Button>
         <button type="button" className="ops-link-button" onClick={() => { setActivationMode((value) => !value); setError(''); setMessage('') }}>
-          {activationMode ? 'Вернуться ко входу' : 'Я уже клиент — активировать доступ'}
+          {activationMode ? 'Вернуться ко входу' : 'У меня есть код доступа'}
         </button>
       </form>
     </div>

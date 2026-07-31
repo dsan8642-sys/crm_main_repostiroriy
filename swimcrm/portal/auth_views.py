@@ -12,10 +12,11 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.middleware import OTP_SESSION_KEY
-from accounts.models import AccountActivation, ParentAccount, Role, User
+from accounts.models import AccessPurpose, AccountActivation, ParentAccount, Role, Trainer, User
+from audit.models import audit
 
 from .admin_support import _admin_required
-from .support import _error, _json_body
+from .support import _error, _invalidate_access_codes, _json_body
 
 
 def _user_payload(user):
@@ -31,17 +32,14 @@ def _user_payload(user):
 
 
 def _username_for_login(login_value):
-    user = User.objects.filter(Q(username__iexact=login_value) | Q(email__iexact=login_value)).order_by("id").first()
-    if user:
-        return user.get_username()
-
-    account = (
-        ParentAccount.objects.select_related("user")
-        .filter(email__iexact=login_value)
-        .order_by("id")
-        .first()
-    )
-    return account.user.get_username() if account else login_value
+    user_ids = set(User.objects.filter(
+        Q(username__iexact=login_value) | Q(email__iexact=login_value)
+    ).values_list("id", flat=True))
+    user_ids.update(ParentAccount.objects.filter(
+        email__iexact=login_value).values_list("user_id", flat=True))
+    if len(user_ids) != 1:
+        return None
+    return User.objects.only("username").get(pk=user_ids.pop()).get_username()
 
 
 def _profile_allows_login(user):
@@ -66,7 +64,7 @@ def auth_login(request):
         return _error("Login and password are required", status=400)
 
     username = _username_for_login(login_value)
-    user = authenticate(request, username=username, password=password)
+    user = authenticate(request, username=username, password=password) if username else None
     if user is None or not user.is_active or not _profile_allows_login(user):
         return _error("Invalid login or password", status=400)
 
@@ -81,27 +79,128 @@ def auth_logout(request):
     return JsonResponse({"ok": True})
 
 
-@require_POST
-def admin_create_client_activation(request, client_id):
-    actor = _admin_required(request)
-    account = ParentAccount.objects.select_related("user").filter(pk=client_id).first()
-    if account is None:
-        return _error("Client not found", status=404)
-    if not account.user.is_active:
-        return _error("Archived client access cannot be activated", status=400)
-    AccountActivation.objects.filter(parent=account, used_at__isnull=True).update(used_at=timezone.now())
-    token = secrets.token_urlsafe(32)
+def _issue_access_code(user, actor, *, parent=None, purpose=None):
+    if user.role not in {Role.PARENT, Role.TRAINER}:
+        raise ValidationError("portal access is available only for clients and trainers")
+    now = timezone.now()
+    AccountActivation.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
+    if parent is not None:
+        AccountActivation.objects.filter(
+            parent=parent, user__isnull=True, used_at__isnull=True).update(used_at=now)
+    raw_code = secrets.token_urlsafe(32)
+    purpose = purpose or (
+        AccessPurpose.RECOVERY if user.has_usable_password() else AccessPurpose.ACTIVATION)
     activation = AccountActivation.objects.create(
-        parent=account,
-        token_hash=hashlib.sha256(token.encode()).hexdigest(),
-        expires_at=timezone.now() + timedelta(hours=72),
+        parent=parent,
+        user=user,
+        purpose=purpose,
+        token_hash=hashlib.sha256(raw_code.encode()).hexdigest(),
+        expires_at=now + timedelta(hours=72),
         created_by=actor,
     )
-    return JsonResponse({
-        "client_id": account.id,
-        "activation_token": token,
+    audit(actor, "portal_access.code_issued", user, {
+        "purpose": purpose,
+        "role": user.role,
         "expires_at": activation.expires_at.isoformat(),
-    }, status=201)
+    })
+    return {
+        "login": user.email or user.username,
+        "activation_code": raw_code,
+        # Compatibility for the pre-Prompt-05 client activation consumer.
+        "activation_token": raw_code,
+        "expires_at": activation.expires_at.isoformat(),
+        "purpose": purpose,
+    }
+
+
+def _client_access_target(client_id):
+    account = ParentAccount.objects.select_related("user").filter(pk=client_id).first()
+    return account, account.user if account else None
+
+
+def _trainer_access_target(trainer_id):
+    trainer = Trainer.objects.select_related("user").filter(pk=trainer_id).first()
+    return trainer, trainer.user if trainer else None
+
+
+def _admin_issue_access(request, target, user, *, parent=None):
+    actor = _admin_required(request)
+    if target is None:
+        return _error("Portal profile not found", status=404)
+    if not user.is_active:
+        return _error("Portal access is revoked; use restore access", status=400)
+    return JsonResponse(_issue_access_code(user, actor, parent=parent), status=201)
+
+
+def _admin_revoke_access(request, target, user):
+    actor = _admin_required(request)
+    if target is None:
+        return _error("Portal profile not found", status=404)
+    with transaction.atomic():
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        invalidated = _invalidate_access_codes(user)
+        audit(actor, "portal_access.revoked", user, {
+            "role": user.role,
+            "invalidated_codes": invalidated,
+        })
+    return JsonResponse({"ok": True, "portal_access": "revoked"})
+
+
+def _admin_restore_access(request, target, user, *, parent=None):
+    actor = _admin_required(request)
+    if target is None:
+        return _error("Portal profile not found", status=404)
+    if user.role == Role.TRAINER and not target.is_active:
+        return _error("Restore the trainer profile before restoring portal access", status=400)
+    with transaction.atomic():
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        payload = _issue_access_code(
+            user, actor, parent=parent, purpose=AccessPurpose.RECOVERY)
+        audit(actor, "portal_access.restored", user, {"role": user.role})
+    return JsonResponse(payload, status=201)
+
+
+@require_POST
+def admin_client_access_issue(request, client_id):
+    account, user = _client_access_target(client_id)
+    return _admin_issue_access(request, account, user, parent=account)
+
+
+@require_POST
+def admin_client_access_revoke(request, client_id):
+    account, user = _client_access_target(client_id)
+    return _admin_revoke_access(request, account, user)
+
+
+@require_POST
+def admin_client_access_restore(request, client_id):
+    account, user = _client_access_target(client_id)
+    return _admin_restore_access(request, account, user, parent=account)
+
+
+@require_POST
+def admin_trainer_access_issue(request, trainer_id):
+    trainer, user = _trainer_access_target(trainer_id)
+    return _admin_issue_access(request, trainer, user)
+
+
+@require_POST
+def admin_trainer_access_revoke(request, trainer_id):
+    trainer, user = _trainer_access_target(trainer_id)
+    return _admin_revoke_access(request, trainer, user)
+
+
+@require_POST
+def admin_trainer_access_restore(request, trainer_id):
+    trainer, user = _trainer_access_target(trainer_id)
+    return _admin_restore_access(request, trainer, user)
+
+
+@require_POST
+def admin_create_client_activation(request, client_id):
+    return admin_client_access_issue(request, client_id)
 
 
 @require_POST
@@ -119,15 +218,17 @@ def auth_activate(request):
     with transaction.atomic():
         activation = (
             AccountActivation.objects.select_for_update()
-            .select_related("parent__user")
+            .select_related("user", "parent__user")
             .filter(token_hash=token_hash)
             .first()
         )
         if activation is None or not activation.is_valid:
             return _error("Activation code is invalid or expired", status=400)
-        user = activation.parent.user
-        if not user.is_active:
-            return _error("Client account is archived", status=400)
+        user = activation.user or (activation.parent.user if activation.parent_id else None)
+        if user is None or user.role not in {Role.PARENT, Role.TRAINER}:
+            return _error("Activation code is invalid or expired", status=400)
+        if not user.is_active or not _profile_allows_login(user):
+            return _error("Portal access is unavailable", status=400)
         try:
             validate_password(password, user=user)
         except ValidationError as exc:
@@ -136,7 +237,11 @@ def auth_activate(request):
         user.save(update_fields=["password"])
         activation.used_at = timezone.now()
         activation.save(update_fields=["used_at"])
-    return JsonResponse({"ok": True, "login": activation.parent.email or user.username})
+        audit(None, "portal_access.code_used", user, {
+            "purpose": activation.purpose,
+            "role": user.role,
+        })
+    return JsonResponse({"ok": True, "login": user.email or user.username})
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

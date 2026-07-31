@@ -1,16 +1,17 @@
 import React, { useMemo, useState } from 'react'
 import { api } from '../../api.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
-export function createAdminGroupsScreen(components, reloadRoleData) {
+export function createAdminGroupsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Button, Banner, Input, Avatar, Badge, Money } = components
 
   return function ApiAdminGroups({ go, groupId }) {
-    const rows = globalThis.AdminData?.groups || []
-    const trainers = globalThis.AdminData?.trainers || []
-    const clients = globalThis.AdminData?.clients || []
-    const sessions = globalThis.AdminData?.sessions || []
+    const rows = adminData.groups || []
+    const trainers = adminData.trainers || []
+    const clients = adminData.clients || []
+    const sessions = adminData.sessions || []
     const initial = rows.find((row) => String(row.groupId) === String(groupId)) || null
     const [selected, setSelected] = useState(initial)
     const [creating, setCreating] = useState(false)
@@ -73,7 +74,7 @@ export function createAdminGroupsScreen(components, reloadRoleData) {
     return (
       <div className="page page-wide">
         <div className="page-head"><div><h2 className="page-title">Группы</h2><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { setCreating(true); setSelected(null); setForm({ name: '', description: '', defaultTrainerId: '', isActive: true }) }}>Новая группа</Button></div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="admin-groups-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Обновляю состав группы...</BusyBanner>
         {creating && editor}

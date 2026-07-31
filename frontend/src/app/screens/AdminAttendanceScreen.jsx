@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import { api, apiErrorMessage } from '../../api.js'
 import { formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
-export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
-  const { Table, Button, Banner, Avatar, StatusPill, Input, Badge } = components
+export function createAdminAttendanceScreen(components, icons, reloadRoleData, adminData = {}) {
+  const { Table, Button, Banner, Avatar, StatusPill, Input, Badge, Dialog } = components
   const I = icons
   const options = [
     { value: 'present', label: 'Был', consumes: true },
@@ -15,9 +16,12 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
   ]
 
   return function ApiAdminAttendance({ go, sessionId }) {
-    const sessions = globalThis.AdminData?.sessions || []
-    const clients = globalThis.AdminData?.clients || []
-    const [selectedSessionId, setSelectedSessionId] = useState(sessionId || sessions.find((item) => !item.isCancelled)?.sessionId || sessions[0]?.sessionId || '')
+    const sessions = adminData.sessions || []
+    const clients = adminData.clients || []
+    const today = new Date().toISOString().slice(0, 10)
+    const defaultSession = sessions.find((item) => !item.isCancelled && item.startAt?.slice(0, 10) === today)
+      || sessions.find((item) => !item.isCancelled && item.startAt?.slice(0, 10) > today)
+    const [selectedSessionId, setSelectedSessionId] = useState(sessionId || defaultSession?.sessionId || '')
     const [selectedStudentId, setSelectedStudentId] = useState('')
     const [detail, setDetail] = useState(null)
     const [message, setMessage] = useState(null)
@@ -25,6 +29,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
     const [busyId, setBusyId] = useState(null)
     const [loading, setLoading] = useState(false)
     const [cancelReason, setCancelReason] = useState('')
+    const [bulkPending, setBulkPending] = useState(false)
 
     useEffect(() => {
       if (sessionId) setSelectedSessionId(sessionId)
@@ -85,7 +90,10 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
       if (!selectedSessionId || !rows.length) return
       setBusyId('mark-all'); setError(null)
       try {
-        const records = await Promise.all(rows.map((row) => api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, { student_id: row.id, status: 'present' })))
+        const payload = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/bulk/`, {
+          items: rows.map((row) => ({ student_id: row.id, status: 'present' })),
+        })
+        const records = payload.results || []
         const byStudent = new Map(records.map((record) => [record.participant_id, record]))
         setDetail((current) => ({ ...current, students: current.students.map((row) => ({ ...row, attendance: byStudent.get(row.id) || row.attendance })) }))
         setMessage(`Отмечены присутствующими: ${records.length}.`)
@@ -143,6 +151,22 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
       }
     }
 
+    async function restoreSelectedSession() {
+      if (!selectedSessionId) return
+      setBusyId('restore-session')
+      setError(null)
+      try {
+        const session = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/restore/`)
+        setDetail((current) => ({ ...current, session }))
+        setMessage('Тренировка восстановлена.')
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(apiErrorMessage(err, 'Не удалось восстановить тренировку.'))
+      } finally {
+        setBusyId(null)
+      }
+    }
+
     const selectedSession = detail?.session || sessions.find((item) => String(item.sessionId) === String(selectedSessionId))
     const selectedGroupName = typeof selectedSession?.group === 'object'
       ? selectedSession.group?.name
@@ -158,15 +182,16 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
         <div className="page-head">
           <div>
             <h2 className="page-title">Занятие</h2>
-            <p className="page-desc">Кликабельный состав занятия: добавить, убрать, отметить посещение, открыть профиль клиента.</p>
+            <p className="page-desc">Состав и посещаемость тренировки.</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="secondary" onClick={() => go?.('schedule')}>Назад к расписанию</Button>
-            <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={markAllPresent}>Все присутствовали</Button>
+            <Button variant="primary" disabled={selectedStatus === 'cancelled' || !rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={() => setBulkPending(true)}>Все присутствовали</Button>
           </div>
         </div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="admin-attendance-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {selectedStatus === 'cancelled' && <Banner tone="warning" title="Занятие отменено" style={{ marginBottom: 12 }}>Доступно только чтение. История сохранена. <Button size="sm" variant="secondary" disabled={busyId != null} loading={busyId === 'restore-session'} onClick={restoreSelectedSession}>Восстановить тренировку</Button></Banner>}
         <BusyBanner Banner={Banner} show={loading}>Загружаю состав занятия...</BusyBanner>
         <BusyBanner Banner={Banner} show={busyId != null && !loading}>Сохраняю изменение...</BusyBanner>
 
@@ -207,7 +232,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
                 <StatusPill status={selectedStatus === 'cancelled' ? 'cancelled' : 'planned'} size="sm" />
               </div>
             </div>
-            <div className="ops-inline-add"><Input label="Причина отмены или переноса" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={!selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>
+            <div className="ops-inline-add"><Input label="Причина отмены или переноса" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>
             {selectedSession?.notes && <div className="ops-inline-note">{selectedSession.notes}</div>}
           </div>
 
@@ -222,7 +247,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
                   description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}`,
                 }))}
               />
-              <Button variant="primary" disabled={!selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button>
+              <Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button>
             </div>
             <div className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>
               Добавление создаёт разовое участие только в этом занятии. Основной состав группы не меняется.
@@ -248,7 +273,13 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
                   </button>
                 ),
               },
-              { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.client_phone || '-'}</span> },
+              {
+                key: 'balance',
+                header: 'Задолженность',
+                render: (row) => row.balance_minor > 0
+                  ? <Badge tone="danger">Долг: {(row.balance_minor / 100).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {row.currency}</Badge>
+                  : <Badge tone="success">Нет задолженности</Badge>,
+              },
               { key: 'group', header: 'Группа', muted: true, render: (row) => row.group?.name || 'Индивидуально' },
               { key: 'status', header: 'Отметка', width: 120, render: (row) => <StatusPill status={row.attendance?.status === 'rescheduled' ? 'moved' : row.attendance?.status} size="sm" /> },
               {
@@ -263,7 +294,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
                         size="sm"
                         variant={row.attendance?.status === option.value ? 'primary' : 'secondary'}
                         loading={busyId === `mark-${row.id}`}
-                        disabled={busyId === `mark-${row.id}`}
+                        disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`}
                         onClick={() => mark(row, option.value)}
                       >
                         {option.label}{option.consumes ? ' -1' : ''}
@@ -280,7 +311,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                     <Button size="sm" variant="subtle" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>Профиль</Button>
                     {row.can_remove_from_session ? (
-                      <Button size="sm" variant="secondary" disabled={busyId === `remove-${row.id}`} loading={busyId === `remove-${row.id}`} onClick={() => removeStudent(row)}>Убрать</Button>
+                      <Button size="sm" variant="secondary" disabled={selectedStatus === 'cancelled' || busyId === `remove-${row.id}`} loading={busyId === `remove-${row.id}`} onClick={() => removeStudent(row)}>Убрать</Button>
                     ) : (
                       <span className="ops-muted-chip">основной состав</span>
                     )}
@@ -290,7 +321,16 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
             ]}
           />
         </div>
-        <div className="card card-pad" style={{ marginTop: 16 }}><div className="eyebrow">История изменений</div>{(detail?.history || []).map((entry) => <div className="ops-detail-row" key={entry.id}><strong>{({ 'session.created': 'Занятие создано', 'session.edited': 'Занятие изменено' }[entry.action] || entry.action)}</strong><span>{entry.actor} · {new Date(entry.created_at).toLocaleString('ru-RU')}</span></div>)}{!(detail?.history || []).length && <div className="empty">Изменений после создания нет.</div>}</div>
+        <Dialog
+          open={bulkPending}
+          title="Отметить всех присутствующими?"
+          description={`${selectedSession?.date || ''} ${selectedStart || ''}-${selectedEnd || ''} · ${selectedGroupName || sessionTypeLabel}. Будет обновлено участников: ${rows.length}; у каждого спишется одно занятие.`}
+          confirmLabel="Подтвердить отметку"
+          cancelLabel="Отмена"
+          onClose={() => setBulkPending(false)}
+          onConfirm={async () => { setBulkPending(false); await markAllPresent() }}
+        />
+        <div className="card card-pad" style={{ marginTop: 16 }}><div className="eyebrow">История изменений</div>{(detail?.history || []).map((entry) => <div className="ops-detail-row" key={entry.id}><strong>{({ 'session.created': 'Занятие создано', 'session.edited': 'Занятие изменено', 'session.restored': 'Тренировка восстановлена' }[entry.action] || entry.action)}</strong><span>{entry.actor} · {new Date(entry.created_at).toLocaleString('ru-RU')}</span></div>)}{!(detail?.history || []).length && <div className="empty">Изменений после создания нет.</div>}</div>
       </div>
     )
   }

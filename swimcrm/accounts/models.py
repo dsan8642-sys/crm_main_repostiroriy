@@ -42,9 +42,21 @@ class ParentAccount(models.Model):
         return self.user.get_full_name() or self.user.username
 
 
+class AccessPurpose(models.TextChoices):
+    ACTIVATION = "activation", "Activation"
+    RECOVERY = "recovery", "Recovery"
+
+
 class AccountActivation(models.Model):
-    """Single-use credential used to attach portal access to an existing client."""
-    parent = models.ForeignKey(ParentAccount, on_delete=models.CASCADE, related_name="activations")
+    """Single-use, hash-only credential for client or trainer portal access."""
+    parent = models.ForeignKey(
+        ParentAccount, null=True, blank=True, on_delete=models.CASCADE,
+        related_name="activations")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE,
+        related_name="account_activations")
+    purpose = models.CharField(
+        max_length=16, choices=AccessPurpose.choices, default=AccessPurpose.ACTIVATION)
     token_hash = models.CharField(max_length=64, unique=True)
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)
@@ -55,7 +67,7 @@ class AccountActivation(models.Model):
 
     @property
     def is_valid(self):
-        return self.used_at is None and self.expires_at > timezone.now()
+        return bool(self.user_id or self.parent_id) and self.used_at is None and self.expires_at > timezone.now()
 
 
 class Trainer(models.Model):

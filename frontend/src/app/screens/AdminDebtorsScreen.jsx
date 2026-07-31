@@ -2,8 +2,9 @@
 import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 
-export function createAdminDebtorsScreen(components, icons, reloadRoleData) {
+export function createAdminDebtorsScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, Money, Button, Avatar, Badge, IconButton, Banner } = components
   const I = icons
 
@@ -16,7 +17,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData) {
     const [groupFilter, setGroupFilter] = useState('')
     const [minAmount, setMinAmount] = useState('')
     const [historyClientId, setHistoryClientId] = useState(null)
-    const debtors = globalThis.AdminData?.debtors || []
+    const debtors = adminData.debtors || []
     const total = debtors.reduce((sum, row) => sum + (row.balance || 0), 0)
     const groups = [...new Set(debtors.map((row) => row.group).filter(Boolean))]
     const visibleDebtors = debtors.filter((row) => {
@@ -87,7 +88,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData) {
           </Button>
         </div>
 
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage('')}>{message}</Banner>}
+        <ToastNotice id="admin-debtors-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError('')}>{error}</Banner>}
 
         <div className="toolbar">

@@ -1,4 +1,4 @@
-"""Rule 4 & 5: session generation from templates, series edits, conflict control."""
+"""Schedule creation, period copy, single-session edits and conflict control."""
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -10,10 +10,10 @@ from django.utils import timezone
 from audit.models import audit
 from students.models import Student
 
-from .models import (RecurringTemplate, ScheduleBatchStatus, ScheduleOperationBatch,
+from .models import (ScheduleBatchStatus, ScheduleOperationBatch,
                      Session, SessionParticipant, SessionTypeConfig,
                      SessionParticipantSource, SessionParticipantStatus,
-                     SessionType, WaitlistEntry, WaitlistStatus, WeeklyPlan)
+                     SessionType, WaitlistEntry, WaitlistStatus)
 
 
 class ScheduleConflict(ValidationError):
@@ -146,7 +146,7 @@ def _session_type_defaults(session_type):
 
 @transaction.atomic
 def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, location, max_participants,
-                   group=None, template=None, session_type=SessionType.GROUP,
+                   group=None, session_type=SessionType.GROUP,
                    individual_student=None, manually_modified=False, actor=None,
                    weekly_plan_slot=None, notes="", price_minor=None, currency=None):
     defaults = _session_type_defaults(session_type)
@@ -169,7 +169,7 @@ def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, loc
     currency = (currency or default_currency or settings.DEFAULT_CURRENCY).upper()
     session = Session(
         trainer=trainer, start_at=start_at, end_at=end_at, location=location,
-        max_participants=max_participants, group=group, template=template,
+        max_participants=max_participants, group=group,
         weekly_plan_slot=weekly_plan_slot,
         session_type=session_type, individual_student=individual_student,
         is_manually_modified=manually_modified,
@@ -178,84 +178,9 @@ def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, loc
     )
     session.full_clean(exclude=["template", "group", "individual_student"])
     session.save()
-    # Bulk generation passes actor=None and logs one summary entry instead.
     if actor is not None:
         audit(actor, "session.created", session, {"type": str(session_type)})
     return session
-
-
-@transaction.atomic
-def generate_sessions(template: RecurringTemplate, date_from, date_to, *,
-                      skip_conflicts=False, actor=None):
-    """Rule 4: generate concrete Sessions from a template for [date_from, date_to]."""
-    if not template.is_active:
-        raise ValidationError("Шаблон неактивен")
-    created, skipped = [], []
-    day = date_from
-    while day <= date_to:
-        if day.weekday() == template.weekday:
-            start_at = timezone.make_aware(datetime.combine(day, template.start_time))
-            end_at = timezone.make_aware(datetime.combine(day, template.end_time))
-            try:
-                session = create_session(
-                    trainer=template.trainer, start_at=start_at, end_at=end_at,
-                    location=template.location, max_participants=template.max_participants,
-                    group=template.group, template=template, session_type=SessionType.GROUP)
-                created.append(session)
-            except ScheduleConflict:
-                if not skip_conflicts:
-                    raise
-                skipped.append(day)
-        day += timedelta(days=1)
-    if actor is not None:
-        audit(actor, "schedule.generated", template,
-              {"created": len(created), "skipped": len(skipped),
-               "from": str(date_from), "to": str(date_to)})
-    return created, skipped
-
-
-@transaction.atomic
-def generate_weekly_plan(plan: WeeklyPlan, date_from, date_to, *,
-                         skip_conflicts=False, actor=None):
-    if not plan.is_active:
-        raise ValidationError("Недельный план неактивен")
-    slots = list(plan.slots.filter(is_active=True).select_related("trainer__user"))
-    created = []
-    skipped = []
-    day = date_from
-    while day <= date_to:
-        for slot in slots:
-            if slot.weekday != day.weekday():
-                continue
-            start_at = timezone.make_aware(datetime.combine(day, slot.start_time))
-            try:
-                created.append(create_session(
-                    trainer=slot.trainer,
-                    start_at=start_at,
-                    duration_minutes=slot.duration_minutes,
-                    location=slot.location,
-                    max_participants=slot.max_participants,
-                    group=plan.group,
-                    session_type=SessionType.GROUP,
-                    weekly_plan_slot=slot,
-                ))
-            except ScheduleConflict as exc:
-                if not skip_conflicts:
-                    raise
-                skipped.append({
-                    "slot_id": slot.id,
-                    "date": day.isoformat(),
-                    "error": "; ".join(exc.messages),
-                })
-        day += timedelta(days=1)
-    if actor is not None:
-        audit(actor, "weekly_plan.generated", plan, {
-            "created": len(created),
-            "skipped": len(skipped),
-            "from": str(date_from),
-            "to": str(date_to),
-        })
-    return created, skipped
 
 
 def _copy_period_rows(params):
@@ -417,19 +342,6 @@ def commit_copy_period(*, batch_id, actor, selected_indices):
     return batch, created, skipped
 
 
-@transaction.atomic
-def cancel_series(template: RecurringTemplate, date_from=None, *, actor=None):
-    """Rule 4: change the whole series — cancel future generated sessions."""
-    qs = template.sessions.filter(is_cancelled=False)
-    if date_from:
-        qs = qs.filter(start_at__date__gte=date_from)
-    count = qs.update(is_cancelled=True)
-    if actor is not None:
-        audit(actor, "schedule.series_cancelled", template,
-              {"count": count, "from": str(date_from) if date_from else None})
-    return count
-
-
 def deletion_preview(session: Session):
     return {
         "session_id": session.id,
@@ -514,3 +426,27 @@ def edit_single_session(session: Session, *, actor=None, **changes):
     if actor is not None:
         audit(actor, "session.edited", session, {"fields": list(changes.keys())})
     return session
+
+
+@transaction.atomic
+def restore_session(session: Session, *, actor=None):
+    """Restore one cancelled session without recreating it or its related history."""
+    session = Session.objects.select_for_update().select_related(
+        "trainer", "substitute_trainer",
+    ).get(pk=session.pk)
+    if not session.is_cancelled:
+        return session, False
+    effective_trainer = session.substitute_trainer or session.trainer
+    check_trainer_conflict(
+        effective_trainer,
+        session.start_at,
+        session.end_at,
+        exclude_session_id=session.pk,
+    )
+    session.is_cancelled = False
+    session.is_manually_modified = True
+    session.full_clean(exclude=["template", "group", "individual_student"])
+    session.save(update_fields=["is_cancelled", "is_manually_modified"])
+    if actor is not None:
+        audit(actor, "session.restored", session, {"is_cancelled": False})
+    return session, True

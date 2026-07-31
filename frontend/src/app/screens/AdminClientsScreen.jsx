@@ -3,12 +3,14 @@ import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { DateField } from '../DateTimeField.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 
-export function createAdminClientsScreen(components, reloadRoleData) {
+export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Input, Dialog } = components
   return function ApiAdminClients({ go }) {
-    const rows = globalThis.AdminData?.clients || []
-    const groups = globalThis.AdminData?.groups || []
+    const rows = adminData.clients || []
+    const groups = adminData.groups || []
     const clientOptions = Array.from(
       new Map(rows.filter((row) => row.clientId).map((row) => [row.clientId, row])).values(),
     )
@@ -16,6 +18,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
       firstName: '',
       lastName: '',
       email: '',
+      username: '',
       phone: '',
       participantFirstName: '',
       participantLastName: '',
@@ -59,6 +62,12 @@ export function createAdminClientsScreen(components, reloadRoleData) {
       if (!needle) return true
       return [row.first, row.last, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))
     })
+    const hasActiveFilter = Boolean(query.trim())
+    const emptyLabel = hasActiveFilter && scopedRows.length
+      ? 'По заданным фильтрам ничего не найдено.'
+      : scope === 'blacklist'
+        ? 'Чёрный список пуст'
+        : 'Активных клиентов пока нет'
 
     const updateClientForm = (field, value) => setClientForm((current) => ({ ...current, [field]: value }))
     const updateParticipantForm = (field, value) => setParticipantForm((current) => ({ ...current, [field]: value }))
@@ -117,6 +126,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
             first_name: clientForm.firstName,
             last_name: clientForm.lastName,
             email: clientForm.email,
+            username: clientForm.username,
             phone: clientForm.phone,
           },
           participant: {
@@ -133,6 +143,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
           firstName: '',
           lastName: '',
           email: '',
+          username: '',
           phone: '',
           participantFirstName: '',
           participantLastName: '',
@@ -240,7 +251,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
             <p className="page-desc">Родители, дети, контакты и связанные группы.</p>
           </div>
         </div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
+        <ToastNotice id="admin-clients-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Сохраняю данные клиента...</BusyBanner>
 
@@ -264,10 +275,11 @@ export function createAdminClientsScreen(components, reloadRoleData) {
               <Input label="Имя владельца аккаунта" value={clientForm.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
               <Input label="Фамилия владельца" value={clientForm.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
               <Input label="Email" value={clientForm.email} onChange={(event) => updateClientForm('email', event.target.value)} />
+              <Input label="Логин, если email не указан" value={clientForm.username} onChange={(event) => updateClientForm('username', event.target.value)} />
               <Input label="Телефон" value={clientForm.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
               <Input label="Имя участника" value={clientForm.participantFirstName} onChange={(event) => updateClientForm('participantFirstName', event.target.value)} placeholder="Как у владельца" />
               <Input label="Фамилия участника" value={clientForm.participantLastName} onChange={(event) => updateClientForm('participantLastName', event.target.value)} placeholder="Как у владельца" />
-              <Input label="Дата рождения" value={clientForm.birthDate} onChange={(event) => updateClientForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+              <DateField label="Дата рождения" value={clientForm.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
                 Группа
                 <select value={clientForm.groupId} onChange={(event) => updateClientForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
@@ -304,7 +316,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
               />
               <Input label="Имя" value={participantForm.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
               <Input label="Фамилия" value={participantForm.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
-              <Input label="Дата рождения" value={participantForm.birthDate} onChange={(event) => updateParticipantForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+              <DateField label="Дата рождения" value={participantForm.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
               <Input label="Email" value={participantForm.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', gridColumn: '1 / -1' }}>
                 Группа
@@ -332,7 +344,7 @@ export function createAdminClientsScreen(components, reloadRoleData) {
               <Input label="Телефон владельца" value={clientEditForm.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
               <Input label="Имя участника" value={clientEditForm.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
               <Input label="Фамилия участника" value={clientEditForm.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
-              <Input label="Дата рождения" value={clientEditForm.birthDate} onChange={(event) => updateClientEditForm('birthDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+              <DateField label="Дата рождения" value={clientEditForm.birthDate} onChange={(value) => updateClientEditForm('birthDate', value)} />
               <Input label="Email участника" value={clientEditForm.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
                 Группа
@@ -363,11 +375,16 @@ export function createAdminClientsScreen(components, reloadRoleData) {
               <input aria-label="Поиск клиентов" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, телефон, email или группа" />
             </div>
           </div>
-          <span className="muted">Найдено: {filteredRows.length}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="muted">Найдено: {filteredRows.length}</span>
+            {hasActiveFilter && (
+              <Button size="sm" variant="subtle" onClick={() => setQuery('')}>Сбросить фильтры</Button>
+            )}
+          </div>
         </div>
         <Table
           rows={filteredRows}
-          emptyLabel={scope === 'blacklist' ? 'Чёрный список пуст' : 'Активных клиентов пока нет'}
+          emptyLabel={emptyLabel}
           columns={[
             { key: 'name', header: 'Участник', render: (row) => (
               <button type="button" className="ops-link-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>

@@ -1,4 +1,4 @@
-/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"daedca97ce7e","components/data/Avatar.jsx":"6fcd0a5080a4","components/data/Badge.jsx":"ed0aa3033c94","components/data/Money.jsx":"84dd3f8c6313","components/data/StatusPill.jsx":"5e04e2f701b3","components/data/Table.jsx":"5f4ff4d25f0a","components/feedback/Banner.jsx":"7f02f7a1fefb","components/feedback/Dialog.jsx":"5a0731c5540f","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/forms/Button.jsx":"d515b677698e","components/forms/Checkbox.jsx":"f0f71a933776","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"2af56f30580a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"cba3835ef4c9","components/forms/Switch.jsx":"e466da9072ab","components/forms/Textarea.jsx":"ae0b3a42e4c3","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"bbbcc232ebaa","ui_kits/admin/Attendance.jsx":"959f58642ae7","ui_kits/admin/Clients.jsx":"549143b37085","ui_kits/admin/Debtors.jsx":"7de5a19d6d4e","ui_kits/admin/Overview.jsx":"93b4d593d07b","ui_kits/admin/Payments.jsx":"56c9f1dcde72","ui_kits/admin/Schedule.jsx":"f1ce6f1511a5","ui_kits/admin/data.jsx":"81a279dcff77","ui_kits/parent/data.jsx":"10378a012779","ui_kits/parent/screens.jsx":"a1fccc3ea3c0","ui_kits/trainer/data.jsx":"30584aa96676","ui_kits/trainer/screens.jsx":"81076f9febea"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
+/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"bc992ade7fa8","components/data/Avatar.jsx":"6fcd0a5080a4","components/data/Badge.jsx":"ed0aa3033c94","components/data/Money.jsx":"84dd3f8c6313","components/data/StatusPill.jsx":"5e04e2f701b3","components/data/Table.jsx":"5f4ff4d25f0a","components/feedback/Banner.jsx":"7f02f7a1fefb","components/feedback/Dialog.jsx":"5a0731c5540f","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/forms/Button.jsx":"d515b677698e","components/forms/Checkbox.jsx":"f0f71a933776","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"2af56f30580a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"cba3835ef4c9","components/forms/Switch.jsx":"e466da9072ab","components/forms/Textarea.jsx":"ae0b3a42e4c3","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"bbbcc232ebaa","ui_kits/admin/Attendance.jsx":"959f58642ae7","ui_kits/admin/Clients.jsx":"549143b37085","ui_kits/admin/Debtors.jsx":"7de5a19d6d4e","ui_kits/admin/Overview.jsx":"93b4d593d07b","ui_kits/admin/Payments.jsx":"56c9f1dcde72","ui_kits/admin/Schedule.jsx":"f1ce6f1511a5","ui_kits/admin/data.jsx":"81a279dcff77","ui_kits/parent/data.jsx":"10378a012779","ui_kits/parent/screens.jsx":"a1fccc3ea3c0","ui_kits/trainer/data.jsx":"30584aa96676","ui_kits/trainer/screens.jsx":"81076f9febea"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
 
 (() => {
 
@@ -38,13 +38,13 @@ try { (() => {
     d
   });
   const circle = (cx, cy, r, key) => React.createElement('circle', {
-    key: key || 'c' + cx,
+    key: key || 'c' + cx + cy,
     cx,
     cy,
     r
   });
   const rect = (x, y, w, h, rx, key) => React.createElement('rect', {
-    key: key || 'r' + x,
+    key: key || 'r' + x + y,
     x,
     y,
     width: w,
@@ -468,7 +468,8 @@ function Table({
   const allSelected = rows.length > 0 && selectedIds.length === rows.length;
   const someSelected = selectedIds.length > 0 && !allSelected;
   return /*#__PURE__*/React.createElement("div", {
-    style: wrap
+    style: wrap,
+    className: "table-wrap"
   }, /*#__PURE__*/React.createElement("table", {
     style: tableBase
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, selectable && /*#__PURE__*/React.createElement("th", {
@@ -523,6 +524,7 @@ function Table({
       onChange: () => onToggleRow && onToggleRow(id)
     })), columns.map(c => /*#__PURE__*/React.createElement("td", {
       key: c.key,
+      "data-label": c.header,
       style: {
         ...tdBase,
         padding: cellPad,
@@ -649,7 +651,7 @@ function Banner({
     }
   }, children)), action, onClose && /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    "aria-label": "Zamknij",
+    "aria-label": "Закрыть",
     style: {
       background: 'none',
       border: 'none',
@@ -876,7 +878,7 @@ function Toast({
     }
   }, children)), onClose && /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    "aria-label": "Zamknij",
+    "aria-label": "Закрыть",
     style: {
       background: 'none',
       border: 'none',
@@ -1025,17 +1027,84 @@ function Dialog({
   children,
   onClose,
   onConfirm,
-  confirmLabel = 'Potwierdź',
-  cancelLabel = 'Anuluj',
+  confirmLabel = 'Подтвердить',
+  cancelLabel = 'Отмена',
+  label = 'Диалог подтверждения',
   tone = 'primary',
   width = 460,
   hideFooter = false,
   irreversible = false
 }) {
+  const overlayRef = React.useRef(null);
+  const returnFocusRef = React.useRef(null);
+  const titleId = React.useId();
+  React.useEffect(() => {
+    if (!open) return undefined;
+    returnFocusRef.current = document.activeElement;
+    const overlay = overlayRef.current;
+    const parent = overlay && overlay.parentElement;
+    const hiddenSiblings = [];
+    if (parent) {
+      Array.from(parent.children).forEach(node => {
+        if (node === overlay) return;
+        hiddenSiblings.push({
+          node,
+          inert: node.inert,
+          ariaHidden: node.getAttribute('aria-hidden')
+        });
+        node.inert = true;
+        node.setAttribute('aria-hidden', 'true');
+      });
+    }
+    const focusable = overlay && overlay.querySelector('[data-dialog-initial-focus], button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    if (focusable) focusable.focus();else if (overlay) overlay.focus();
+    const onKeyDown = event => {
+      if (event.key === 'Escape' && onClose) {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !overlay) return;
+      const items = Array.from(overlay.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(node => !node.hidden);
+      if (!items.length) {
+        event.preventDefault();
+        overlay.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      hiddenSiblings.forEach(({
+        node,
+        inert,
+        ariaHidden
+      }) => {
+        node.inert = inert;
+        if (ariaHidden === null) node.removeAttribute('aria-hidden');else node.setAttribute('aria-hidden', ariaHidden);
+      });
+      if (returnFocusRef.current && document.contains(returnFocusRef.current)) {
+        returnFocusRef.current.focus();
+      }
+    };
+  }, [open, onClose]);
   if (!open) return null;
   return /*#__PURE__*/React.createElement("div", {
+    ref: overlayRef,
     role: "dialog",
     "aria-modal": "true",
+    "aria-labelledby": title ? titleId : undefined,
+    "aria-label": title ? undefined : label,
+    tabIndex: -1,
     style: {
       position: 'fixed',
       inset: 0,
@@ -1078,7 +1147,8 @@ function Dialog({
       letterSpacing: '0.06em',
       textTransform: 'uppercase'
     }
-  }, /*#__PURE__*/React.createElement(WarnIcon, null), " Dzia\u0142anie nieodwracalne"), title && /*#__PURE__*/React.createElement("h2", {
+  }, /*#__PURE__*/React.createElement(WarnIcon, null), " Действие необратимо"), title && /*#__PURE__*/React.createElement("h2", {
+    id: titleId,
     style: {
       margin: 0,
       font: 'var(--text-card-title)',
@@ -1106,6 +1176,7 @@ function Dialog({
     }
   }, /*#__PURE__*/React.createElement(__ds_scope.Button, {
     variant: "secondary",
+    "data-dialog-initial-focus": "true",
     onClick: onClose
   }, cancelLabel), /*#__PURE__*/React.createElement(__ds_scope.Button, {
     variant: tone === 'danger' ? 'danger' : 'primary',
