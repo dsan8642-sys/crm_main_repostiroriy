@@ -431,7 +431,7 @@ def edit_single_session(session: Session, *, actor=None, **changes):
 @transaction.atomic
 def restore_session(session: Session, *, actor=None):
     """Restore one cancelled session without recreating it or its related history."""
-    session = Session.objects.select_for_update().select_related(
+    session = Session.objects.select_for_update(of=("self",)).select_related(
         "trainer", "substitute_trainer",
     ).get(pk=session.pk)
     if not session.is_cancelled:

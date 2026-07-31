@@ -217,7 +217,7 @@ def auth_activate(request):
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with transaction.atomic():
         activation = (
-            AccountActivation.objects.select_for_update()
+            AccountActivation.objects.select_for_update(of=("self",))
             .select_related("user", "parent__user")
             .filter(token_hash=token_hash)
             .first()
