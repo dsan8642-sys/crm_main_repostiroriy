@@ -41,7 +41,7 @@ export function Table({
   const someSelected = selectedIds.length > 0 && !allSelected;
 
   return (
-    <div style={wrap}>
+    <div style={wrap} className="table-wrap">
       <table style={tableBase}>
         <thead>
           <tr>
@@ -95,7 +95,7 @@ export function Table({
                   </td>
                 )}
                 {columns.map((c) => (
-                  <td key={c.key} style={{ ...tdBase, padding: cellPad, textAlign: c.align || 'left', color: c.muted ? 'var(--text-muted)' : 'var(--text-body)' }}>
+                  <td key={c.key} data-label={c.header} style={{ ...tdBase, padding: cellPad, textAlign: c.align || 'left', color: c.muted ? 'var(--text-muted)' : 'var(--text-body)' }}>
                     {c.render ? c.render(r, i) : r[c.key]}
                   </td>
                 ))}

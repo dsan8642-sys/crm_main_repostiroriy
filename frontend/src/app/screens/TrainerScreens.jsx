@@ -5,6 +5,7 @@ import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitche
 import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
+import { scheduleColorStyle } from '../schedulePalette.js'
 
 export function createTrainerSessionScreen(components, icons, reloadRoleData, trainerData = {}) {
   const { Button, Avatar, Banner, Dialog, StatusPill } = components
@@ -97,7 +98,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
         <div className="page-head">
           <div>
             <button onClick={() => go('sessions')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Мои занятия</button>
-            <h2 className="page-title">{title}</h2>
+            <h1 className="page-title">{title}</h1>
             <p className="page-desc">{sessionMeta.date} · <StatusPill status={sessionMeta.status || 'planned'} size="sm" /></p>
             <p className="page-desc">Отметьте посещаемость каждого ученика.</p>
           </div>
@@ -194,7 +195,7 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Мои занятия</h2>
+            <h1 className="page-title">Мои занятия</h1>
             <p className="page-desc">Ближайшие, завершённые и отменённые занятия.</p>
           </div>
           <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
@@ -251,7 +252,7 @@ export function createTrainerHistoryScreen(components, icons, trainerData = {}) 
       <div className="page">
         <div className="page-head">
           <div>
-            <h2 className="page-title">История</h2>
+            <h1 className="page-title">История</h1>
             <p className="page-desc">Завершённые занятия и их состав.</p>
           </div>
         </div>
@@ -266,7 +267,7 @@ export function createTrainerHistoryScreen(components, icons, trainerData = {}) 
         </div>
         <div className="card" style={{ overflow: 'hidden' }}>
           {visibleSessions.map((session, index) => (
-            <div key={session.id} role="button" tabIndex={0} className="ops-session-row" onClick={() => go('session', { trainerSessionId: session.sessionId })} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}>
+            <div key={session.id} role="button" tabIndex={0} className={`ops-session-row${session.status === 'cancelled' ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} onClick={() => go('session', { trainerSessionId: session.sessionId })} style={{ ...scheduleColorStyle(session.colorKey), display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}>
               <span className="mono" style={{ width: 120, fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)' }}>{session.date}</span>
               <span className="mono" style={{ width: 104, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{session.start}-{session.end}</span>
               <span className="strong" style={{ width: 140 }}>{session.group}</span>
@@ -294,7 +295,7 @@ export function createTrainerGroupsScreen(components, icons, trainerData = {}) {
       <div className="page">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Мои группы</h2>
+            <h1 className="page-title">Мои группы</h1>
             <p className="page-desc">Назначено групп: {groups.length}.</p>
           </div>
         </div>

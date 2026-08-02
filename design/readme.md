@@ -78,11 +78,22 @@ Each directory has `<Name>.jsx` + `<Name>.d.ts` + a `.prompt.md` usage note + a 
 - `SKILL.md` — Agent-Skill wrapper.
 - Generated (do not edit): `_ds_bundle.js`, `_ds_manifest.json`, `_adherence.oxlintrc.json`.
 
+### Reproducible bundle workflow
+
+Run `node scripts/generate-design-bundle.mjs` from the repository root after
+changing an authoring component or `assets/icons.jsx`. The command rebuilds
+`design/_ds_bundle.js` and `design/_ds_manifest.json` from canonical sources
+and synchronises the runtime bundle. Use
+`node scripts/generate-design-bundle.mjs --check` in tests to fail when a
+generated artifact is stale. Token, stylesheet and font assets are synchronised
+with `scripts/sync-design-frontend.ps1` and verified with
+`scripts/verify-design-runtime.ps1`.
+
 ## Caveats & open questions
 
 1. **No brand identity was provided.** There is **no logo** — the mark is a type-only lockup ("H2O" tile + "SwimCRM" wordmark, see `guidelines/brand-wordmark.card.html`). If H2O has a real logo, share it and I'll swap the wordmark.
 2. **Colour & type are my invention** to fit a calm Polish swim-school CRM. Happy to re-theme to real brand colours/fonts if they exist.
-3. **Fonts load from the Google Fonts CDN**, not self-hosted binaries (the authoring environment can't download `.woff2`). For production/offline, drop IBM Plex Sans + Mono files into `tokens/` and swap the `@import` in `tokens/fonts.css` for local `@font-face`.
+3. **Fonts are self-hosted.** The official IBM Plex Sans variable Roman face and IBM Plex Mono Regular are stored under `assets/fonts/ibm-plex/`; hashes, source URLs and the OFL are recorded in `PROVENANCE.md`.
 4. **Icons are a hand-built Lucide-style substitute** (no source set was given). Swappable for real Lucide.
 5. **Trainer and Parent UI kits are not yet built** — only the Admin kit is complete. The primitives and tokens they need are all in place.
 

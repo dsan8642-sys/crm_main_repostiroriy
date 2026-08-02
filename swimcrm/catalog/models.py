@@ -17,7 +17,24 @@ class Group(models.Model):
         help_text="Цена одного занятия в минорных единицах; пусто = не начислять")
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
                                 default=settings.DEFAULT_CURRENCY)
+    default_capacity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Вместимость по умолчанию для новых групповых занятий",
+    )
+    color_key = models.CharField(max_length=32, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(default_capacity__isnull=True)
+                    | models.Q(default_capacity__gt=0)
+                ),
+                name="catalog_group_default_capacity_positive",
+            ),
+        ]
 
     @property
     def price(self) -> Money | None:

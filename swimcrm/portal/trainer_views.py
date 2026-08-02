@@ -27,7 +27,11 @@ def trainer_sessions(request):
         qs = qs.filter(is_cancelled=True)
     elif request.GET.get("status") == "active":
         qs = qs.filter(is_cancelled=False)
-    return JsonResponse({"sessions": [_role_session_payload(session) for session in qs[:300]]})
+    type_colors = session_type_color_keys()
+    return JsonResponse({"sessions": [
+        _role_session_payload(session, type_color_keys=type_colors)
+        for session in qs[:300]
+    ]})
 
 
 @require_GET
@@ -35,6 +39,7 @@ def trainer_groups(request):
     trainer = _trainer_from_request(request)
     today = timezone.localdate()
     groups = Group.objects.filter(default_trainer=trainer).order_by("name", "id")
+    type_colors = session_type_color_keys()
     payload = []
     for group in groups:
         next_session = Session.objects.filter(
@@ -49,7 +54,8 @@ def trainer_groups(request):
             "description": group.description,
             "students_count": group.students.filter(is_active=True).count(),
             "is_active": group.is_active,
-            "next_session": _role_session_payload(next_session) if next_session else None,
+            "next_session": _role_session_payload(
+                next_session, type_color_keys=type_colors) if next_session else None,
             "students": [{"id": student.id, "full_name": student.full_name} for student in group.students.filter(is_active=True).order_by("last_name", "first_name")],
         })
     return JsonResponse({"groups": payload})
@@ -71,7 +77,11 @@ def trainer_history(request):
         qs = qs.filter(start_at__date__gte=date_from)
     if date_to:
         qs = qs.filter(start_at__date__lte=date_to)
-    return JsonResponse({"sessions": [_role_session_payload(session) for session in qs[:300]]})
+    type_colors = session_type_color_keys()
+    return JsonResponse({"sessions": [
+        _role_session_payload(session, type_color_keys=type_colors)
+        for session in qs[:300]
+    ]})
 
 
 @require_GET

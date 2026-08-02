@@ -145,6 +145,7 @@ class SessionTypeConfig(models.Model):
     default_currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
                                         default=settings.DEFAULT_CURRENCY)
     default_duration_minutes = models.PositiveSmallIntegerField(default=60)
+    color_key = models.CharField(max_length=32, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=dj_timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

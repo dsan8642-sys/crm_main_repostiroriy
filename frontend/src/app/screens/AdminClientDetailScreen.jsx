@@ -363,7 +363,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <div className="page page-wide">
           <div className="page-head">
             <div>
-              <h2 className="page-title">Клиент</h2>
+              <h1 className="page-title">Клиент</h1>
               <p className="page-desc">Выберите клиента из списка.</p>
             </div>
             <Button variant="secondary" iconLeft={<I.ArrowLeft size={15} />} onClick={() => go?.('clients')}>Клиенты</Button>
@@ -378,7 +378,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <div className="page-head">
           <div>
             <button onClick={() => go?.('clients')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Клиенты</button>
-            <h2 className="page-title">{account.full_name || account.username || 'Клиент'}</h2>
+            <h1 className="page-title">{account.full_name || account.username || 'Клиент'}</h1>
             <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
           </div>
           <div className="ops-button-row ops-page-actions">

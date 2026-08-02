@@ -26,6 +26,12 @@ from billing.services import (
 )
 from catalog.models import Group, SubscriptionType
 from common.money import Money
+from common.schedule_palette import (
+    resolve_session_color_key,
+    session_type_color_keys,
+    stored_schedule_color_key,
+    validate_schedule_color_key,
+)
 from dataio.exports import export_entity
 from notifications.models import Channel, NotificationLog
 from notifications.services import queue_mass_mailing
@@ -198,7 +204,9 @@ def _client_student_payload(student):
     }
 
 
-def _session_payload(session):
+def _session_payload(session, *, type_color_keys=None):
+    if type_color_keys is None:
+        type_color_keys = session_type_color_keys()
     waitlist_active_count = getattr(session, "waitlist_active_count", None)
     if waitlist_active_count is None and session.pk:
         waitlist_active_count = session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).count()
@@ -218,6 +226,15 @@ def _session_payload(session):
         "duration_minutes": session.duration_minutes,
         "location": session.location,
         "session_type": session.session_type,
+        "presentation_type_label": (
+            getattr(type_color_keys, "labels", {}).get(session.session_type)
+            or {
+                SessionType.GROUP: "Групповая тренировка",
+                SessionType.INDIVIDUAL: "Индивидуальная тренировка",
+                SessionType.SPLIT: "Split-тренировка",
+            }.get(session.session_type, session.get_session_type_display())
+        ),
+        "presentation_color_key": resolve_session_color_key(session, type_color_keys),
         "trainer_id": session.trainer_id,
         "trainer": str(session.trainer),
         "substitute_trainer_id": session.substitute_trainer_id,
@@ -240,6 +257,7 @@ def _session_payload(session):
 
 _ROLE_SESSION_FIELDS = (
     "id", "start_at", "end_at", "duration_minutes", "location", "session_type",
+    "presentation_type_label", "presentation_color_key",
     "trainer_id", "trainer", "substitute_trainer_id", "substitute_trainer",
     "effective_trainer_id", "effective_trainer", "group",
     "individual_student_id", "individual_participant", "is_cancelled", "max_participants",
@@ -247,9 +265,9 @@ _ROLE_SESSION_FIELDS = (
 )
 
 
-def _role_session_payload(session, *, participant=None):
+def _role_session_payload(session, *, participant=None, type_color_keys=None):
     """Client/trainer session allowlist. Staff notes never cross this boundary."""
-    admin_payload = _session_payload(session)
+    admin_payload = _session_payload(session, type_color_keys=type_color_keys)
     if participant is not None:
         owns_individual_context = (
             session.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
@@ -356,6 +374,8 @@ def _group_payload(group):
         } if group.default_trainer_id else None,
         "price_minor": group.price_minor,
         "currency": group.currency,
+        "default_capacity": group.default_capacity,
+        "color_key": stored_schedule_color_key(group.color_key),
         "is_active": group.is_active,
         "participants_count": group.students.count(),
     }
@@ -763,6 +783,27 @@ def _positive_int(value, field):
     return parsed
 
 
+def _nullable_positive_int(value, field):
+    def invalid(message):
+        raise ValidationError({field: message})
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        invalid("Must be an integer.")
+    if isinstance(value, float) and not value.is_integer():
+        invalid("Must be an integer.")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        invalid("Must be an integer.")
+    if str(value).strip() not in {str(parsed), f"+{parsed}"}:
+        invalid("Must be an integer.")
+    if parsed <= 0:
+        invalid("Must be greater than zero.")
+    return parsed
+
+
 def _create_trainer(data):
     trainer_data = _trainer_data(data)
     email, username = _portal_identity(
@@ -829,6 +870,11 @@ def _apply_group_data(group, data):
             raise ValidationError("group price cannot be negative")
     if "currency" in group_data:
         group.currency = group_data.get("currency") or settings.DEFAULT_CURRENCY
+    if "default_capacity" in group_data:
+        group.default_capacity = _nullable_positive_int(
+            group_data.get("default_capacity"), "default_capacity")
+    if "color_key" in group_data:
+        group.color_key = validate_schedule_color_key(group_data.get("color_key"))
     if "is_active" in group_data:
         group.is_active = _bool_value(group_data.get("is_active"), True)
     if not group.name:

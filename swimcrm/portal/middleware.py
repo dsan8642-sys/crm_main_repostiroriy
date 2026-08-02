@@ -12,7 +12,7 @@ class ApiExceptionMiddleware:
         try:
             return self.get_response(request)
         except ValidationError as exc:
-            return self._json_error(request, exc.messages if hasattr(exc, "messages") else str(exc), 400)
+            return self._json_validation_error(request, exc)
         except PermissionDenied as exc:
             return self._json_error(request, str(exc) or "Недостаточно прав", 403)
         except Http404 as exc:
@@ -20,11 +20,7 @@ class ApiExceptionMiddleware:
 
     def process_exception(self, request, exception):
         if isinstance(exception, ValidationError):
-            return self._json_error(
-                request,
-                exception.messages if hasattr(exception, "messages") else str(exception),
-                400,
-            )
+            return self._json_validation_error(request, exception)
         if isinstance(exception, PermissionDenied):
             return self._json_error(request, str(exception) or "Недостаточно прав", 403)
         if isinstance(exception, Http404):
@@ -35,3 +31,13 @@ class ApiExceptionMiddleware:
         if request.path.startswith("/api/"):
             return JsonResponse({"error": message}, status=status)
         raise
+
+    def _json_validation_error(self, request, exception):
+        if not request.path.startswith("/api/"):
+            raise exception
+        payload = {
+            "error": exception.messages if hasattr(exception, "messages") else str(exception),
+        }
+        if hasattr(exception, "message_dict"):
+            payload["errors"] = exception.message_dict
+        return JsonResponse(payload, status=400)

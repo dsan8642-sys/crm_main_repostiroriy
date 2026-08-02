@@ -20,6 +20,9 @@
   window.SwimIcons = {
     Home:       P([path('M3 11.5 12 4l9 7.5'), path('M5.5 10v9.5h13V10')]),
     Users:      P([path('M16 19v-1.5a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3V19'), circle(9.5, 8, 3.2), path('M17.5 19v-1.5a3 3 0 0 0-2.2-2.9'), path('M15 5.2a3 3 0 0 1 0 5.6')]),
+    ClientFamily: P([circle(8.5, 7.5, 2.8), circle(16.5, 10, 2.2), path('M3.5 19v-1.3a4 4 0 0 1 4-4h2a4 4 0 0 1 4 4V19'), path('M13.5 19v-.8a3 3 0 0 1 3-3h.5a3 3 0 0 1 3 3v.8')]),
+    GroupMembers: P([circle(12, 6.7, 2.8), circle(6, 9.2, 2), circle(18, 9.2, 2), path('M6.5 20v-1.2a5.5 5.5 0 0 1 11 0V20'), path('M2.5 20v-1a3.5 3.5 0 0 1 4.8-3.25'), path('M21.5 20v-1a3.5 3.5 0 0 0-4.8-3.25')]),
+    TrainerWhistle: P([circle(12, 6.5, 3), path('M5.5 20v-1.5a6.5 6.5 0 0 1 13 0V20'), path('M9.5 12.7 12 15l2.5-2.3'), path('M11 15h3.2l2.3 1v1.8l-2.3 1H13a2 2 0 0 1-2-2V15Z'), circle(13.2, 16.9, .55)]),
     User:       P([path('M18 20v-1.5a4 4 0 0 0-4-4H10a4 4 0 0 0-4 4V20'), circle(12, 7.5, 3.5)]),
     Calendar:   P([rect(3.5, 5, 17, 15.5, 2), line(3.5, 9.5, 20.5, 9.5), line(8, 3, 8, 6.5), line(16, 3, 16, 6.5)]),
     Clock:      P([circle(12, 12, 8.5), path('M12 7.5V12l3 2')]),

@@ -104,6 +104,7 @@ def client_overview(request):
     students = list(_student_queryset_for_client(account))
     today = timezone.localdate()
     payload = []
+    type_colors = session_type_color_keys()
     for student in students:
         subscriptions = list(student.subscriptions.select_related("subscription_type").exclude(
             status=SubscriptionStatus.CANCELLED).order_by("-start_date", "-id"))
@@ -116,7 +117,10 @@ def client_overview(request):
             "balance_minor": balance.amount_minor,
             "current_subscription": _subscription_payload(subscriptions[0]) if subscriptions else None,
             "next_session": _role_session_payload(
-                next_session, participant=student) if next_session else None,
+                next_session,
+                participant=student,
+                type_color_keys=type_colors,
+            ) if next_session else None,
             "last_payment": {
                 "id": latest_payment.id,
                 "amount": latest_payment.amount.format(),
@@ -137,10 +141,15 @@ def client_schedule(request):
     student = _participant_for_client_request(request, account)
     date_from = _parse_date(request.GET.get("date_from"), "date_from") or timezone.localdate()
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
+    type_colors = session_type_color_keys()
     return JsonResponse({
         **_participant_context(account, student),
         "sessions": [
-            _role_session_payload(session, participant=student)
+            _role_session_payload(
+                session,
+                participant=student,
+                type_color_keys=type_colors,
+            )
             for session in _visible_client_sessions([student], date_from, date_to)
         ],
     })
@@ -152,12 +161,17 @@ def client_attendance(request):
     student = _participant_for_client_request(request, account)
     qs = AttendanceRecord.objects.filter(student=student).select_related(
         "student", "session", "session__group", "session__trainer__user")
+    type_colors = session_type_color_keys()
     return JsonResponse({
         **_participant_context(account, student),
         "attendance": [{
         "id": record.id,
         "student": _client_student_payload(record.student),
-        "session": _role_session_payload(record.session, participant=student),
+        "session": _role_session_payload(
+            record.session,
+            participant=student,
+            type_color_keys=type_colors,
+        ),
         "status": record.status,
         "deducts": record.deducts,
         "marked_at": timezone.localtime(record.marked_at).isoformat(),

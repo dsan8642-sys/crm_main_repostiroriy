@@ -407,7 +407,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Платежи</h2>
+            <h1 className="page-title">Платежи</h1>
             <p className="page-desc">Подтверждение оплат, абонементы, начисления и корректировки.</p>
           </div>
         </div>

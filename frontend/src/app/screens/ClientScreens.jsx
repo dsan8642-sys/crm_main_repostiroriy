@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
+import { normalizeScheduleColorKey } from '../schedulePalette.js'
 import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
@@ -37,7 +38,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     return (
       <div className="page" style={{ maxWidth: 900 }}>
         <div className="page-head">
-          <div><h2 className="page-title">Главная</h2><p className="page-desc">Ближайшее занятие, абонемент и состояние оплаты.</p></div>
+          <div><h1 className="page-title">Главная</h1><p className="page-desc">Ближайшее занятие, абонемент и состояние оплаты.</p></div>
           <ChildButtons kid={child?.id || kid} setKid={setKid} />
         </div>
         {child?.balance < 0 && (
@@ -80,6 +81,8 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       location: session.location,
       status: session.is_cancelled ? 'cancelled' : 'planned',
       sessionType: session.session_type || 'group',
+      sessionTypeLabel: session.presentation_type_label || '',
+      colorKey: normalizeScheduleColorKey(session.presentation_color_key),
       individualParticipant: session.individual_participant || null,
       deductsExpected: session.is_cancelled ? 0 : 1,
     })
@@ -114,7 +117,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const selected = rows.find((row) => String(row.sessionId) === String(selectedId))
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h2 className="page-title">Расписание</h2><p className="page-desc">Календарь занятий выбранного участника.</p></div><div className="ops-page-actions"><ChildButtons kid={kid} setKid={setKid} /><ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} /></div></div>
+        <div className="page-head"><div><h1 className="page-title">Расписание</h1><p className="page-desc">Календарь занятий выбранного участника.</p></div><div className="ops-page-actions"><ChildButtons kid={kid} setKid={setKid} /><ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} /></div></div>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="card card-pad" style={{ marginBottom: 14 }}>
           <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} />
@@ -175,7 +178,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     return (
       <div className="page" style={{ maxWidth: 900 }}>
-        <div className="page-head"><div><h2 className="page-title">Платежи</h2><p className="page-desc">Начисления, история операций и запросы на пополнение баланса.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="page-head"><div><h1 className="page-title">Платежи</h1><p className="page-desc">Начисления, история операций и запросы на пополнение баланса.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
         <ToastNotice id="client-payment-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Отправляю запрос на пополнение...</BusyBanner>
@@ -217,7 +220,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   function Subscription({ kid, setKid }) {
     const child = (parentData.children || []).find((item) => item.id === kid)
     const subscription = child?.subscription
-    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h2 className="page-title">Абонемент</h2><p className="page-desc">Срок действия, статус и остаток занятий.</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Текущий абонемент</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>Осталось занятий</span><strong>{subscription.remaining_sessions == null ? 'Без лимита' : subscription.remaining_sessions}</strong></div><div><span>Начало</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>Действует до</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>Статус</span><strong>{subscription.status}</strong></div></div></div> : <div className="card card-pad empty">Активного абонемента нет. Обратитесь к администратору клуба.</div>}</div>
+    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h1 className="page-title">Абонемент</h1><p className="page-desc">Срок действия, статус и остаток занятий.</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Текущий абонемент</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>Осталось занятий</span><strong>{subscription.remaining_sessions == null ? 'Без лимита' : subscription.remaining_sessions}</strong></div><div><span>Начало</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>Действует до</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>Статус</span><strong>{subscription.status}</strong></div></div></div> : <div className="card card-pad empty">Активного абонемента нет. Обратитесь к администратору клуба.</div>}</div>
   }
 
   function History({ kid, setKid }) {
@@ -229,7 +232,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const visibleAttendance = attendance.filter((row) => new Date(row.date) >= cutoff)
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h2 className="page-title">История</h2><p className="page-desc">Посещения и история доставки сообщений выбранного участника.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="page-head"><div><h1 className="page-title">История</h1><p className="page-desc">Посещения и история доставки сообщений выбранного участника.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
         <div className="toolbar"><span className="spacer" /><label>Период <select value={days} onChange={(event) => setDays(event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Всё время</option></select></label></div>
         {selectedHistory && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="ops-section-head"><div><div className="eyebrow">Детали операции</div><strong>{selectedHistory.label || selectedHistory.method}</strong></div><Button size="sm" variant="subtle" onClick={() => setSelectedHistory(null)}>Закрыть</Button></div><div className="muted">Дата: {selectedHistory.date} · сумма/списание и статус сохранены в истории.</div></div>}
         <div>
@@ -299,7 +302,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h2 className="page-title">Профиль</h2><p className="page-desc">Контактные данные аккаунта и участники.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="page-head"><div><h1 className="page-title">Профиль</h1><p className="page-desc">Контактные данные аккаунта и участники.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
         <ToastNotice id="client-profile-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Сохраняю профиль...</BusyBanner>
@@ -403,7 +406,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     return (
       <div className="page" style={{ maxWidth: 760 }}>
-        <div className="page-head"><div><h2 className="page-title">Согласия</h2><p className="page-desc">Управление согласиями и каналами связи.</p></div></div>
+        <div className="page-head"><div><h1 className="page-title">Согласия</h1><p className="page-desc">Управление согласиями и каналами связи.</p></div></div>
         <ToastNotice id="client-consent-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busyType != null}>

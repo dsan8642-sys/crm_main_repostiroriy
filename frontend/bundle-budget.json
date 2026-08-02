@@ -7,7 +7,7 @@
   },
   "maximum": {
     "javascriptRawBytes": 590000,
-    "javascriptGzipBytes": 155000,
-    "cssRawBytes": 40000
+    "javascriptGzipBytes": 160000,
+    "cssRawBytes": 52000
   }
 }

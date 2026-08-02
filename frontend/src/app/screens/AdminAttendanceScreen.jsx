@@ -5,6 +5,14 @@ import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 
+export function attendanceSessionDisplayStatus(session, now = Date.now()) {
+  if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
+  if (session?.status === 'done') return 'done'
+  const endAt = session?.end_at || session?.endAt
+  const endTimestamp = endAt ? Date.parse(endAt) : Number.NaN
+  return Number.isFinite(endTimestamp) && endTimestamp <= now ? 'done' : 'planned'
+}
+
 export function createAdminAttendanceScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, Button, Banner, Avatar, StatusPill, Input, Badge, Dialog } = components
   const I = icons
@@ -175,13 +183,14 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const selectedStart = selectedSession?.start_at ? formatTime(selectedSession.start_at) : selectedSession?.start
     const selectedEnd = selectedSession?.end_at ? formatTime(selectedSession.end_at) : selectedSession?.end
     const selectedStatus = selectedSession?.is_cancelled || selectedSession?.isCancelled ? 'cancelled' : selectedSession?.status
+    const selectedDisplayStatus = attendanceSessionDisplayStatus(selectedSession)
     const sessionTypeLabel = { group: 'Групповое', individual: 'Индивидуальное', split: 'Сплит для двоих' }[selectedSession?.session_type || selectedSession?.sessionType] || 'Групповое'
 
     return (
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Занятие</h2>
+            <h1 className="page-title">Занятие</h1>
             <p className="page-desc">Состав и посещаемость тренировки.</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -229,7 +238,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
               </div>
               <div>
                 <div className="muted">Статус</div>
-                <StatusPill status={selectedStatus === 'cancelled' ? 'cancelled' : 'planned'} size="sm" />
+                <StatusPill status={selectedDisplayStatus} tone={selectedDisplayStatus === 'done' ? 'present' : undefined} size="sm" />
               </div>
             </div>
             <div className="ops-inline-add"><Input label="Причина отмены или переноса" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>

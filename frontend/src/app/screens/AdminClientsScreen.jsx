@@ -247,7 +247,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Клиенты</h2>
+            <h1 className="page-title">Клиенты</h1>
             <p className="page-desc">Родители, дети, контакты и связанные группы.</p>
           </div>
         </div>
@@ -382,41 +382,68 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             )}
           </div>
         </div>
-        <Table
-          rows={filteredRows}
-          emptyLabel={emptyLabel}
-          columns={[
-            { key: 'name', header: 'Участник', render: (row) => (
-              <button type="button" className="ops-link-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
-                <Avatar name={`${row.first} ${row.last}`} size={28} />
-                <span className="strong">{row.last} {row.first}</span>
-              </button>
-            ) },
-            { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
-            { key: 'email', header: 'Email', muted: true },
-            { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button" onClick={() => go?.('groups', { groupId: row.groupId })}>{row.group}</button> : row.group },
-            { key: 'finance', header: 'Финансы', width: 110, render: (row) => <button type="button" className="ops-count-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId, tab: 'subscriptions' })}>Открыть</button> },
-            { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.status} size="sm" /> },
-            {
-              key: 'act',
-              header: '',
-              width: 170,
-              render: (row) => (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <Button size="sm" variant="subtle" disabled={busy || !row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>Карточка</Button>
-                  {scope === 'active' ? (
-                    <>
-                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>Изменить</Button>
-                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => setClientAction({ type: 'archive', row })}>В чёрный список</Button>
-                    </>
-                  ) : (
-                    <Button size="sm" variant="primary" disabled={busy} onClick={() => setClientAction({ type: 'restore', row })}>Восстановить</Button>
-                  )}
-                </div>
-              ),
-            },
-          ]}
-        />
+        <div className="ops-client-desktop-table">
+          <Table
+            rows={filteredRows}
+            emptyLabel={emptyLabel}
+            columns={[
+              { key: 'name', header: 'Участник', render: (row) => (
+                <button type="button" className="ops-link-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
+                  <Avatar name={`${row.first} ${row.last}`} size={28} />
+                  <span className="strong">{row.last} {row.first}</span>
+                </button>
+              ) },
+              { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
+              { key: 'email', header: 'Email', muted: true },
+              { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button" onClick={() => go?.('groups', { groupId: row.groupId })}>{row.group}</button> : row.group },
+              { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.status} size="sm" /> },
+              {
+                key: 'act',
+                header: '',
+                width: 170,
+                render: (row) => (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Button size="sm" variant="subtle" disabled={busy || !row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>Карточка</Button>
+                    {scope === 'active' ? (
+                      <>
+                        <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>Изменить</Button>
+                        <Button size="sm" variant="subtle" disabled={busy} onClick={() => setClientAction({ type: 'archive', row })}>В чёрный список</Button>
+                      </>
+                    ) : (
+                      <Button size="sm" variant="primary" disabled={busy} onClick={() => setClientAction({ type: 'restore', row })}>Восстановить</Button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </div>
+        <div className="ops-client-mobile-list">
+          {filteredRows.map((row) => {
+            const Card = row.clientId ? 'button' : 'article'
+            return (
+              <Card
+                key={row.id}
+                type={row.clientId ? 'button' : undefined}
+                className={`ops-client-mobile-card${row.clientId ? ' is-linked' : ''}`}
+                aria-label={row.clientId ? `Открыть профиль клиента ${row.last} ${row.first}` : undefined}
+                onClick={row.clientId ? () => go?.('clientDetail', { clientId: row.clientId }) : undefined}
+              >
+                <span className="ops-client-mobile-person">
+                  <Avatar name={`${row.first} ${row.last}`} size={32} />
+                  <strong>{row.last} {row.first}</strong>
+                  <StatusPill status={row.status} size="sm" />
+                </span>
+                <span className="ops-client-mobile-details">
+                  <span><small>Телефон</small><span className="mono">{row.phone || '-'}</span></span>
+                  <span><small>Email</small><span>{row.email || '-'}</span></span>
+                  <span><small>Группа</small><span>{row.group || 'Индивидуально'}</span></span>
+                </span>
+              </Card>
+            )
+          })}
+          {!filteredRows.length && <div className="empty">{emptyLabel}</div>}
+        </div>
         {clientAction && (
           <Dialog
             title={clientAction.type === 'archive' ? 'Переместить клиента в чёрный список?' : 'Восстановить клиента?'}

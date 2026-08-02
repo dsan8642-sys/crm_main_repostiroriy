@@ -50,6 +50,10 @@ class Prompt05SchedulePrivacyTest(TestCase):
         )
 
     def test_individual_context_is_minimal_and_role_scoped(self):
+        SessionTypeConfig.objects.update_or_create(
+            code=SessionType.INDIVIDUAL,
+            defaults={"label": "Персональная тренировка", "is_active": True},
+        )
         date_value = timezone.localdate(self.start).isoformat()
 
         admin_client = Client()
@@ -64,6 +68,7 @@ class Prompt05SchedulePrivacyTest(TestCase):
             individual["individual_participant"],
             {"id": self.student.id, "full_name": self.student.full_name},
         )
+        self.assertEqual(individual["presentation_type_label"], "Персональная тренировка")
         self.assertIsNone(group["individual_participant"])
 
         trainer_client = Client()
@@ -72,10 +77,12 @@ class Prompt05SchedulePrivacyTest(TestCase):
             "/api/trainer/sessions/",
             {"date_from": date_value, "date_to": date_value},
         ).json()["sessions"]
+        trainer_individual = next(row for row in trainer_rows if row["id"] == self.individual.id)
         self.assertEqual(
-            next(row for row in trainer_rows if row["id"] == self.individual.id)["individual_participant"],
+            trainer_individual["individual_participant"],
             {"id": self.student.id, "full_name": self.student.full_name},
         )
+        self.assertEqual(trainer_individual["presentation_type_label"], "Персональная тренировка")
 
         other_trainer_client = Client()
         other_trainer_client.force_login(self.other_trainer.user)
@@ -98,6 +105,7 @@ class Prompt05SchedulePrivacyTest(TestCase):
             },
         ).json()["sessions"]
         self.assertEqual(parent_rows[0]["individual_participant"]["id"], self.student.id)
+        self.assertEqual(parent_rows[0]["presentation_type_label"], "Персональная тренировка")
         self.assertNotIn(self.foreign_student.full_name, json.dumps(parent_rows))
 
         foreign_client = Client()

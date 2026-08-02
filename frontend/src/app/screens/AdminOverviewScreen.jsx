@@ -28,7 +28,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
       <div className="page">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Рабочий стол</h2>
+            <h1 className="page-title">Рабочий стол</h1>
             <p className="page-desc">Быстрый вход в ежедневные действия.</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -47,26 +47,39 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
         <div className="eyebrow" style={{ marginBottom: 10 }}>Быстрые переходы</div>
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
           <Kpi icon={<I.Calendar size={15} />} label="Занятия" value={sessions.length} sub="Сегодня и ближайшие" onClick={() => go('schedule', { tab: 'day' })} />
-          <Kpi icon={<I.Users size={15} />} label="Клиенты" value={(data.clients || []).length} sub="Открыть базу" onClick={() => go('clients')} />
-          <Kpi icon={<I.Whistle size={15} />} label="Тренеры" value={(data.trainers || []).filter((row) => row.active).length} sub="Открыть команду" onClick={() => go('trainers')} />
+          <Kpi icon={<I.ClientFamily size={15} />} label="Клиенты" value={(data.clients || []).length} sub="Открыть базу" onClick={() => go('clients')} />
+          <Kpi icon={<I.TrainerWhistle size={15} />} label="Тренеры" value={(data.trainers || []).filter((row) => row.active).length} sub="Открыть команду" onClick={() => go('trainers')} />
           <Kpi icon={<I.Alert size={15} />} label="Должники" value={debtors.length} sub={`${debtTotal.toLocaleString('pl-PL')} zl`} tone="var(--money-debt)" onClick={() => go('debtors')} />
         </div>
 
         <div className="eyebrow" style={{ marginBottom: 10 }}>Ближайшие занятия</div>
-        <div className="card">
+        <div className="card ops-upcoming-sessions">
           {sessions.slice(0, 8).map((session, index, list) => (
             <button
               key={session.id}
               type="button"
-              className="ops-list-click-row"
+              className="ops-list-click-row ops-upcoming-session-row"
               onClick={() => go('attendance', { sessionId: session.sessionId })}
               style={{ borderBottom: index < list.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}
             >
-              <span className="mono" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)', width: 190 }}>{session.date} · {session.start}-{session.end}</span>
-              <span className="strong" style={{ flex: 1 }}>{session.group}</span>
-              <span className="muted" style={{ fontSize: 'var(--fs-sm)', width: 150 }}>{session.trainer}</span>
-              <span className="muted" style={{ fontSize: 'var(--fs-xs)', width: 150 }}>{session.location}</span>
-              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : 'Запланировано'}</Badge>
+              <span className="ops-upcoming-session-primary">
+                <span className="mono ops-upcoming-session-time">{session.date} · {session.start}-{session.end}</span>
+                <span className="strong ops-upcoming-session-name">{session.group}</span>
+              </span>
+              <span className="ops-upcoming-session-secondary">
+                <span className="ops-upcoming-session-details">
+                  <span className="muted ops-upcoming-session-trainer">{session.trainer}</span>
+                  <span className="muted ops-upcoming-session-location">{session.location}</span>
+                </span>
+                <span className="ops-upcoming-session-status">
+                  <Badge
+                    tone={session.status === 'cancelled' ? 'danger' : 'primary'}
+                    style={{ maxWidth: '100%', height: 'auto', minHeight: 20, whiteSpace: 'normal', textAlign: 'center' }}
+                  >
+                    {session.status === 'cancelled' ? 'Отменено' : 'Запланировано'}
+                  </Badge>
+                </span>
+              </span>
             </button>
           ))}
           {sessions.length === 0 && (

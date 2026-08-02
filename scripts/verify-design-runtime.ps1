@@ -7,8 +7,13 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $pairs = @(
     @("design\styles.css", "frontend\src\design\styles.css"),
     @("design\_ds_bundle.js", "frontend\src\design\_ds_bundle.js"),
+    @("design\tokens\colors.css", "frontend\src\design\tokens\colors.css"),
     @("design\tokens\fonts.css", "frontend\src\design\tokens\fonts.css"),
+    @("design\tokens\typography.css", "frontend\src\design\tokens\typography.css"),
+    @("design\tokens\schedule-palette.json", "frontend\src\design\tokens\schedule-palette.json"),
+    @("design\tokens\schedule-palette.json", "swimcrm\common\schedule_palette.json"),
     @("design\ui_kits\shared\kit.css", "frontend\src\design\ui_kits\shared\kit.css"),
+    @("design\assets\fonts\ibm-plex\IBMPlexSans-Variable.woff2", "frontend\src\design\assets\fonts\ibm-plex\IBMPlexSans-Variable.woff2"),
     @("design\assets\fonts\ibm-plex\IBMPlexSans-Regular.woff2", "frontend\src\design\assets\fonts\ibm-plex\IBMPlexSans-Regular.woff2"),
     @("design\assets\fonts\ibm-plex\IBMPlexSans-SemiBold.woff2", "frontend\src\design\assets\fonts\ibm-plex\IBMPlexSans-SemiBold.woff2"),
     @("design\assets\fonts\ibm-plex\IBMPlexMono-Regular.woff2", "frontend\src\design\assets\fonts\ibm-plex\IBMPlexMono-Regular.woff2"),

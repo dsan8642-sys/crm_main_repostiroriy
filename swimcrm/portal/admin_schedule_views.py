@@ -121,8 +121,13 @@ def admin_schedule_sessions(request):
         qs = qs.filter(group_id=request.GET["group_id"])
     if request.GET.get("cancelled") in {"true", "false"}:
         qs = qs.filter(is_cancelled=request.GET["cancelled"] == "true")
+    type_colors = session_type_color_keys()
     return JsonResponse(paginated_payload(
-        request, qs, key="sessions", serializer=_session_payload))
+        request,
+        qs,
+        key="sessions",
+        serializer=lambda session: _session_payload(session, type_color_keys=type_colors),
+    ))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])

@@ -1,3 +1,6 @@
+import { normalizeScheduleColorKey } from './app/schedulePalette.js'
+
+
 export function asMoneyMajor(minor) {
   return Math.round((Number(minor || 0) / 100) * 100) / 100
 }
@@ -93,8 +96,12 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         group: session.group?.name || 'Индивидуальное',
         trainer: session.trainer,
         location: session.location,
+        count: session.participants_count || 0,
+        limit: session.max_participants || 0,
         status: sessionStatus(session),
         sessionType: session.session_type || 'group',
+        sessionTypeLabel: session.presentation_type_label || '',
+        colorKey: normalizeScheduleColorKey(session.presentation_color_key),
         individualParticipant: session.individual_participant || null,
         deductsExpected: session.is_cancelled ? 0 : 1,
       })) : [],
@@ -167,9 +174,12 @@ export function mapTrainerSession(session) {
     groupId: session.group?.id || '',
     group: session.group?.name || 'Индивидуальное',
     location: session.location,
-    count: session.max_participants || 0,
+    count: session.participants_count || 0,
+    limit: session.max_participants || 0,
     status: sessionStatus(session),
     sessionType: session.session_type || 'group',
+    sessionTypeLabel: session.presentation_type_label || '',
+    colorKey: normalizeScheduleColorKey(session.presentation_color_key),
     individualParticipant: session.individual_participant || null,
     trainer: session.effective_trainer || session.trainer,
   }
@@ -239,6 +249,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       price: group.price_minor == null ? null : asMoneyMajor(group.price_minor),
       priceMinor: group.price_minor,
       currency: group.currency,
+      defaultCapacity: group.default_capacity ?? null,
+      colorKey: normalizeScheduleColorKey(group.color_key),
       active: group.is_active,
     })),
     subscriptionTypes: (subscriptionTypes?.subscription_types || []).map((type) => ({
@@ -287,6 +299,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       trainerId: session.trainer_id || '',
       notes: session.notes || '',
       sessionType: session.session_type || 'group',
+      sessionTypeLabel: session.presentation_type_label || '',
+      colorKey: normalizeScheduleColorKey(session.presentation_color_key),
       isCancelled: session.is_cancelled,
       start: formatTime(session.start_at),
       end: formatTime(session.end_at),

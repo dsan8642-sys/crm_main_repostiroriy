@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from localization.models import DictionaryKey
 from notifications.models import NotificationTemplate
+from common.schedule_palette import stored_schedule_color_key, validate_schedule_color_key
 
 from .support import _bool_value
 
@@ -46,6 +47,7 @@ def session_type_payload(session_type):
         "default_price_minor": session_type.default_price_minor,
         "default_currency": session_type.default_currency,
         "default_duration_minutes": session_type.default_duration_minutes,
+        "color_key": stored_schedule_color_key(session_type.color_key),
         "is_active": session_type.is_active,
         "created_at": timezone.localtime(session_type.created_at).isoformat() if session_type.created_at else None,
         "updated_at": timezone.localtime(session_type.updated_at).isoformat() if session_type.updated_at else None,
@@ -68,6 +70,8 @@ def apply_session_type(session_type, data):
         session_type.default_currency = (data.get("default_currency") or "PLN").upper()
     if "default_duration_minutes" in data:
         session_type.default_duration_minutes = int(data.get("default_duration_minutes"))
+    if "color_key" in data:
+        session_type.color_key = validate_schedule_color_key(data.get("color_key"))
     if "is_active" in data:
         session_type.is_active = _bool_value(data.get("is_active"), True)
     session_type.full_clean()

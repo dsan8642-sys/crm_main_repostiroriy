@@ -85,6 +85,11 @@ export function periodCountLabel(count, viewMode) {
   return `За ${period}: ${count}`
 }
 
+export function newSessionCapacity({ groupCapacity, typeCapacity, currentCapacity }) {
+  const preferred = groupCapacity ?? typeCapacity ?? currentCapacity
+  return preferred == null ? '' : String(preferred)
+}
+
 export function validateAdminSessionForm(form) {
   const errors = {}
   if (!form.trainerId) errors.trainerId = 'Выберите тренера.'

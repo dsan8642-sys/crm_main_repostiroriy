@@ -16,16 +16,29 @@ New-Item -ItemType Directory -Force -Path (Join-Path $FrontendDesignDir "tokens"
 New-Item -ItemType Directory -Force -Path (Join-Path $FrontendDesignDir "ui_kits\shared") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $FrontendDesignDir "assets\fonts\ibm-plex") | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $DesignDir "styles.css") -Destination (Join-Path $FrontendDesignDir "styles.css") -Force
-Copy-Item -LiteralPath (Join-Path $DesignDir "_ds_bundle.js") -Destination (Join-Path $FrontendDesignDir "_ds_bundle.js") -Force
+function Copy-IfChanged {
+    param([string]$Source, [string]$Destination)
+    $same = (Test-Path -LiteralPath $Destination -PathType Leaf) -and
+        ((Get-FileHash -Algorithm SHA256 -LiteralPath $Source).Hash -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash)
+    if (-not $same) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    }
+}
+
+Copy-IfChanged (Join-Path $DesignDir "styles.css") (Join-Path $FrontendDesignDir "styles.css")
+Copy-IfChanged (Join-Path $DesignDir "_ds_bundle.js") (Join-Path $FrontendDesignDir "_ds_bundle.js")
 Get-ChildItem -LiteralPath (Join-Path $DesignDir "tokens") -Filter "*.css" -File |
     ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $FrontendDesignDir "tokens") -Force
+        Copy-IfChanged $_.FullName (Join-Path (Join-Path $FrontendDesignDir "tokens") $_.Name)
     }
-Copy-Item -LiteralPath (Join-Path $DesignDir "ui_kits\shared\kit.css") -Destination (Join-Path $FrontendDesignDir "ui_kits\shared\kit.css") -Force
+Copy-IfChanged (Join-Path $DesignDir "tokens\schedule-palette.json") (Join-Path $FrontendDesignDir "tokens\schedule-palette.json")
+Copy-IfChanged (Join-Path $DesignDir "tokens\schedule-palette.json") (Join-Path $RepoRoot "swimcrm\common\schedule_palette.json")
+Copy-IfChanged (Join-Path $DesignDir "tokens\schedule-palette.json") (Join-Path $FrontendDesignDir "tokens\schedule-palette.json")
+Copy-IfChanged (Join-Path $DesignDir "tokens\schedule-palette.json") (Join-Path $RepoRoot "swimcrm\common\schedule_palette.json")
+Copy-IfChanged (Join-Path $DesignDir "ui_kits\shared\kit.css") (Join-Path $FrontendDesignDir "ui_kits\shared\kit.css")
 Get-ChildItem -LiteralPath (Join-Path $DesignDir "assets\fonts\ibm-plex") -File |
     ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $FrontendDesignDir "assets\fonts\ibm-plex") -Force
+        Copy-IfChanged $_.FullName (Join-Path (Join-Path $FrontendDesignDir "assets\fonts\ibm-plex") $_.Name)
     }
 
 Write-Host "Synced design runtime assets into frontend\src\design."

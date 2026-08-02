@@ -1,16 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { formatTime } from '../../mappers.js'
 import { DateField, TimeField } from '../DateTimeField.jsx'
 import {
   CalendarNavigation,
+  eventAccessibleLabel,
   ScheduleCalendar,
+  ScheduleEventContent,
   ScheduleViewSwitcher,
 } from '../ScheduleCalendar.jsx'
 import {
   calendarRange,
   DEFAULT_SCHEDULE_VIEW,
   localToday,
+  newSessionCapacity,
   periodCountLabel,
   periodSessionCount,
   sessionIsoDate,
@@ -21,6 +24,14 @@ import {
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { normalizeScheduleColorKey, scheduleColorStyle } from '../schedulePalette.js'
+
+const EMPTY_SCHEDULE_FILTERS = {
+  trainerId: '',
+  groupId: '',
+  location: '',
+  status: '',
+}
 
 function normalizeSession(session) {
   if (session.startAt) return session
@@ -35,6 +46,8 @@ function normalizeSession(session) {
     trainerId: session.trainer_id || '',
     notes: session.notes || '',
     sessionType: session.session_type || 'group',
+    sessionTypeLabel: session.presentation_type_label || '',
+    colorKey: normalizeScheduleColorKey(session.presentation_color_key),
     isCancelled: Boolean(session.is_cancelled),
     start: formatTime(session.start_at),
     end: formatTime(session.end_at),
@@ -76,7 +89,11 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       durationMinutes: '60',
       price: '',
       location: configuredLocations[0]?.name || '',
-      maxParticipants: '10',
+      maxParticipants: newSessionCapacity({
+        groupCapacity: groups[0]?.defaultCapacity,
+        typeCapacity: sessionTypeConfigs.find((item) => item.code === 'group')?.default_capacity,
+        currentCapacity: 10,
+      }),
       notes: '',
       sessionType: 'group',
       participantId: '',
@@ -114,13 +131,30 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
     const [focusDate, setFocusDate] = useState(localToday())
     const [filtersOpen, setFiltersOpen] = useState(false)
-    const [filters, setFilters] = useState({
-      trainerId: '',
-      groupId: '',
-      location: '',
-      status: '',
-    })
+    const [filters, setFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
+    const [draftFilters, setDraftFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
+    const filterPopoverRef = useRef(null)
     const [rangeRefresh, setRangeRefresh] = useState(0)
+
+    useEffect(() => {
+      if (!filtersOpen) return undefined
+      const closeWithoutApplying = () => {
+        setDraftFilters({ ...filters })
+        setFiltersOpen(false)
+      }
+      const onPointerDown = (event) => {
+        if (!filterPopoverRef.current?.contains(event.target)) closeWithoutApplying()
+      }
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') closeWithoutApplying()
+      }
+      document.addEventListener('pointerdown', onPointerDown)
+      document.addEventListener('keydown', onKeyDown)
+      return () => {
+        document.removeEventListener('pointerdown', onPointerDown)
+        document.removeEventListener('keydown', onKeyDown)
+      }
+    }, [filters, filtersOpen])
 
     useEffect(() => {
       if (['day', 'week', 'month'].includes(initialTab)) setViewMode(initialTab)
@@ -220,9 +254,34 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         ...current,
         sessionType,
         durationMinutes: String(defaults?.default_duration_minutes || 60),
-        maxParticipants: String(defaults?.default_capacity || (sessionType === 'split' ? 2 : current.maxParticipants)),
+        maxParticipants: newSessionCapacity({
+          groupCapacity: sessionType === 'group' ? group?.defaultCapacity : null,
+          typeCapacity: defaults?.default_capacity || (sessionType === 'split' ? 2 : null),
+          currentCapacity: current.maxParticipants,
+        }),
         price: defaultPriceMinor == null ? '' : String(defaultPriceMinor / 100),
       }))
+    }
+
+    function updateNewSessionGroup(groupId) {
+      const group = groups.find((item) => String(item.groupId) === String(groupId))
+      const defaults = sessionTypeConfigs.find((item) => item.code === sessionForm.sessionType)
+      setSessionForm((current) => ({
+        ...current,
+        groupId,
+        maxParticipants: newSessionCapacity({
+          groupCapacity: group?.defaultCapacity,
+          typeCapacity: defaults?.default_capacity,
+          currentCapacity: current.maxParticipants,
+        }),
+      }))
+      setFieldErrors((current) => {
+        if (!current.groupId && !current.maxParticipants) return current
+        const next = { ...current }
+        delete next.groupId
+        delete next.maxParticipants
+        return next
+      })
     }
 
     function openSessionShortcut(sessionType) {
@@ -465,19 +524,18 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       }
     }
 
-    function renderCalendarEvent(session) {
+    function renderCalendarEvent(session, { viewMode }) {
       return (
-        <div className="ops-schedule-event-wrap">
+        <div className="ops-schedule-event-wrap" data-view-mode={viewMode}>
           <button
             type="button"
             className={`ops-schedule-event${session.isCancelled ? ' is-cancelled' : ''}`}
+            aria-label={eventAccessibleLabel(session)}
+            data-color-key={session.colorKey}
             onClick={() => go('attendance', { sessionId: session.sessionId })}
+            style={scheduleColorStyle(session.colorKey)}
           >
-            <span className="mono">{session.start}-{session.end}</span>
-            <strong>{session.group}</strong>
-            {session.individualParticipant?.full_name && <small>{session.individualParticipant.full_name}</small>}
-            <small>{session.trainer}</small>
-            <small><I.Location size={11} /> {session.location}</small>
+            <ScheduleEventContent session={session} />
           </button>
           <button
             type="button"
@@ -498,12 +556,41 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
 
     return (
       <div className="page page-wide">
-        <div className="page-head">
+        <div className="page-head ops-schedule-page-head">
           <div>
-            <h2 className="page-title">Расписание</h2>
+            <h1 className="page-title">Расписание</h1>
             <p className="page-desc">Занятия и копирование периодов.</p>
           </div>
-          <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
+          <div className="ops-schedule-head-actions" ref={filterPopoverRef}>
+            <button
+              type="button"
+              className="ops-filter-trigger"
+              aria-expanded={filtersOpen}
+              aria-controls="admin-schedule-filters"
+              onClick={() => {
+                setDraftFilters({ ...filters })
+                setFiltersOpen((current) => !current)
+              }}
+            >
+              <span>Фильтры{activeFilterCount ? ` · ${activeFilterCount}` : ''}</span>
+              <span className="ops-filter-period-count"><Badge tone={activeFilterCount ? 'primary' : 'neutral'}>{periodCountLabel(periodCount, viewMode)}</Badge></span>
+            </button>
+            <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
+            {filtersOpen && (
+              <div id="admin-schedule-filters" className="ops-filter-popover" role="dialog" aria-label="Фильтры расписания">
+                <div className="ops-form-grid">
+                  <label>Тренер<select value={draftFilters.trainerId} onChange={(event) => setDraftFilters({ ...draftFilters, trainerId: event.target.value })}><option value="">Все</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
+                  <label>Группа<select value={draftFilters.groupId} onChange={(event) => setDraftFilters({ ...draftFilters, groupId: event.target.value })}><option value="">Все</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
+                  <label>Локация<select value={draftFilters.location} onChange={(event) => setDraftFilters({ ...draftFilters, location: event.target.value })}><option value="">Все</option>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
+                  <label>Статус<select value={draftFilters.status} onChange={(event) => setDraftFilters({ ...draftFilters, status: event.target.value })}><option value="">Все</option><option value="planned">Запланировано</option><option value="cancelled">Отменено</option></select></label>
+                </div>
+                <div className="ops-filter-actions">
+                  <Button size="sm" variant="subtle" onClick={() => setDraftFilters({ ...EMPTY_SCHEDULE_FILTERS })}>Сбросить</Button>
+                  <Button size="sm" variant="primary" onClick={() => { setFilters({ ...draftFilters }); setFiltersOpen(false) }}>Применить</Button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <ToastNotice id="admin-schedule-result" message={message} tone="success" />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
@@ -525,7 +612,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
               <span>{label}</span>
             </button>
           ))}
-          <button type="button" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'copy' ? null : 'copy')}><span>Копировать период</span><small>Предпросмотр перед записью</small></button>
+          <button type="button" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => setActionPanel((current) => current === 'copy' ? null : 'copy')}><span>Копировать период</span></button>
         </div>
 
         {actionPanel === 'session' && (
@@ -534,7 +621,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             <div className="ops-form-grid ops-schedule-form-grid">
               <label>Тип занятия<select value={sessionForm.sessionType} onChange={(event) => updateSessionType(event.target.value)}>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code} disabled={type.configured === false}>{type.label || type.code}</option>)}</select></label>
               {sessionForm.sessionType !== 'group' && <SearchableSelect inputId="admin-session-participantId" label="Участник" value={sessionForm.participantId} onChange={(value) => updateSessionForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant))} error={fieldErrors.participantId} />}
-              {sessionForm.sessionType === 'group' && <label>Группа<select id="admin-session-groupId" value={sessionForm.groupId} aria-invalid={Boolean(fieldErrors.groupId)} aria-describedby={fieldErrors.groupId ? 'admin-session-groupId-error' : undefined} onChange={(event) => updateSessionForm('groupId', event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{fieldErrors.groupId && <small id="admin-session-groupId-error" className="ops-field-error" role="alert">{fieldErrors.groupId}</small>}</label>}
+              {sessionForm.sessionType === 'group' && <label>Группа<select id="admin-session-groupId" value={sessionForm.groupId} aria-invalid={Boolean(fieldErrors.groupId)} aria-describedby={fieldErrors.groupId ? 'admin-session-groupId-error' : undefined} onChange={(event) => updateNewSessionGroup(event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{fieldErrors.groupId && <small id="admin-session-groupId-error" className="ops-field-error" role="alert">{fieldErrors.groupId}</small>}</label>}
               <label>Тренер<select id="admin-session-trainerId" value={sessionForm.trainerId} aria-invalid={Boolean(fieldErrors.trainerId)} aria-describedby={fieldErrors.trainerId ? 'admin-session-trainerId-error' : undefined} onChange={(event) => updateSessionForm('trainerId', event.target.value)}><option value="">Выберите тренера</option>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{fieldErrors.trainerId && <small id="admin-session-trainerId-error" className="ops-field-error" role="alert">{fieldErrors.trainerId}</small>}</label>
               <DateField id="admin-session-date" label="Дата" value={sessionForm.date} onChange={(value) => updateSessionForm('date', value)} required error={fieldErrors.date} />
               <TimeField id="admin-session-start" label="Начало" value={sessionForm.start} onChange={(value) => updateSessionForm('start', value)} required error={fieldErrors.start} />
@@ -593,7 +680,6 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           </div>
         )}
 
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Занятия</div>
         <div className="ops-calendar-toolbar">
           <CalendarNavigation
             focusDate={focusDate}
@@ -601,19 +687,6 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             viewMode={viewMode}
             setViewMode={setViewMode}
           />
-          <details className="ops-filter-disclosure" open={filtersOpen} onToggle={(event) => setFiltersOpen(event.currentTarget.open)}>
-            <summary>
-              <span>Фильтры{activeFilterCount ? ` · ${activeFilterCount}` : ''}</span>
-              <Badge tone={activeFilterCount ? 'primary' : 'neutral'}>{periodCountLabel(periodCount, viewMode)}</Badge>
-            </summary>
-            <div className="ops-form-grid">
-              <label>Тренер<select value={filters.trainerId} onChange={(event) => setFilters({ ...filters, trainerId: event.target.value })}><option value="">Все</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
-              <label>Группа<select value={filters.groupId} onChange={(event) => setFilters({ ...filters, groupId: event.target.value })}><option value="">Все</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
-              <label>Локация<select value={filters.location} onChange={(event) => setFilters({ ...filters, location: event.target.value })}><option value="">Все</option>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
-              <label>Статус<select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option value="">Все</option><option value="planned">Запланировано</option><option value="cancelled">Отменено</option></select></label>
-            </div>
-            {activeFilterCount > 0 && <Button size="sm" variant="subtle" onClick={() => setFilters({ trainerId: '', groupId: '', location: '', status: '' })}>Сбросить фильтры</Button>}
-          </details>
         </div>
         {displayMode === 'calendar' && (
           <ScheduleCalendar
@@ -632,7 +705,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                 key={session.id}
                 role="button"
                 tabIndex={0}
-                className="ops-session-row"
+                aria-label={eventAccessibleLabel(session)}
+                className={`ops-session-row${session.isCancelled ? ' is-cancelled' : ''}`}
+                data-color-key={session.colorKey}
                 onClick={() => go('attendance', { sessionId: session.sessionId })}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
@@ -640,10 +715,11 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                     go('attendance', { sessionId: session.sessionId })
                   }
                 }}
-                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}
+                style={{ ...scheduleColorStyle(session.colorKey), display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}
               >
                 <span className="mono">{sessionIsoDate(session)}</span>
                 <span className="mono">{session.start}-{session.end}</span>
+                {session.limit > 0 && <span className="mono">{session.count}/{session.limit}</span>}
                 <span className="strong" style={{ flex: 1 }}>{session.group}{session.individualParticipant?.full_name ? ` · ${session.individualParticipant.full_name}` : ''}</span>
                 <span className="muted">{session.trainer}</span>
                 <span className="muted">{session.location}</span>

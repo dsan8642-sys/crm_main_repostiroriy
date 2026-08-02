@@ -25,6 +25,11 @@ function collectPageErrors(page) {
   return errors
 }
 
+function localIsoDateTime(date) {
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/health/', async (route) => {
     await route.fulfill({
@@ -102,12 +107,610 @@ test('icon-only buttons have accessible names', async ({ page }) => {
   expect(unnamedIconButtons).toBe(0)
 })
 
+test('shared shell and calendar keep mobile controls compact and accessible', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile calendar contract')
+  const errors = collectPageErrors(page)
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': {
+      sessions: [
+        {
+          id: 1, start_at: '2026-08-03T08:00:00+02:00', end_at: '2026-08-03T09:00:00+02:00',
+          location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek',
+          group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1,
+        },
+      ],
+    },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  })
+
+  await page.goto('/?role=admin&view=schedule')
+  await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+
+  const theme = await page.evaluate(async () => {
+    await document.fonts.ready
+    const root = getComputedStyle(document.documentElement)
+    const body = getComputedStyle(document.body)
+    const heading = getComputedStyle(document.querySelector('.page-title'))
+    const sidebar = getComputedStyle(document.querySelector('.ops-sidebar'))
+    const logo = getComputedStyle(document.querySelector('.ops-brand-mark'))
+    return {
+      primary: root.getPropertyValue('--primary').trim(),
+      primaryHover: root.getPropertyValue('--primary-hover').trim(),
+      bodyFamily: body.fontFamily,
+      bodyWeight: body.fontWeight,
+      variableFaceLoaded: document.fonts.check('450 14px "IBM Plex Sans"'),
+      headingWeight: heading.fontWeight,
+      sidebarBackground: sidebar.backgroundColor,
+      logoBackground: logo.backgroundImage,
+    }
+  })
+  expect(theme.primary.toLowerCase()).toBe('#1a7dc4')
+  expect(theme.primaryHover.toLowerCase()).toBe('#1364a3')
+  expect(theme.bodyFamily).toContain('IBM Plex Sans')
+  expect(theme.bodyWeight).toBe('450')
+  expect(theme.variableFaceLoaded).toBe(true)
+  expect(theme.headingWeight).toBe('600')
+  expect(theme.sidebarBackground).toBe('rgb(16, 24, 40)')
+  expect(theme.logoBackground).not.toContain('15, 118, 110')
+
+  const shellLayout = await page.locator('.ops-sidebar-head').evaluate((head) => {
+    const brand = head.querySelector('.ops-brand')?.getBoundingClientRect()
+    const logout = head.querySelector('[aria-label="Выйти"]')?.getBoundingClientRect()
+    return {
+      sameRow: Boolean(brand && logout && Math.abs(brand.top - logout.top) <= 2),
+      logoutSize: logout ? Math.min(logout.width, logout.height) : 0,
+    }
+  })
+  expect(shellLayout).toEqual({ sameRow: true, logoutSize: 44 })
+
+  const strip = page.locator('.ops-mobile-week-strip')
+  await expect(strip.getByRole('tab')).toHaveCount(7)
+  expect(await strip.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+  const visuallyHiddenBoxes = await Promise.all([
+    page.getByText('Опорная дата', { exact: true }).boundingBox(),
+    page.getByText(/Неделя · \d{4}-\d{2}-\d{2}/).boundingBox(),
+  ])
+  for (const box of visuallyHiddenBoxes) {
+    expect(box?.width || 0).toBeLessThanOrEqual(1)
+    expect(box?.height || 0).toBeLessThanOrEqual(1)
+  }
+  await expect(page.getByRole('textbox', { name: 'Опорная дата', exact: true })).toBeVisible()
+  await expect(page.getByText('Занятия', { exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Месяц', exact: true }).click()
+  const marker = page.locator('.ops-calendar-marker').first()
+  if (await marker.count()) await expect(marker).not.toContainText('•')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  expect(errors).toEqual([])
+})
+
+test('approved preview follow-ups define the responsive shell and calendar', async ({ page }) => {
+  const errors = collectPageErrors(page)
+  const sessions = [
+    {
+      id: 1, start_at: '2026-08-03T08:00:00+02:00', end_at: '2026-08-03T09:00:00+02:00',
+      location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek',
+      group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 15, participants_count: 6,
+      presentation_color_key: 'forest-01',
+    },
+    {
+      id: 2, start_at: '2026-08-03T10:00:00+02:00', end_at: '2026-08-03T11:00:00+02:00',
+      location: 'Basen B', session_type: 'individual', trainer_id: 1, trainer: 'Marek',
+      group: null, individual_participant: { id: 7, full_name: 'Anna Nowak' }, is_cancelled: true,
+      max_participants: 1, participants_count: 1, presentation_type_label: 'Индивидуальная тренировка',
+      presentation_color_key: 'coral-01',
+    },
+  ]
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [{ id: 1, name: 'Marek' }], groups: [{ id: 1, name: 'Delfiny' }],
+      subscription_types: [], locations: [{ id: 1, name: 'Basen A' }, { id: 2, name: 'Basen B' }],
+      session_types: [], participants: [], choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': { sessions },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  })
+
+  await page.goto('/?role=admin&view=schedule')
+  await expect(page.getByRole('heading', { level: 1, name: 'Расписание' })).toBeVisible()
+  await expect(page.locator('.ops-topbar .ops-crumb, .ops-topbar .sub, .ops-topbar h1')).toHaveCount(0)
+  await expect(page.locator('.ops-topbar')).toHaveCSS('background-color', 'rgb(238, 246, 253)')
+  await expect(page.locator('.ops-global-search > input')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.locator('.ops-sidebar')).toHaveCSS('background-color', 'rgb(16, 24, 40)')
+
+  const actionCards = page.locator('.ops-action-card')
+  await expect(actionCards).toHaveCount(4)
+  await expect(actionCards.first()).toHaveCSS('align-items', 'center')
+  await expect(actionCards.first()).toHaveCSS('text-align', 'center')
+  const copyPeriodAction = page.getByRole('button', { name: 'Копировать период', exact: true })
+  await expect(copyPeriodAction).toBeVisible()
+  await expect(copyPeriodAction.locator('small')).toHaveCount(0)
+  await expect(copyPeriodAction).not.toContainText('Предпросмотр перед записью')
+
+  const width = page.viewportSize()?.width || 0
+  const logout = page.getByRole('button', { name: 'Выйти', exact: true })
+  await expect(logout).toHaveCount(1)
+  if (width >= 961) {
+    await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
+    await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
+    await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toHaveCount(0)
+  } else {
+    await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toBeVisible()
+  }
+
+  await page.getByRole('textbox', { name: 'Опорная дата', exact: true }).fill('2026-08-03')
+  await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+  const individualEvent = page.locator('.ops-schedule-event:visible').filter({ hasText: 'Anna Nowak' }).first()
+  await expect(individualEvent.locator('.ops-event-title')).toHaveText('Индивидуальная тренировка')
+  await expect(individualEvent.locator('.ops-event-type')).toHaveText('Anna Nowak')
+  await expect(individualEvent.locator('.ops-event-title')).toHaveCSS('font-size', '14px')
+  await expect(individualEvent.locator('.ops-event-type')).toHaveCSS('font-size', '13px')
+  await expect(individualEvent.locator('.ops-event-secondary').first()).toHaveCSS('font-size', '12px')
+
+  const filterTrigger = page.getByRole('button', { name: /Фильтры/ })
+  const viewSwitcher = page.locator('.ops-view-switcher')
+  const [filterBox, switcherBox] = await Promise.all([filterTrigger.boundingBox(), viewSwitcher.boundingBox()])
+  expect(
+    ((filterBox?.x || 0) + (filterBox?.width || 0)) <= (switcherBox?.x || 0) + 1,
+    `filter must stay left of view switcher: ${JSON.stringify({ filterBox, switcherBox })}`,
+  ).toBe(true)
+  await filterTrigger.click()
+  const filterPanel = page.getByRole('dialog', { name: 'Фильтры расписания' })
+  await expect(filterPanel).toBeVisible()
+  await filterPanel.getByLabel('Статус').selectOption('cancelled')
+  await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+  await filterPanel.getByRole('button', { name: 'Применить', exact: true }).click()
+  await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(1)
+  await filterTrigger.click()
+  await filterPanel.getByLabel('Статус').selectOption('planned')
+  await page.keyboard.press('Escape')
+  await filterTrigger.click()
+  await expect(filterPanel.getByLabel('Статус')).toHaveValue('cancelled')
+  await filterPanel.getByLabel('Статус').selectOption('')
+  await filterPanel.getByRole('button', { name: 'Применить', exact: true }).click()
+
+  if (width >= 769) {
+    const eventWrap = page.locator('.ops-schedule-event-wrap:visible').filter({ hasText: 'Delfiny' }).first()
+    const event = eventWrap.locator('.ops-schedule-event')
+    await expect(event.locator('.ops-event-occupancy')).toHaveText('6/15')
+    await expect(event.locator('.ops-event-occupancy')).toHaveAttribute('aria-label', 'Записано 6 из 15')
+    await expect(event).toHaveAttribute('aria-label', /Записано 6 из 15/)
+    await expect(event.locator('.ops-event-title')).toHaveText('Delfiny')
+    await expect(event.locator('.ops-event-title')).toHaveCSS('font-size', '14px')
+    await expect(event.locator('.ops-event-type')).toHaveText('Групповая тренировка')
+    await expect(event.locator('.ops-event-type')).toHaveCSS('font-size', '13px')
+    await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-size', '12px')
+    await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(77, 89, 103)')
+    await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-weight', '500')
+    await expect(event.locator('.ops-event-primary')).toHaveCSS('justify-content', 'space-between')
+    await expect(event).toHaveCSS('padding-right', '9px')
+    expect((await event.boundingBox())?.height || 0).toBeGreaterThanOrEqual(92)
+    await expect(event).toHaveCSS('border-top-width', '0px')
+    await expect(event).toHaveCSS('border-right-width', '0px')
+    await expect(event).toHaveCSS('border-bottom-width', '0px')
+    await expect(event).toHaveCSS('border-left-width', '0px')
+    expect(await event.evaluate((node) => getComputedStyle(node).getPropertyValue('--schedule-card-fill'))).toContain('38%')
+    expect(await event.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(232, 245, 233)')
+    const action = eventWrap.locator('.ops-schedule-event-edit')
+    await expect(action).toBeHidden()
+    await eventWrap.hover()
+    await expect(action).toBeVisible()
+
+    await page.getByRole('button', { name: 'Месяц', exact: true }).click()
+    const weekdayHeader = page.getByTestId('month-weekday-header')
+    await expect(weekdayHeader).toBeVisible()
+    await expect(weekdayHeader.locator('.ops-calendar-weekday')).toHaveCount(7)
+    await expect(weekdayHeader.locator('.ops-calendar-weekday strong').first()).toHaveCSS('font-size', '16px')
+    await expect(page.locator('.ops-schedule-event:visible .ops-event-type').first()).toBeVisible()
+    await expect(page.locator('.ops-schedule-event:visible .ops-event-trainer').first()).toBeHidden()
+    const weekdayCenters = await weekdayHeader.locator('.ops-calendar-weekday').evaluateAll((nodes) => (
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return box.left + box.width / 2
+      })
+    ))
+    const firstWeekCenters = await page.locator('.ops-calendar-grid > .ops-schedule-day').evaluateAll((nodes) => (
+      nodes.slice(0, 7).map((node) => {
+        const box = node.getBoundingClientRect()
+        return box.left + box.width / 2
+      })
+    ))
+    weekdayCenters.forEach((center, index) => expect(Math.abs(center - firstWeekCenters[index])).toBeLessThan(1.5))
+    await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
+    const dateButton = page.locator('.ops-schedule-day > header button').first()
+    await expect(dateButton).toHaveCSS('color', 'rgb(17, 24, 39)')
+
+    if (width === 1440) {
+      await page.setViewportSize({ width: 769, height: 900 })
+      await expect(page.locator('.ops-schedule-event-edit').first()).toBeHidden()
+      await page.setViewportSize({ width: 960, height: 900 })
+      await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toBeVisible()
+      await page.setViewportSize({ width: 961, height: 900 })
+      await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
+      await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
+    }
+  } else {
+    const dot = page.locator('.ops-mobile-week-dot').first()
+    await expect(dot).toBeVisible()
+    await expect(dot).toHaveCSS('background-color', 'rgb(26, 125, 196)')
+    await expect(page.locator('.ops-mobile-week-strip small')).toHaveCount(0)
+    await expect(page.locator('.ops-schedule-event-edit').first()).toBeVisible()
+  }
+  expect(errors).toEqual([])
+})
+
+test('attendance shows a past non-cancelled session as completed', async ({ page }) => {
+  const pastSession = {
+    id: 71,
+    start_at: '2025-01-15T10:00:00+01:00',
+    end_at: '2025-01-15T11:00:00+01:00',
+    location: 'Basen A',
+    session_type: 'group',
+    status: 'planned',
+    is_cancelled: false,
+    trainer_id: 1,
+    trainer: 'Marek',
+    group: { id: 1, name: 'Delfiny' },
+    max_participants: 15,
+    participants_count: 0,
+  }
+  const futureSession = {
+    ...pastSession,
+    id: 72,
+    start_at: '2099-01-15T10:00:00+01:00',
+    end_at: '2099-01-15T11:00:00+01:00',
+  }
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [{ id: 1, name: 'Marek' }], groups: [{ id: 1, name: 'Delfiny' }],
+      subscription_types: [], locations: [{ id: 1, name: 'Basen A' }], session_types: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/schedule/sessions/': { sessions: [pastSession, futureSession] },
+    '/api/admin/schedule/sessions/71/attendance/': { session: pastSession, history: [], students: [] },
+    '/api/admin/schedule/sessions/72/attendance/': { session: futureSession, history: [], students: [] },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  })
+
+  await page.goto('/?role=admin&view=attendance&session=71')
+  const statusSummary = page.locator('.ops-session-summary > div').filter({ hasText: 'Статус' })
+  await expect(statusSummary).toContainText('Завершено')
+  await expect(statusSummary).not.toContainText('Запланировано')
+  const completedPill = statusSummary.locator('span').filter({ hasText: 'Завершено' }).last()
+  await expect(completedPill).toHaveCSS('background-color', 'rgb(233, 247, 238)')
+  await expect(completedPill).toHaveCSS('color', 'rgb(15, 97, 20)')
+  await expect(completedPill).toHaveCSS('border-color', 'rgb(205, 236, 215)')
+
+  await page.locator('.ops-session-detail-grid select').first().selectOption('72')
+  await expect(statusSummary).toContainText('Запланировано')
+  await expect(statusSummary).not.toContainText('Завершено')
+})
+
+test('admin schedule color pickers stay compact and reveal the approved palette on demand', async ({ page }) => {
+  const errors = collectPageErrors(page)
+  let submittedColor = null
+  const emptyPages = {
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/payroll/schemes/': { schemes: [] },
+    '/api/admin/payroll/rules/': { rules: [] },
+    '/api/admin/payroll/assignments/': { assignments: [] },
+    '/api/admin/payroll/periods/': { periods: [] },
+    '/api/admin/notifications/logs/': { logs: [] },
+    '/api/admin/notifications/templates/': { templates: [] },
+    '/api/admin/notifications/rules/': { rules: [] },
+    '/api/admin/notifications/quiet-hours/': { policies: [] },
+    '/api/admin/settings/locations/': { locations: [] },
+    '/api/admin/settings/languages/': { languages: [] },
+    '/api/admin/settings/dictionary-keys/': { keys: [] },
+    '/api/admin/settings/dictionary-translations/': { translations: [] },
+    '/api/admin/settings/notification-template-translations/': { translations: [] },
+    '/api/admin/system/audit/': { entries: [] },
+    '/api/admin/system/imports/': { batches: [] },
+    '/api/admin/system/security/': { users: [] },
+    '/api/admin/system/credentials/': { username: 'admin', role: 'admin' },
+  }
+  await mockPortal(page, {
+    '/api/csrf/': { ok: true },
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Admin' },
+    '/api/admin/dashboard/': { metrics: {} },
+    '/api/admin/reference/': {
+      trainers: [], groups: [{ id: 1, name: 'Delfiny' }], subscription_types: [], locations: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] },
+    },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': {
+      groups: [{ id: 1, name: 'Delfiny', description: '', default_capacity: 10, color_key: null, participants_count: 0, is_active: true }],
+    },
+    '/api/admin/settings/session-types/': {
+      session_types: [{ id: 1, code: 'group', label: 'Групповое', default_capacity: 10, default_duration_minutes: 60, color_key: null, is_active: true, configured: true }],
+    },
+    '/api/admin/schedule/sessions/': { sessions: [] },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+    ...emptyPages,
+  })
+  await page.route('**/api/admin/settings/session-types/1/', async (route) => {
+    submittedColor = route.request().postDataJSON()?.color_key ?? null
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ id: 1, code: 'group', label: 'Групповое', color_key: submittedColor, is_active: true }),
+    })
+  })
+
+  await page.goto('/')
+  await page.locator('.ops-nav-button[title="Группы"]').click()
+  await page.getByRole('button', { name: 'Карточка', exact: true }).click()
+  await page.getByRole('button', { name: 'Редактировать', exact: true }).click()
+  const groupPicker = page.getByRole('group', { name: 'Цвет расписания' })
+  const groupTrigger = groupPicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Стандартный', exact: true })
+  await expect(groupTrigger).toHaveAttribute('aria-expanded', 'false')
+  await expect(groupPicker.getByRole('radio')).toHaveCount(0)
+  await groupTrigger.click()
+  await expect(groupTrigger).toHaveAttribute('aria-expanded', 'true')
+  await expect(groupPicker.getByRole('radio')).toHaveCount(31)
+
+  await page.locator('.ops-nav-button[title="Настройки"]').click()
+  await page.getByRole('button', { name: /Типы занятий/ }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  const typePicker = page.getByRole('group', { name: 'Цвет расписания' })
+  const typeTrigger = typePicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Стандартный', exact: true })
+  await expect(typeTrigger).toHaveAttribute('aria-expanded', 'false')
+  await expect(typePicker.getByRole('radio')).toHaveCount(0)
+  await typeTrigger.click()
+  await expect(typeTrigger).toHaveAttribute('aria-expanded', 'true')
+  await expect(typePicker.getByRole('radio')).toHaveCount(31)
+  const forest = typePicker.getByRole('radio', { name: 'Лесной', exact: true })
+  const pickerFits = await typePicker.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+  expect(pickerFits).toBe(true)
+  await forest.focus()
+  await page.keyboard.press('Space')
+  await expect(typePicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Лесной', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  await expect(typePicker.getByRole('radio')).toHaveCount(0)
+  await page.locator('.ops-edit-panel').getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect.poll(() => submittedColor).toBe('forest-01')
+  expect(errors).toEqual([])
+})
+
+test('shared logout stays single-shot for admin, trainer and client', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile shared-shell contract')
+  let role = 'admin'
+  let loggedOut = false
+  const logoutPosts = []
+  const emptyAdmin = {
+    '/api/admin/dashboard/': { metrics: {} },
+    '/api/admin/reference/': { trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [], choices: { payment_methods: [], notification_channels: [] }, notification_settings: {} },
+    '/api/admin/clients/': { clients: [] }, '/api/admin/trainers/': { trainers: [] }, '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] }, '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': { sessions: [] }, '/api/admin/payments/': { payments: [] }, '/api/admin/debtors/': { debtors: [] },
+  }
+  const emptyTrainer = {
+    '/api/trainer/sessions/': { sessions: [] }, '/api/trainer/groups/': { groups: [] }, '/api/trainer/history/': { sessions: [] },
+  }
+  const emptyClient = {
+    '/api/client/overview/': { account: { id: 3, full_name: 'Parent Client' }, participants: [] },
+    '/api/client/profile/': { account: { id: 3, full_name: 'Parent Client', preferred_language: 'ru' }, participants: [], subscriptions: [] },
+    '/api/client/consents/': { consents: [] }, '/api/client/schedule/': { sessions: [] }, '/api/client/attendance/': { attendance: [] },
+    '/api/client/payments/': { payments: [] }, '/api/client/notifications/': { notifications: [] },
+  }
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (pathname === '/api/auth/logout/' && request.method() === 'POST') {
+      logoutPosts.push(role)
+      loggedOut = true
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+      return
+    }
+    let payload = null
+    if (pathname === '/api/csrf/') payload = { ok: true }
+    else if (pathname === '/api/health/') payload = { status: 'ok', service: 'swimcrm' }
+    else if (pathname === '/api/me/' && !loggedOut) payload = { id: 1, username: role, role: role === 'client' ? 'parent' : role, full_name: `${role} user` }
+    else if (role === 'admin') payload = emptyAdmin[pathname]
+    else if (role === 'trainer') payload = emptyTrainer[pathname]
+    else payload = emptyClient[pathname]
+    await route.fulfill({ status: payload ? 200 : 403, contentType: 'application/json', body: JSON.stringify(payload || { error: 'Login required' }) })
+  })
+
+  const actions = {
+    admin: (button) => button.click(),
+    trainer: async (button) => { await button.focus(); await page.keyboard.press('Enter') },
+    client: async (button) => { await button.focus(); await page.keyboard.press('Space') },
+  }
+  for (const nextRole of ['admin', 'trainer', 'client']) {
+    role = nextRole
+    loggedOut = false
+    await page.goto(`/?logout-role=${nextRole}`)
+    const logout = page.getByRole('button', { name: 'Выйти', exact: true })
+    await expect(logout).toHaveCount(1)
+    await expect(logout).toBeVisible()
+    await actions[nextRole](logout)
+    await expect(page.getByText('Вход в систему')).toBeVisible()
+    expect(logoutPosts.filter((item) => item === nextRole)).toHaveLength(1)
+  }
+})
+
+test('admin mobile client list uses one navigation control and no finance actions', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile client-card contract')
+  const writeRequests = []
+  page.on('request', (request) => {
+    if (!['GET', 'HEAD'].includes(request.method())) writeRequests.push(`${request.method()} ${new URL(request.url()).pathname}`)
+  })
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 1, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [], groups: [{ id: 3, name: 'Delfiny' }], subscription_types: [], locations: [], session_types: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/clients/': {
+      clients: [{
+        id: 7, client_id: 10, first_name: 'Jan', last_name: 'Kowalski', full_name: 'Jan Kowalski',
+        client_phone: '+48123456789', email: 'jan.long.address@example.test', group: { id: 3, name: 'Delfiny' },
+        is_active: true, client_is_active: true,
+      }],
+    },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': { sessions: [] },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  })
+
+  await page.goto('/?role=admin&view=clients')
+  const mobileList = page.locator('.ops-client-mobile-list')
+  await expect(mobileList).toBeVisible()
+  await expect(mobileList.getByText('Финансы', { exact: true })).toHaveCount(0)
+  await expect(mobileList.getByRole('button')).toHaveCount(1)
+  const card = mobileList.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })
+  await expect(card).toContainText('jan.long.address@example.test')
+  expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+  await card.click()
+  await expect(page).toHaveURL(/view=clientDetail.*client=10/)
+  expect(writeRequests).toEqual([])
+})
+
+test('admin upcoming sessions stay inside a narrow card', async ({ page }) => {
+  const errors = collectPageErrors(page)
+  const longGroup = 'Delfiny Zaawansowane Grupa Poranna'
+  const longTrainer = 'Marek Zielinski-Trener-Zastepujacy'
+  const longLocation = 'Basen_A_Sektor_Polnocny_Bardzo_Dluga_Nazwa'
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [],
+      groups: [],
+      subscription_types: [],
+      locations: [],
+      session_types: [],
+      participants: [],
+      choices: { payment_methods: [], notification_channels: [] },
+      notification_settings: {},
+    },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': {
+      sessions: [{
+        id: 1,
+        start_at: '2026-08-03T08:00:00+02:00',
+        end_at: '2026-08-03T09:00:00+02:00',
+        location: longLocation,
+        session_type: 'group',
+        trainer_id: 1,
+        trainer: longTrainer,
+        group: { id: 1, name: longGroup },
+        is_cancelled: true,
+        max_participants: 8,
+        participants_count: 1,
+        notes: '',
+      }],
+    },
+    '/api/admin/schedule/sessions/1/attendance/': {
+      session: {
+        id: 1,
+        start_at: '2026-08-03T08:00:00+02:00',
+        end_at: '2026-08-03T09:00:00+02:00',
+        location: longLocation,
+        session_type: 'group',
+        trainer_id: 1,
+        trainer: longTrainer,
+        group: { id: 1, name: longGroup },
+        is_cancelled: true,
+        max_participants: 8,
+        participants_count: 1,
+        notes: '',
+      },
+      history: [],
+      students: [],
+    },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  })
+
+  await page.goto('/')
+  await expect(page.locator('h1.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+  const upcomingSession = page.getByRole('button', {
+    name: /Delfiny Zaawansowane.*Marek Zielinski-Trener.*Basen_A.*Отменено/,
+  })
+  await expect(upcomingSession).toBeVisible()
+  const layout = await upcomingSession.evaluate((row) => {
+    const rowBox = row.getBoundingClientRect()
+    const textBox = (text) => {
+      const element = [...row.querySelectorAll('*')].find((node) => node.textContent?.trim() === text)
+      const box = element?.getBoundingClientRect()
+      return box ? { top: box.top, bottom: box.bottom, left: box.left, right: box.right } : null
+    }
+    const timeBox = row.querySelector('.mono')?.getBoundingClientRect()
+    return {
+      row: { top: rowBox.top, bottom: rowBox.bottom, left: rowBox.left, right: rowBox.right },
+      time: timeBox ? { top: timeBox.top, bottom: timeBox.bottom, left: timeBox.left, right: timeBox.right } : null,
+      group: textBox('Delfiny Zaawansowane Grupa Poranna'),
+      trainer: textBox('Marek Zielinski-Trener-Zastepujacy'),
+      location: textBox('Basen_A_Sektor_Polnocny_Bardzo_Dluga_Nazwa'),
+      status: textBox('Отменено'),
+      contentOverflow: row.scrollWidth > row.clientWidth + 1,
+      pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    }
+  })
+
+  expect(layout.contentOverflow).toBe(false)
+  expect(layout.pageOverflow).toBe(false)
+  for (const box of [layout.time, layout.group, layout.trainer, layout.location, layout.status]) {
+    expect(box).not.toBeNull()
+    expect(box.left).toBeGreaterThanOrEqual(layout.row.left - 1)
+    expect(box.right).toBeLessThanOrEqual(layout.row.right + 1)
+  }
+  if (layout.row.right - layout.row.left <= 720) {
+    expect(Math.abs(layout.time.top - layout.group.top)).toBeLessThanOrEqual(4)
+    expect(layout.trainer.top).toBeGreaterThan(layout.time.top + 4)
+    expect(Math.abs(layout.trainer.top - layout.status.top)).toBeLessThanOrEqual(4)
+  } else {
+    expect(Math.abs(layout.time.top - layout.status.top)).toBeLessThanOrEqual(4)
+  }
+  await upcomingSession.click()
+  await expect(page).toHaveURL(/view=attendance.*session=1/)
+  expect(errors).toEqual([])
+})
+
 test('admin critical screens render with API-backed data', async ({ page }) => {
   const errors = collectPageErrors(page)
-  const fixtureStart = new Date(Date.now() + 24 * 60 * 60 * 1000)
-  fixtureStart.setHours(17, 0, 0, 0)
-  const now = fixtureStart.toISOString()
-  const fixtureEnd = new Date(fixtureStart.getTime() + 60 * 60 * 1000).toISOString()
+  const fixtureStart = new Date(Date.now() + 10 * 60 * 1000)
+  const now = localIsoDateTime(fixtureStart)
+  const fixtureEnd = localIsoDateTime(new Date(fixtureStart.getTime() + 45 * 60 * 1000))
   const seenAdminEndpoints = new Set()
   const seenClientFinanceActions = new Set()
   const submittedSettings = []
@@ -215,15 +818,15 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       trainers: [{ id: 1, username: 'marek', full_name: 'Marek Zielinski', email: 'm@example.com', phone: '+48000111222', is_active: true, user_is_active: true, access_activated: true, portal_access: 'active', groups_count: 1 }],
     },
     '/api/admin/groups/': {
-      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, participants_count: 1, is_active: true }],
+      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_capacity: 12, participants_count: 1, is_active: true }],
     },
     '/api/admin/subscription-types/': {
       subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN', duration_days: 30, sessions_count: 8, is_unlimited: false, is_individual: false, is_active: true }],
     },
     '/api/admin/schedule/sessions/': {
       sessions: [
-        { id: 1, start_at: now, end_at: fixtureEnd, location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' },
-        { id: 2, start_at: new Date(fixtureStart.getTime() + 2 * 60 * 60 * 1000).toISOString(), end_at: new Date(fixtureStart.getTime() + 3 * 60 * 60 * 1000).toISOString(), location: 'Basen A', session_type: 'group', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: true, max_participants: 8, participants_count: 1, notes: 'cancelled' },
+        { id: 1, start_at: now, end_at: fixtureEnd, location: 'Basen A', session_type: 'group', presentation_color_key: 'forest-01', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' },
+        { id: 2, start_at: localIsoDateTime(new Date(fixtureStart.getTime() + 20 * 60 * 1000)), end_at: localIsoDateTime(new Date(fixtureStart.getTime() + 65 * 60 * 1000)), location: 'Basen A', session_type: 'group', presentation_color_key: 'coral-01', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: true, max_participants: 8, participants_count: 1, notes: 'cancelled' },
       ],
     },
     '/api/admin/schedule/sessions/1/attendance/': {
@@ -408,14 +1011,29 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   })
 
   await page.goto('/')
-  await expect(page.locator('h2.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+  const adminIconSignatures = await page.evaluate(() => {
+    const nav = (label) => document.querySelector(`.ops-nav-button[title="${label}"] svg`)?.innerHTML
+    const kpi = (label) => [...document.querySelectorAll('.ops-kpi-button')]
+      .find((button) => button.textContent?.includes(label))?.querySelector('svg')?.innerHTML
+    return {
+      clients: nav('Клиенты'),
+      trainers: nav('Тренеры'),
+      groups: nav('Группы'),
+      clientsKpi: kpi('Клиенты'),
+      trainersKpi: kpi('Тренеры'),
+    }
+  })
+  expect(new Set([adminIconSignatures.clients, adminIconSignatures.trainers, adminIconSignatures.groups]).size).toBe(3)
+  expect(adminIconSignatures.clientsKpi).toBe(adminIconSignatures.clients)
+  expect(adminIconSignatures.trainersKpi).toBe(adminIconSignatures.trainers)
   await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
   await page.getByLabel('Глобальный поиск').fill('Jan Kowalski')
   await page.getByRole('button', { name: /Jan Kowalski/ }).first().click()
-  await expect(page.locator('h2.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
   await expect(page).toHaveURL(/client=10/)
   await page.reload()
-  await expect(page.locator('h2.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
   await page.getByRole('button', { name: 'Восстановить доступ', exact: true }).click()
   await expect(page.getByText('Код восстановления доступа')).toBeVisible()
   await expect(page.getByText('synthetic-client-recovery-code')).toBeVisible()
@@ -429,20 +1047,30 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Данные владельца аккаунта обновлены.')).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Клиенты"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Клиенты' })).toBeVisible()
-  await expect(page.getByRole('row', { name: /Kowalski Jan/ })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Клиенты' })).toBeVisible()
+  const compactClients = (page.viewportSize()?.width || 0) <= 960
+  if (compactClients) {
+    await expect(page.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })).toBeVisible()
+  } else {
+    await expect(page.getByRole('row', { name: /Kowalski Jan/ })).toBeVisible()
+  }
   await expect(page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')).toHaveText('1')
   await expect(page.getByRole('button', { name: /Новый клиент/ })).toBeVisible()
   await expect(page.getByText('Piotr Nowak')).toHaveCount(0)
   await page.getByRole('button', { name: 'Чёрный список', exact: true }).click()
-  await expect(page.getByText('Nowak Piotr')).toBeVisible()
-  await page.getByRole('button', { name: 'Восстановить' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Восстановить' }).click()
-  await expect(page.getByText('Клиент восстановлен и снова отображается в рабочем списке.')).toBeVisible()
-  expect(seenAdminEndpoints).toContain('/api/admin/clients/11/restore/')
+  if (compactClients) {
+    await expect(page.getByRole('button', { name: /Открыть профиль клиента Nowak Piotr/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Восстановить' })).toHaveCount(0)
+  } else {
+    await expect(page.getByRole('row', { name: /Nowak Piotr/ })).toBeVisible()
+    await page.getByRole('button', { name: 'Восстановить' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Восстановить' }).click()
+    await expect(page.getByText('Клиент восстановлен и снова отображается в рабочем списке.')).toBeVisible()
+    expect(seenAdminEndpoints).toContain('/api/admin/clients/11/restore/')
+  }
 
   await page.locator('.ops-nav-button[title="Тренеры"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Тренеры' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Тренеры' })).toBeVisible()
   await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
   await page.getByRole('button', { name: /Marek Zielinski/ }).first().click()
   await expect(page.getByRole('region', { name: /Профиль тренера/ })).toBeVisible()
@@ -456,26 +1084,43 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Ставки по типам занятий')).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Группы"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Группы' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Группы' })).toBeVisible()
   await expect(page.getByText('Delfiny').first()).toBeVisible()
   await page.getByRole('button', { name: 'Delfiny', exact: true }).first().click()
-  await expect(page.getByRole('region', { name: /Карточка группы/ })).toBeVisible()
+  const groupCard = page.getByRole('region', { name: /Карточка группы/ })
+  await expect(groupCard).toBeVisible()
+  await expect(groupCard).toContainText('Вместимость12')
   await expect(page.getByText('Состав группы')).toBeVisible()
+  await groupCard.getByRole('button', { name: 'Редактировать' }).click()
+  const capacityInput = groupCard.getByLabel('Вместимость')
+  await expect(capacityInput).toHaveValue('12')
+  await capacityInput.fill('0')
+  await groupCard.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(capacityInput).toHaveAttribute('aria-invalid', 'true')
+  await capacityInput.fill('12')
+  await groupCard.getByRole('button', { name: 'Отмена' }).click()
   const clientCombobox = page.getByRole('combobox', { name: 'Добавить участника' })
   await clientCombobox.fill('zolc aleks')
   await expect(page.getByRole('option', { name: /Żółć Aleksandra/ })).toBeVisible()
   await clientCombobox.press('Escape')
 
   await page.locator('.ops-nav-button[title="Расписание"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Расписание' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Расписание' })).toBeVisible()
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+  const forestEvent = page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()
+  const cancelledCoralEvent = page.locator('.ops-schedule-event.is-cancelled[data-color-key="coral-01"]:visible').first()
+  expect(await forestEvent.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(232, 245, 233)')
+  expect(await cancelledCoralEvent.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(255, 240, 236)')
+  await expect(forestEvent).toHaveCSS('border-left-width', '0px')
+  await expect(cancelledCoralEvent).toHaveCSS('border-left-width', '0px')
+  await expect(cancelledCoralEvent).toHaveCSS('opacity', '0.6')
   await expect(page.getByRole('button', { name: 'Календарь', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByRole('button', { name: 'Неделя', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByText('За неделю: 2')).toBeVisible()
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За неделю: 2')).toBeVisible()
   await expect(page.getByText(/Шаблоны расписания|Создать из шаблона/)).toHaveCount(0)
   expect(schedulePageSizes.every((size) => size > 0 && size <= 200)).toBe(true)
-  const filterDetails = page.locator('.ops-filter-disclosure')
-  const filterBox = await filterDetails.boundingBox()
+  const filterTrigger = page.getByRole('button', { name: /Фильтры/ })
+  const filterBox = await filterTrigger.boundingBox()
   const pageBox = await page.locator('.page').boundingBox()
   expect(filterBox?.height).toBeLessThanOrEqual(50)
   expect(filterBox?.width).toBeLessThan(pageBox?.width || 10000)
@@ -489,19 +1134,20 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.keyboard.press('Escape')
   await expect(referencePickerButton).toBeFocused()
   await page.getByRole('button', { name: 'Месяц', exact: true }).click()
-  await expect(page.getByText('За месяц: 0')).toBeVisible()
-  const marker = page.locator('.ops-calendar-marker').first()
-  await expect(marker).toContainText('2')
-  await expect(marker).toHaveAttribute('aria-label', 'Занятий: 2')
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За месяц: 2')).toBeVisible()
+  await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
+  await expect(page.getByTestId('month-weekday-header')).toBeVisible()
   await page.getByRole('button', { name: 'День', exact: true }).click()
-  await expect(page.getByText('За день: 0')).toBeVisible()
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За день: 2')).toBeVisible()
   await page.getByRole('button', { name: 'Неделя', exact: true }).click()
-  await expect(page.getByText('За неделю: 2')).toBeVisible()
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За неделю: 2')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Уведомления' })).toHaveAttribute('aria-live', 'polite')
   await expect(page.getByTestId('schedule-list')).toHaveCount(0)
   await page.locator('[aria-label="Режим отображения расписания"] button').nth(1).click()
   await expect(page.getByTestId('schedule-list')).toBeVisible()
   await expect(page.locator('.ops-session-row').first()).toContainText('Basen A')
+  await expect(page.locator('.ops-session-row[data-color-key="forest-01"]')).toHaveCount(1)
+  await expect(page.locator('.ops-session-row.is-cancelled[data-color-key="coral-01"]')).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Восстановить тренировку', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Восстановить тренировку', exact: true }).click()
   await expect(page.getByText('Тренировка восстановлена.')).toBeVisible()
@@ -528,6 +1174,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   await page.getByRole('button', { name: /Групповая тренировка/ }).click()
   const invalidCard = page.locator('.card').filter({ has: page.getByText('Новое занятие', { exact: true }) })
+  await expect(invalidCard.getByLabel('Лимит участников')).toHaveValue('12')
   await invalidCard.getByLabel('Тренер').selectOption('')
   await invalidCard.getByRole('button', { name: 'Создать занятие' }).click()
   await expect(invalidCard.getByLabel('Тренер')).toHaveAttribute('aria-invalid', 'true')
@@ -537,7 +1184,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText(/Недельный план|Weekly plan/i)).toHaveCount(0)
 
   await page.locator('.ops-session-row').first().click()
-  await expect(page.locator('h2.page-title', { hasText: 'Занятие' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Занятие' })).toBeVisible()
   await expect(page.getByText('Jan Kowalski').first()).toBeVisible()
   await expect(page.getByText(/Долг:.*PLN/)).toBeVisible()
   await expect(page.getByRole('columnheader', { name: 'Телефон' })).toHaveCount(0)
@@ -586,15 +1233,15 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   }
 
   await page.locator('.ops-nav-button[title="Платежи"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Платежи' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
   await expect(page.locator('td').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Должники"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Должники' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Должники' })).toBeVisible()
   await expect(page.getByText('Przeterminowana platnosc').first()).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Настройки"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Настройки и контроль' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Настройки и контроль' })).toBeVisible()
   await expect(page.getByText('Типы абонементов').first()).toBeVisible()
   await page.getByRole('button', { name: /Локации/ }).click()
   await page.getByRole('button', { name: 'Добавить', exact: true }).click()
@@ -633,13 +1280,15 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
 test('trainer can open every menu screen without runtime errors', async ({ page }) => {
   const errors = collectPageErrors(page)
+  const trainerSessionStart = new Date(Date.now() + 60 * 60 * 1000)
   const session = {
     id: 41,
-    start_at: '2026-07-22T17:00:00+02:00',
-    end_at: '2026-07-22T17:45:00+02:00',
+    start_at: localIsoDateTime(trainerSessionStart),
+    end_at: localIsoDateTime(new Date(trainerSessionStart.getTime() + 45 * 60 * 1000)),
     location: 'Большой бассейн',
     max_participants: 8,
     is_cancelled: false,
+    presentation_color_key: 'forest-01',
     group: { id: 7, name: 'Дельфины' },
   }
   await mockPortal(page, {
@@ -656,11 +1305,14 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
   await expect(page.locator('.ops-sidebar')).toBeVisible()
+  await expect(page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
 
   for (const label of ['Мои занятия', 'Посещаемость', 'Мои группы', 'История']) {
     await page.locator(`.ops-nav-button[title="${label}"]`).click()
-    await expect(page.locator('.topbar h1')).toHaveText(label)
+    const pageHeading = page.locator('main:visible h1.page-title')
+    await expect(pageHeading).toHaveCount(1)
+    if (label !== 'Посещаемость') await expect(pageHeading).toHaveText(label)
     await expect(page.locator('.page')).toBeVisible()
   }
 
@@ -673,7 +1325,7 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
-  await expect(page.locator('.topbar h1')).toHaveText('История')
+  await expect(page.getByRole('heading', { level: 1, name: 'История' })).toBeVisible()
   expect(errors).toEqual([])
 })
 
@@ -697,6 +1349,7 @@ test('client can open every menu screen without runtime errors', async ({ page }
     location: 'Большой бассейн',
     trainer: 'Анна Тренер',
     is_cancelled: false,
+    presentation_color_key: 'gold-01',
     group: { id: 7, name: 'Дельфины' },
   }
   await mockPortal(page, {
@@ -716,12 +1369,13 @@ test('client can open every menu screen without runtime errors', async ({ page }
 
   for (const label of ['Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль', 'Согласия']) {
     await page.locator(`.ops-nav-button[title="${label}"]`).click()
-    await expect(page.locator('.topbar h1')).toHaveText(label)
+    await expect(page.getByRole('heading', { level: 1, name: label })).toBeVisible()
     await expect(page.locator('.page')).toBeVisible()
   }
 
   await page.locator('.ops-nav-button[title="Расписание"]').click()
   await page.getByRole('button', { name: 'Список', exact: true }).click()
+  await expect(page.locator('[data-testid="client-schedule-list"] .ops-session-tile[data-color-key="gold-01"]')).toHaveCount(1)
   await page.locator('[data-testid="client-schedule-list"] .ops-session-tile').first().click()
   await expect(page.getByText('-1 занятие')).toBeVisible()
   await page.locator('.ops-nav-button[title="Абонемент"]').click()
@@ -733,7 +1387,7 @@ test('client can open every menu screen without runtime errors', async ({ page }
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
-  await expect(page.locator('.topbar h1')).toHaveText('Согласия')
+  await expect(page.getByRole('heading', { level: 1, name: 'Согласия' })).toBeVisible()
   expect(errors).toEqual([])
 })
 
@@ -803,13 +1457,13 @@ test('admin confirms and rejects pending payments and the nav counter decrements
 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
-  await expect(page.locator('h2.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
 
   const counter = page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')
   await expect(counter).toHaveText('2')
 
   await page.locator('.ops-nav-button[title="Платежи"]').click()
-  await expect(page.locator('h2.page-title', { hasText: 'Платежи' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
 
   // Confirm the first pending payment: balance-affecting action, counter must drop 2 -> 1.
   const confirmTrigger = page.getByRole('row', { name: /Kowalski/ }).getByRole('button', { name: 'Подтвердить' })

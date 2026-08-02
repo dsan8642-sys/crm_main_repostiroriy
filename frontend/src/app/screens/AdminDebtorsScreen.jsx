@@ -69,7 +69,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Должники</h2>
+            <h1 className="page-title">Должники</h1>
             <p className="page-desc">
               Клиентов: {debtors.length} · общий долг{' '}
               <span style={{ color: 'var(--money-debt)', fontWeight: 600 }}>

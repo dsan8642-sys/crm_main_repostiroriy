@@ -6,12 +6,14 @@ import {
   calendarRange,
   DEFAULT_SCHEDULE_VIEW,
   moveCalendarFocus,
+  newSessionCapacity,
   periodCountLabel,
   periodSessionCount,
   validateAdminSessionForm,
   validIsoDate,
   validTime,
 } from '../src/app/scheduleContracts.js'
+import { mapAdminPortalData, mapClientPortalData, mapTrainerSession } from '../src/mappers.js'
 import { accessCodeClipboardText } from '../src/app/accessContracts.js'
 import { toastReducer } from '../src/app/toastContracts.js'
 
@@ -39,6 +41,86 @@ test('calendar navigation moves exactly one selected period', () => {
   assert.equal(moveCalendarFocus('2026-07-29', 'day', 1), '2026-07-30')
   assert.equal(moveCalendarFocus('2026-07-29', 'week', -1), '2026-07-22')
   assert.equal(moveCalendarFocus('2026-01-31', 'month', 1), '2026-02-28')
+})
+
+test('new group sessions prefer the group capacity without changing saved sessions', () => {
+  assert.equal(newSessionCapacity({ groupCapacity: 12, typeCapacity: 8, currentCapacity: 4 }), '12')
+  assert.equal(newSessionCapacity({ groupCapacity: null, typeCapacity: 8, currentCapacity: 4 }), '8')
+  assert.equal(newSessionCapacity({ groupCapacity: null, typeCapacity: null, currentCapacity: 4 }), '4')
+})
+
+test('admin group mapper preserves nullable default capacity', () => {
+  const common = {
+    reference: {}, clients: {}, trainers: {}, subscriptionTypes: {}, sessionTypeConfigs: {},
+    sessions: {}, payments: {}, debtors: {},
+  }
+  const withCapacity = mapAdminPortalData({
+    ...common,
+    groups: { groups: [{ id: 1, name: 'Delfiny', participants_count: 3, default_capacity: 12, color_key: 'forest-01' }] },
+  }).groups[0]
+  const withoutCapacity = mapAdminPortalData({
+    ...common,
+    groups: { groups: [{ id: 2, name: 'Foki', participants_count: 1, default_capacity: null }] },
+  }).groups[0]
+
+  assert.equal(withCapacity.defaultCapacity, 12)
+  assert.equal(withCapacity.colorKey, 'forest-01')
+  assert.equal(withoutCapacity.defaultCapacity, null)
+  assert.equal(withoutCapacity.colorKey, 'standard')
+})
+
+test('schedule mappers normalize the server presentation key for every role', () => {
+  const trainer = mapTrainerSession({
+    id: 1,
+    start_at: '2026-08-02T10:00:00+02:00',
+    end_at: '2026-08-02T11:00:00+02:00',
+    presentation_color_key: 'coral-01',
+    presentation_type_label: 'Персональная тренировка',
+    participants_count: 6,
+    max_participants: 15,
+  })
+  assert.equal(trainer.colorKey, 'coral-01')
+  assert.equal(trainer.sessionTypeLabel, 'Персональная тренировка')
+  assert.equal(trainer.count, 6)
+  assert.equal(trainer.limit, 15)
+
+  const common = {
+    reference: {}, clients: {}, trainers: {}, groups: {}, subscriptionTypes: {}, sessionTypeConfigs: {},
+    payments: {}, debtors: {},
+  }
+  const admin = mapAdminPortalData({
+    ...common,
+    sessions: { sessions: [{
+      id: 2,
+      start_at: '2026-08-02T12:00:00+02:00',
+      end_at: '2026-08-02T13:00:00+02:00',
+      presentation_color_key: 'not-approved',
+      presentation_type_label: 'Групповая тренировка',
+    }] },
+  }).sessions[0]
+  assert.equal(admin.colorKey, 'standard')
+  assert.equal(admin.sessionTypeLabel, 'Групповая тренировка')
+
+  const client = mapClientPortalData({
+    overview: { account: {}, participants: [{ id: 7, full_name: 'Client', group: null }] },
+    profile: {}, consents: {}, attendance: {}, payments: {}, notifications: {},
+    schedule: {
+      student_id: 7,
+      sessions: [{
+        id: 3,
+        start_at: '2026-08-02T14:00:00+02:00',
+        end_at: '2026-08-02T15:00:00+02:00',
+        presentation_color_key: 'gold-01',
+        presentation_type_label: 'Split для двоих',
+        participants_count: 1,
+        max_participants: 2,
+      }],
+    },
+  }).schedule.s7[0]
+  assert.equal(client.colorKey, 'gold-01')
+  assert.equal(client.sessionTypeLabel, 'Split для двоих')
+  assert.equal(client.count, 1)
+  assert.equal(client.limit, 2)
 })
 
 test('new session validation identifies fields while notes stay optional', () => {

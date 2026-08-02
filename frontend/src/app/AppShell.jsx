@@ -38,6 +38,7 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
   const [selectedGroupId, setSelectedGroupId] = useState(initialRoute.groupId)
   const [selectedTab, setSelectedTab] = useState(initialRoute.tab)
   const [searchQuery, setSearchQuery] = useState('')
+  const [compactSidebar, setCompactSidebar] = useState(() => window.matchMedia('(max-width: 960px)').matches)
   const [roleScreenBundle, setRoleScreenBundle] = useState({
     role: null,
     module: null,
@@ -88,7 +89,6 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     }
   }, [components, icons, reloadRoleData, role, roleScreenBundle])
   const Screen = screenFor(role, view, runtimeScreens)
-  const [title, subtitle] = meta.titles[view] || Object.values(meta.titles)[0]
   const clientItems = data.ParentData?.children || []
   const activeKid = role === 'client' && !clientItems.some((item) => item.id === kid)
     ? clientItems[0]?.id || kid
@@ -101,6 +101,14 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     const sessions = (data.AdminData?.sessions || []).filter((row) => [row.group, row.trainer, row.location, row.date].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))).slice(0, 4).map((row) => ({ key: `session-${row.sessionId}`, label: `${row.date} · ${row.start} · ${row.group}`, hint: row.location, view: 'attendance', params: { sessionId: row.sessionId } }))
     return [...clients, ...groups, ...sessions].slice(0, 10)
   }, [searchQuery, role, data])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 960px)')
+    const update = () => setCompactSidebar(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     if (!initialRole) return
@@ -172,13 +180,16 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     <div className="app">
       <a className="ops-skip-link" href="#main-content">{t('shell.skip')}</a>
       <aside className="ops-sidebar">
-        <button type="button" className="ops-brand ops-brand-button" onClick={() => navigate(ROLE_META[role].initialView)}>
-          <div className="ops-brand-mark">H2O</div>
-          <div>
-            <div className="ops-brand-name">SwimCRM</div>
-            <div className="ops-brand-sub">операционная панель</div>
-          </div>
-        </button>
+        <div className="ops-sidebar-head">
+          <button type="button" className="ops-brand ops-brand-button" onClick={() => navigate(ROLE_META[role].initialView)}>
+            <div className="ops-brand-mark">H2O</div>
+            <div>
+              <div className="ops-brand-name">SwimCRM</div>
+              <div className="ops-brand-sub">операционная панель</div>
+            </div>
+          </button>
+          {compactSidebar && <IconButton className="ops-sidebar-logout is-mobile" label="Выйти" onClick={onLogout}><icons.Logout size={16} /></IconButton>}
+        </div>
 
         <nav className="ops-nav" aria-label="Основная навигация">
           {nav.map((item) => {
@@ -214,21 +225,17 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
               <div className="ops-user-role">{meta.productRole}</div>
             </div>
           </div>
-          <IconButton label="Выйти" onClick={onLogout}><icons.Logout size={16} /></IconButton>
+          {!compactSidebar && <IconButton className="ops-sidebar-logout is-desktop" label="Выйти" onClick={onLogout}><icons.Logout size={16} /></IconButton>}
         </div>
       </aside>
 
       <div className="ops-main">
         <header className="topbar ops-topbar">
-          <div>
-            <div className="ops-crumb">H2O / {meta.productRole}</div>
-            <h1>{title}</h1>
-            <div className="sub">{subtitle}</div>
-          </div>
           {role === 'admin' && <div className="ops-global-search"><input aria-label="Глобальный поиск" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Найти клиента, группу или занятие" />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">Ничего не найдено</div>}</div>}</div>}
-          <span className="spacer" />
-          <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>Сервер</span>
-          <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>Данные</span>
+          <div className="ops-topbar-statuses">
+            <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>Сервер</span>
+            <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>Данные</span>
+          </div>
         </header>
 
         <main className="scroll" id="main-content" tabIndex={-1}>

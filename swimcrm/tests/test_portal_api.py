@@ -3,7 +3,9 @@ import tempfile
 from datetime import date, timedelta
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.models import Consent, ConsentType, ParentAccount, Role
@@ -1032,7 +1034,7 @@ class AdminPortalApiRule(TestCase):
     def test_admin_group_crud(self):
         response = self.client.post(
             "/api/admin/groups/",
-            data=json.dumps({"name": "Adults", "description": "Evening group"}),
+            data=json.dumps({"name": "Adults", "description": "Evening group", "default_capacity": 12}),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 201)
@@ -1057,12 +1059,248 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(update.json()["name"], "Adults A")
         self.assertEqual(update.json()["description"], "Updated evening group")
         self.assertEqual(update.json()["default_trainer"]["id"], trainer.id)
+        self.assertEqual(update.json()["default_capacity"], 12)
         self.assertFalse(update.json()["is_active"])
         self.assertEqual(detail.json()["default_trainer"]["id"], trainer.id)
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(listing.json()["groups"][0]["name"], "Adults A")
         self.assertEqual(archived.status_code, 200)
         self.assertFalse(archived.json()["is_active"])
+
+    def test_admin_group_capacity_accepts_null_or_positive_integer_only(self):
+        created = self.client.post(
+            "/api/admin/groups/",
+            data=json.dumps({"name": "Capacity group", "default_capacity": 9}),
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["default_capacity"], 9)
+        group_id = created.json()["id"]
+
+        cleared = self.client.patch(
+            f"/api/admin/groups/{group_id}/",
+            data=json.dumps({"group": {"default_capacity": None}}),
+            content_type="application/json",
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["default_capacity"])
+
+        for invalid in (0, -1, 1.5, "many"):
+            with self.subTest(invalid=invalid):
+                response = self.client.patch(
+                    f"/api/admin/groups/{group_id}/",
+                    data=json.dumps({"group": {"default_capacity": invalid}}),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("default_capacity", response.json()["errors"])
+
+    def test_admin_group_color_accepts_approved_key_or_null_only(self):
+        created = self.client.post(
+            "/api/admin/groups/",
+            data=json.dumps({"name": "Palette group", "color_key": "forest-01"}),
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["color_key"], "forest-01")
+        group_id = created.json()["id"]
+
+        cleared = self.client.patch(
+            f"/api/admin/groups/{group_id}/",
+            data=json.dumps({"group": {"color_key": None}}),
+            content_type="application/json",
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["color_key"])
+
+        rejected = self.client.patch(
+            f"/api/admin/groups/{group_id}/",
+            data=json.dumps({"group": {"color_key": "#ff0000"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("color_key", rejected.json()["errors"])
+
+        group = self.group.__class__.objects.get(pk=group_id)
+        group.color_key = "legacy-key"
+        group.save(update_fields=["color_key"])
+        self.assertIsNone(self.client.get(f"/api/admin/groups/{group_id}/").json()["color_key"])
+
+    def test_admin_session_type_color_accepts_approved_key_or_null_only(self):
+        session_type = SessionTypeConfig.objects.create(
+            code=SessionType.GROUP,
+            label="Group",
+        )
+        updated = self.client.patch(
+            f"/api/admin/settings/session-types/{session_type.id}/",
+            data=json.dumps({"color_key": "violet-01"}),
+            content_type="application/json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["color_key"], "violet-01")
+
+        cleared = self.client.patch(
+            f"/api/admin/settings/session-types/{session_type.id}/",
+            data=json.dumps({"session_type": {"color_key": None}}),
+            content_type="application/json",
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["color_key"])
+
+        rejected = self.client.patch(
+            f"/api/admin/settings/session-types/{session_type.id}/",
+            data=json.dumps({"color_key": "violet-99"}),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("color_key", rejected.json()["errors"])
+
+        session_type.color_key = "legacy-key"
+        session_type.save(update_fields=["color_key"])
+        detail = self.client.get(f"/api/admin/settings/session-types/{session_type.id}/")
+        self.assertIsNone(detail.json()["color_key"])
+
+    def test_schedule_color_resolver_prefers_group_then_type_then_standard(self):
+        trainer = f.make_trainer(username="palette_resolver_coach")
+        self.group.color_key = "forest-01"
+        self.group.save(update_fields=["color_key"])
+        session_type = SessionTypeConfig.objects.create(
+            code=SessionType.GROUP,
+            label="Group",
+            color_key="violet-01",
+        )
+        start = timezone.now() + timedelta(hours=1)
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=start,
+            end_at=start + timedelta(hours=1),
+            location="Palette pool",
+            max_participants=10,
+        )
+
+        group_color = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        self.assertEqual(group_color.json()["presentation_color_key"], "forest-01")
+
+        self.group.color_key = "obsolete-key"
+        self.group.save(update_fields=["color_key"])
+        unknown_group = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        self.assertEqual(unknown_group.json()["presentation_color_key"], "standard")
+
+        self.group.color_key = None
+        self.group.save(update_fields=["color_key"])
+        type_color = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        self.assertEqual(type_color.json()["presentation_color_key"], "violet-01")
+
+        session_type.color_key = "obsolete-key"
+        session_type.save(update_fields=["color_key"])
+        fallback = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        self.assertEqual(fallback.json()["presentation_color_key"], "standard")
+
+    def test_role_schedule_payloads_share_presentation_key_without_admin_color_fields(self):
+        trainer = f.make_trainer(username="palette_roles_coach")
+        self.group.color_key = "coral-01"
+        self.group.save(update_fields=["color_key"])
+        start = timezone.now() + timedelta(hours=1)
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=start,
+            end_at=start + timedelta(hours=1),
+            location="Role pool",
+            max_participants=10,
+        )
+
+        admin_row = self.client.get(f"/api/admin/schedule/sessions/{session.id}/").json()
+        self.client.force_login(trainer.user)
+        trainer_row = next(
+            row for row in self.client.get("/api/trainer/sessions/").json()["sessions"]
+            if row["id"] == session.id
+        )
+        self.client.force_login(self.student.parent.user)
+        client_row = next(
+            row for row in self.client.get(
+                "/api/client/schedule/", {"student_id": self.student.id}
+            ).json()["sessions"]
+            if row["id"] == session.id
+        )
+
+        self.assertEqual(
+            {admin_row["presentation_color_key"], trainer_row["presentation_color_key"], client_row["presentation_color_key"]},
+            {"coral-01"},
+        )
+        self.assertNotIn("color_key", trainer_row)
+        self.assertNotIn("color_key", client_row)
+
+    def test_schedule_list_loads_session_type_colors_once(self):
+        trainer = f.make_trainer(username="palette_query_coach")
+        SessionTypeConfig.objects.create(
+            code=SessionType.GROUP,
+            label="Group",
+            color_key="sky-01",
+        )
+        start = timezone.now() + timedelta(hours=1)
+        for offset in range(3):
+            session_start = start + timedelta(hours=offset * 2)
+            create_session(
+                trainer=trainer,
+                group=self.group,
+                start_at=session_start,
+                end_at=session_start + timedelta(hours=1),
+                location=f"Palette pool {offset}",
+                max_participants=10,
+            )
+
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get("/api/admin/schedule/sessions/", {"page_size": 200})
+
+        color_queries = [
+            query["sql"] for query in captured.captured_queries
+            if "scheduling_sessiontypeconfig" in query["sql"].lower()
+        ]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(color_queries), 1)
+
+    def test_individual_and_split_sessions_use_their_type_colors_without_group(self):
+        trainer = f.make_trainer(username="palette_individual_coach")
+        SessionTypeConfig.objects.create(
+            code=SessionType.INDIVIDUAL,
+            label="Individual",
+            color_key="gold-01",
+        )
+        SessionTypeConfig.objects.create(
+            code=SessionType.SPLIT,
+            label="Split",
+            color_key="indigo-01",
+        )
+        start = timezone.now() + timedelta(hours=1)
+        individual = create_session(
+            trainer=trainer,
+            individual_student=self.student,
+            session_type=SessionType.INDIVIDUAL,
+            start_at=start,
+            end_at=start + timedelta(hours=1),
+            location="Lane 1",
+            max_participants=1,
+        )
+        split = create_session(
+            trainer=trainer,
+            individual_student=self.student,
+            session_type=SessionType.SPLIT,
+            start_at=start + timedelta(hours=2),
+            end_at=start + timedelta(hours=3),
+            location="Lane 2",
+            max_participants=2,
+        )
+
+        individual_payload = self.client.get(
+            f"/api/admin/schedule/sessions/{individual.id}/"
+        ).json()
+        split_payload = self.client.get(
+            f"/api/admin/schedule/sessions/{split.id}/"
+        ).json()
+        self.assertEqual(individual_payload["presentation_color_key"], "gold-01")
+        self.assertEqual(split_payload["presentation_color_key"], "indigo-01")
 
     def test_admin_subscription_type_crud(self):
         response = self.client.post(

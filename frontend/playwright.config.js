@@ -5,6 +5,7 @@ const port = new URL(baseURL).port || '5173'
 
 export default defineConfig({
   testDir: './tests',
+  outputDir: './.playwright/test-results',
   timeout: 30_000,
   workers: 1,
   use: {

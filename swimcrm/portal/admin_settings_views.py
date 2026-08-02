@@ -109,6 +109,7 @@ def admin_settings_session_types(request):
                 "default_price_minor": None,
                 "default_currency": "PLN",
                 "default_duration_minutes": defaults["default_duration_minutes"],
+                "color_key": None,
                 "is_active": False,
                 "configured": False,
                 "repair_available": code == SessionType.SPLIT,
