@@ -34,6 +34,9 @@ from scheduling.models import (Session, SessionParticipant,
 from scheduling.services import ScheduleConflict, create_session, session_roster_students
 from students.models import Student
 
+from .contracts import prepare_rows
+from .matching import match_student
+
 MATCHED, WILL_CREATE_SESSION, DUPLICATE, ERROR = (
     "matched", "will_create_session", "duplicate", "error")
 
@@ -47,6 +50,7 @@ class AttendancePreviewRow:
     data: dict
     status: str = ERROR
     errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
     resolved: dict = field(default_factory=dict)
 
 
@@ -79,11 +83,15 @@ def _parse_status(raw):
 
 
 def _parse_start_at(raw):
+    raw = (raw or "").strip()
     try:
-        naive = datetime.strptime((raw or "").strip(), "%d.%m.%Y %H:%M")
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
-        return None
-    return timezone.make_aware(naive) if timezone.is_naive(naive) else naive
+        try:
+            parsed = datetime.strptime(raw, "%d.%m.%Y %H:%M")
+        except ValueError:
+            return None
+    return timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed
 
 
 def _parse_end_at(start_at, raw):
@@ -91,6 +99,9 @@ def _parse_end_at(start_at, raw):
     if not raw or start_at is None:
         return None
     try:
+        if "T" in raw or "-" in raw:
+            parsed = datetime.fromisoformat(raw)
+            return timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed
         hh, mm = raw.split(":")
         return start_at.replace(hour=int(hh), minute=int(mm))
     except (ValueError, TypeError):
@@ -136,34 +147,62 @@ def _resolve_trainer(raw, trainers_by_key, trainers_by_full_name):
     return None, f"Тренер не найден: {value}"
 
 
-def preview(headers, rows):
+def preview(headers, rows, mapping=None):
     """Classify each row: matched (session exists) / will_create_session /
     duplicate (attendance already recorded) / error. No DB writes."""
+    rows = prepare_rows("attendance", headers, rows, mapping)["rows"]
     trainers_by_key, trainers_by_full_name, groups_by_name = _build_lookups()
     result = []
+    seen_record_ids = set()
     for i, row in enumerate(rows, start=2):  # row 1 = header
-        d = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
+        d = {(k or "").strip(): ("" if v is None else str(v).strip())
+             for k, v in row.items()}
         pr = AttendancePreviewRow(index=i, data=d)
+        record_id = str(d.get("record_id") or "").strip()
+        if record_id:
+            if record_id in seen_record_ids:
+                pr.errors.append("Повторяющийся Internal ID в файле")
+            seen_record_ids.add(record_id)
 
-        student, err = _resolve_student(d.get("Клиент"))
-        if err:
-            pr.errors.append(err)
+        student_match = match_student(d)
+        student = student_match.student
+        if student is None:
+            pr.errors.append(student_match.reason or "Клиент не найден")
 
-        status_value = _parse_status(d.get("Статус"))
+        status_value = _parse_status(d.get("status"))
         if status_value is None:
-            pr.errors.append(f"Некорректный статус: {d.get('Статус', '')}")
+            pr.errors.append(f"Некорректный статус: {d.get('status', '')}")
 
-        start_at = _parse_start_at(d.get("Дата"))
+        start_at = _parse_start_at(d.get("start_at"))
         if start_at is None:
             pr.errors.append("Некорректная дата (ожидается ДД.ММ.ГГГГ ЧЧ:ММ)")
 
-        gname = d.get("Группа", "").strip()
-        tname = d.get("Тренер", "").strip()
-        group = groups_by_name.get(gname.lower()) if gname else None
+        gname = d.get("group_name", "").strip()
+        raw_group_id = d.get("group_id")
+        group = None
+        if raw_group_id not in (None, ""):
+            try:
+                group = Group.objects.filter(pk=int(raw_group_id)).first()
+            except (TypeError, ValueError):
+                pr.errors.append("Некорректный Group internal ID")
+        if group is None and gname:
+            group = groups_by_name.get(gname.lower())
         if gname and group is None:
             pr.errors.append(f"Группа не найдена: {gname}")
-        trainer, trainer_error = _resolve_trainer(
-            tname, trainers_by_key, trainers_by_full_name)
+        raw_trainer_id = d.get("trainer_id")
+        trainer = None
+        trainer_error = None
+        if raw_trainer_id not in (None, ""):
+            try:
+                trainer = Trainer.objects.select_related("user").filter(pk=int(raw_trainer_id)).first()
+            except (TypeError, ValueError):
+                trainer = None
+            if trainer is None:
+                trainer_error = f"Тренер не найден по ID: {raw_trainer_id}"
+        tname = (d.get("trainer_username") or d.get("trainer_email") or "").strip()
+        if trainer is None and tname:
+            trainer, trainer_error = _resolve_trainer(
+                tname, trainers_by_key, trainers_by_full_name)
         if trainer_error:
             pr.errors.append(trainer_error)
         if not gname and not tname:
@@ -175,14 +214,20 @@ def preview(headers, rows):
             continue
 
         session = None
+        raw_session_id = d.get("session_id")
+        if raw_session_id not in (None, ""):
+            try:
+                session = Session.objects.filter(pk=int(raw_session_id), is_cancelled=False).first()
+            except (TypeError, ValueError):
+                session = None
         # Group and individual sessions are mutually exclusive (DB constraint
         # session_group_xor_individual), so match on whichever the row specifies
         # rather than falling back to "any session this trainer has at this
         # time" — that could silently attach to an unrelated individual session.
-        if group is not None:
+        if session is None and group is not None:
             session = Session.objects.filter(
                 group=group, start_at=start_at, is_cancelled=False).first()
-        elif trainer is not None:
+        elif session is None and trainer is not None:
             session = Session.objects.filter(
                 trainer=trainer, start_at=start_at, is_cancelled=False,
                 individual_student=student).first()
@@ -195,14 +240,26 @@ def preview(headers, rows):
                 continue
             pr.status = MATCHED
             pr.resolved = {"student_id": student.id, "session_id": session.id,
-                           "status": status_value}
+                           "status": status_value,
+                           "comment": d.get("comment", ""),
+                           "marked_at": d.get("marked_at", ""),
+                           "matching_reason": student_match.reason,
+                           "matching_confidence": student_match.confidence,
+                           "matching_candidates": student_match.candidates}
             result.append(pr)
             continue
 
         # No matching session — plan to create one.
-        end_at = _parse_end_at(start_at, d.get("Окончание"))
-        location = d.get("Локация", "").strip()
-        capacity_raw = d.get("Вместимость", "").strip()
+        end_at = _parse_end_at(start_at, d.get("end_at"))
+        duration_raw = d.get("duration_minutes")
+        if end_at is None and start_at is not None and duration_raw not in (None, ""):
+            try:
+                from datetime import timedelta
+                end_at = start_at + timedelta(minutes=int(duration_raw))
+            except (TypeError, ValueError):
+                end_at = None
+        location = d.get("location", "").strip()
+        capacity_raw = d.get("max_participants", "").strip()
         row_errors = []
         if trainer is None:
             row_errors.append("Для создания занятия нужен тренер")
@@ -237,6 +294,15 @@ def preview(headers, rows):
             "location": location,
             "max_participants": capacity,
             "status": status_value,
+            "session_type": d.get("session_type") or (SessionType.GROUP if group else SessionType.INDIVIDUAL),
+            "duration_minutes": duration_raw or "",
+            "price_minor": d.get("price_minor", ""),
+            "currency": d.get("currency", ""),
+            "comment": d.get("comment", ""),
+            "marked_at": d.get("marked_at", ""),
+            "matching_reason": student_match.reason,
+            "matching_confidence": student_match.confidence,
+            "matching_candidates": student_match.candidates,
         }
         result.append(pr)
     return result
@@ -264,6 +330,7 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
         raise ValidationError("Invalid attendance import effect mode")
     apply_financial_effects = mode == ImportEffectMode.APPLY_FINANCIAL
     created_sessions = created_records = skipped = 0
+    created_ids = []
     errors = []
 
     for pr in preview_rows:
@@ -295,8 +362,11 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
                         session = create_session(
                             trainer=trainer, start_at=start_at, end_at=end_at,
                             location=r["location"], max_participants=r["max_participants"],
-                            group=group, session_type=(SessionType.GROUP if group else SessionType.INDIVIDUAL),
-                            individual_student=(None if group else student), actor=actor)
+                            group=group, session_type=r.get("session_type") or (
+                                SessionType.GROUP if group else SessionType.INDIVIDUAL),
+                            individual_student=(None if group else student), actor=actor,
+                            price_minor=(None if r.get("price_minor") in (None, "") else int(r["price_minor"])),
+                            currency=r.get("currency") or None)
                         created_sessions += 1
                 else:
                     session = Session.objects.select_for_update().get(pk=r["session_id"])
@@ -305,7 +375,7 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
                     skipped += 1
                     continue
                 _ensure_roster(session, student, actor)
-                set_attendance(
+                record = set_attendance(
                     session_id=session.id,
                     student=student,
                     status=r["status"],
@@ -313,6 +383,19 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
                     apply_financial_effects=apply_financial_effects,
                     source="historical_import",
                 )
+                update_fields = []
+                if r.get("comment"):
+                    record.comment = r["comment"]
+                    update_fields.append("comment")
+                if r.get("marked_at"):
+                    try:
+                        record.marked_at = _parse_iso(r["marked_at"])
+                        update_fields.append("marked_at")
+                    except (TypeError, ValueError):
+                        pass
+                if update_fields:
+                    record.save(update_fields=update_fields)
+                created_ids.append(record.id)
                 created_records += 1
         except (ValidationError, ScheduleConflict) as exc:
             message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
@@ -324,6 +407,7 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
         "financial_effects_applied": apply_financial_effects,
         "created_sessions": created_sessions,
         "created_records": created_records,
+        "created_ids": created_ids,
         "skipped": skipped,
         "errors": errors,
     }

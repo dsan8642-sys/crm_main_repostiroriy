@@ -1,49 +1,26 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { api, downloadFile } from '../../api.js'
 
-const EXPORT_DATASETS = [
-  ['clients', 'Клиенты'],
-  ['attendance', 'Посещаемость'],
-  ['payments', 'Оплаты'],
-  ['groups', 'Группы'],
-  ['trainers', 'Тренеры'],
+const DATASETS = [
+  { kind: 'trainers', label: 'Тренеры', help: 'Сначала импортируйте тренеров.' },
+  { kind: 'groups', label: 'Группы', help: 'Группы связываются с тренерами по ID или username.' },
+  { kind: 'clients', label: 'Клиенты', help: 'Клиенты связываются с группами; существующий импорт сохранён.' },
+  { kind: 'payments', label: 'Оплаты', help: 'Оплата не импортируется без однозначного или ручного выбора клиента.' },
+  { kind: 'attendance', label: 'Посещаемость', help: 'Посещения связываются с клиентом, занятием, группой и тренером.' },
 ]
-
-const CANONICAL_FIELD_OPTIONS = [
-  ['', '— не использовать —'],
-  ['last_name', 'Фамилия'],
-  ['first_name', 'Имя'],
-  ['name', 'ФИО целиком'],
-  ['phone', 'Телефон'],
-  ['email', 'Email'],
-  ['group', 'Группа'],
-  ['subscription', 'Абонемент'],
-]
-
-const HEADER_ALIASES = {
-  'фамилия': 'last_name', 'имя': 'first_name', 'фио': 'name', 'name': 'name',
-  'телефон': 'phone', 'phone': 'phone', 'email': 'email', 'почта': 'email',
-  'группа': 'group', 'group': 'group', 'абонемент': 'subscription', 'subscription': 'subscription',
-  'last_name': 'last_name', 'first_name': 'first_name',
-}
 
 const STATUS_META = {
   new: ['Новая запись', '#1a7f37'],
-  matched: ['Занятие найдено', '#1a7f37'],
+  matched: ['Связи найдены', '#1a7f37'],
   will_create_session: ['Будет создано занятие', '#9a6700'],
-  duplicate: ['Дубликат', '#9a6700'],
+  duplicate: ['Дубликат — пропуск', '#9a6700'],
   possible_duplicate: ['Вероятный дубликат', '#b54708'],
-  error: ['Ошибка', '#cf222e'],
+  update: ['Будет обновлено', '#0969da'],
+  skipped: ['Пропуск по режиму', '#57606a'],
+  error: ['Требует исправления', '#cf222e'],
 }
 
-function guessMapping(headers) {
-  const mapping = {}
-  headers.forEach((header) => {
-    const key = HEADER_ALIASES[String(header).trim().toLowerCase()]
-    if (key) mapping[header] = key
-  })
-  return mapping
-}
+const READY = new Set(['new', 'update', 'matched', 'will_create_session', 'possible_duplicate'])
 
 function cleanMapping(mapping) {
   return Object.fromEntries(Object.entries(mapping || {}).filter(([, value]) => value))
@@ -51,108 +28,403 @@ function cleanMapping(mapping) {
 
 function StatusText({ status }) {
   const [label, color] = STATUS_META[status] || [status, '#57606a']
-  return <span style={{ color, fontWeight: 600 }}>{label}</span>
+  return <span style={{ color, fontWeight: 650 }}>{label}</span>
 }
 
-function useImportTab({ previewUrl, commitUrl, buildFormData, onFileSelected }) {
+function useImportTab(kind, effectMode, reloadRoleData) {
   const [file, setFile] = useState(null)
   const [headers, setHeaders] = useState([])
   const [mapping, setMapping] = useState({})
+  const [fieldOptions, setFieldOptions] = useState([])
   const [rows, setRows] = useState([])
+  const [selected, setSelected] = useState([])
   const [batchId, setBatchId] = useState(null)
+  const [counts, setCounts] = useState({})
   const [summary, setSummary] = useState(null)
+  const [meta, setMeta] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [importMode, setImportMode] = useState('create_only')
 
-  async function runPreview(overrideFile, overrideMapping) {
-    const targetFile = overrideFile || file
+  function applyPreview(payload) {
+    const nextRows = payload.rows || []
+    setHeaders(payload.headers || [])
+    setMapping(payload.mapping || {})
+    setFieldOptions(payload.field_options || [])
+    setRows(nextRows)
+    setSelected(nextRows.filter((row) => READY.has(row.status) && !row.excluded).map((row) => row.index))
+    setBatchId(payload.batch_id || null)
+    setCounts(payload.counts || {})
+    setMeta({
+      ownExport: payload.own_export,
+      schema: payload.metadata?.schema_version,
+      duplicateFile: payload.duplicate_file,
+      unusedHeaders: payload.unused_headers || [],
+      requiredMissing: payload.required_missing || [],
+      sourceSamples: payload.source_samples || {},
+    })
+    setImportMode(payload.import_mode || 'create_only')
+  }
+
+  async function runPreview(targetFile = file, targetMapping = mapping) {
     if (!targetFile) return
     setBusy(true); setError(''); setSummary(null)
     try {
-      const formData = buildFormData(targetFile, overrideMapping || mapping)
-      const payload = await api.postForm(previewUrl, formData)
-      setHeaders(payload.headers || [])
-      setRows(payload.rows || [])
-      setBatchId(payload.batch_id || null)
+      const form = new FormData()
+      form.set('file', targetFile)
+      form.set('mapping', JSON.stringify(cleanMapping(targetMapping)))
+      if (kind === 'attendance') form.set('effect_mode', effectMode)
+      if (kind === 'groups') form.set('import_mode', importMode)
+      applyPreview(await api.postForm(`/api/admin/import/${kind}/preview/`, form))
     } catch (err) {
-      setError(err.message)
-      setRows([])
-      setBatchId(null)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function commit(extraPayload = {}) {
-    if (!batchId || rows.length === 0) return
-    setBusy(true); setError('')
-    try {
-      const payload = await api.post(commitUrl, {
-        batch_id: batchId,
-        selected_indices: rows.map((row) => row.index),
-        ...extraPayload,
-      })
-      setSummary(payload)
-      setRows([])
-      setBatchId(null)
-      setFile(null)
-      setHeaders([])
-    } catch (err) {
-      setError(err.message)
+      setError(err.payload?.error || err.message)
+      setRows([]); setBatchId(null); setSelected([])
     } finally {
       setBusy(false)
     }
   }
 
   async function selectFile(nextFile) {
-    setFile(nextFile)
-    setRows([])
-    setBatchId(null)
-    setSummary(null)
-    setError('')
-    if (!nextFile) return
-    setBusy(true)
+    setFile(nextFile); setRows([]); setBatchId(null); setSummary(null); setError('')
+    setHeaders([]); setMapping({}); setFieldOptions([]); setMeta({}); setSelected([])
+    if (nextFile) await runPreview(nextFile, {})
+  }
+
+  async function patchRow(index, patch) {
+    if (!batchId) return
+    setBusy(true); setError('')
     try {
-      if (onFileSelected) await onFileSelected(nextFile, { runPreview, setMapping })
-      else await runPreview(nextFile)
+      const payload = await api.patch(`/api/admin/import/${kind}/${batchId}/rows/${index}/`, patch)
+      setRows((current) => current.map((row) => row.index === index ? payload.row : row))
+      setCounts(payload.counts || {})
+      if (payload.row.excluded || !READY.has(payload.row.status)) {
+        setSelected((current) => current.filter((item) => item !== index))
+      }
+      return payload.row
     } catch (err) {
-      setError(err.message)
+      setError(err.payload?.error || err.message)
     } finally {
       setBusy(false)
     }
   }
 
-  return { file, headers, mapping, setMapping, rows, batchId, summary, busy, error, selectFile, runPreview, commit }
+  async function bulkPatch(indices, patch) {
+    if (!batchId || !indices.length) return
+    setBusy(true); setError('')
+    try {
+      const payload = await api.post(`/api/admin/import/${kind}/${batchId}/rows/bulk/`, { indices, ...patch })
+      setRows(payload.rows || [])
+      setCounts(payload.counts || {})
+      if (patch.excluded) setSelected([])
+    } catch (err) {
+      setError(err.payload?.error || err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function commit(extraPayload = {}) {
+    const available = new Set(rows.filter((row) => !row.excluded && READY.has(row.status)).map((row) => row.index))
+    const selectedIndices = selected.filter((index) => available.has(index))
+    if (!batchId || !selectedIndices.length) return
+    setBusy(true); setError('')
+    try {
+      const payload = await api.post(`/api/admin/import/${kind}/commit/`, {
+        batch_id: batchId,
+        selected_indices: selectedIndices,
+        ...extraPayload,
+      })
+      setSummary(payload)
+      setRows([]); setBatchId(null); setFile(null); setHeaders([]); setSelected([])
+      if (reloadRoleData) await reloadRoleData('admin')
+    } catch (err) {
+      setError(err.payload?.error || err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function toggle(index) {
+    setSelected((current) => current.includes(index)
+      ? current.filter((item) => item !== index)
+      : [...current, index])
+  }
+
+  return {
+    kind, file, headers, mapping, setMapping, fieldOptions, rows, selected, setSelected,
+    batchId, counts, summary, meta, busy, error, setError, selectFile, runPreview,
+    patchRow, bulkPatch, commit, toggle, importMode, setImportMode,
+  }
+}
+
+function ImportSummary({ summary }) {
+  if (!summary) return null
+  const parts = Object.entries(summary)
+    .filter(([key]) => !['errors', 'created_ids', 'created_client_ids'].includes(key))
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(', ')
+  return <div className="banner banner-success" role="status" style={{ marginBottom: 12 }}>
+    <div>{parts}</div>
+    {(summary.errors || []).length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+      {summary.errors.map((line, index) => <li key={index}>{line}</li>)}
+    </ul>}
+  </div>
+}
+
+function ClientSearch({ Button, disabled, onChoose }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [error, setError] = useState('')
+
+  async function search() {
+    if (!query.trim()) return
+    setError('')
+    try {
+      const payload = await api.get(`/api/admin/import/client-search/?q=${encodeURIComponent(query.trim())}`)
+      setResults(payload.clients || [])
+    } catch (err) {
+      setError(err.payload?.error || err.message)
+    }
+  }
+
+  return <div style={{ display: 'grid', gap: 8 }}>
+    <div className="ops-button-row">
+      <input value={query} onChange={(event) => setQuery(event.target.value)}
+        placeholder="ID, email, телефон, имя или дата рождения" />
+      <Button size="sm" variant="secondary" disabled={disabled} onClick={search}>Найти клиента</Button>
+    </div>
+    {error && <span className="muted">{error}</span>}
+    {results.map((client) => <button type="button" key={client.id} className="card card-pad"
+      style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => onChoose(client)}>
+      <strong>{client.name}</strong> · ID {client.id} · {client.email || 'без email'} · {client.phone || 'без телефона'}
+    </button>)}
+  </div>
+}
+
+function RowEditor({ state, row, Button, onClose }) {
+  const editable = state.fieldOptions.filter((field) => field.editable)
+  const readOnly = state.fieldOptions.filter((field) => !field.editable && row.data?.[field.key])
+  const [values, setValues] = useState(() => Object.fromEntries(
+    editable.map((field) => [field.key, row.data?.[field.key] ?? ''])))
+
+  useEffect(() => {
+    setValues(Object.fromEntries(editable.map((field) => [field.key, row.data?.[field.key] ?? ''])))
+  }, [row.index])
+
+  async function save() {
+    await state.patchRow(row.index, { data: values })
+    onClose()
+  }
+
+  async function assign(client) {
+    await state.patchRow(row.index, { relations: { client_id: client.id } })
+    onClose()
+  }
+
+  async function clearClient() {
+    await state.patchRow(row.index, { relations: {
+      client_id: '', client_email: '', client_phone: '', client_first_name: '',
+      client_last_name: '', client_birth_date: '', client: '', create_client: '',
+    } })
+  }
+
+  return <div className="card card-pad" style={{ margin: '12px 0', display: 'grid', gap: 12 }}>
+    <div className="ops-button-row" style={{ justifyContent: 'space-between' }}>
+      <strong>Исправление строки {row.index}</strong>
+      <Button size="sm" variant="subtle" onClick={onClose}>Закрыть</Button>
+    </div>
+    <div className="ops-form-grid">
+      {editable.map((field) => <label key={field.key}>
+        {field.label}{field.required ? ' *' : ''}
+        <input value={values[field.key] ?? ''}
+          onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} />
+      </label>)}
+    </div>
+    {readOnly.length > 0 && <div className="muted">
+      Системные поля только для чтения: {readOnly.map((field) => `${field.label}: ${row.data[field.key]}`).join(' · ')}
+    </div>}
+    {['payments', 'attendance'].includes(state.kind) && <>
+      <div className="eyebrow">Связь с клиентом</div>
+      <ClientSearch Button={Button} disabled={state.busy} onChoose={assign} />
+      <div className="ops-button-row">
+        <Button size="sm" variant="secondary" onClick={clearClient}>Снять автосопоставление</Button>
+        {state.kind === 'payments' && <Button size="sm" variant="secondary"
+          onClick={() => state.patchRow(row.index, { relations: { create_client: 'true' } })}>
+          Создать клиента из строки при импорте
+        </Button>}
+      </div>
+    </>}
+    <div className="ops-button-row">
+      <Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>Сохранить исправления</Button>
+    </div>
+  </div>
+}
+
+function ImportWorkspace({ state, dataset, components, financial, possibleDuplicates, onFinancial, onDuplicates }) {
+  const { Button, Banner, Table } = components
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [editing, setEditing] = useState(null)
+  const [bulkClient, setBulkClient] = useState(null)
+
+  const visibleRows = useMemo(() => state.rows.filter((row) => {
+    const text = JSON.stringify(row.data || {}).toLocaleLowerCase()
+    if (search && !text.includes(search.toLocaleLowerCase())) return false
+    if (filter === 'error') return row.status === 'error'
+    if (filter === 'warning') return (row.warnings || []).length > 0
+    if (filter === 'unmatched') return ['ambiguous', 'suggestion', 'none'].includes(row.resolved?.matching_confidence)
+    if (filter === 'new') return row.status === 'new'
+    if (filter === 'update') return row.action === 'update'
+    if (filter === 'duplicate') return ['duplicate', 'possible_duplicate'].includes(row.status)
+    if (filter === 'excluded') return row.excluded
+    return true
+  }), [state.rows, search, filter])
+
+  const columns = [
+    { key: 'selected', header: '', width: 42, render: (row) => <input type="checkbox"
+      aria-label={`Выбрать строку ${row.index}`} checked={state.selected.includes(row.index)}
+      disabled={row.excluded || row.status === 'error' || row.status === 'duplicate'}
+      onChange={() => state.toggle(row.index)} /> },
+    { key: 'index', header: '#', width: 52, render: (row) => row.index },
+    { key: 'status', header: 'Статус', width: 190, render: (row) => <StatusText status={row.status} /> },
+    { key: 'summary', header: 'Данные', render: (row) => Object.values(row.data || {}).filter(Boolean).slice(0, 8).join(' · ') },
+    { key: 'match', header: 'Связи / изменения', render: (row) => {
+      const changes = Object.entries(row.resolved?.changes || {})
+        .map(([field, value]) => `${field}: ${value.old ?? '∅'} → ${value.new ?? '∅'}`)
+      return changes.join(' · ') || row.resolved?.matching_reason || row.resolved?.group_reason || '—'
+    } },
+    { key: 'issues', header: 'Ошибки и предупреждения', render: (row) => [
+      ...(row.errors || []), ...(row.warnings || []),
+    ].join('; ') || '—' },
+    { key: 'actions', header: 'Действия', width: 190, render: (row) => <div className="ops-button-row">
+      <Button size="sm" variant="subtle" onClick={() => setEditing(row.index)}>Исправить</Button>
+      <Button size="sm" variant="subtle" onClick={() => state.patchRow(row.index, { excluded: !row.excluded })}>
+        {row.excluded ? 'Вернуть' : 'Исключить'}
+      </Button>
+    </div> },
+  ]
+
+  const selectedRows = state.rows.filter((row) => state.selected.includes(row.index))
+  const hasPossibleDuplicates = selectedRows.some((row) => row.status === 'possible_duplicate')
+  const canCommit = state.selected.length > 0 && !state.busy
+    && (!hasPossibleDuplicates || possibleDuplicates)
+    && (state.kind !== 'attendance' || !financial.required || financial.confirmed)
+
+  return <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
+    <div className="card card-pad">
+      <div className="eyebrow">{dataset.label}: CSV / XLSX</div>
+      <p className="muted" style={{ margin: '6px 0 12px' }}>{dataset.help}</p>
+      {state.kind === 'attendance' && financial.controls}
+      {state.kind === 'groups' && <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+        <span className="eyebrow">Безопасный режим конфликта</span>
+        <select value={state.importMode} disabled={Boolean(state.file)}
+          onChange={(event) => state.setImportMode(event.target.value)}>
+          <option value="create_only">Создать только новые, существующие пропустить</option>
+          <option value="update_existing">Обновить только существующие</option>
+          <option value="upsert">Создать новые или обновить существующие</option>
+        </select>
+      </label>}
+      <input type="file" accept=".xlsx,.xlsm,.csv" disabled={state.busy}
+        onChange={(event) => state.selectFile(event.target.files?.[0] || null)} />
+    </div>
+
+    {state.error && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
+    <ImportSummary summary={state.summary} />
+    {state.meta.ownExport && <Banner tone="success">Собственный export CRM распознан автоматически · schema {state.meta.schema}</Banner>}
+    {state.meta.duplicateFile && <Banner tone="warning">Этот файл уже был импортирован. Проверьте дубликаты перед commit.</Banner>}
+    {state.meta.requiredMissing?.length > 0 && <Banner tone="warning">
+      Не сопоставлены обязательные поля: {state.meta.requiredMissing.join(', ')}
+    </Banner>}
+
+    {state.headers.length > 0 && <div className="card card-pad">
+      <div className="eyebrow">Сопоставление колонок</div>
+      <div className="ops-form-grid" style={{ marginTop: 8 }}>
+        {state.headers.filter((header) => !['schema_version', 'exported_at', 'source_system', 'entity_type'].includes(header))
+          .map((header) => <label key={header}>
+            <span>{header}{state.meta.sourceSamples?.[header]
+              ? <small className="muted"> · пример: {state.meta.sourceSamples[header]}</small>
+              : null}</span>
+            <select value={state.mapping[header] || ''}
+              onChange={(event) => state.setMapping({ ...state.mapping, [header]: event.target.value })}>
+              <option value="">— не использовать —</option>
+              {state.fieldOptions.map((field) => <option key={field.key} value={field.key}>
+                {field.label}{field.required ? ' *' : ''}
+              </option>)}
+            </select>
+          </label>)}
+      </div>
+      {state.meta.unusedHeaders?.length > 0 && <p className="muted">
+        Неиспользуемые колонки: {state.meta.unusedHeaders.join(', ')}
+      </p>}
+      <Button size="sm" variant="secondary" disabled={state.busy} onClick={() => state.runPreview()}>
+        Обновить preview с этим mapping
+      </Button>
+    </div>}
+
+    {state.rows.length > 0 && <>
+      <div className="card card-pad">
+        <div className="ops-button-row" style={{ justifyContent: 'space-between' }}>
+          <strong>Всего {state.counts.total || state.rows.length} · ошибок {state.counts.error || 0} · дубликатов {(state.counts.duplicate || 0) + (state.counts.possible_duplicate || 0)} · исключено {state.counts.excluded || 0}</strong>
+          <div className="ops-button-row">
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по строкам" />
+            <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+              <option value="all">Все строки</option>
+              <option value="error">С ошибками</option>
+              <option value="warning">С предупреждениями</option>
+              <option value="unmatched">Несопоставленные</option>
+              <option value="new">Новые</option>
+              <option value="update">Обновляемые</option>
+              <option value="duplicate">Дубликаты</option>
+              <option value="excluded">Исключённые</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <Table rows={visibleRows} rowKey={(row) => row.row_key || row.index} columns={columns} density="sm"
+        emptyLabel="Нет строк для выбранного фильтра" />
+      {editing && <RowEditor state={state} row={state.rows.find((row) => row.index === editing)}
+        Button={Button} onClose={() => setEditing(null)} />}
+      <div className="card card-pad" style={{ display: 'grid', gap: 10 }}>
+        <div className="eyebrow">Массовые действия · выбрано {state.selected.length}</div>
+        <div className="ops-button-row">
+          <Button size="sm" variant="secondary" disabled={!state.selected.length || state.busy}
+            onClick={() => state.bulkPatch(state.selected, { excluded: true })}>Исключить выбранные</Button>
+          <Button size="sm" variant="subtle" disabled={!visibleRows.length}
+            onClick={() => state.setSelected(visibleRows.filter((row) => READY.has(row.status) && !row.excluded).map((row) => row.index))}>
+            Выбрать видимые безопасные строки
+          </Button>
+        </div>
+        {['payments', 'attendance'].includes(state.kind) && <>
+          <div className="eyebrow">Назначить одного клиента выбранным строкам</div>
+          <ClientSearch Button={Button} disabled={!state.selected.length || state.busy}
+            onChoose={(client) => setBulkClient(client)} />
+          {bulkClient && <Button size="sm" variant="secondary" disabled={!state.selected.length}
+            onClick={() => state.bulkPatch(state.selected, { relations: { client_id: bulkClient.id } })}>
+            Назначить {bulkClient.name} выбранным строкам
+          </Button>}
+        </>}
+      </div>
+
+      {state.kind === 'payments' && hasPossibleDuplicates && <label className="card card-pad"
+        style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        <input type="checkbox" checked={possibleDuplicates} onChange={(event) => onDuplicates(event.target.checked)} />
+        <span>Я проверил вероятные дубликаты и явно разрешаю выбранные строки без Reference ID.</span>
+      </label>}
+      {state.kind === 'attendance' && financial.warning}
+      <div className="ops-button-row">
+        <Button variant="primary" loading={state.busy} disabled={!canCommit}
+          onClick={() => state.commit({
+            ...(state.kind === 'payments' ? { approve_possible_duplicates: possibleDuplicates } : {}),
+            ...(state.kind === 'attendance' && financial.required ? { confirm_financial_effects: true } : {}),
+          })}>Подтвердить импорт выбранных строк</Button>
+      </div>
+    </>}
+  </div>
 }
 
 export function createAdminImportExportPanel(components, icons, reloadRoleData) {
-  const { Button, Banner, Tabs, Table } = components
+  const { Button, Banner, Tabs } = components
   const I = icons
-
-  function ImportRowsTable({ rows }) {
-    const columns = [
-      { key: 'index', header: '#', width: 56, render: (row) => row.index },
-      { key: 'status', header: 'Статус', width: 190, render: (row) => <StatusText status={row.status} /> },
-      { key: 'summary', header: 'Строка', render: (row) => Object.values(row.data || {}).filter(Boolean).join(' · ') },
-      { key: 'errors', header: 'Ошибки', muted: true, render: (row) => (row.errors || []).join('; ') },
-    ]
-    return <Table rows={rows} rowKey={(row) => row.index} columns={columns} density="sm"
-      emptyLabel="Загрузите файл, чтобы увидеть предпросмотр" />
-  }
-
-  function ImportSummary({ summary }) {
-    if (!summary) return null
-    const parts = Object.entries(summary)
-      .filter(([key]) => key !== 'errors')
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(', ')
-    return <Banner tone={(summary.errors || []).length ? 'warning' : 'success'} style={{ marginBottom: 12 }}>
-      <div>{parts}</div>
-      {(summary.errors || []).length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-        {summary.errors.map((line, i) => <li key={i}>{line}</li>)}
-      </ul>}
-    </Banner>
-  }
 
   return function AdminImportExportScreen() {
     const [tab, setTab] = useState('export')
@@ -161,243 +433,123 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
     const [batches, setBatches] = useState([])
     const [batchesError, setBatchesError] = useState('')
     const [attendanceEffectMode, setAttendanceEffectMode] = useState('history_only')
-    const [financialEffectsConfirmed, setFinancialEffectsConfirmed] = useState(false)
-    const [possiblePaymentDuplicatesApproved, setPossiblePaymentDuplicatesApproved] = useState(false)
+    const [financialConfirmed, setFinancialConfirmed] = useState(false)
+    const [possibleDuplicates, setPossibleDuplicates] = useState(false)
 
-    const clientsImport = useImportTab({
-      previewUrl: '/api/admin/import/clients/preview/',
-      commitUrl: '/api/admin/import/clients/commit/',
-      buildFormData: (file, mapping) => {
-        const fd = new FormData()
-        fd.set('file', file)
-        fd.set('mapping', JSON.stringify(cleanMapping(mapping)))
-        return fd
-      },
-      onFileSelected: async (nextFile, { runPreview, setMapping }) => {
-        // First pass reads the header row only (empty mapping -> every row is an
-        // error, ignored here); the guessed mapping then drives the real preview.
-        const probe = new FormData()
-        probe.set('file', nextFile)
-        probe.set('mapping', '{}')
-        const payload = await api.postForm('/api/admin/import/clients/preview/', probe)
-        const guessed = guessMapping(payload.headers || [])
-        setMapping(guessed)
-        await runPreview(nextFile, guessed)
-      },
-    })
-    const attendanceImport = useImportTab({
-      previewUrl: '/api/admin/import/attendance/preview/',
-      commitUrl: '/api/admin/import/attendance/commit/',
-      buildFormData: (file) => {
-        const fd = new FormData()
-        fd.set('file', file)
-        fd.set('effect_mode', attendanceEffectMode)
-        return fd
-      },
-    })
-    const paymentsImport = useImportTab({
-      previewUrl: '/api/admin/import/payments/preview/',
-      commitUrl: '/api/admin/import/payments/commit/',
-      buildFormData: (file) => { const fd = new FormData(); fd.set('file', file); return fd },
-    })
+    const trainers = useImportTab('trainers', null, reloadRoleData)
+    const groups = useImportTab('groups', null, reloadRoleData)
+    const clients = useImportTab('clients', null, reloadRoleData)
+    const payments = useImportTab('payments', null, reloadRoleData)
+    const attendance = useImportTab('attendance', attendanceEffectMode, reloadRoleData)
+    const states = { trainers, groups, clients, payments, attendance }
 
     async function loadBatches() {
       try {
         const payload = await api.get('/api/admin/system/imports/')
         setBatches(payload.batches || [])
       } catch (err) {
-        setBatchesError(err.message)
+        setBatchesError(err.payload?.error || err.message)
       }
     }
 
-    useEffect(() => { if (tab === 'clients') loadBatches() }, [tab])
+    useEffect(() => { if (tab !== 'export') loadBatches() }, [tab])
 
-    async function rollbackBatch(batchId) {
+    async function rollbackBatch(kind, batchId) {
       setBatchesError('')
       try {
-        const preview = await api.get(`/api/admin/import/clients/${batchId}/rollback/`)
-        if (!preview.can_rollback) {
-          const details = (preview.blockers || []).map((item) => item.student).join(', ')
-          throw new Error(`Откат заблокирован зависимыми данными: ${details || 'есть зависимости'}`)
-        }
-        const confirmation = window.prompt(
-          `Откат удалит импортированные записи. Введите ID batch ${batchId} для подтверждения:`)
+        const preview = await api.get(`/api/admin/import/${kind}/${batchId}/rollback/`)
+        if (!preview.can_rollback) throw new Error('Откат заблокирован зависимыми данными')
+        const confirmation = window.prompt(`Введите ID batch ${batchId} для подтверждения отката:`)
         if (confirmation !== String(batchId)) return
-        await api.post(`/api/admin/import/clients/${batchId}/rollback/`, {
-          confirm_batch_id: batchId,
-          confirm_rollback: true,
+        await api.post(`/api/admin/import/${kind}/${batchId}/rollback/`, {
+          confirm_batch_id: batchId, confirm_rollback: true,
         })
         await loadBatches()
       } catch (err) {
-        setBatchesError(err.message)
+        setBatchesError(err.payload?.error || err.message)
       }
     }
 
     async function runExport(entity, fmt) {
-      setExportBusy(`${entity}-${fmt}`)
-      setExportError('')
+      setExportBusy(`${entity}-${fmt}`); setExportError('')
       try {
         await downloadFile(`/api/admin/export/${entity}/${fmt}/`, `${entity}.${fmt}`)
       } catch (err) {
-        setExportError(err.message)
+        setExportError(err.payload?.error || err.message)
       } finally {
         setExportBusy(null)
       }
     }
 
-    // Rendered inside Settings → Контроль, which supplies the page header.
+    const financial = {
+      required: attendanceEffectMode === 'apply_financial',
+      confirmed: financialConfirmed,
+      controls: <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+        <span className="eyebrow">Режим импорта</span>
+        <select value={attendanceEffectMode} disabled={Boolean(attendance.file)}
+          onChange={(event) => { setAttendanceEffectMode(event.target.value); setFinancialConfirmed(false) }}>
+          <option value="history_only">Только история, без списаний и начислений</option>
+          <option value="apply_financial">Применить списания или начисления</option>
+        </select>
+      </label>,
+      warning: attendanceEffectMode === 'apply_financial'
+        ? <label className="card card-pad" style={{ display: 'flex', gap: 10 }}>
+          <input type="checkbox" checked={financialConfirmed}
+            onChange={(event) => setFinancialConfirmed(event.target.checked)} />
+          <span>Я подтверждаю финансовые последствия для выбранных строк.</span>
+        </label>
+        : <Banner tone="info">Безопасный режим: история без изменений баланса.</Banner>,
+    }
+
     return <div>
       <Tabs value={tab} onChange={setTab} items={[
         { value: 'export', label: 'Экспорт' },
-        { value: 'clients', label: 'Клиенты' },
-        { value: 'attendance', label: 'Посещаемость' },
-        { value: 'payments', label: 'Оплаты' },
+        ...DATASETS.map((dataset) => ({ value: dataset.kind, label: dataset.label })),
       ]} />
 
       {tab === 'export' && <div className="card card-pad" style={{ marginTop: 12 }}>
-        {exportError && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setExportError('')}>{exportError}</Banner>}
+        {exportError && <Banner tone="danger" onClose={() => setExportError('')}>{exportError}</Banner>}
+        <p className="muted">CSV — UTF-8; даты — ISO 8601; деньги — точный decimal/minor units; каждый файл содержит schema version и stable keys.</p>
         <div className="ops-action-strip">
-          {EXPORT_DATASETS.map(([entity, label]) => <div key={entity} className="card card-pad" style={{ display: 'grid', gap: 8 }}>
-            <strong>{label}</strong>
+          {DATASETS.map((dataset) => <div key={dataset.kind} className="card card-pad" style={{ display: 'grid', gap: 8 }}>
+            <strong>{dataset.label}</strong>
             <div className="ops-button-row">
-              <Button size="sm" variant="secondary" iconLeft={<I.Download size={14} />}
-                loading={exportBusy === `${entity}-xlsx`} disabled={exportBusy != null}
-                onClick={() => runExport(entity, 'xlsx')}>XLSX</Button>
-              <Button size="sm" variant="secondary" iconLeft={<I.Download size={14} />}
-                loading={exportBusy === `${entity}-csv`} disabled={exportBusy != null}
-                onClick={() => runExport(entity, 'csv')}>CSV</Button>
+              {['xlsx', 'csv'].map((fmt) => <Button key={fmt} size="sm" variant="secondary"
+                iconLeft={<I.Download size={14} />} loading={exportBusy === `${dataset.kind}-${fmt}`}
+                disabled={exportBusy != null} onClick={() => runExport(dataset.kind, fmt)}>{fmt.toUpperCase()}</Button>)}
             </div>
           </div>)}
         </div>
       </div>}
 
-      {tab === 'clients' && <div style={{ marginTop: 12 }}>
-        <div className="card card-pad" style={{ marginBottom: 12 }}>
-          <div className="eyebrow">Файл клиентов (.xlsx / .csv)</div>
-          <input type="file" accept=".xlsx,.xlsm,.csv" style={{ marginTop: 8 }}
-            onChange={(event) => clientsImport.selectFile(event.target.files?.[0] || null)} />
-        </div>
-        {clientsImport.error && <Banner tone="danger" style={{ marginBottom: 12 }}>{clientsImport.error}</Banner>}
-        {clientsImport.headers.length > 0 && <div className="card card-pad" style={{ marginBottom: 12 }}>
-          <div className="eyebrow">Сопоставление колонок</div>
-          <div className="ops-form-grid">
-            {clientsImport.headers.map((header) => <label key={header}>
-              {header}
-              <select value={clientsImport.mapping[header] || ''}
-                onChange={(event) => clientsImport.setMapping({ ...clientsImport.mapping, [header]: event.target.value })}>
-                {CANONICAL_FIELD_OPTIONS.map(([value, label]) => <option key={value || 'none'} value={value}>{label}</option>)}
-              </select>
-            </label>)}
-          </div>
-          <div className="ops-button-row" style={{ marginTop: 8 }}>
-            <Button variant="secondary" disabled={clientsImport.busy} onClick={() => clientsImport.runPreview()}>Обновить предпросмотр</Button>
-          </div>
-        </div>}
-        <ImportSummary summary={clientsImport.summary} />
-        {clientsImport.rows.length > 0 && <>
-          <ImportRowsTable rows={clientsImport.rows} />
-          <div className="ops-button-row" style={{ margin: '12px 0' }}>
-            <Button variant="primary" loading={clientsImport.busy} disabled={clientsImport.busy}
-              onClick={clientsImport.commit}>Импортировать</Button>
-          </div>
-        </>}
-        <div className="card card-pad" style={{ marginTop: 12 }}>
-          <div className="eyebrow">История импортов</div>
-          {batchesError && <Banner tone="danger" style={{ margin: '8px 0' }} onClose={() => setBatchesError('')}>{batchesError}</Banner>}
-          {batches.slice(0, 5).map((batch) => <div key={batch.id} className="ops-button-row" style={{ justifyContent: 'space-between', padding: '6px 0' }}>
-            <span>{batch.source_name || 'Импорт'} · {batch.rows_imported}/{batch.rows_total} строк{batch.is_rolled_back ? ' · откачен' : ''}</span>
-            {!batch.is_rolled_back && <Button size="sm" variant="subtle" onClick={() => rollbackBatch(batch.id)}>Откатить</Button>}
-          </div>)}
-          {!batches.length && <p className="muted">Импортов пока не было.</p>}
-        </div>
-      </div>}
+      {DATASETS.map((dataset) => tab === dataset.kind && <ImportWorkspace key={dataset.kind}
+        state={states[dataset.kind]} dataset={dataset} components={components}
+        financial={financial} possibleDuplicates={possibleDuplicates}
+        onFinancial={setFinancialConfirmed} onDuplicates={setPossibleDuplicates} />)}
 
-      {tab === 'attendance' && <div style={{ marginTop: 12 }}>
-        <div className="card card-pad" style={{ marginBottom: 12 }}>
-          <div className="eyebrow">Файл посещаемости (.xlsx / .csv)</div>
-          <p className="muted" style={{ margin: '6px 0' }}>
-            Колонки: Дата (ДД.ММ.ГГГГ ЧЧ:ММ), Клиент, Группа, Тренер, Статус.
-            Для занятий, которых ещё нет в расписании, дополнительно: Окончание (ЧЧ:ММ), Локация, Вместимость.
-          </p>
-          <label style={{ display: 'grid', gap: 6, margin: '12px 0' }}>
-            <span className="eyebrow">Режим импорта</span>
-            <select value={attendanceEffectMode} disabled={Boolean(attendanceImport.file)}
-              onChange={(event) => {
-                setAttendanceEffectMode(event.target.value)
-                setFinancialEffectsConfirmed(false)
-              }}>
-              <option value="history_only">Только история, без списаний и начислений</option>
-              <option value="apply_financial">Применить списания абонемента или начисления</option>
-            </select>
-          </label>
-          {attendanceEffectMode === 'history_only' && <Banner tone="info" style={{ margin: '8px 0 12px' }}>
-            Безопасный режим по умолчанию: посещения сохранятся в истории, но баланс абонемента и денежные начисления не изменятся.
-          </Banner>}
-          {attendanceEffectMode === 'apply_financial' && <Banner tone="warning" style={{ margin: '8px 0 12px' }}>
-            Финансовый режим может списать занятия с действующих абонементов или создать начисления по тарифу занятия.
-          </Banner>}
-          <input type="file" accept=".xlsx,.xlsm,.csv"
-            onChange={(event) => {
-              setFinancialEffectsConfirmed(false)
-              attendanceImport.selectFile(event.target.files?.[0] || null)
-            }} />
-        </div>
-        {attendanceImport.error && <Banner tone="danger" style={{ marginBottom: 12 }}>{attendanceImport.error}</Banner>}
-        <ImportSummary summary={attendanceImport.summary} />
-        {attendanceImport.rows.length > 0 && <>
-          <ImportRowsTable rows={attendanceImport.rows} />
-          <Banner tone="warning" style={{ margin: '12px 0' }}>
-            Операция необратима: отметки посещаемости нельзя удалить после импорта.
-          </Banner>
-          {attendanceEffectMode === 'apply_financial' && <label className="card card-pad"
-            style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
-            <input type="checkbox" checked={financialEffectsConfirmed}
-              onChange={(event) => setFinancialEffectsConfirmed(event.target.checked)} />
-            <span>Я подтверждаю списание занятий или создание денежных начислений для выбранных строк.</span>
-          </label>}
-          <div className="ops-button-row" style={{ marginBottom: 12 }}>
-            <Button variant="primary" loading={attendanceImport.busy}
-              disabled={attendanceImport.busy || (attendanceEffectMode === 'apply_financial' && !financialEffectsConfirmed)}
-              onClick={() => attendanceImport.commit(
-                attendanceEffectMode === 'apply_financial'
-                  ? { confirm_financial_effects: true }
-                  : {}
-              )}>Импортировать</Button>
+      {tab !== 'export' && <div className="card card-pad" style={{ marginTop: 16 }}>
+        <div className="eyebrow">История import batches</div>
+        {batchesError && <Banner tone="danger" onClose={() => setBatchesError('')}>{batchesError}</Banner>}
+        {batches.slice(0, 10).map((batch) => <div key={batch.id} className="ops-button-row"
+          style={{ justifyContent: 'space-between', padding: '6px 0' }}>
+          <span>#{batch.id} · {batch.kind} · {batch.source_name || 'Импорт'} · создано {batch.created || 0}
+            {' · '}обновлено {batch.updated || 0} · пропущено {batch.skipped || 0}
+            {' · '}ошибок {batch.errors_count || 0} · {batch.status}
+            {batch.rollback_strategy?.label ? <small className="muted" style={{ display: 'block' }}>
+              {batch.rollback_strategy.label}
+            </small> : null}</span>
+          <div className="ops-button-row">
+            {batch.report_available && ['csv', 'xlsx'].map((fmt) => <Button key={fmt} size="sm"
+              variant="subtle" onClick={() => downloadFile(
+                `/api/admin/import/batches/${batch.id}/report/${fmt}/`,
+                `import-${batch.kind}-${batch.id}-report.${fmt}`)}>
+              Отчёт {fmt.toUpperCase()}
+            </Button>)}
+            {['clients', 'groups'].includes(batch.kind) && batch.status === 'committed' && !batch.is_rolled_back
+              && <Button size="sm" variant="subtle" onClick={() => rollbackBatch(batch.kind, batch.id)}>Откатить</Button>}
           </div>
-        </>}
-      </div>}
-
-      {tab === 'payments' && <div style={{ marginTop: 12 }}>
-        <div className="card card-pad" style={{ marginBottom: 12 }}>
-          <div className="eyebrow">Файл оплат (.xlsx / .csv)</div>
-          <p className="muted" style={{ margin: '6px 0' }}>
-            Колонки: Клиент, Сумма, Валюта (необязательно, по умолчанию PLN), Дата (ДД.ММ.ГГГГ),
-            Способ (наличные/перевод/карта/другое), Статус (необязательно, по умолчанию — подтверждён), Reference ID (необязательно), Комментарий.
-          </p>
-          <input type="file" accept=".xlsx,.xlsm,.csv"
-            onChange={(event) => paymentsImport.selectFile(event.target.files?.[0] || null)} />
-        </div>
-        {paymentsImport.error && <Banner tone="danger" style={{ marginBottom: 12 }}>{paymentsImport.error}</Banner>}
-        <ImportSummary summary={paymentsImport.summary} />
-        {paymentsImport.rows.length > 0 && <>
-          <ImportRowsTable rows={paymentsImport.rows} />
-          <Banner tone="warning" style={{ margin: '12px 0' }}>
-            Операция необратима: платежи нельзя удалить после импорта (append-only история).
-          </Banner>
-          {paymentsImport.rows.some((row) => row.status === 'possible_duplicate') && <label className="card card-pad"
-            style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
-            <input type="checkbox" checked={possiblePaymentDuplicatesApproved}
-              onChange={(event) => setPossiblePaymentDuplicatesApproved(event.target.checked)} />
-            <span>Я проверил вероятные дубликаты и разрешаю добавить выбранные платежи без Reference ID.</span>
-          </label>}
-          <div className="ops-button-row" style={{ marginBottom: 12 }}>
-            <Button variant="primary" loading={paymentsImport.busy}
-              disabled={paymentsImport.busy || (paymentsImport.rows.some((row) => row.status === 'possible_duplicate') && !possiblePaymentDuplicatesApproved)}
-              onClick={() => paymentsImport.commit({
-                approve_possible_duplicates: possiblePaymentDuplicatesApproved,
-              })}>Импортировать</Button>
-          </div>
-        </>}
+        </div>)}
+        {!batches.length && <p className="muted">Импортов пока не было.</p>}
       </div>}
     </div>
   }

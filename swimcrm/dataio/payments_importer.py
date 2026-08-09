@@ -32,6 +32,9 @@ from billing.services import confirm_payment, record_admin_payment_created, reje
 from common.money import MINOR_UNITS, Money
 from students.models import Student
 
+from .contracts import prepare_rows
+from .matching import match_student, requested
+
 NEW, DUPLICATE, POSSIBLE_DUPLICATE, ERROR = "new", "duplicate", "possible_duplicate", "error"
 
 METHOD_LABELS = {label.lower(): value for value, label in PaymentMethod.choices}
@@ -44,6 +47,7 @@ class PaymentPreviewRow:
     data: dict
     status: str = ERROR
     errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
     resolved: dict = field(default_factory=dict)
 
 
@@ -110,7 +114,7 @@ def _parse_paid_at(raw):
     raw = (raw or "").strip()
     if not raw:
         return None, "Не указана дата оплаты"
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
         try:
             return datetime.strptime(raw, fmt).date(), None
         except ValueError:
@@ -118,22 +122,50 @@ def _parse_paid_at(raw):
     return None, f"Некорректная дата (ожидается ДД.ММ.ГГГГ): {raw}"
 
 
-def preview(headers, rows):
+def preview(headers, rows, mapping=None):
     """Validate + classify each row (new / duplicate / error). No DB writes."""
+    rows = prepare_rows("payments", headers, rows, mapping)["rows"]
     result = []
+    seen_record_ids = set()
+    seen_reference_ids = set()
     for i, row in enumerate(rows, start=2):  # row 1 = header
-        d = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
+        d = {(k or "").strip(): ("" if v is None else str(v).strip())
+             for k, v in row.items()}
         pr = PaymentPreviewRow(index=i, data=d)
+        record_id = str(d.get("record_id") or "").strip()
+        if record_id:
+            if record_id in seen_record_ids:
+                pr.errors.append("Повторяющийся Internal ID в файле")
+            seen_record_ids.add(record_id)
 
-        student, err = _resolve_student(d.get("Клиент"))
-        if err:
-            pr.errors.append(err)
+        create_client = requested(d.get("create_client"))
+        matched = match_student(d)
+        student = matched.student
+        if student is None and not create_client:
+            pr.errors.append(matched.reason or "Клиент не найден")
+        if create_client:
+            if not str(d.get("client_first_name") or "").strip() and not str(d.get("client_last_name") or "").strip():
+                pr.errors.append("Для создания клиента укажите имя или фамилию")
+            if not str(d.get("client_email") or "").strip() and not str(d.get("client_phone") or "").strip():
+                pr.errors.append("Для создания клиента укажите email или телефон")
 
-        currency = (d.get("Валюта") or "PLN").strip().upper()
+        currency = (d.get("currency") or "PLN").strip().upper()
         if currency not in MINOR_UNITS:
             pr.errors.append(f"Неподдерживаемая валюта: {currency}")
 
-        amount_minor, err = _parse_amount_minor(d.get("Сумма"), currency)
+        amount_minor, err = _parse_amount_minor(d.get("amount"), currency)
+        exported_minor = d.get("amount_minor")
+        if exported_minor not in (None, ""):
+            try:
+                exported_minor = int(exported_minor)
+            except (TypeError, ValueError):
+                pr.errors.append(f"Некорректная сумма в minor units: {exported_minor}")
+            else:
+                if amount_minor is None:
+                    amount_minor = exported_minor
+                    err = None
+                elif amount_minor != exported_minor:
+                    pr.errors.append("Сумма и amount_minor не совпадают")
         if err:
             pr.errors.append(err)
         elif currency in MINOR_UNITS:
@@ -142,15 +174,15 @@ def preview(headers, rows):
             except (TypeError, ValueError) as exc:
                 pr.errors.append(str(exc))
 
-        paid_at, err = _parse_paid_at(d.get("Дата"))
+        paid_at, err = _parse_paid_at(d.get("paid_at"))
         if err:
             pr.errors.append(err)
 
-        method, err = _parse_method(d.get("Способ"))
+        method, err = _parse_method(d.get("method"))
         if err:
             pr.errors.append(err)
 
-        status, err = _parse_status(d.get("Статус"))
+        status, err = _parse_status(d.get("status"))
         if err:
             pr.errors.append(err)
 
@@ -159,25 +191,39 @@ def preview(headers, rows):
             result.append(pr)
             continue
 
-        reference_id = (d.get("Reference ID") or d.get("ID транзакции") or "").strip()[:128]
-        same_payment = Payment.objects.filter(
+        reference_id = (d.get("reference_id") or "").strip()[:128]
+        same_payment = Payment.objects.none() if student is None else Payment.objects.filter(
             student=student, amount_minor=amount_minor, currency=currency,
             paid_at=paid_at, method=method)
         if reference_id:
-            is_dup = Payment.objects.filter(reference_id=reference_id).exists()
+            is_dup = (reference_id.casefold() in seen_reference_ids
+                      or Payment.objects.filter(reference_id=reference_id).exists())
             pr.status = DUPLICATE if is_dup else NEW
             if is_dup:
                 pr.errors.append("Платёж с таким Reference ID уже существует")
+            seen_reference_ids.add(reference_id.casefold())
         elif same_payment.exists():
             pr.status = POSSIBLE_DUPLICATE
             pr.errors.append("Вероятный дубликат: подтвердите импорт вручную или укажите Reference ID")
         else:
             pr.status = NEW
         pr.resolved = {
-            "student_id": student.id, "amount_minor": amount_minor, "currency": currency,
+            "student_id": student.id if student else None,
+            "create_client": create_client,
+            "client_data": {
+                "first_name": d.get("client_first_name", ""),
+                "last_name": d.get("client_last_name", ""),
+                "email": d.get("client_email", ""),
+                "phone": d.get("client_phone", ""),
+                "birth_date": d.get("client_birth_date", ""),
+            },
+            "amount_minor": amount_minor, "currency": currency,
             "paid_at": paid_at.isoformat(), "method": method, "status": status,
             "reference_id": reference_id,
-            "comment": d.get("Комментарий", ""),
+            "comment": d.get("comment", ""),
+            "matching_reason": ("Новый клиент будет создан после подтверждения" if create_client else matched.reason),
+            "matching_confidence": ("manual_create" if create_client else matched.confidence),
+            "matching_candidates": matched.candidates,
         }
         result.append(pr)
     return result
@@ -188,6 +234,8 @@ def commit(preview_rows, *, actor=None, approve_possible_duplicates=False):
     """Apply NEW rows. Everything else is skipped. No rollback: Payment/Charge/
     PaymentEvent history is immutable by design — preview is the safety net."""
     created = skipped = 0
+    created_ids = []
+    created_client_ids = []
     errors = []
 
     for pr in preview_rows:
@@ -201,7 +249,44 @@ def commit(preview_rows, *, actor=None, approve_possible_duplicates=False):
             with transaction.atomic():
                 r = pr.resolved
                 paid_at = date_cls.fromisoformat(r["paid_at"])
-                student = Student.objects.select_related("parent__user").get(pk=r["student_id"])
+                if r.get("create_client"):
+                    from accounts.models import ParentAccount, Role, User
+                    client_data = r.get("client_data") or {}
+                    email = str(client_data.get("email") or "").strip()
+                    phone = str(client_data.get("phone") or "").strip()
+                    if email and Student.objects.filter(email__iexact=email).exists():
+                        raise ValidationError("Клиент с таким email уже существует")
+                    if phone and ParentAccount.objects.filter(phone=phone).exists():
+                        raise ValidationError("Семья с таким телефоном уже существует; выберите участника вручную")
+                    base = email or phone or "imported-client"
+                    username = f"imp_{base}"[:150]
+                    suffix = 1
+                    while User.objects.filter(username=username).exists():
+                        suffix += 1
+                        username = f"imp_{base}_{suffix}"[:150]
+                    user = User.objects.create_user(
+                        username=username,
+                        role=Role.PARENT,
+                        first_name=str(client_data.get("first_name") or "").strip(),
+                        last_name=str(client_data.get("last_name") or "").strip(),
+                        email=email,
+                    )
+                    user.set_unusable_password()
+                    user.save(update_fields=["password"])
+                    parent = ParentAccount.objects.create(user=user, phone=phone, email=email)
+                    birth_date = None
+                    if client_data.get("birth_date"):
+                        birth_date = date_cls.fromisoformat(str(client_data["birth_date"]).strip())
+                    student = Student.objects.create(
+                        parent=parent,
+                        first_name=str(client_data.get("first_name") or "").strip(),
+                        last_name=str(client_data.get("last_name") or "").strip(),
+                        email=email,
+                        birth_date=birth_date,
+                    )
+                    created_client_ids.append(student.id)
+                else:
+                    student = Student.objects.select_related("parent__user").get(pk=r["student_id"])
                 # Re-check the duplicate guard at commit time too: data may have
                 # changed since preview, and a written payment cannot be undone.
                 if r.get("reference_id"):
@@ -223,10 +308,12 @@ def commit(preview_rows, *, actor=None, approve_possible_duplicates=False):
                     confirm_payment(payment, actor)
                 elif r["status"] == PaymentStatus.REJECTED:
                     reject_payment(payment, actor, "Импортировано как отклонённый платёж")
+                created_ids.append(payment.id)
                 created += 1
         except ValidationError as exc:
             message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
             errors.append(f"Строка {pr.index}: {message}")
             skipped += 1
 
-    return {"created": created, "skipped": skipped, "errors": errors}
+    return {"created": created, "skipped": skipped, "created_ids": created_ids,
+            "created_client_ids": created_client_ids, "errors": errors}

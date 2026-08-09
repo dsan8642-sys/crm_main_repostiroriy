@@ -15,12 +15,19 @@ HEADER_FONT = Font(name=FONT, bold=True, color="FFFFFF")
 BODY_FONT = Font(name=FONT)
 
 
+def _safe_cell(value):
+    """Keep spreadsheet programs from executing exported user text as formulas."""
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def rows_to_csv(headers, rows) -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")  # PL locale friendly
     writer.writerow(headers)
     for r in rows:
-        writer.writerow(["" if v is None else v for v in r])
+        writer.writerow(["" if v is None else _safe_cell(v) for v in r])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
 
@@ -32,7 +39,7 @@ def _fill_sheet(ws, headers, rows):
         c.fill = HEADER_FILL
         c.alignment = Alignment(vertical="center")
     for r in rows:
-        ws.append(["" if v is None else v for v in r])
+        ws.append(["" if v is None else _safe_cell(v) for v in r])
         for col in range(1, len(headers) + 1):
             ws.cell(row=ws.max_row, column=col).font = BODY_FONT
     # width heuristic

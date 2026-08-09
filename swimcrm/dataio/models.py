@@ -6,6 +6,8 @@ class ImportKind(models.TextChoices):
     CLIENTS = "clients", "Clients"
     ATTENDANCE = "attendance", "Attendance"
     PAYMENTS = "payments", "Payments"
+    GROUPS = "groups", "Groups"
+    TRAINERS = "trainers", "Trainers"
 
 
 class ImportBatchStatus(models.TextChoices):

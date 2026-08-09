@@ -22,7 +22,8 @@ def _audit_payload(entry):
     }
 
 
-def _import_payload(batch):
+def _import_payload(batch, actor):
+    result = batch.result if isinstance(batch.result, dict) else {}
     return {
         "id": batch.id,
         "created_at": timezone.localtime(batch.created_at).isoformat(),
@@ -34,6 +35,13 @@ def _import_payload(batch):
         "rows_imported": batch.rows_imported,
         "is_rolled_back": batch.is_rolled_back,
         "created_by": str(batch.created_by) if batch.created_by_id else "Система",
+        "import_mode": result.get("import_mode", "create_only"),
+        "rollback_strategy": result.get("rollback_strategy"),
+        "report_available": bool(result.get("report_rows")) and batch.created_by_id == actor.id,
+        "created": result.get("created", result.get("created_records", batch.rows_imported)),
+        "updated": result.get("updated", 0),
+        "skipped": result.get("skipped", max(batch.rows_total - batch.rows_imported, 0)),
+        "errors_count": len(result.get("errors") or []),
     }
 
 
@@ -53,9 +61,9 @@ def admin_audit_log(request):
 
 @require_GET
 def admin_import_batches(request):
-    _admin_required(request)
+    actor = _admin_required(request)
     batches = ImportBatch.objects.select_related("created_by").order_by("-created_at", "-id")[:200]
-    return JsonResponse({"batches": [_import_payload(batch) for batch in batches]})
+    return JsonResponse({"batches": [_import_payload(batch, actor) for batch in batches]})
 
 
 @require_GET

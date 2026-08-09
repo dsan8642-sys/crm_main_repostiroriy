@@ -83,16 +83,44 @@ Settings query validation:
 
 Imports use a server-owned two-phase batch:
 
-- `POST /api/admin/import/<kind>/preview/` accepts the source file and returns
-  `batch_id`, `expires_at`, headers, and display-only preview rows.
+- Standard kinds are `trainers`, `groups`, `clients`, `payments`, and
+  `attendance`. Every kind also exists in the standard CSV/XLSX export registry.
+- `POST /api/admin/import/<kind>/preview/` accepts a CSV/XLSX file plus optional
+  JSON `mapping`. It returns `batch_id`, `expires_at`, schema metadata, proposed
+  mapping, source examples, required/unused columns, file fingerprint warning,
+  per-row stable key/status/errors/warnings/action and editable field metadata.
+- Own SwimCRM exports are recognized through `schema_version`, `exported_at`,
+  `source_system`, and `entity_type`; unsupported or inconsistent metadata is
+  rejected. External files use the same alias registry and may override mapping.
+- `PATCH /api/admin/import/<kind>/<batch_id>/rows/<row_index>/` changes only
+  contract-approved `data`, relation overrides, or the row exclusion flag.
+  Consecutive patches merge with existing manual corrections; changing a relation
+  never discards an earlier data edit (and vice versa).
+- `POST /api/admin/import/<kind>/<batch_id>/rows/bulk/` applies the same checked
+  patch to explicit source-row indices. Protected fields cannot be edited.
+- `GET /api/admin/import/client-search/?q=...` searches clients for manual
+  payment/attendance assignment. A manual choice is retained during every later
+  server revalidation.
 - `POST /api/admin/import/<kind>/commit/` accepts only `batch_id` and
-  `selected_indices`.
+  `selected_indices`, plus the documented payment/attendance confirmations.
 - Preview batches expire after 30 minutes, belong to the administrator who
   created them, and can be committed once.
 - Commit rebuilds and validates the preview from server-held source data inside
   a database transaction. Browser-supplied `rows`, `status`, `data`, or
   `resolved` fields are rejected.
 - Server-held source rows are removed from the batch after a successful commit.
+- Batch results retain the file hash, source/schema, mode, mapping, manual
+  corrections, counts, created/updated IDs, rollback strategy, and sanitized
+  row report. The initiating administrator can download that report at
+  `GET /api/admin/import/batches/<batch_id>/report/csv|xlsx/`.
+- `groups` preview additionally accepts
+  `import_mode=create_only|update_existing|upsert`. The default is
+  `create_only`; update rows include an old-to-new diff.
+- Client and group batches have explicit, dependency-aware rollback endpoints.
+  Group rollback deletes only unchanged records created by that batch and
+  restores updated groups only when their post-import snapshot is unchanged.
+  Payments and attendance remain immutable; their batch exposes the required
+  auditable compensating strategy instead of deleting history.
 - Attendance preview accepts `effect_mode=history_only|apply_financial`; the
   default is `history_only`.
 - `history_only` creates immutable attendance history without changing
@@ -101,6 +129,9 @@ Imports use a server-owned two-phase batch:
 - `apply_financial` is stored in the server-owned batch and commit additionally
   requires `confirm_financial_effects=true`. The committed mode, result, and
   acting administrator are recorded in the audit log.
+- Import/export payloads never contain role, permission, password, OTP, direct
+  balance, or other privilege fields. Payments and attendance are committed
+  through existing domain services, not direct balance writes.
 
 Notification delivery chooses `NotificationTemplateTranslation` by
 `ParentAccount.preferred_language`, then falls back to the default language and
