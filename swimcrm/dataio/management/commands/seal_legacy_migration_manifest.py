@@ -11,6 +11,12 @@ from dataio.legacy_migration import file_sha256, production_snapshot
 from students.models import Student
 
 
+APPROVED_FAMILY_CREATES = {
+    "663888", "756027", "661221", "660278", "660279",
+    "673360", "676825", "731356", "731529",
+}
+
+
 def _clean(value):
     return str(value or "").strip()
 
@@ -36,6 +42,30 @@ def _identity(student):
         "first_name": student.first_name,
         "last_name": student.last_name,
         "birth_date": _iso(student.birth_date),
+    }
+
+
+def build_family_create_client(legacy_id, mapped, canonical_student):
+    fields = mapped.get("create_fields") or {}
+    first_name = _clean(fields.get("first_name"))
+    last_name = _clean(fields.get("last_name"))
+    if not first_name or not last_name:
+        raise CommandError(f"Family create {legacy_id} requires an approved Latin first and last name.")
+    return {
+        "legacy_id": legacy_id,
+        "approved": True,
+        "action": "create",
+        "parent_target_id": canonical_student.parent_id,
+        "fields": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "birth_date": _iso(fields.get("birth_date")),
+            "email": "",
+            "phone": "",
+            "parent_email": "",
+            "is_account_holder": False,
+        },
+        "allow_name_overwrite": False,
     }
 
 
@@ -71,9 +101,27 @@ class Command(BaseCommand):
             mapped = mapping_by_id.get(legacy_id)
             if not mapped or len(mapped.get("candidates", [])) != 1:
                 raise CommandError(f"Legacy ID {legacy_id} has no unique stable target.")
-            alias_of = _clean(mapped.get("method")).removeprefix("alias_of:")
-            if _clean(mapped.get("method")).startswith("alias_of:"):
+            method = _clean(mapped.get("method"))
+            alias_of = method.removeprefix("alias_of:")
+            if method.startswith("alias_of:"):
                 clients.append({"legacy_id": legacy_id, "approved": True, "action": "alias", "alias_of": alias_of})
+                continue
+
+            if method.startswith("create_under_parent_of:"):
+                canonical_id = method.removeprefix("create_under_parent_of:")
+                canonical = mapping_by_id.get(canonical_id)
+                if not canonical or len(canonical.get("candidates", [])) != 1:
+                    raise CommandError(f"Family create {legacy_id} has no unique canonical target.")
+                if _clean(canonical.get("method")).startswith(("alias_of:", "create_under_parent_of:")):
+                    raise CommandError(f"Family create {legacy_id} must reference a canonical update target.")
+                if mapped["candidates"][0]["student_id"] != canonical["candidates"][0]["student_id"]:
+                    raise CommandError(f"Family create {legacy_id} target differs from its canonical family target.")
+                canonical_student = Student.objects.filter(
+                    id=canonical["candidates"][0]["student_id"]
+                ).select_related("parent").first()
+                if canonical_student is None:
+                    raise CommandError(f"Family create {legacy_id} canonical Student.id is absent.")
+                clients.append(build_family_create_client(legacy_id, mapped, canonical_student))
                 continue
 
             student = Student.objects.filter(id=mapped["candidates"][0]["student_id"]).select_related("parent").first()
@@ -99,6 +147,10 @@ class Command(BaseCommand):
                 "fields": fields,
                 "allow_name_overwrite": allow_name,
             })
+
+        family_create_ids = {row["legacy_id"] for row in clients if row["action"] == "create"}
+        if family_create_ids != APPROVED_FAMILY_CREATES:
+            raise CommandError("Approved family participant creations are not exact.")
 
         balance_by_id = {str(row["legacy_id"]): row for row in balances_review}
         balances = []

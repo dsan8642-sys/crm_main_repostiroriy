@@ -13,6 +13,7 @@ from audit.models import AuditLogEntry
 from billing.models import Payment, PaymentStatus
 from catalog.models import Group
 from dataio.legacy_migration import execute_manifest, production_snapshot
+from dataio.management.commands.seal_legacy_migration_manifest import build_family_create_client
 from students.models import Student
 from scheduling.services import create_session
 from subscriptions.models import SessionLedgerEntry, Subscription
@@ -129,6 +130,20 @@ class LegacyMigrationTest(TestCase):
         created = Student.objects.filter(parent=parent, first_name="Latin", last_name="Name")
         self.assertEqual(created.count(), 2)
         self.assertEqual(created.values("id").distinct().count(), 2)
+
+    def test_approved_family_create_reuses_parent_without_contacts_or_group(self):
+        canonical = f.make_student(group=Group.objects.create(name="Legacy family group"))
+        row = build_family_create_client(
+            "child-legacy",
+            {"create_fields": {"first_name": "Sofiia", "last_name": "Bedun", "birth_date": None}},
+            canonical,
+        )
+        manifest = self._manifest([self._client("canonical", canonical), row])
+        execute_manifest(manifest, self.source, self.admin, commit=True)
+        created = Student.objects.get(first_name="Sofiia", last_name="Bedun")
+        self.assertEqual(created.parent_id, canonical.parent_id)
+        self.assertIsNone(created.group_id)
+        self.assertFalse(created.email)
 
     def test_payments_attendance_and_group_membership_are_unchanged(self):
         group = Group.objects.create(name="Protected group")

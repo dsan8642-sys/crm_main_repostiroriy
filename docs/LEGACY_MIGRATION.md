@@ -12,7 +12,7 @@ This is a one-off production operation. It does not use the normal UI import and
 
 ## Hard gates
 
-1. All 293 approved legacy rows have a stable `Student.id`, or an explicitly approved alias to one canonical legacy ID.
+1. All 293 approved legacy rows have a stable `Student.id`, an explicitly approved alias, or an explicitly approved participant creation under an existing family account.
 2. Legacy IDs `603302` and `605680` are the only excluded legacy profiles.
 3. Duda Aleksander and Duda Jakub are separate `CREATE` rows with separate new family accounts.
 4. Every final balance row is approved; partial PLN is archive-only and never rounded into the migration.
