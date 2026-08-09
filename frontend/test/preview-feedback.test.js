@@ -69,6 +69,39 @@ test('admin group mapper preserves nullable default capacity', () => {
   assert.equal(withoutCapacity.colorKey, 'standard')
 })
 
+test('admin client mapper exposes balance subscription and recent activity metadata', () => {
+  const common = {
+    reference: {}, trainers: {}, groups: {}, subscriptionTypes: {}, sessionTypeConfigs: {},
+    sessions: {}, payments: {}, debtors: {},
+  }
+  const client = mapAdminPortalData({
+    ...common,
+    clients: { clients: [{
+      id: 7,
+      client_id: 3,
+      first_name: 'Anna',
+      last_name: 'Nowak',
+      balance_minor: -500,
+      currency: 'PLN',
+      has_current_subscription: true,
+      current_subscription_remaining: 2,
+      current_subscription_total: 4,
+      is_recently_active: true,
+      last_present_at: '2026-08-01T17:00:00+02:00',
+      is_active: true,
+      client_is_active: true,
+    }] },
+  }).clients[0]
+
+  assert.equal(client.balance, 5)
+  assert.equal(client.currency, 'PLN')
+  assert.equal(client.hasCurrentSubscription, true)
+  assert.equal(client.currentSubscriptionRemaining, 2)
+  assert.equal(client.currentSubscriptionTotal, 4)
+  assert.equal(client.isRecentlyActive, true)
+  assert.equal(client.lastPresentAt, '2026-08-01T17:00:00+02:00')
+})
+
 test('schedule mappers normalize the server presentation key for every role', () => {
   const trainer = mapTrainerSession({
     id: 1,

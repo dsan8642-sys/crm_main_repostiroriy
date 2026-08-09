@@ -105,8 +105,8 @@ class LegacyMigrationTest(TestCase):
 
     def test_create_separate_uninvited_duda_accounts(self):
         clients = [
-            self._client("duda-a", fields={"first_name": "Aleksander", "last_name": "Duda"}),
-            self._client("duda-j", fields={"first_name": "Jakub", "last_name": "Duda"}),
+            self._client("gsheet:duda_aleksander", fields={"first_name": "Aleksander", "last_name": "Duda"}),
+            self._client("gsheet:duda_jakub", fields={"first_name": "Jakub", "last_name": "Duda"}),
         ]
         manifest = self._manifest([], run_id="duda-separate")
         manifest["new_clients"] = clients
@@ -118,6 +118,7 @@ class LegacyMigrationTest(TestCase):
         self.assertTrue(all(not st.parent.phone and not st.parent.email for st in students))
         self.assertTrue(all(not st.parent.user.has_usable_password() for st in students))
         self.assertTrue(all(not st.parent.user.is_active for st in students))
+        self.assertTrue(all(":" not in st.parent.user.username for st in students))
         self.assertFalse(AccountActivation.objects.filter(user__in=[st.parent.user for st in students]).exists())
 
     def test_related_participants_share_family_without_collapsing(self):

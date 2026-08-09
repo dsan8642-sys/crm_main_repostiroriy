@@ -7,7 +7,7 @@ import { DateField } from '../DateTimeField.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 
 export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Avatar, Button, Banner, Input, Dialog } = components
+  const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
   return function ApiAdminClients({ go }) {
     const rows = adminData.clients || []
     const groups = adminData.groups || []
@@ -53,21 +53,43 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     const [quickAction, setQuickAction] = useState(null)
     const [query, setQuery] = useState('')
     const [scope, setScope] = useState('active')
+    const [subscriptionFilter, setSubscriptionFilter] = useState('all')
+    const [balanceFilter, setBalanceFilter] = useState('all')
+    const [activityFilter, setActivityFilter] = useState('all')
     const [clientAction, setClientAction] = useState(null)
     const scopedRows = scope === 'blacklist'
       ? Array.from(new Map(rows.filter((row) => row.accountActive === false).map((row) => [row.clientId, row])).values())
       : rows.filter((row) => row.accountActive !== false && row.isActive)
     const filteredRows = scopedRows.filter((row) => {
       const needle = query.trim().toLocaleLowerCase('ru-RU')
-      if (!needle) return true
-      return [row.first, row.last, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))
+      if (needle && ![row.first, row.last, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))) return false
+      if (subscriptionFilter === 'with' && !row.hasCurrentSubscription) return false
+      if (subscriptionFilter === 'without' && row.hasCurrentSubscription) return false
+      if (balanceFilter === 'positive' && row.balance <= 0) return false
+      if (balanceFilter === 'negative' && row.balance >= 0) return false
+      if (activityFilter === 'active' && !row.isRecentlyActive) return false
+      if (activityFilter === 'inactive' && row.isRecentlyActive) return false
+      return true
     })
-    const hasActiveFilter = Boolean(query.trim())
+    const hasActiveFilter = Boolean(query.trim()) || subscriptionFilter !== 'all' || balanceFilter !== 'all' || activityFilter !== 'all'
     const emptyLabel = hasActiveFilter && scopedRows.length
       ? 'По заданным фильтрам ничего не найдено.'
       : scope === 'blacklist'
         ? 'Чёрный список пуст'
         : 'Активных клиентов пока нет'
+
+    function resetFilters() {
+      setQuery('')
+      setSubscriptionFilter('all')
+      setBalanceFilter('all')
+      setActivityFilter('all')
+    }
+
+    const subscriptionUsage = (row) => {
+      if (!row.hasCurrentSubscription) return 'Нет'
+      if (row.currentSubscriptionIsUnlimited) return 'Безлимит'
+      return `${row.currentSubscriptionRemaining} из ${row.currentSubscriptionTotal}`
+    }
 
     const updateClientForm = (field, value) => setClientForm((current) => ({ ...current, [field]: value }))
     const updateParticipantForm = (field, value) => setParticipantForm((current) => ({ ...current, [field]: value }))
@@ -374,11 +396,37 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               <span aria-hidden="true">⌕</span>
               <input aria-label="Поиск клиентов" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, телефон, email или группа" />
             </div>
+            <div className="ops-client-filter-selects">
+              <label className="ops-client-filter-field">
+                <span>Абонемент</span>
+                <select aria-label="Абонемент" value={subscriptionFilter} onChange={(event) => setSubscriptionFilter(event.target.value)}>
+                  <option value="all">Все</option>
+                  <option value="with">Есть</option>
+                  <option value="without">Нет</option>
+                </select>
+              </label>
+              <label className="ops-client-filter-field">
+                <span>Баланс</span>
+                <select aria-label="Баланс" value={balanceFilter} onChange={(event) => setBalanceFilter(event.target.value)}>
+                  <option value="all">Любой</option>
+                  <option value="positive">Положительный — переплата</option>
+                  <option value="negative">Отрицательный — долг</option>
+                </select>
+              </label>
+              <label className="ops-client-filter-field">
+                <span>Активность</span>
+                <select aria-label="Активность" value={activityFilter} onChange={(event) => setActivityFilter(event.target.value)}>
+                  <option value="all">Все</option>
+                  <option value="active">Активные за 60 дней</option>
+                  <option value="inactive">Неактивные</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="muted">Найдено: {filteredRows.length}</span>
             {hasActiveFilter && (
-              <Button size="sm" variant="subtle" onClick={() => setQuery('')}>Сбросить фильтры</Button>
+              <Button size="sm" variant="subtle" onClick={resetFilters}>Сбросить фильтры</Button>
             )}
           </div>
         </div>
@@ -396,6 +444,14 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
               { key: 'email', header: 'Email', muted: true },
               { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button" onClick={() => go?.('groups', { groupId: row.groupId })}>{row.group}</button> : row.group },
+              { key: 'subscription', header: 'Абонемент', width: 105, render: (row) => <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge> },
+              { key: 'balance', header: 'Баланс', align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
+              { key: 'activity', header: 'Активность', width: 150, render: (row) => (
+                <span className="ops-client-activity">
+                  <StatusPill status={row.isRecentlyActive ? 'active' : 'inactive'} size="sm" />
+                  <small>{row.lastPresentAt ? formatDate(row.lastPresentAt) : 'Не посещал'}</small>
+                </span>
+              ) },
               { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.status} size="sm" /> },
               {
                 key: 'act',
@@ -438,6 +494,9 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <span><small>Телефон</small><span className="mono">{row.phone || '-'}</span></span>
                   <span><small>Email</small><span>{row.email || '-'}</span></span>
                   <span><small>Группа</small><span>{row.group || 'Индивидуально'}</span></span>
+                  <span><small>Абонемент</small><span>{subscriptionUsage(row)}</span></span>
+                  <span><small>Баланс</small><Money amount={row.balance} signed currency="zł" /></span>
+                  <span><small>Активность</small><span>{row.isRecentlyActive ? 'Активен' : 'Неактивен'} · {row.lastPresentAt ? formatDate(row.lastPresentAt) : 'Не посещал'}</span></span>
                 </span>
               </Card>
             )

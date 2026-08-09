@@ -1,6 +1,105 @@
 ﻿from .support import *
 from .admin_support import _admin_required
 from .pagination import paginated_payload
+from datetime import timedelta
+
+from django.db.models import Max
+
+
+def _client_list_balances(students):
+    student_ids = [student.id for student in students]
+    charged = {
+        row["student_id"]: row["total"] or 0
+        for row in Charge.objects.filter(
+            student_id__in=student_ids,
+            currency=settings.DEFAULT_CURRENCY,
+        ).values("student_id").annotate(total=Sum("amount_minor"))
+    }
+    paid = {
+        row["student_id"]: row["total"] or 0
+        for row in Payment.objects.filter(
+            student_id__in=student_ids,
+            currency=settings.DEFAULT_CURRENCY,
+            status=PaymentStatus.CONFIRMED,
+        ).values("student_id").annotate(total=Sum("amount_minor"))
+    }
+    return {
+        student_id: charged.get(student_id, 0) - paid.get(student_id, 0)
+        for student_id in student_ids
+    }
+
+
+def _client_current_subscriptions(students):
+    current = {student.id: None for student in students}
+    today = timezone.localdate()
+    subscriptions = Subscription.objects.filter(
+        student_id__in=current,
+        status__in=[SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN],
+    ).select_related("subscription_type").prefetch_related(
+        "freeze_periods"
+    ).annotate(
+        list_remaining_sessions=Sum("ledger_entries__delta")
+    ).order_by("student_id", "-start_date", "-id")
+    for subscription in subscriptions:
+        if current[subscription.student_id] is not None:
+            continue
+        if subscription.is_active_on(today):
+            is_unlimited = subscription.subscription_type.is_unlimited
+            current[subscription.student_id] = {
+                "remaining": (
+                    None if is_unlimited
+                    else subscription.list_remaining_sessions or 0
+                ),
+                "total": (
+                    None if is_unlimited
+                    else subscription.subscription_type.sessions_count
+                ),
+                "is_unlimited": is_unlimited,
+            }
+    return current
+
+
+def _client_recent_attendance(students):
+    now = timezone.now()
+    rows = AttendanceRecord.objects.filter(
+        student_id__in=[student.id for student in students],
+        status=AttendanceStatus.PRESENT,
+        session__is_cancelled=False,
+        session__start_at__lte=now,
+    ).values("student_id").annotate(last_present_at=Max("session__start_at"))
+    return (
+        {row["student_id"]: row["last_present_at"] for row in rows},
+        now - timedelta(days=60),
+    )
+
+
+def _client_list_payload(
+        student, balances, current_subscriptions, recent_attendance,
+        activity_cutoff):
+    last_present_at = recent_attendance.get(student.id)
+    current_subscription = current_subscriptions.get(student.id)
+    return {
+        **_student_payload(student),
+        "balance_minor": balances.get(student.id, 0),
+        "currency": settings.DEFAULT_CURRENCY,
+        "has_current_subscription": current_subscription is not None,
+        "current_subscription_remaining": (
+            current_subscription["remaining"] if current_subscription else None
+        ),
+        "current_subscription_total": (
+            current_subscription["total"] if current_subscription else None
+        ),
+        "current_subscription_is_unlimited": (
+            current_subscription["is_unlimited"]
+            if current_subscription else False
+        ),
+        "last_present_at": (
+            timezone.localtime(last_present_at).isoformat()
+            if last_present_at else None
+        ),
+        "is_recently_active": bool(
+            last_present_at and last_present_at >= activity_cutoff),
+    }
 
 @require_http_methods(["GET", "POST"])
 def admin_clients(request):
@@ -47,8 +146,21 @@ def admin_clients(request):
             if (debt == "yes" and has_debt) or (debt == "no" and not has_debt):
                 filtered.append(student)
         students = filtered
+    balances = _client_list_balances(students)
+    current_subscriptions = _client_current_subscriptions(students)
+    recent_attendance, activity_cutoff = _client_recent_attendance(students)
     return JsonResponse(paginated_payload(
-        request, students, key="clients", serializer=_student_payload))
+        request,
+        students,
+        key="clients",
+        serializer=lambda student: _client_list_payload(
+            student,
+            balances,
+            current_subscriptions,
+            recent_attendance,
+            activity_cutoff,
+        ),
+    ))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])

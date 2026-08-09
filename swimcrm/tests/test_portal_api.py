@@ -1,6 +1,7 @@
 import json
 import tempfile
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
@@ -24,7 +25,8 @@ from scheduling.models import (Location, Session, SessionParticipant, SessionPar
                                WaitlistStatus)
 from scheduling.services import create_session
 from students.models import Student
-from subscriptions.services import create_subscription
+from subscriptions.models import SubscriptionStatus
+from subscriptions.services import create_subscription, freeze_subscription, manual_adjust
 
 from . import factories as f
 
@@ -436,6 +438,240 @@ class AdminPortalApiRule(TestCase):
         rows = response.json()["clients"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["full_name"], "Тестова Ада")
+
+    def test_admin_client_list_exposes_each_participants_confirmed_money_balance(self):
+        overpaid = f.make_student(group=self.group, first="Over", last="Paid")
+        family_sibling = f.make_student(
+            parent=overpaid.parent,
+            group=self.group,
+            first="Family",
+            last="Sibling",
+        )
+        zero = f.make_student(group=self.group, first="Zero", last="Balance")
+        Payment.objects.create(
+            student=overpaid,
+            amount_minor=500,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.CONFIRMED,
+        )
+        Payment.objects.create(
+            student=zero,
+            amount_minor=900,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.PENDING,
+        )
+
+        response = self.client.get("/api/admin/clients/", {"page_size": 200})
+
+        rows = {row["id"]: row for row in response.json()["clients"]}
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(rows[self.student.id]["balance_minor"], 24000)
+        self.assertEqual(rows[overpaid.id]["balance_minor"], -500)
+        self.assertEqual(rows[family_sibling.id]["balance_minor"], 0)
+        self.assertEqual(rows[zero.id]["balance_minor"], 0)
+        self.assertEqual(rows[overpaid.id]["currency"], "PLN")
+
+    def test_admin_client_list_identifies_only_subscriptions_valid_today(self):
+        subscription_type = f.make_sub_type(
+            name="Current Pack",
+            sessions=4,
+            days=30,
+        )
+        current = self.student
+        frozen = f.make_student(group=self.group, first="Frozen", last="Current")
+        future = f.make_student(group=self.group, first="Future", last="Pack")
+        grace = f.make_student(group=self.group, first="Grace", last="Pack")
+        expired = f.make_student(group=self.group, first="Expired", last="Pack")
+        cancelled = f.make_student(group=self.group, first="Cancelled", last="Pack")
+        today = date.today()
+        current_subscription = create_subscription(
+            student=current,
+            subscription_type=subscription_type,
+            start_date=today,
+            created_by=self.admin,
+        )
+        manual_adjust(
+            subscription=current_subscription,
+            delta=-2,
+            created_by=self.admin,
+            note="Two sessions used",
+        )
+        frozen_subscription = create_subscription(
+            student=frozen,
+            subscription_type=subscription_type,
+            start_date=today - timedelta(days=40),
+            created_by=self.admin,
+        )
+        frozen_subscription.status = SubscriptionStatus.FROZEN
+        frozen_subscription.save(update_fields=["status"])
+        freeze_subscription(
+            subscription=frozen_subscription,
+            start_date=today - timedelta(days=35),
+            end_date=today - timedelta(days=21),
+            created_by=self.admin,
+        )
+        create_subscription(
+            student=future,
+            subscription_type=subscription_type,
+            start_date=today + timedelta(days=1),
+            created_by=self.admin,
+        )
+        create_subscription(
+            student=grace,
+            subscription_type=subscription_type,
+            start_date=today - timedelta(days=32),
+            created_by=self.admin,
+        )
+        create_subscription(
+            student=expired,
+            subscription_type=subscription_type,
+            start_date=today - timedelta(days=60),
+            created_by=self.admin,
+        )
+        cancelled_subscription = create_subscription(
+            student=cancelled,
+            subscription_type=subscription_type,
+            start_date=today,
+            created_by=self.admin,
+        )
+        cancelled_subscription.status = SubscriptionStatus.CANCELLED
+        cancelled_subscription.save(update_fields=["status"])
+
+        response = self.client.get("/api/admin/clients/", {"page_size": 200})
+
+        rows = {row["id"]: row for row in response.json()["clients"]}
+        self.assertTrue(rows[current.id]["has_current_subscription"])
+        self.assertEqual(rows[current.id]["current_subscription_remaining"], 2)
+        self.assertEqual(rows[current.id]["current_subscription_total"], 4)
+        self.assertTrue(rows[frozen.id]["has_current_subscription"])
+        self.assertFalse(rows[future.id]["has_current_subscription"])
+        self.assertTrue(rows[grace.id]["has_current_subscription"])
+        self.assertFalse(rows[expired.id]["has_current_subscription"])
+        self.assertFalse(rows[cancelled.id]["has_current_subscription"])
+
+    def test_admin_client_list_activity_uses_recent_present_sessions_of_every_type(self):
+        trainer = f.make_trainer(username="client_activity_coach")
+        now = timezone.now()
+
+        def attendance_row(student, start_at, session_type, status=AttendanceStatus.PRESENT):
+            session = create_session(
+                trainer=trainer,
+                group=self.group if session_type == SessionType.GROUP else None,
+                individual_student=student if session_type != SessionType.GROUP else None,
+                session_type=session_type,
+                start_at=start_at,
+                duration_minutes=60,
+                location=f"Activity {student.id}",
+                max_participants=8,
+            )
+            set_attendance(
+                session_id=session.id,
+                student=student,
+                status=status,
+                actor=self.admin,
+                apply_financial_effects=False,
+            )
+            return session
+
+        group_student = self.student
+        individual_student = f.make_student(group=self.group, first="Individual", last="Active")
+        split_student = f.make_student(group=self.group, first="Split", last="Active")
+        boundary_student = f.make_student(group=self.group, first="Boundary", last="Active")
+        old_student = f.make_student(group=self.group, first="Old", last="Inactive")
+        absent_student = f.make_student(group=self.group, first="Absent", last="Inactive")
+        excused_student = f.make_student(group=self.group, first="Excused", last="Inactive")
+        rescheduled_student = f.make_student(group=self.group, first="Rescheduled", last="Inactive")
+        cancelled_student = f.make_student(group=self.group, first="Cancelled", last="Inactive")
+        future_student = f.make_student(group=self.group, first="Future", last="Inactive")
+        never_student = f.make_student(group=self.group, first="Never", last="Inactive")
+
+        group_session = attendance_row(
+            group_student, now - timedelta(days=59), SessionType.GROUP)
+        attendance_row(
+            individual_student, now - timedelta(days=2), SessionType.INDIVIDUAL)
+        attendance_row(
+            split_student, now - timedelta(days=3), SessionType.SPLIT)
+        attendance_row(
+            boundary_student,
+            now - timedelta(days=60),
+            SessionType.GROUP,
+        )
+        old_session = attendance_row(
+            old_student, now - timedelta(days=61), SessionType.GROUP)
+        attendance_row(
+            absent_student,
+            now - timedelta(days=4),
+            SessionType.GROUP,
+            status=AttendanceStatus.ABSENT,
+        )
+        attendance_row(
+            excused_student,
+            now - timedelta(days=6),
+            SessionType.GROUP,
+            status=AttendanceStatus.EXCUSED,
+        )
+        attendance_row(
+            rescheduled_student,
+            now - timedelta(days=7),
+            SessionType.GROUP,
+            status=AttendanceStatus.RESCHEDULED,
+        )
+        cancelled_session = attendance_row(
+            cancelled_student, now - timedelta(days=5), SessionType.GROUP)
+        cancelled_session.is_cancelled = True
+        cancelled_session.save(update_fields=["is_cancelled"])
+        attendance_row(future_student, now + timedelta(days=1), SessionType.GROUP)
+
+        with patch("portal.admin_client_views.timezone.now", return_value=now):
+            response = self.client.get("/api/admin/clients/", {"page_size": 200})
+
+        rows = {row["id"]: row for row in response.json()["clients"]}
+        for student in (group_student, individual_student, split_student, boundary_student):
+            self.assertTrue(rows[student.id]["is_recently_active"])
+            self.assertIsNotNone(rows[student.id]["last_present_at"])
+        for student in (
+            old_student,
+            absent_student,
+            excused_student,
+            rescheduled_student,
+            cancelled_student,
+            future_student,
+            never_student,
+        ):
+            self.assertFalse(rows[student.id]["is_recently_active"])
+        self.assertEqual(
+            rows[group_student.id]["last_present_at"],
+            timezone.localtime(group_session.start_at).isoformat(),
+        )
+        self.assertEqual(
+            rows[old_student.id]["last_present_at"],
+            timezone.localtime(old_session.start_at).isoformat(),
+        )
+
+    def test_admin_client_list_enrichment_query_count_does_not_grow_per_participant(self):
+        create_subscription(
+            student=self.student,
+            subscription_type=f.make_sub_type(name="Query Pack"),
+            start_date=date.today(),
+            created_by=self.admin,
+        )
+        with CaptureQueriesContext(connection) as baseline:
+            first_response = self.client.get("/api/admin/clients/", {"page_size": 200})
+
+        for index in range(20):
+            f.make_student(
+                group=self.group,
+                first=f"Bulk{index}",
+                last="Query",
+            )
+        with CaptureQueriesContext(connection) as expanded:
+            expanded_response = self.client.get("/api/admin/clients/", {"page_size": 200})
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(expanded_response.status_code, 200)
+        self.assertEqual(len(expanded), len(baseline))
 
     def test_admin_can_create_adult_client_account(self):
         response = self.client.post(

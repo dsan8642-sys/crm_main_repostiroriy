@@ -397,11 +397,51 @@ body {
   min-width: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .ops-client-list-tools .ops-search {
-  width: min(520px, 100%);
+  flex: 1 1 280px;
+  width: min(420px, 100%);
+}
+
+.ops-client-filter-selects {
+  display: grid;
+  flex: 1 1 560px;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.ops-client-filter-field {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
+.ops-client-filter-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--text-body);
+  font: inherit;
+}
+
+.ops-client-activity {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+}
+
+.ops-client-activity small {
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
 }
 
 .ops-edit-panel {
@@ -1817,7 +1857,8 @@ button.ops-schedule-detail-row:focus-visible {
   }
 
   .ops-client-list-tools .seg,
-  .ops-client-list-tools .ops-search {
+  .ops-client-list-tools .ops-search,
+  .ops-client-filter-selects {
     width: 100%;
     max-width: none;
   }

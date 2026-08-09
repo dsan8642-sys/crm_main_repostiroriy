@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -174,7 +175,7 @@ def _blank_fill(instance, field, value):
 
 
 def _unique_username(run_id, legacy_id):
-    base = f"legacy_{run_id}_{legacy_id}"[:145]
+    base = re.sub(r"[^\w.@+-]", "_", f"legacy_{run_id}_{legacy_id}")[:145]
     candidate = base
     suffix = 1
     while User.objects.filter(username=candidate).exists():

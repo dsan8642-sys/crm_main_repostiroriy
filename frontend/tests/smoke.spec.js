@@ -1391,6 +1391,72 @@ test('client can open every menu screen without runtime errors', async ({ page }
   expect(errors).toEqual([])
 })
 
+test('admin client filters combine with search and keep the blacklist separate', async ({ page }) => {
+  const viewportWidth = page.viewportSize()?.width || 0
+  test.skip(![390, 1440].includes(viewportWidth), 'desktop and mobile client-filter workflow')
+  const errors = collectPageErrors(page)
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 4, active_subscriptions: 1, debtors: 1 } },
+    '/api/admin/reference/': {
+      trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/clients/': {
+      clients: [
+        { id: 1, client_id: 11, first_name: 'Anna', last_name: 'Plus', balance_minor: -500, currency: 'PLN', has_current_subscription: true, current_subscription_remaining: 2, current_subscription_total: 4, is_recently_active: true, last_present_at: '2026-08-01T17:00:00+02:00', is_active: true, client_is_active: true, group: null },
+        { id: 2, client_id: 12, first_name: 'Boris', last_name: 'Debt', balance_minor: 700, currency: 'PLN', has_current_subscription: false, is_recently_active: false, last_present_at: null, is_active: true, client_is_active: true, group: null },
+        { id: 3, client_id: 13, first_name: 'Cara', last_name: 'Zero', balance_minor: 0, currency: 'PLN', has_current_subscription: false, is_recently_active: true, last_present_at: '2026-08-02T17:00:00+02:00', is_active: true, client_is_active: true, group: null },
+        { id: 4, client_id: 14, first_name: 'Black', last_name: 'Archive', balance_minor: 700, currency: 'PLN', has_current_subscription: false, is_recently_active: false, last_present_at: null, is_active: false, client_is_active: false, group: null },
+      ],
+    },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': { sessions: [] },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  })
+
+  await page.goto('/?role=admin&view=clients')
+  const clientList = page.locator(viewportWidth === 390 ? '.ops-client-mobile-list' : '.ops-client-desktop-table')
+  await expect(page.getByText('Найдено: 3')).toBeVisible()
+
+  await page.getByLabel('Абонемент').selectOption('with')
+  await expect(page.getByText('Найдено: 1')).toBeVisible()
+  await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
+  await expect(clientList.getByText('2 из 4', { exact: true })).toBeVisible()
+  if (viewportWidth === 390) {
+    await expect(clientList.getByText('+5,00 zł', { exact: true })).toBeVisible()
+    await expect(clientList.getByText(/Активен · 01\.08\.2026/)).toBeVisible()
+  }
+
+  await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
+  await page.getByLabel('Баланс').selectOption('positive')
+  await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
+  await page.getByLabel('Баланс').selectOption('negative')
+  await expect(clientList.getByText('Debt Boris', { exact: true })).toBeVisible()
+
+  await page.getByLabel('Абонемент').selectOption('without')
+  await page.getByLabel('Активность').selectOption('inactive')
+  await expect(page.getByText('Найдено: 1')).toBeVisible()
+  await expect(clientList.getByText('Debt Boris', { exact: true })).toBeVisible()
+
+  await page.getByLabel('Поиск клиентов').fill('Plus')
+  await expect(page.getByText('Найдено: 0')).toBeVisible()
+  await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
+  await expect(page.getByText('Найдено: 3')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Чёрный список', exact: true }).click()
+  await expect(page.getByText('Найдено: 1')).toBeVisible()
+  await expect(clientList.getByText('Archive Black', { exact: true })).toBeVisible()
+  if (viewportWidth === 390) {
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  }
+  expect(errors).toEqual([])
+})
+
 test('admin confirms and rejects pending payments and the nav counter decrements', async ({ page }) => {
   const errors = collectPageErrors(page)
   const seen = new Set()
