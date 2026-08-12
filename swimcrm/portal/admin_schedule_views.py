@@ -201,7 +201,7 @@ def admin_schedule_session_detail(request, session_id):
             "individual_student__parent__user", "template"
         )
     if request.method != "GET":
-        sessions = sessions.select_for_update()
+        sessions = sessions.select_for_update(of=("self",))
     session = get_object_or_404(sessions, pk=session_id)
     if request.method == "DELETE":
         data = _json_body(request)
@@ -317,7 +317,7 @@ def admin_schedule_session_attendance(request, session_id):
         "group", "trainer__user", "substitute_trainer__user", "individual_student"
     )
     if request.method == "POST":
-        sessions = sessions.select_for_update()
+        sessions = sessions.select_for_update(of=("self",))
     session = get_object_or_404(sessions, pk=session_id)
     if request.method == "POST":
         data = _json_body(request)
@@ -412,7 +412,7 @@ def admin_schedule_session_attendance_bulk(request, session_id):
 def admin_schedule_session_participants(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(
-        Session.objects.select_for_update().select_related(
+        Session.objects.select_for_update(of=("self",)).select_related(
             "group", "trainer__user", "substitute_trainer__user", "individual_student"
         ),
         pk=session_id,
@@ -469,7 +469,7 @@ def admin_schedule_session_participants(request, session_id):
 def admin_schedule_session_participant_detail(request, session_id, student_id):
     user = _admin_required(request)
     session = get_object_or_404(
-        Session.objects.select_for_update().select_related(
+        Session.objects.select_for_update(of=("self",)).select_related(
             "group", "trainer__user", "substitute_trainer__user", "individual_student"
         ),
         pk=session_id,
