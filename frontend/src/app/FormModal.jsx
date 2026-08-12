@@ -112,6 +112,18 @@ export function FormModal({
     }
   }, [confirmDiscard])
 
+  useEffect(() => {
+    if (!confirmDiscard) return undefined
+    const dismissDiscard = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setConfirmDiscard(false)
+    }
+    document.addEventListener('keydown', dismissDiscard, true)
+    return () => document.removeEventListener('keydown', dismissDiscard, true)
+  }, [confirmDiscard])
+
   if (!open) return null
 
   function handleKeyDown(event) {
