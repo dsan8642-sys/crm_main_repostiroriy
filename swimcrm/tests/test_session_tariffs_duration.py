@@ -77,7 +77,7 @@ class SessionTariffAndDurationTest(TestCase):
 
     def test_rejects_conflicting_end_and_duration(self):
         start = timezone.now() + timedelta(days=3)
-        with self.assertRaisesMessage(ValidationError, "conflicts"):
+        with self.assertRaisesMessage(ValidationError, "не совпадает"):
             create_session(
                 trainer=self.trainer,
                 start_at=start,

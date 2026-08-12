@@ -25,7 +25,7 @@ from dataio.models import (
 )
 
 from .admin_support import _admin_required
-from .support import _json_body
+from .support import _field_validation_error, _json_body
 from students.models import Student
 
 
@@ -70,9 +70,12 @@ IMPORTERS = {
 def _uploaded_file(request):
     file = request.FILES.get("file")
     if file is None:
-        raise ValidationError("Файл не передан")
+        raise _field_validation_error(
+            "file", "Выберите файл для импорта.", code="required")
     if file.size > clients_importer.MAX_IMPORT_BYTES:
-        raise ValidationError("Файл импорта превышает лимит 5 МБ")
+        raise _field_validation_error(
+            "file", "Файл импорта превышает лимит 5 МБ.",
+            code="max_size")
     return file
 
 
@@ -128,12 +131,22 @@ def _preview_rows(kind, headers, rows, overrides=None, import_mode="create_only"
 
 def _prepare_upload(file, kind, mapping=None):
     raw = file.read()
-    headers, rows = clients_importer.parse_source(raw, file.name)
+    try:
+        headers, rows = clients_importer.parse_source(raw, file.name)
+    except ValidationError as exc:
+        raise ValidationError({"file": exc}) from exc
     if not headers or not rows:
-        raise ValidationError("Файл импорта пуст или не содержит строк данных")
+        raise _field_validation_error(
+            "file", "Файл импорта пуст или не содержит строк данных.",
+            code="empty")
     if any(not header for header in headers) or len(headers) != len(set(headers)):
-        raise ValidationError("Заголовки колонок должны быть непустыми и уникальными")
-    prepared = prepare_rows(kind, headers, rows, mapping)
+        raise _field_validation_error(
+            "file", "Заголовки колонок должны быть непустыми и уникальными.",
+            code="invalid_headers")
+    try:
+        prepared = prepare_rows(kind, headers, rows, mapping)
+    except ValidationError as exc:
+        raise ValidationError({"file": exc}) from exc
     canonical_headers = list(CONTRACTS[kind].field_map)
     return raw, headers, canonical_headers, prepared
 
@@ -206,14 +219,22 @@ def _commit_data(request, *, allowed_fields=COMMIT_FIELDS):
     try:
         batch_id = int(data.get("batch_id"))
     except (TypeError, ValueError):
-        raise ValidationError("Некорректный batch_id")
+        raise _field_validation_error(
+            "batch_id", "Некорректный идентификатор preview.",
+            code="invalid")
     selected_indices = data.get("selected_indices")
     if not isinstance(selected_indices, list) or not selected_indices:
-        raise ValidationError("Не выбраны строки для импорта")
+        raise _field_validation_error(
+            "selected_indices", "Выберите строки для импорта.",
+            code="required")
     if any(isinstance(index, bool) or not isinstance(index, int) for index in selected_indices):
-        raise ValidationError("selected_indices должен содержать номера строк")
+        raise _field_validation_error(
+            "selected_indices", "Список выбранных строк повреждён.",
+            code="invalid")
     if len(selected_indices) != len(set(selected_indices)):
-        raise ValidationError("selected_indices содержит повторяющиеся номера")
+        raise _field_validation_error(
+            "selected_indices", "Выбранные строки не должны повторяться.",
+            code="duplicate")
     return batch_id, set(selected_indices), data
 
 
@@ -317,9 +338,13 @@ def _mapping_from_request(request):
     try:
         mapping = json.loads(request.POST.get("mapping") or "{}")
     except json.JSONDecodeError as exc:
-        raise ValidationError(f"Invalid mapping JSON: {exc}") from exc
+        raise _field_validation_error(
+            "mapping", "Некорректное сопоставление колонок.",
+            code="invalid_json") from exc
     if not isinstance(mapping, dict):
-        raise ValidationError("mapping должен быть объектом")
+        raise _field_validation_error(
+            "mapping", "Сопоставление колонок должно быть объектом.",
+            code="invalid")
     return mapping
 
 @require_POST
@@ -422,7 +447,9 @@ def admin_import_attendance_preview(request):
     file = _uploaded_file(request)
     effect_mode = request.POST.get("effect_mode") or ImportEffectMode.HISTORY_ONLY
     if effect_mode not in (ImportEffectMode.HISTORY_ONLY, ImportEffectMode.APPLY_FINANCIAL):
-        raise ValidationError("Некорректный режим импорта посещаемости")
+        raise _field_validation_error(
+            "effect_mode", "Выберите допустимый режим импорта посещаемости.",
+            code="invalid_choice")
     mapping = _mapping_from_request(request)
     raw, source_headers, canonical_headers, prepared = _prepare_upload(
         file, ImportKind.ATTENDANCE, mapping)
@@ -456,11 +483,15 @@ def admin_import_attendance_commit(request):
         batch_id=batch_id, actor=actor, kind=ImportKind.ATTENDANCE)
     if batch.effect_mode == ImportEffectMode.APPLY_FINANCIAL:
         if data.get("confirm_financial_effects") is not True:
-            raise ValidationError(
-                "Подтвердите применение финансовых последствий исторического импорта")
+            raise _field_validation_error(
+                "confirm_financial_effects",
+                "Подтвердите применение финансовых последствий исторического импорта.",
+                code="required")
     elif data.get("confirm_financial_effects") is True:
-        raise ValidationError(
-            "Финансовое подтверждение не соответствует безопасному import batch")
+        raise _field_validation_error(
+            "confirm_financial_effects",
+            "Финансовое подтверждение не соответствует безопасному режиму импорта.",
+            code="invalid")
     rows = _apply_overrides(rows, batch.input_data.get("row_overrides"))
     preview_rows = attendance_importer.preview(headers, rows)
     selected_rows = _selected_rows(
@@ -545,9 +576,13 @@ def _reference_preview(request, kind):
     mapping = _mapping_from_request(request)
     import_mode = request.POST.get("import_mode") or "create_only"
     if kind != ImportKind.GROUPS and import_mode != "create_only":
-        raise ValidationError("Для этого типа доступен только режим create_only")
+        raise _field_validation_error(
+            "import_mode", "Для этого типа доступен только режим создания.",
+            code="invalid_choice")
     if kind == ImportKind.GROUPS and import_mode not in reference_importer.REFERENCE_IMPORT_MODES:
-        raise ValidationError("Некорректный режим импорта групп")
+        raise _field_validation_error(
+            "import_mode", "Выберите допустимый режим импорта групп.",
+            code="invalid_choice")
     raw, source_headers, canonical_headers, prepared = _prepare_upload(file, kind, mapping)
     rows, preview_rows = _preview_rows(
         kind, canonical_headers, prepared["rows"], import_mode=import_mode)
@@ -667,7 +702,14 @@ def _validated_override(kind, data):
     values = data.get("data") or {}
     relations = data.get("relations") or {}
     if not isinstance(values, dict) or not isinstance(relations, dict):
-        raise ValidationError("data и relations должны быть объектами")
+        errors = {}
+        if not isinstance(values, dict):
+            errors["data"] = ValidationError(
+                "Данные строки должны быть объектом.", code="invalid")
+        if not isinstance(relations, dict):
+            errors["relations"] = ValidationError(
+                "Связи строки должны быть объектом.", code="invalid")
+        raise ValidationError(errors)
     contract = CONTRACTS[kind]
     editable = {field.key for field in contract.fields if field.editable}
     relation_fields = {field.key for field in contract.fields if field.relation}
@@ -680,7 +722,9 @@ def _validated_override(kind, data):
         raise ValidationError(
             f"Недопустимые relation overrides: {', '.join(sorted(invalid_relations))}")
     if "excluded" in data and not isinstance(data["excluded"], bool):
-        raise ValidationError("excluded должен быть boolean")
+        raise _field_validation_error(
+            "excluded", "Флаг исключения должен быть логическим значением.",
+            code="invalid")
     normalize = lambda value: "" if value is None else str(value).strip()
     return {
         "data": {key: normalize(value) for key, value in values.items()},
@@ -746,11 +790,15 @@ def admin_import_rows_bulk(request, kind, batch_id):
     data = _json_body(request)
     indices = data.pop("indices", None)
     if not isinstance(indices, list) or not indices:
-        raise ValidationError("indices должен быть непустым списком")
+        raise _field_validation_error(
+            "indices", "Выберите хотя бы одну строку.", code="required")
     if any(isinstance(index, bool) or not isinstance(index, int) for index in indices):
-        raise ValidationError("indices должен содержать номера строк")
+        raise _field_validation_error(
+            "indices", "Список выбранных строк повреждён.", code="invalid")
     if set(indices) - set(range(2, len(rows) + 2)):
-        raise ValidationError("Одна или несколько строк отсутствуют в batch")
+        raise _field_validation_error(
+            "indices", "Одна или несколько строк отсутствуют в preview.",
+            code="invalid_choice")
     override_patch = _validated_override(kind, data)
     payload = dict(batch.input_data)
     overrides = dict(payload.get("row_overrides") or {})

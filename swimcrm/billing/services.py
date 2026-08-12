@@ -73,9 +73,15 @@ def _validate_payment_amount(amount_minor):
     try:
         amount_minor = int(amount_minor)
     except (TypeError, ValueError):
-        raise ValidationError("amount_minor must be a positive integer") from None
+        raise ValidationError({
+            "amount_minor": ValidationError(
+                "Введите сумму больше нуля.", code="invalid_integer"),
+        }) from None
     if amount_minor <= 0:
-        raise ValidationError("Payment amount must be greater than zero")
+        raise ValidationError({
+            "amount_minor": ValidationError(
+                "Сумма должна быть больше нуля.", code="min_value"),
+        })
     return amount_minor
 
 
@@ -106,7 +112,10 @@ def create_client_top_up_request(
     try:
         Money(amount_minor, currency)
     except (TypeError, ValueError) as exc:
-        raise ValidationError(str(exc)) from exc
+        raise ValidationError({
+            "currency": ValidationError(
+                "Укажите поддерживаемую валюту.", code="invalid_choice"),
+        }) from exc
 
     payment = Payment.objects.create(
         student=student,

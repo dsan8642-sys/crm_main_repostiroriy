@@ -117,13 +117,18 @@ def trainer_mark_attendance(request, session_id):
     try:
         student_id = int(data.get("student_id"))
     except (TypeError, ValueError) as exc:
-        raise ValidationError("student_id is required") from exc
+        raise _field_validation_error(
+            "student_id", "Выберите участника.", code="required") from exc
     status = data.get("status")
     if status not in AttendanceStatus.values:
-        raise ValidationError("invalid attendance status")
+        raise _field_validation_error(
+            "status", "Выберите допустимый статус посещения.",
+            code="invalid_choice")
     allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
     if student_id not in allowed_student_ids:
-        raise PermissionDenied("student is not in this trainer session")
+        raise _field_validation_error(
+            "student_id", "Участник недоступен в этом занятии.",
+            code="invalid_choice")
     record = set_attendance(session_id=session.id, student=Student.objects.get(pk=student_id),
                             status=status, actor=request.user)
     return JsonResponse({
@@ -148,26 +153,42 @@ def trainer_bulk_attendance(request, session_id):
     data = _json_body(request)
     items = data.get("items")
     if not isinstance(items, list) or not items:
-        raise ValidationError("items must be a non-empty list")
+        raise _field_validation_error(
+            "items", "Добавьте хотя бы одну отметку посещения.",
+            code="required")
     if len(items) > 500:
-        raise ValidationError("too many attendance items")
+        raise _field_validation_error(
+            "items", "За один запрос можно сохранить не более 500 отметок.",
+            code="max_items")
     allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
     normalized = []
     seen = set()
-    for item in items:
+    for index, item in enumerate(items):
         if not isinstance(item, dict):
-            raise ValidationError("attendance item must be an object")
+            raise _field_validation_error(
+                f"items.{index}", "Некорректная отметка посещения.",
+                code="invalid")
         try:
             student_id = int(item.get("student_id"))
         except (TypeError, ValueError) as exc:
-            raise ValidationError("student_id is required") from exc
+            raise _field_validation_error(
+                f"items.{index}.student_id", "Выберите участника.",
+                code="required") from exc
         status = item.get("status")
         if student_id in seen:
-            raise ValidationError("duplicate student_id")
+            raise _field_validation_error(
+                f"items.{index}.student_id",
+                "Участник указан в списке повторно.", code="duplicate")
         if student_id not in allowed_student_ids:
-            raise PermissionDenied("student is not in this trainer session")
+            raise _field_validation_error(
+                f"items.{index}.student_id",
+                "Участник недоступен в этом занятии.",
+                code="invalid_choice")
         if status not in AttendanceStatus.values:
-            raise ValidationError("invalid attendance status")
+            raise _field_validation_error(
+                f"items.{index}.status",
+                "Выберите допустимый статус посещения.",
+                code="invalid_choice")
         seen.add(student_id)
         normalized.append((student_id, status))
     students = Student.objects.in_bulk(seen)

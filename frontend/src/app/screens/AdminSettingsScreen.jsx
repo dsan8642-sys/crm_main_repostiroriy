@@ -1,10 +1,28 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api, fetchAllPages } from '../../api.js'
+import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { DateField, TimeField } from '../DateTimeField.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { createAdminImportExportPanel } from './AdminImportExportScreen.jsx'
 import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from '../formErrors.js'
+
+const CREDENTIAL_FIELD_MAP = {
+  username: 'username',
+  current_password: 'currentPassword',
+  new_password: 'newPassword',
+}
+const CREDENTIAL_FIELD_IDS = {
+  username: 'admin-credentials-username',
+  currentPassword: 'admin-credentials-current-password',
+  newPassword: 'admin-credentials-new-password',
+  confirmPassword: 'admin-credentials-confirm-password',
+}
 
 const eventTypes = [
   ['payment_reminder', 'Напоминание об оплате'], ['session_reminder', 'Напоминание о занятии'],
@@ -63,7 +81,7 @@ function readOnlyDetails(row) {
 export function createAdminSettingsScreen(components, reloadRoleData, icons, adminData = {}) {
   const ImportExportPanel = createAdminImportExportPanel(components, icons, reloadRoleData)
 
-  const { Button, Badge, Banner, Tabs, Table, Input, StatusPill, Dialog } = components
+  const { Button, Badge, Banner, Tabs, Table, Input, Select, Textarea, Checkbox, StatusPill, Dialog } = components
   return function AdminSettingsScreen() {
     const [tab, setTab] = useState('catalog')
     const [resourceId, setResourceId] = useState('subscriptionTypes')
@@ -74,9 +92,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const [editing, setEditing] = useState(null)
     const [pendingArchive, setPendingArchive] = useState(null)
     const [form, setForm] = useState({})
+    const [fieldErrors, setFieldErrors] = useState({})
     const [credentials, setCredentials] = useState({
       username: '', currentPassword: '', newPassword: '', confirmPassword: '',
     })
+    const [credentialErrors, setCredentialErrors] = useState({})
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
     const tabResources = useMemo(() => resources.filter((item) => item.tab === tab), [tab])
@@ -92,7 +112,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         const loaded = results.filter((result) => result.status === 'fulfilled').map((result) => result.value)
         setData((current) => ({ ...current, ...Object.fromEntries(loaded.map(([item, payload]) => [item.id, payload[item.response] || []])) }))
         const failed = results.filter((result) => result.status === 'rejected')
-        if (failed.length) setError(`Не удалось загрузить ${failed.length} раздел(а): ${failed.map((result) => result.reason.message).join('; ')}`)
+        if (failed.length) setError(`Не удалось загрузить ${failed.length} раздел(а): ${failed.map((result) => apiErrorMessage(result.reason, 'Ошибка загрузки.')).join('; ')}`)
       } finally {
         setLoading(false)
       }
@@ -106,14 +126,26 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       if (resourceId !== 'credentials') return
       api.get('/api/admin/system/credentials/')
         .then((payload) => setCredentials((current) => ({ ...current, username: payload.username || '' })))
-        .catch((err) => setError(err.message))
+        .catch((err) => setError(apiErrorMessage(err, 'Не удалось загрузить данные входа.')))
     }, [resourceId])
 
     function startEdit(row = null) {
       const initial = {}
       ;(resource.fields || []).forEach(([key, , type]) => { initial[key] = row?.[key] ?? (type === 'boolean' ? true : '') })
       setForm(initial)
+      setFieldErrors({})
+      setError(null)
       setEditing(row || {})
+    }
+
+    function updateFormField(key, value) {
+      setForm((current) => ({ ...current, [key]: value }))
+      setFieldErrors((current) => clearFieldError(current, key))
+    }
+
+    function updateCredentialField(key, value) {
+      setCredentials((current) => ({ ...current, [key]: value }))
+      setCredentialErrors((current) => clearFieldError(current, key))
     }
 
     function fieldOptions(field) {
@@ -135,7 +167,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
 
     async function save() {
       const payload = Object.fromEntries((resource.fields || []).map(([key, , type]) => [key, coerce(form[key], type)]))
-      setLoading(true); setError(null)
+      setLoading(true); setError(null); setFieldErrors({})
       try {
         if (editing?.id) await api.patch(resource.detail(editing.id), payload)
         else await api.post(resource.endpoint, payload)
@@ -144,7 +176,12 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         await load(resource.id)
         reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err)
+        setFieldErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось сохранить запись.'))
+        focusFirstFieldError(nextErrors, Object.fromEntries(
+          (resource.fields || []).map(([key]) => [key, `admin-settings-${resource.id}-${key}`]),
+        ))
       } finally { setLoading(false) }
     }
 
@@ -156,15 +193,21 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         setPendingArchive(null)
         await load(resource.id)
         reloadRoleData?.('admin')
-      } catch (err) { setError(err.message) } finally { setLoading(false) }
+      } catch (err) { setError(apiErrorMessage(err, 'Не удалось убрать запись.')) } finally { setLoading(false) }
     }
 
     async function saveCredentials() {
       if (credentials.newPassword !== credentials.confirmPassword) {
-        setError('Новые пароли не совпадают.')
+        const nextErrors = {
+          newPassword: 'Новые пароли не совпадают.',
+          confirmPassword: 'Повторите новый пароль точно так же.',
+        }
+        setCredentialErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, CREDENTIAL_FIELD_IDS)
         return
       }
-      setLoading(true); setError(null)
+      setLoading(true); setError(null); setCredentialErrors({})
       try {
         const payload = await api.patch('/api/admin/system/credentials/', {
           username: credentials.username,
@@ -179,7 +222,10 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         })
         setMessage('Логин и пароль администратора обновлены. Текущая сессия сохранена.')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, CREDENTIAL_FIELD_MAP)
+        setCredentialErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось обновить данные входа.'))
+        focusFirstFieldError(nextErrors, CREDENTIAL_FIELD_IDS)
       } finally {
         setLoading(false)
       }
@@ -193,7 +239,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         await load('sessionTypes')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось восстановить системный тип split.'))
       } finally {
         setLoading(false)
       }
@@ -219,14 +265,30 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
       <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => setResourceId(item.id)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>
       <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{resourceHelp[resource.id]}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>
-      {editing && <div className="card card-pad ops-edit-panel"><div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div><div className="ops-form-grid">{(resource.fields || []).map((field) => { const [key, label, type = 'text'] = field; const value = form[key] ?? ''; if (type === 'boolean') return <label className="ops-check" key={key}><input type="checkbox" checked={Boolean(value)} onChange={(event) => setForm({ ...form, [key]: event.target.checked })} />{label}</label>; if (type === 'textarea') return <label key={key} style={{ gridColumn: '1 / -1' }}>{label}<textarea value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} rows="4" /></label>; if (type === 'select' || type === 'select-ref') return <label key={key}>{label}<select value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>; if (type === 'date') return <DateField key={key} label={label} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />; if (type === 'time') return <TimeField key={key} label={label} value={value} onChange={(next) => setForm({ ...form, [key]: next })} />; if (type === 'schedule-color') return <ScheduleColorPicker key={key} label={label} value={value} onChange={(next) => setForm({ ...form, [key]: next })} disabled={loading} />; return <Input key={key} label={label} value={value} onChange={(event) => setForm({ ...form, [key]: event.target.value })} type={type} /> })}</div><div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => setEditing(null)}>Отмена</Button></div></div>}
+      {editing && <div className="card card-pad ops-edit-panel">
+        <div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div>
+        <div className="ops-form-grid">{(resource.fields || []).map((field) => {
+          const [key, label, type = 'text'] = field
+          const value = form[key] ?? ''
+          const id = `admin-settings-${resource.id}-${key}`
+          const shared = { id, label, error: fieldErrors[key] }
+          if (type === 'boolean') return <Checkbox key={key} {...shared} checked={Boolean(value)} onChange={(event) => updateFormField(key, event.target.checked)} />
+          if (type === 'textarea') return <Textarea key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} rows="4" containerStyle={{ gridColumn: '1 / -1' }} />
+          if (type === 'select' || type === 'select-ref') return <Select key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</Select>
+          if (type === 'date') return <DateField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
+          if (type === 'time') return <TimeField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
+          if (type === 'schedule-color') return <ScheduleColorPicker key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} disabled={loading} />
+          return <Input key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} type={type} />
+        })}</div>
+        <div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => { setEditing(null); setFieldErrors({}) }}>Отмена</Button></div>
+      </div>}
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">Изменяются данные текущего администратора. Для подтверждения обязательно введите действующий пароль. Пароль хранится только как Django hash и не выводится в журнал.</p>
         <div className="ops-form-grid">
-          <Input label="Новый логин" value={credentials.username} onChange={(event) => setCredentials({ ...credentials, username: event.target.value })} autoComplete="username" />
-          <Input label="Текущий пароль" type="password" value={credentials.currentPassword} onChange={(event) => setCredentials({ ...credentials, currentPassword: event.target.value })} autoComplete="current-password" />
-          <Input label="Новый пароль (необязательно)" type="password" value={credentials.newPassword} onChange={(event) => setCredentials({ ...credentials, newPassword: event.target.value })} autoComplete="new-password" />
-          <Input label="Повторите новый пароль" type="password" value={credentials.confirmPassword} onChange={(event) => setCredentials({ ...credentials, confirmPassword: event.target.value })} autoComplete="new-password" />
+          <Input id={CREDENTIAL_FIELD_IDS.username} label="Новый логин" value={credentials.username} error={credentialErrors.username} onChange={(event) => updateCredentialField('username', event.target.value)} autoComplete="username" />
+          <Input id={CREDENTIAL_FIELD_IDS.currentPassword} label="Текущий пароль" type="password" value={credentials.currentPassword} error={credentialErrors.currentPassword} onChange={(event) => updateCredentialField('currentPassword', event.target.value)} autoComplete="current-password" />
+          <Input id={CREDENTIAL_FIELD_IDS.newPassword} label="Новый пароль (необязательно)" type="password" value={credentials.newPassword} error={credentialErrors.newPassword} onChange={(event) => updateCredentialField('newPassword', event.target.value)} autoComplete="new-password" />
+          <Input id={CREDENTIAL_FIELD_IDS.confirmPassword} label="Повторите новый пароль" type="password" value={credentials.confirmPassword} error={credentialErrors.confirmPassword} onChange={(event) => updateCredentialField('confirmPassword', event.target.value)} autoComplete="new-password" />
         </div>
         <Button variant="primary" disabled={loading || !credentials.currentPassword} onClick={saveCredentials}>Обновить данные входа</Button>
       </div>}

@@ -28,4 +28,7 @@ class AdminPaginationTest(TestCase):
     def test_rejects_page_size_over_two_hundred(self):
         response = self.client.get("/api/admin/groups/", {"page_size": 201})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("page_size", str(response.json()["error"]))
+        self.assertEqual(
+            response.json()["errors"]["page_size"][0]["code"],
+            "out_of_range",
+        )

@@ -1,12 +1,67 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { api, downloadFile } from '../../api.js'
+import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from '../formErrors.js'
+import { validIsoDate } from '../scheduleContracts.js'
+
+const TYPE_FIELD_MAP = {
+  name: 'name', price_minor: 'price', currency: 'currency',
+  duration_days: 'durationDays', sessions_count: 'sessionsCount',
+  is_individual: 'isIndividual', is_active: 'isActive',
+}
+const TYPE_FIELD_IDS = {
+  name: 'subscription-type-name', price: 'subscription-type-price',
+  currency: 'subscription-type-currency', durationDays: 'subscription-type-duration',
+  sessionsCount: 'subscription-type-sessions', isUnlimited: 'subscription-type-unlimited',
+  isIndividual: 'subscription-type-individual', isActive: 'subscription-type-active',
+}
+const TYPE_EDIT_FIELD_IDS = Object.fromEntries(
+  Object.entries(TYPE_FIELD_IDS).map(([key, value]) => [key, `${value}-edit`]),
+)
+const FINANCE_FIELD_IDS = {
+  participantId: 'admin-finance-participant',
+  subscriptionTypeId: 'admin-finance-subscription-type',
+  subscriptionId: 'admin-finance-subscription',
+  startDate: 'admin-finance-start-date', dueDate: 'admin-finance-due-date',
+  createCharge: 'admin-finance-create-charge',
+  chargeDescription: 'admin-finance-charge-description',
+  chargeAmount: 'admin-finance-charge-amount',
+  paymentAmount: 'admin-finance-payment-amount',
+  paymentDate: 'admin-finance-payment-date',
+  paymentMethod: 'admin-finance-payment-method',
+  freezeStart: 'admin-finance-freeze-start', freezeEnd: 'admin-finance-freeze-end',
+  freezeReason: 'admin-finance-freeze-reason',
+  adjustDelta: 'admin-finance-adjust-delta', adjustNote: 'admin-finance-adjust-note',
+}
+const PAYMENT_EDIT_FIELD_IDS = {
+  method: 'admin-payment-edit-method', comment: 'admin-payment-edit-comment',
+}
+
+function validPositiveMoney(value) {
+  const parsed = Number(String(value ?? '').replace(',', '.'))
+  return Number.isFinite(parsed) && parsed > 0
+}
+
+function validNonnegativeMoney(value) {
+  const parsed = Number(String(value ?? '').replace(',', '.'))
+  return String(value ?? '').trim() !== '' && Number.isFinite(parsed) && parsed >= 0
+}
+
+function positiveInteger(value) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0
+}
 
 export function createAdminPaymentsScreen(components, icons, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Dialog, Avatar, Input } = components
+  const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Dialog, Avatar, Input, Select, Checkbox } = components
   const I = icons
 
   return function ApiAdminPayments({ go, initialTab }) {
@@ -18,6 +73,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     const [confirm, setConfirm] = useState(null)
     const [editingPayment, setEditingPayment] = useState(null)
     const [paymentEditForm, setPaymentEditForm] = useState({ method: 'cash', comment: '' })
+    const [paymentEditErrors, setPaymentEditErrors] = useState({})
     const [rows, setRows] = useState(() => [...(adminData.payments || [])])
     const [subscriptions, setSubscriptions] = useState([])
     const [financeForm, setFinanceForm] = useState({
@@ -38,6 +94,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       adjustNote: '',
       createCharge: true,
     })
+    const [financeErrors, setFinanceErrors] = useState({})
     const [subscriptionTypeForm, setSubscriptionTypeForm] = useState({
       name: '',
       price: '',
@@ -48,6 +105,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       isIndividual: false,
       isActive: true,
     })
+    const [subscriptionTypeErrors, setSubscriptionTypeErrors] = useState({})
     const [editingSubscriptionType, setEditingSubscriptionType] = useState(null)
     const [subscriptionTypeEditForm, setSubscriptionTypeEditForm] = useState({
       name: '',
@@ -59,13 +117,16 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       isIndividual: false,
       isActive: true,
     })
+    const [subscriptionTypeEditErrors, setSubscriptionTypeEditErrors] = useState({})
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busyId, setBusyId] = useState(null)
     const [toolPanel, setToolPanel] = useState(null)
     const selectedType = subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))
 
-    const updateFinanceForm = (field, value) => setFinanceForm((current) => {
+    const updateFinanceForm = (field, value) => {
+      setFinanceErrors((current) => clearFieldError(current, field))
+      setFinanceForm((current) => {
       if (field === 'subscriptionTypeId') {
         const nextType = subscriptionTypes.find((type) => String(type.typeId) === String(value))
         const nextAmount = nextType ? String(nextType.price) : ''
@@ -77,17 +138,38 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         }
       }
       return { ...current, [field]: value }
-    })
-    const updateSubscriptionTypeForm = (field, value) => setSubscriptionTypeForm((current) => ({
-      ...current,
-      [field]: value,
-      ...(field === 'isUnlimited' && value ? { sessionsCount: '' } : {}),
-    }))
-    const updateSubscriptionTypeEditForm = (field, value) => setSubscriptionTypeEditForm((current) => ({
-      ...current,
-      [field]: value,
-      ...(field === 'isUnlimited' && value ? { sessionsCount: '' } : {}),
-    }))
+      })
+    }
+    const updateSubscriptionTypeForm = (field, value) => {
+      setSubscriptionTypeErrors((current) => clearFieldError(current, field))
+      setSubscriptionTypeForm((current) => ({
+        ...current,
+        [field]: value,
+        ...(field === 'isUnlimited' && value ? { sessionsCount: '' } : {}),
+      }))
+    }
+    const updateSubscriptionTypeEditForm = (field, value) => {
+      setSubscriptionTypeEditErrors((current) => clearFieldError(current, field))
+      setSubscriptionTypeEditForm((current) => ({
+        ...current,
+        [field]: value,
+        ...(field === 'isUnlimited' && value ? { sessionsCount: '' } : {}),
+      }))
+    }
+
+    function showFinanceErrors(nextErrors) {
+      setFinanceErrors(nextErrors)
+      setError(null)
+      focusFirstFieldError(nextErrors, FINANCE_FIELD_IDS)
+      return false
+    }
+
+    function showApiFieldErrors(err, fieldMap, setErrors, fieldIds, fallback) {
+      const nextErrors = fieldErrorsFromApi(err, fieldMap)
+      setErrors(nextErrors)
+      setError(formErrorMessage(err, fallback))
+      focusFirstFieldError(nextErrors, fieldIds)
+    }
 
     useEffect(() => {
       setRows([...(adminData.payments || [])])
@@ -113,7 +195,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           }))
         })
         .catch((err) => {
-          if (alive) setError(err.message)
+          if (alive) setError(apiErrorMessage(err, 'Не удалось загрузить абонементы участника.'))
         })
       return () => {
         alive = false
@@ -149,7 +231,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         setMessage(action === 'confirm' ? 'Платёж подтверждён.' : 'Платёж отклонён.')
         reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось изменить статус платежа.'))
       } finally {
         setBusyId(null)
       }
@@ -158,19 +240,26 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     function openPaymentEdit(payment) {
       setEditingPayment(payment)
       setPaymentEditForm({ method: payment.methodCode || 'cash', comment: payment.receipt || '' })
+      setPaymentEditErrors({})
     }
 
     async function savePaymentEdit() {
-      setBusyId(`edit-${editingPayment.id}`); setError(null)
+      setBusyId(`edit-${editingPayment.id}`); setError(null); setPaymentEditErrors({})
       try {
         await api.post(`/api/admin/payments/${editingPayment.paymentId || editingPayment.id}/`, { method: paymentEditForm.method, comment: paymentEditForm.comment })
         setRows((current) => current.map((item) => item.id === editingPayment.id ? { ...item, methodCode: paymentEditForm.method, method: { cash: 'Наличные', bank_transfer: 'Bank transfer / IBAN', card: 'Карта', other: 'Другое' }[paymentEditForm.method], receipt: paymentEditForm.comment } : item))
         setEditingPayment(null); setMessage('Реквизиты платежа обновлены, изменение записано в журнал.')
-      } catch (err) { setError(err.message) } finally { setBusyId(null) }
+      } catch (err) {
+        showApiFieldErrors(
+          err, { method: 'method', comment: 'comment' },
+          setPaymentEditErrors, PAYMENT_EDIT_FIELD_IDS,
+          'Не удалось изменить реквизиты платежа.',
+        )
+      } finally { setBusyId(null) }
     }
 
     function minorFromMajor(value) {
-      return Math.round(Number(value || 0) * 100)
+      return Math.round(Number(String(value || 0).replace(',', '.')) * 100)
     }
 
     function subscriptionTypePayload(form) {
@@ -187,6 +276,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
 
     function openSubscriptionTypeEdit(type) {
       setEditingSubscriptionType(type)
+      setSubscriptionTypeEditErrors({})
       setSubscriptionTypeEditForm({
         name: type.name || '',
         price: String(type.price ?? ''),
@@ -199,13 +289,29 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       })
     }
 
-    async function createSubscriptionType() {
-      if (!subscriptionTypeForm.name) {
-        setError('Укажите название типа абонемента.')
-        return
+    function validateSubscriptionType(form, setErrors, fieldIds) {
+      const nextErrors = {}
+      if (!form.name.trim()) nextErrors.name = 'Укажите название типа абонемента.'
+      if (!validNonnegativeMoney(form.price)) nextErrors.price = 'Введите корректную неотрицательную цену.'
+      if (!positiveInteger(form.durationDays)) nextErrors.durationDays = 'Введите целое количество дней больше нуля.'
+      if (!form.isUnlimited && !positiveInteger(form.sessionsCount)) {
+        nextErrors.sessionsCount = 'Введите целое количество занятий больше нуля или включите безлимитный абонемент.'
       }
+      if (!String(form.currency || '').trim()) nextErrors.currency = 'Укажите валюту.'
+      setErrors(nextErrors)
+      if (Object.keys(nextErrors).length) {
+        setError(null)
+        focusFirstFieldError(nextErrors, fieldIds)
+        return false
+      }
+      return true
+    }
+
+    async function createSubscriptionType() {
+      if (!validateSubscriptionType(
+        subscriptionTypeForm, setSubscriptionTypeErrors, TYPE_FIELD_IDS)) return
       setBusyId('subscription-type')
-      setError(null)
+      setError(null); setSubscriptionTypeErrors({})
       try {
         await api.post('/api/admin/subscription-types/', subscriptionTypePayload(subscriptionTypeForm))
         setMessage('Тип абонемента создан.')
@@ -222,7 +328,10 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         })
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(
+          err, TYPE_FIELD_MAP, setSubscriptionTypeErrors, TYPE_FIELD_IDS,
+          'Не удалось создать тип абонемента.',
+        )
       } finally {
         setBusyId(null)
       }
@@ -230,8 +339,11 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
 
     async function saveSubscriptionTypeEdit() {
       if (!editingSubscriptionType) return
+      if (!validateSubscriptionType(
+        subscriptionTypeEditForm, setSubscriptionTypeEditErrors,
+        TYPE_EDIT_FIELD_IDS)) return
       setBusyId('subscription-type-edit')
-      setError(null)
+      setError(null); setSubscriptionTypeEditErrors({})
       try {
         await api.post(
           `/api/admin/subscription-types/${editingSubscriptionType.typeId}/`,
@@ -241,7 +353,10 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         setMessage('Тип абонемента обновлён.')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(
+          err, TYPE_FIELD_MAP, setSubscriptionTypeEditErrors,
+          TYPE_EDIT_FIELD_IDS, 'Не удалось сохранить тип абонемента.',
+        )
       } finally {
         setBusyId(null)
       }
@@ -261,12 +376,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     }
 
     async function createSubscription() {
-      if (!financeForm.participantId || !financeForm.subscriptionTypeId) {
-        setError('Выберите участника и тип абонемента.')
-        return
-      }
+      const nextErrors = {}
+      if (!financeForm.participantId) nextErrors.participantId = 'Выберите участника.'
+      if (!financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = 'Выберите тип абонемента.'
+      if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = 'Введите дату начала в формате ГГГГ-ММ-ДД.'
+      if (financeForm.createCharge && !validIsoDate(financeForm.dueDate)) nextErrors.dueDate = 'Введите срок оплаты в формате ГГГГ-ММ-ДД.'
+      if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('subscription')
-      setError(null)
+      setError(null); setFinanceErrors({})
       try {
         const result = await api.post(`/api/admin/participants/${financeForm.participantId}/subscriptions/`, {
           subscription_type_id: financeForm.subscriptionTypeId,
@@ -280,19 +397,24 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         await reloadSubscriptions()
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(err, {
+          participant_id: 'participantId', subscription_type_id: 'subscriptionTypeId',
+          start_date: 'startDate', due_date: 'dueDate', create_charge: 'createCharge',
+        }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось выдать абонемент.')
       } finally {
         setBusyId(null)
       }
     }
 
     async function createCharge() {
-      if (!financeForm.participantId) {
-        setError('Выберите участника.')
-        return
-      }
+      const nextErrors = {}
+      if (!financeForm.participantId) nextErrors.participantId = 'Выберите участника.'
+      if (!financeForm.chargeDescription.trim()) nextErrors.chargeDescription = 'Укажите описание начисления.'
+      if (!validPositiveMoney(financeForm.chargeAmount)) nextErrors.chargeAmount = 'Введите сумму больше нуля.'
+      if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = 'Введите срок оплаты в формате ГГГГ-ММ-ДД.'
+      if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('charge')
-      setError(null)
+      setError(null); setFinanceErrors({})
       try {
         await api.post(`/api/admin/participants/${financeForm.participantId}/charges/`, {
           description: financeForm.chargeDescription,
@@ -304,19 +426,25 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         setToolPanel(null)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(err, {
+          participant_id: 'participantId', subscription_id: 'subscriptionId',
+          description: 'chargeDescription', amount_minor: 'chargeAmount',
+          due_date: 'dueDate', currency: 'chargeAmount',
+        }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось добавить начисление.')
       } finally {
         setBusyId(null)
       }
     }
 
     async function createPayment() {
-      if (!financeForm.participantId) {
-        setError('Выберите участника.')
-        return
-      }
+      const nextErrors = {}
+      if (!financeForm.participantId) nextErrors.participantId = 'Выберите участника.'
+      if (!validPositiveMoney(financeForm.paymentAmount)) nextErrors.paymentAmount = 'Введите сумму больше нуля.'
+      if (!validIsoDate(financeForm.paymentDate)) nextErrors.paymentDate = 'Введите дату платежа в формате ГГГГ-ММ-ДД.'
+      if (!financeForm.paymentMethod) nextErrors.paymentMethod = 'Выберите способ оплаты.'
+      if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('payment')
-      setError(null)
+      setError(null); setFinanceErrors({})
       try {
         await api.post('/api/admin/payments/', {
           participant_id: financeForm.participantId,
@@ -329,19 +457,26 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         setToolPanel(null)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(err, {
+          participant_id: 'participantId', amount_minor: 'paymentAmount',
+          paid_at: 'paymentDate', method: 'paymentMethod', currency: 'paymentAmount',
+        }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось добавить платёж.')
       } finally {
         setBusyId(null)
       }
     }
 
     async function freezeSubscription() {
-      if (!financeForm.subscriptionId) {
-        setError('Выберите абонемент.')
-        return
+      const nextErrors = {}
+      if (!financeForm.subscriptionId) nextErrors.subscriptionId = 'Выберите абонемент.'
+      if (!validIsoDate(financeForm.freezeStart)) nextErrors.freezeStart = 'Введите дату начала заморозки в формате ГГГГ-ММ-ДД.'
+      if (!validIsoDate(financeForm.freezeEnd)) nextErrors.freezeEnd = 'Введите дату окончания заморозки в формате ГГГГ-ММ-ДД.'
+      if (validIsoDate(financeForm.freezeStart) && validIsoDate(financeForm.freezeEnd) && financeForm.freezeEnd < financeForm.freezeStart) {
+        nextErrors.freezeEnd = 'Дата окончания не может быть раньше даты начала.'
       }
+      if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('freeze')
-      setError(null)
+      setError(null); setFinanceErrors({})
       try {
         const result = await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/freeze/`, {
           start_date: financeForm.freezeStart,
@@ -351,19 +486,23 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         setMessage(`Абонемент заморожен на ${result.days} дней.`)
         await reloadSubscriptions()
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(err, {
+          subscription_id: 'subscriptionId', start_date: 'freezeStart',
+          end_date: 'freezeEnd', reason: 'freezeReason',
+        }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось заморозить абонемент.')
       } finally {
         setBusyId(null)
       }
     }
 
     async function adjustSubscription() {
-      if (!financeForm.subscriptionId) {
-        setError('Выберите абонемент.')
-        return
-      }
+      const nextErrors = {}
+      if (!financeForm.subscriptionId) nextErrors.subscriptionId = 'Выберите абонемент.'
+      const delta = Number(financeForm.adjustDelta)
+      if (!Number.isInteger(delta) || delta === 0) nextErrors.adjustDelta = 'Введите целое число, отличное от нуля.'
+      if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('adjust')
-      setError(null)
+      setError(null); setFinanceErrors({})
       try {
         await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/adjust/`, {
           delta: Number(financeForm.adjustDelta || 0),
@@ -372,19 +511,23 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         setMessage('Корректировка абонемента сохранена.')
         await reloadSubscriptions()
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(err, {
+          subscription_id: 'subscriptionId', delta: 'adjustDelta', note: 'adjustNote',
+        }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось скорректировать абонемент.')
       } finally {
         setBusyId(null)
       }
     }
 
     async function renewSubscription() {
-      if (!financeForm.subscriptionId || !financeForm.subscriptionTypeId) {
-        setError('Выберите абонемент и тип продления.')
-        return
-      }
+      const nextErrors = {}
+      if (!financeForm.subscriptionId) nextErrors.subscriptionId = 'Выберите абонемент.'
+      if (!financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = 'Выберите тип продления.'
+      if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = 'Введите дату начала в формате ГГГГ-ММ-ДД.'
+      if (financeForm.createCharge && !validIsoDate(financeForm.dueDate)) nextErrors.dueDate = 'Введите срок оплаты в формате ГГГГ-ММ-ДД.'
+      if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('renew')
-      setError(null)
+      setError(null); setFinanceErrors({})
       try {
         const result = await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/renew/`, {
           subscription_type_id: financeForm.subscriptionTypeId,
@@ -397,7 +540,10 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         await reloadSubscriptions()
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        showApiFieldErrors(err, {
+          subscription_id: 'subscriptionId', subscription_type_id: 'subscriptionTypeId',
+          start_date: 'startDate', due_date: 'dueDate', create_charge: 'createCharge',
+        }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось продлить абонемент.')
       } finally {
         setBusyId(null)
       }
@@ -433,23 +579,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>Типы абонементов</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.4fr) repeat(3, minmax(120px, 1fr))', gap: 10, marginBottom: 12 }}>
-            <Input label="Название" value={subscriptionTypeForm.name} onChange={(event) => updateSubscriptionTypeForm('name', event.target.value)} />
-            <Input label="Цена" value={subscriptionTypeForm.price} onChange={(event) => updateSubscriptionTypeForm('price', event.target.value)} placeholder="240.00" />
-            <Input label="Валюта" value={subscriptionTypeForm.currency} onChange={(event) => updateSubscriptionTypeForm('currency', event.target.value)} />
-            <Input label="Дней" value={subscriptionTypeForm.durationDays} onChange={(event) => updateSubscriptionTypeForm('durationDays', event.target.value)} />
-            <Input label="Занятий" value={subscriptionTypeForm.sessionsCount} onChange={(event) => updateSubscriptionTypeForm('sessionsCount', event.target.value)} placeholder="Пусто для безлимитного" />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-              <input type="checkbox" checked={subscriptionTypeForm.isUnlimited} onChange={(event) => updateSubscriptionTypeForm('isUnlimited', event.target.checked)} />
-              Безлимитный
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-              <input type="checkbox" checked={subscriptionTypeForm.isIndividual} onChange={(event) => updateSubscriptionTypeForm('isIndividual', event.target.checked)} />
-              Индивидуальный
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-              <input type="checkbox" checked={subscriptionTypeForm.isActive} onChange={(event) => updateSubscriptionTypeForm('isActive', event.target.checked)} />
-              Активен
-            </label>
+            <Input id={TYPE_FIELD_IDS.name} label="Название" value={subscriptionTypeForm.name} error={subscriptionTypeErrors.name} onChange={(event) => updateSubscriptionTypeForm('name', event.target.value)} />
+            <Input id={TYPE_FIELD_IDS.price} label="Цена" value={subscriptionTypeForm.price} error={subscriptionTypeErrors.price} onChange={(event) => updateSubscriptionTypeForm('price', event.target.value)} placeholder="240.00" />
+            <Input id={TYPE_FIELD_IDS.currency} label="Валюта" value={subscriptionTypeForm.currency} error={subscriptionTypeErrors.currency} onChange={(event) => updateSubscriptionTypeForm('currency', event.target.value)} />
+            <Input id={TYPE_FIELD_IDS.durationDays} label="Дней" value={subscriptionTypeForm.durationDays} error={subscriptionTypeErrors.durationDays} onChange={(event) => updateSubscriptionTypeForm('durationDays', event.target.value)} />
+            <Input id={TYPE_FIELD_IDS.sessionsCount} label="Занятий" value={subscriptionTypeForm.sessionsCount} error={subscriptionTypeErrors.sessionsCount} onChange={(event) => updateSubscriptionTypeForm('sessionsCount', event.target.value)} placeholder="Пусто для безлимитного" />
+            <Checkbox id={TYPE_FIELD_IDS.isUnlimited} label="Безлимитный" checked={subscriptionTypeForm.isUnlimited} error={subscriptionTypeErrors.isUnlimited} onChange={(event) => updateSubscriptionTypeForm('isUnlimited', event.target.checked)} style={{ paddingTop: 21 }} />
+            <Checkbox id={TYPE_FIELD_IDS.isIndividual} label="Индивидуальный" checked={subscriptionTypeForm.isIndividual} error={subscriptionTypeErrors.isIndividual} onChange={(event) => updateSubscriptionTypeForm('isIndividual', event.target.checked)} style={{ paddingTop: 21 }} />
+            <Checkbox id={TYPE_FIELD_IDS.isActive} label="Активен" checked={subscriptionTypeForm.isActive} error={subscriptionTypeErrors.isActive} onChange={(event) => updateSubscriptionTypeForm('isActive', event.target.checked)} style={{ paddingTop: 21 }} />
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: editingSubscriptionType ? 14 : 0 }}>
             <Button variant="primary" loading={busyId === 'subscription-type'} disabled={busyId != null} onClick={createSubscriptionType}>Создать тип</Button>
@@ -459,23 +596,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 14 }}>
               <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование типа абонемента</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.4fr) repeat(3, minmax(120px, 1fr))', gap: 10, marginBottom: 12 }}>
-                <Input label="Название" value={subscriptionTypeEditForm.name} onChange={(event) => updateSubscriptionTypeEditForm('name', event.target.value)} />
-                <Input label="Цена" value={subscriptionTypeEditForm.price} onChange={(event) => updateSubscriptionTypeEditForm('price', event.target.value)} />
-                <Input label="Валюта" value={subscriptionTypeEditForm.currency} onChange={(event) => updateSubscriptionTypeEditForm('currency', event.target.value)} />
-                <Input label="Дней" value={subscriptionTypeEditForm.durationDays} onChange={(event) => updateSubscriptionTypeEditForm('durationDays', event.target.value)} />
-                <Input label="Занятий" value={subscriptionTypeEditForm.sessionsCount} onChange={(event) => updateSubscriptionTypeEditForm('sessionsCount', event.target.value)} placeholder="Пусто для безлимитного" />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-                  <input type="checkbox" checked={subscriptionTypeEditForm.isUnlimited} onChange={(event) => updateSubscriptionTypeEditForm('isUnlimited', event.target.checked)} />
-                  Безлимитный
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-                  <input type="checkbox" checked={subscriptionTypeEditForm.isIndividual} onChange={(event) => updateSubscriptionTypeEditForm('isIndividual', event.target.checked)} />
-                  Индивидуальный
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-                  <input type="checkbox" checked={subscriptionTypeEditForm.isActive} onChange={(event) => updateSubscriptionTypeEditForm('isActive', event.target.checked)} />
-                  Активен
-                </label>
+                <Input id={TYPE_EDIT_FIELD_IDS.name} label="Название" value={subscriptionTypeEditForm.name} error={subscriptionTypeEditErrors.name} onChange={(event) => updateSubscriptionTypeEditForm('name', event.target.value)} />
+                <Input id={TYPE_EDIT_FIELD_IDS.price} label="Цена" value={subscriptionTypeEditForm.price} error={subscriptionTypeEditErrors.price} onChange={(event) => updateSubscriptionTypeEditForm('price', event.target.value)} />
+                <Input id={TYPE_EDIT_FIELD_IDS.currency} label="Валюта" value={subscriptionTypeEditForm.currency} error={subscriptionTypeEditErrors.currency} onChange={(event) => updateSubscriptionTypeEditForm('currency', event.target.value)} />
+                <Input id={TYPE_EDIT_FIELD_IDS.durationDays} label="Дней" value={subscriptionTypeEditForm.durationDays} error={subscriptionTypeEditErrors.durationDays} onChange={(event) => updateSubscriptionTypeEditForm('durationDays', event.target.value)} />
+                <Input id={TYPE_EDIT_FIELD_IDS.sessionsCount} label="Занятий" value={subscriptionTypeEditForm.sessionsCount} error={subscriptionTypeEditErrors.sessionsCount} onChange={(event) => updateSubscriptionTypeEditForm('sessionsCount', event.target.value)} placeholder="Пусто для безлимитного" />
+                <Checkbox id={TYPE_EDIT_FIELD_IDS.isUnlimited} label="Безлимитный" checked={subscriptionTypeEditForm.isUnlimited} error={subscriptionTypeEditErrors.isUnlimited} onChange={(event) => updateSubscriptionTypeEditForm('isUnlimited', event.target.checked)} style={{ paddingTop: 21 }} />
+                <Checkbox id={TYPE_EDIT_FIELD_IDS.isIndividual} label="Индивидуальный" checked={subscriptionTypeEditForm.isIndividual} error={subscriptionTypeEditErrors.isIndividual} onChange={(event) => updateSubscriptionTypeEditForm('isIndividual', event.target.checked)} style={{ paddingTop: 21 }} />
+                <Checkbox id={TYPE_EDIT_FIELD_IDS.isActive} label="Активен" checked={subscriptionTypeEditForm.isActive} error={subscriptionTypeEditErrors.isActive} onChange={(event) => updateSubscriptionTypeEditForm('isActive', event.target.checked)} style={{ paddingTop: 21 }} />
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Button variant="primary" loading={busyId === 'subscription-type-edit'} disabled={busyId != null} onClick={saveSubscriptionTypeEdit}>Сохранить тип</Button>
@@ -512,44 +640,37 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           <div className="eyebrow" style={{ marginBottom: 10 }}>Абонементы и расчёты</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.3fr) minmax(220px, 1.3fr) minmax(180px, 1fr)', gap: 10, marginBottom: 12 }}>
             <SearchableSelect
+              inputId={FINANCE_FIELD_IDS.participantId}
               label="Участник"
               value={financeForm.participantId}
+              error={financeErrors.participantId}
               onChange={(value) => updateFinanceForm('participantId', value)}
               options={participants.map((participant) => clientSelectOption(participant, {
                 description: (row) => row.phone || row.email || row.group,
               }))}
             />
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Тип абонемента
-              <select value={financeForm.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)} style={{ minHeight: 36 }}>
+            <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label="Тип абонемента" value={financeForm.subscriptionTypeId} error={financeErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}>
                 <option value="">Выберите тип</option>
                 {subscriptionTypes.map((type) => (
                   <option key={type.typeId} value={type.typeId}>
                     {type.name} · {type.price.toLocaleString('ru-RU')} {type.currency}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Абонемент участника
-              <select value={financeForm.subscriptionId} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)} style={{ minHeight: 36 }}>
+            </Select>
+            <Select id={FINANCE_FIELD_IDS.subscriptionId} label="Абонемент участника" value={financeForm.subscriptionId} error={financeErrors.subscriptionId} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}>
                 <option value="">Выберите абонемент</option>
                 {subscriptions.map((subscription) => (
                   <option key={subscription.id} value={subscription.id}>
                     #{subscription.id} · {subscription.type} · {subscription.status} · {subscription.remaining_sessions ?? 'безлимитный'}
                   </option>
                 ))}
-              </select>
-            </label>
+            </Select>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
-            <Input label="Начало абонемента" value={financeForm.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-            <Input label="Срок оплаты" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
-              <input type="checkbox" checked={financeForm.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} />
-              Создать начисление
-            </label>
+            <Input id={FINANCE_FIELD_IDS.startDate} label="Начало абонемента" value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Input id={FINANCE_FIELD_IDS.dueDate} label="Срок оплаты" value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Checkbox id={FINANCE_FIELD_IDS.createCharge} label="Создать начисление" checked={financeForm.createCharge} error={financeErrors.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} style={{ paddingTop: 21 }} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
               <Button variant="primary" loading={busyId === 'subscription'} disabled={busyId != null} onClick={createSubscription}>Выдать абонемент</Button>
               <Button variant="secondary" loading={busyId === 'renew'} disabled={busyId != null} onClick={renewSubscription}>Продлить</Button>
@@ -557,19 +678,16 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
-            <Input label="Описание начисления" value={financeForm.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} />
-            <Input label="Сумма начисления" value={financeForm.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
-            <Input label="Сумма платежа" value={financeForm.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
-            <Input label="Дата платежа" value={financeForm.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Способ оплаты
-              <select value={financeForm.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)} style={{ minHeight: 36 }}>
+            <Input id={FINANCE_FIELD_IDS.chargeDescription} label="Описание начисления" value={financeForm.chargeDescription} error={financeErrors.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} />
+            <Input id={FINANCE_FIELD_IDS.chargeAmount} label="Сумма начисления" value={financeForm.chargeAmount} error={financeErrors.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
+            <Input id={FINANCE_FIELD_IDS.paymentAmount} label="Сумма платежа" value={financeForm.paymentAmount} error={financeErrors.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} />
+            <Input id={FINANCE_FIELD_IDS.paymentDate} label="Дата платежа" value={financeForm.paymentDate} error={financeErrors.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Select id={FINANCE_FIELD_IDS.paymentMethod} label="Способ оплаты" value={financeForm.paymentMethod} error={financeErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}>
                 <option value="cash">Наличные</option>
                 <option value="bank_transfer">Bank transfer / IBAN</option>
                 <option value="card">Карта</option>
                 <option value="other">Другое</option>
-              </select>
-            </label>
+            </Select>
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
               <Button variant="secondary" loading={busyId === 'charge'} disabled={busyId != null} onClick={createCharge}>Добавить начисление</Button>
               <Button variant="secondary" loading={busyId === 'payment'} disabled={busyId != null} onClick={createPayment}>Добавить платёж</Button>
@@ -577,14 +695,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10 }}>
-            <Input label="Заморозить с" value={financeForm.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-            <Input label="Заморозить до" value={financeForm.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-            <Input label="Причина заморозки" value={financeForm.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
+            <Input id={FINANCE_FIELD_IDS.freezeStart} label="Заморозить с" value={financeForm.freezeStart} error={financeErrors.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Input id={FINANCE_FIELD_IDS.freezeEnd} label="Заморозить до" value={financeForm.freezeEnd} error={financeErrors.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+            <Input id={FINANCE_FIELD_IDS.freezeReason} label="Причина заморозки" value={financeForm.freezeReason} error={financeErrors.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
               <Button variant="secondary" loading={busyId === 'freeze'} disabled={busyId != null} onClick={freezeSubscription}>Заморозить</Button>
             </div>
-            <Input label="Корректировка занятий" value={financeForm.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} />
-            <Input label="Комментарий к корректировке" value={financeForm.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
+            <Input id={FINANCE_FIELD_IDS.adjustDelta} label="Корректировка занятий" value={financeForm.adjustDelta} error={financeErrors.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} />
+            <Input id={FINANCE_FIELD_IDS.adjustNote} label="Комментарий к корректировке" value={financeForm.adjustNote} error={financeErrors.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
               <Button variant="secondary" loading={busyId === 'adjust'} disabled={busyId != null} onClick={adjustSubscription}>Сохранить корректировку</Button>
             </div>
@@ -603,7 +721,15 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           <label>Способ оплаты <select aria-label="Способ оплаты" value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label>
         </div>
 
-        {editingPayment && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="eyebrow">Чувствительное действие: реквизиты платежа</div><p className="muted">Сумма, время и сама запись не удаляются. Изменение способа и комментария попадёт в журнал действий.</p><div className="ops-form-grid"><label>Способ оплаты<select value={paymentEditForm.method} onChange={(event) => setPaymentEditForm({ ...paymentEditForm, method: event.target.value })}><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label><Input label="Комментарий" value={paymentEditForm.comment} onChange={(event) => setPaymentEditForm({ ...paymentEditForm, comment: event.target.value })} /></div><div className="ops-button-row"><Button variant="primary" disabled={busyId != null} onClick={savePaymentEdit}>Сохранить изменение</Button><Button variant="secondary" onClick={() => setEditingPayment(null)}>Отмена</Button></div></div>}
+        {editingPayment && <div className="card card-pad" style={{ marginBottom: 14 }}>
+          <div className="eyebrow">Чувствительное действие: реквизиты платежа</div>
+          <p className="muted">Сумма, время и сама запись не удаляются. Изменение способа и комментария попадёт в журнал действий.</p>
+          <div className="ops-form-grid">
+            <Select id={PAYMENT_EDIT_FIELD_IDS.method} label="Способ оплаты" value={paymentEditForm.method} error={paymentEditErrors.method} onChange={(event) => { setPaymentEditForm({ ...paymentEditForm, method: event.target.value }); setPaymentEditErrors((current) => clearFieldError(current, 'method')) }}><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></Select>
+            <Input id={PAYMENT_EDIT_FIELD_IDS.comment} label="Комментарий" value={paymentEditForm.comment} error={paymentEditErrors.comment} onChange={(event) => { setPaymentEditForm({ ...paymentEditForm, comment: event.target.value }); setPaymentEditErrors((current) => clearFieldError(current, 'comment')) }} />
+          </div>
+          <div className="ops-button-row"><Button variant="primary" disabled={busyId != null} onClick={savePaymentEdit}>Сохранить изменение</Button><Button variant="secondary" onClick={() => { setEditingPayment(null); setPaymentEditErrors({}) }}>Отмена</Button></div>
+        </div>}
 
         <Table
           rows={visibleRows}

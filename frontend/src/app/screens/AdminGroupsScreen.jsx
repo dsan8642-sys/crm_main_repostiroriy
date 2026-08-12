@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import { api, apiErrorMessage } from '../../api.js'
+import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
@@ -7,7 +8,7 @@ import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
 
 export function createAdminGroupsScreen(components, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Button, Banner, Input, Avatar, Badge, Money } = components
+  const { Table, StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money } = components
 
   return function ApiAdminGroups({ go, groupId }) {
     const rows = adminData.groups || []
@@ -21,6 +22,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const [candidateId, setCandidateId] = useState('')
     const [form, setForm] = useState({ name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true })
     const [capacityError, setCapacityError] = useState('')
+    const [fieldErrors, setFieldErrors] = useState({})
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
@@ -33,6 +35,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     function openGroup(row) {
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
       setCapacityError('')
+      setFieldErrors({})
       setForm({ name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active })
     }
 
@@ -41,6 +44,12 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       const parsedCapacity = Number(capacityValue)
       if (capacityValue !== '' && (!Number.isInteger(parsedCapacity) || parsedCapacity <= 0)) {
         setCapacityError('Укажите целое число больше нуля.')
+        document.getElementById('admin-group-defaultCapacity')?.focus()
+        return
+      }
+      if (!form.name.trim()) {
+        setFieldErrors({ name: 'Укажите название группы.' })
+        document.getElementById('admin-group-name')?.focus()
         return
       }
       setCapacityError('')
@@ -57,16 +66,35 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           color_key: form.colorKey || null,
           is_active: form.isActive,
         }
-        if (price !== '' && !Number.isFinite(Number(price))) throw new Error('Некорректная цена занятия')
+        if (price !== '' && (!Number.isFinite(Number(price)) || Number(price) < 0)) {
+          setFieldErrors((current) => ({ ...current, price: 'Укажите неотрицательную цену.' }))
+          document.getElementById('admin-group-price')?.focus()
+          return
+        }
         if (isNew) await api.post('/api/admin/groups/', payload)
         else await api.post(`/api/admin/groups/${selected.groupId}/`, payload)
         setMessage(isNew ? 'Группа создана.' : 'Карточка группы обновлена.')
         setCreating(false); setEditing(false)
         await reloadRoleData?.('admin')
       } catch (err) {
-        const fieldError = err?.payload?.errors?.default_capacity
-        if (fieldError) setCapacityError(Array.isArray(fieldError) ? fieldError.join(' ') : String(fieldError))
-        else setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, {
+          name: 'name',
+          description: 'description',
+          default_trainer_id: 'defaultTrainerId',
+          price_minor: 'price',
+          default_capacity: 'defaultCapacity',
+          color_key: 'colorKey',
+          is_active: 'isActive',
+        })
+        setFieldErrors(nextErrors)
+        setCapacityError(nextErrors.defaultCapacity || '')
+        setError(formErrorMessage(err, 'Не удалось сохранить группу.'))
+        focusFirstFieldError(nextErrors, {
+          name: 'admin-group-name', description: 'admin-group-description',
+          defaultCapacity: 'admin-group-defaultCapacity', price: 'admin-group-price',
+          defaultTrainerId: 'admin-group-defaultTrainerId', colorKey: 'admin-group-colorKey',
+          isActive: 'admin-group-isActive',
+        })
       } finally { setBusy(false) }
     }
 
@@ -77,21 +105,27 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         setMessage(nextGroupId ? 'Участник добавлен в группу.' : 'Участник убран из группы.')
         setCandidateId('')
         await reloadRoleData?.('admin')
-      } catch (err) { setError(err.message) } finally { setBusy(false) }
+      } catch (err) { setError(apiErrorMessage(err, 'Не удалось изменить состав группы.')) } finally { setBusy(false) }
+    }
+
+    function updateForm(field, value) {
+      setFieldErrors((current) => clearFieldError(current, field))
+      if (field === 'defaultCapacity') setCapacityError('')
+      setForm((current) => ({ ...current, [field]: value }))
     }
 
     const editor = (
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>{creating ? 'Новая группа' : 'Редактирование группы'}</div>
-        <div className="ops-form-grid"><Input label="Название" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Input label="Описание" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /><Input label="Вместимость" hint="Значение по умолчанию для новых групповых тренировок." inputMode="numeric" value={form.defaultCapacity} error={capacityError} aria-invalid={Boolean(capacityError)} onChange={(event) => { setCapacityError(''); setForm({ ...form, defaultCapacity: event.target.value }) }} /><Input label="Цена занятия" hint="Списывается за посещение без абонемента. Пусто — не списывать." inputMode="decimal" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /><label>Тренер по умолчанию<select value={form.defaultTrainerId} onChange={(event) => setForm({ ...form, defaultTrainerId: event.target.value })}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} />Активна</label></div>
-        <ScheduleColorPicker value={form.colorKey} onChange={(colorKey) => setForm({ ...form, colorKey: colorKey || '' })} />
+        <div className="ops-form-grid"><Input id="admin-group-name" label="Название" value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label="Описание" value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label="Вместимость" hint="Значение по умолчанию для новых групповых тренировок." inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-price" label="Цена занятия" hint="Списывается за посещение без абонемента. Пусто — не списывать." inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label="Тренер по умолчанию" value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Checkbox id="admin-group-isActive" label="Активна" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
+        <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
         <div className="ops-button-row"><Button variant="primary" disabled={busy || !form.name} onClick={() => saveGroup(creating)}>Сохранить</Button><Button variant="secondary" onClick={() => { setCreating(false); setEditing(false) }}>Отмена</Button></div>
       </div>
     )
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">Группы</h1><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { setCreating(true); setSelected(null); setCapacityError(''); setForm({ name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }) }}>Новая группа</Button></div>
+        <div className="page-head"><div><h1 className="page-title">Группы</h1><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm({ name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }) }}>Новая группа</Button></div>
         <ToastNotice id="admin-groups-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Обновляю состав группы...</BusyBanner>

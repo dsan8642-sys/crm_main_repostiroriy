@@ -168,7 +168,11 @@ class Prompt04BulkAttendanceRule(TestCase):
             ]}),
             content_type="application/json",
         )
-        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(
+            rejected.json()["errors"]["items.1.student_id"][0]["code"],
+            "invalid_choice",
+        )
         self.assertFalse(AttendanceRecord.objects.filter(session=self.session).exists())
 
         accepted = self.client.post(
@@ -228,7 +232,11 @@ class Prompt04AdminScheduleRule(TestCase):
             data=json.dumps(self._payload(self.inactive_trainer.id)),
             content_type="application/json",
         )
-        self.assertEqual(rejected.status_code, 404)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(
+            rejected.json()["errors"]["trainer_id"][0]["code"],
+            "invalid_choice",
+        )
 
         created = self.client.post(
             "/api/admin/schedule/sessions/",
@@ -280,5 +288,9 @@ class Prompt04AdminScheduleRule(TestCase):
             ]}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["errors"]["items.1.student_id"][0]["code"],
+            "invalid_choice",
+        )
         self.assertFalse(AttendanceRecord.objects.filter(session=session).exists())

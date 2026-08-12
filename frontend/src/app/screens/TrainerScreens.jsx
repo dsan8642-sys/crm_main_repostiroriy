@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import { api, apiErrorMessage } from '../../api.js'
 import { formatDate, formatShortDate, formatTime, mapTrainerSession } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
 import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
@@ -24,6 +24,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
     const [bulkPending, setBulkPending] = useState(false)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
+    const [rowErrors, setRowErrors] = useState({})
     const [busyId, setBusyId] = useState(null)
     const [loading, setLoading] = useState(false)
     const sessionId = trainerSessionId || trainerData.activeSessionId
@@ -54,7 +55,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
             status: student.attendance?.status || null,
           })))
         })
-        .catch((err) => setError(err.message))
+        .catch((err) => setError(apiErrorMessage(err, 'Не удалось загрузить занятие.')))
         .finally(() => {
           if (alive) setLoading(false)
         })
@@ -67,6 +68,11 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
       if (!sessionId || !row.studentId || sessionMeta.cancelled) return
       setBusyId(row.id)
       setError(null)
+      setRowErrors((current) => {
+        const next = { ...current }
+        delete next[row.id]
+        return next
+      })
       try {
         await api.post(`/api/trainer/sessions/${sessionId}/attendance/`, {
           student_id: row.studentId,
@@ -76,21 +82,40 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
         setMessage(`${row.name}: ${labels[status]}. Влияние на абонемент: ${status === 'present' || status === 'absent' ? '-1 занятие' : 'без списания'}.`)
         reloadRoleData?.('trainer')
       } catch (err) {
-        setError(err.message)
+        const message = apiErrorMessage(err, 'Не удалось сохранить посещаемость.')
+        setRowErrors((current) => ({ ...current, [row.id]: message }))
+        document.querySelector(`#trainer-attendance-row-${row.id} button`)?.focus()
       } finally {
         setBusyId(null)
       }
     }
 
     async function markAllPresent() {
-      setBusyId('all'); setError(null)
+      setBusyId('all'); setError(null); setRowErrors({})
       try {
         const result = await api.post(`/api/trainer/sessions/${sessionId}/attendance/bulk/`, {
           items: rows.map((row) => ({ student_id: row.studentId, status: 'present' })),
         })
         setRows((current) => current.map((row) => ({ ...row, status: 'present' })))
         setMessage(`Отмечены присутствующими: ${result.updated_count}. Списывается по одному занятию у каждого участника.`)
-      } catch (err) { setError(err.message) } finally { setBusyId(null) }
+      } catch (err) {
+        const nextRowErrors = {}
+        for (const [field, items] of Object.entries(err.fieldErrors || {})) {
+          const match = field.match(/^items\.(\d+)\./)
+          const row = match ? rows[Number(match[1])] : null
+          const message = (Array.isArray(items) ? items : [items])
+            .map((item) => typeof item === 'string' ? item : item?.message)
+            .filter(Boolean).join(' ')
+          if (row && message) nextRowErrors[row.id] = message
+        }
+        setRowErrors(nextRowErrors)
+        if (Object.keys(nextRowErrors).length) {
+          const firstId = Object.keys(nextRowErrors)[0]
+          document.querySelector(`#trainer-attendance-row-${firstId} button`)?.focus()
+        } else {
+          setError(apiErrorMessage(err, 'Не удалось сохранить посещаемость.'))
+        }
+      } finally { setBusyId(null) }
     }
 
     return (
@@ -119,7 +144,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
                 <div className="strong">{row.name}</div>
                 <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>Данные доступны только в рамках занятия</div>
               </div>
-              <div className="ops-attendance-actions" style={{ display: 'flex', gap: 4 }}>
+              <div id={`trainer-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `trainer-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4 }}>
                 {options.map((status) => {
                   const on = row.status === status
                   const consumes = status === 'present' || status === 'absent'
@@ -137,6 +162,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
                     </Button>
                   )
                 })}
+                {rowErrors[row.id] && <small id={`trainer-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
               </div>
             </div>
           ))}
@@ -181,7 +207,7 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
           if (active) setSessions((payload.sessions || []).map(mapTrainerSession))
         })
         .catch((err) => {
-          if (active) setError(err.message)
+          if (active) setError(apiErrorMessage(err, 'Не удалось загрузить занятия.'))
         })
       return () => { active = false }
     }, [range.dateFrom, range.dateTo])

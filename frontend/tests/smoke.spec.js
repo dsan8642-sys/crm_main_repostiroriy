@@ -107,6 +107,147 @@ test('icon-only buttons have accessible names', async ({ page }) => {
   expect(unnamedIconButtons).toBe(0)
 })
 
+test('client and schedule forms show field errors and focus the first invalid field', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop form-contract smoke is sufficient')
+  const errors = collectPageErrors(page)
+  const clientPosts = []
+  let schedulePosts = 0
+  const routes = {
+    '/api/csrf/': { ok: true },
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [{ id: 1, name: 'Marek' }],
+      groups: [{ id: 1, name: 'Delfiny' }],
+      subscription_types: [],
+      locations: [{ id: 1, name: 'Basen A', is_active: true }],
+      session_types: [],
+      participants: [],
+      choices: { payment_methods: [], notification_channels: [] },
+      notification_settings: {},
+    },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': {
+      trainers: [{ id: 1, username: 'marek', full_name: 'Marek', is_active: true }],
+    },
+    '/api/admin/groups/': {
+      groups: [{
+        id: 1, name: 'Delfiny', description: '', default_capacity: 8,
+        participants_count: 0, is_active: true,
+      }],
+    },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': {
+      session_types: [{
+        id: 1, code: 'group', label: 'Групповое', default_capacity: 8,
+        default_duration_minutes: 60, is_active: true, configured: true,
+      }],
+    },
+    '/api/admin/schedule/sessions/': { sessions: [] },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  }
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (request.method() === 'POST' && pathname === '/api/admin/clients/') {
+      const submitted = request.postDataJSON()
+      clientPosts.push(submitted)
+      if (clientPosts.length === 1) {
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({ account: { id: 10, username: submitted.account.username }, participants: [] }),
+        })
+      } else {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'Проверьте отмеченные поля.',
+            code: 'validation_error',
+            errors: {
+              'account.username': [{
+                code: 'duplicate',
+                message: 'Этот телефон уже используется как логин. Измените контакт или логин',
+              }],
+              'account.phone': [{
+                code: 'duplicate',
+                message: 'Этот телефон уже используется как логин. Измените контакт или логин',
+              }],
+            },
+            non_field_errors: [],
+          }),
+        })
+      }
+      return
+    }
+    if (request.method() === 'POST' && pathname.startsWith('/api/admin/schedule/')) {
+      schedulePosts += 1
+    }
+    const payload = pathname === '/api/health/'
+      ? { status: 'ok', service: 'swimcrm' }
+      : routes[pathname]
+    await route.fulfill({
+      status: payload ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(payload || { error: `Unhandled smoke endpoint: ${pathname}` }),
+    })
+  })
+
+  await page.goto('/?role=admin&view=clients')
+  await page.getByRole('button', { name: /^Новый клиент/ }).click()
+  await expect(page.getByRole('checkbox', { name: /сам является участником/i })).toHaveCount(0)
+  await page.getByLabel('Имя владельца аккаунта').fill('Anna')
+  await page.getByLabel('Фамилия владельца').fill('Nowak')
+  await page.getByLabel('Телефон', { exact: true }).fill('+48 500-111-222')
+  await expect(page.getByLabel('Логин', { exact: true })).toHaveValue('48500111222')
+  await page.getByRole('button', { name: 'Создать клиента', exact: true }).click()
+  await expect.poll(() => clientPosts.length).toBe(1)
+  expect(clientPosts[0]).toMatchObject({
+    client_type: 'adult',
+    is_adult: true,
+    account: { username: '48500111222', phone: '+48 500-111-222' },
+    participant: { is_account_holder: true },
+  })
+
+  await page.getByRole('button', { name: /^Новый клиент/ }).click()
+  await page.getByLabel('Имя владельца аккаунта').fill('Anna')
+  await page.getByLabel('Фамилия владельца').fill('Nowak')
+  await page.getByLabel('Телефон', { exact: true }).fill('+48 500-111-222')
+  await page.getByRole('button', { name: 'Создать клиента', exact: true }).click()
+  const username = page.getByLabel('Логин', { exact: true })
+  const phone = page.getByLabel('Телефон', { exact: true })
+  await expect(username).toBeFocused()
+  await expect(username).toHaveAttribute('aria-invalid', 'true')
+  await expect(phone).toHaveAttribute('aria-invalid', 'true')
+  await expect(username).toHaveCSS('border-color', 'rgb(214, 63, 54)')
+  await expect(page.getByText(
+    'Этот телефон уже используется как логин. Измените контакт или логин',
+    { exact: true },
+  )).toHaveCount(2)
+  await phone.fill('+48 500-111-223')
+  await expect(username).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(phone).not.toHaveAttribute('aria-invalid', 'true')
+
+  await page.goto('/?role=admin&view=schedule')
+  await page.getByRole('button', { name: 'Групповая тренировка', exact: true }).click()
+  const duration = page.getByLabel('Длительность, мин', { exact: true })
+  await duration.fill('17')
+  await page.getByRole('button', { name: 'Создать занятие', exact: true }).click()
+  await expect(duration).toBeFocused()
+  await expect(duration).toHaveAttribute('aria-invalid', 'true')
+  await expect(duration).toHaveCSS('border-color', 'rgb(214, 63, 54)')
+  await expect(page.getByText('От 15 до 480 минут с шагом 5 минут.', { exact: true })).toBeVisible()
+  expect(schedulePosts).toBe(0)
+  await duration.fill('20')
+  await expect(duration).not.toHaveAttribute('aria-invalid', 'true')
+  expect(errors.filter((message) => !(
+    message.includes('status of 400')
+      && message.includes('/api/admin/clients/')
+  ))).toEqual([])
+})
+
 test('shared shell and calendar keep mobile controls compact and accessible', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile calendar contract')
   const errors = collectPageErrors(page)
@@ -1212,6 +1353,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Абонемент продлён с начислением.')).toBeVisible()
 
   await page.getByRole('button', { name: /Заморозить/ }).click()
+  await page.getByRole('textbox', { name: 'С даты', exact: true }).fill('2026-07-17')
   await page.getByRole('textbox', { name: 'По дату', exact: true }).fill('2026-07-23')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент заморожен на 7 дней.')).toBeVisible()

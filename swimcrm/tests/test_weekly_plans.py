@@ -117,3 +117,34 @@ class RetiredWeeklyPlanApiTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(replay.status_code, 400)
+        self.assertEqual(replay.json()["code"], "validation_error")
+        self.assertEqual(
+            replay.json()["errors"]["batch_id"][0]["code"],
+            "invalid_choice",
+        )
+
+    def test_period_copy_commit_reports_malformed_fields(self):
+        malformed_batch = self.client.post(
+            "/api/admin/schedule/copy-period/commit/",
+            data=json.dumps({
+                "batch_id": "not-a-number",
+                "selected_indices": ["also-not-a-number"],
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(malformed_batch.status_code, 400)
+        self.assertEqual(
+            malformed_batch.json()["errors"]["batch_id"][0]["code"],
+            "invalid_integer",
+        )
+
+        malformed_selection = self.client.post(
+            "/api/admin/schedule/copy-period/commit/",
+            data=json.dumps({"batch_id": 1, "selected_indices": ["bad"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(malformed_selection.status_code, 400)
+        self.assertEqual(
+            malformed_selection.json()["errors"]["selected_indices"][0]["code"],
+            "invalid_integer",
+        )

@@ -1,11 +1,16 @@
-from django.shortcuts import get_object_or_404
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from localization.models import DictionaryKey
 from notifications.models import NotificationTemplate
 from common.schedule_palette import stored_schedule_color_key, validate_schedule_color_key
 
-from .support import _bool_value
+from .support import (
+    _bool_value,
+    _field_validation_error,
+    _object_for_field,
+    _required_int,
+)
 
 
 def location_payload(location):
@@ -62,16 +67,41 @@ def apply_session_type(session_type, data):
         session_type.label = data.get("label", "") or ""
     if "default_capacity" in data:
         value = data.get("default_capacity")
-        session_type.default_capacity = None if value in (None, "") else int(value)
+        session_type.default_capacity = (
+            None if value in (None, "")
+            else _required_int(value, "default_capacity"))
+        if session_type.default_capacity is not None and session_type.default_capacity <= 0:
+            raise _field_validation_error(
+                "default_capacity", "Вместимость должна быть больше нуля.",
+                code="min_value")
     if "default_price_minor" in data:
         value = data.get("default_price_minor")
-        session_type.default_price_minor = None if value in (None, "") else int(value)
+        session_type.default_price_minor = (
+            None if value in (None, "")
+            else _required_int(value, "default_price_minor"))
+        if session_type.default_price_minor is not None and session_type.default_price_minor < 0:
+            raise _field_validation_error(
+                "default_price_minor", "Цена не может быть отрицательной.",
+                code="min_value")
     if "default_currency" in data:
         session_type.default_currency = (data.get("default_currency") or "PLN").upper()
     if "default_duration_minutes" in data:
-        session_type.default_duration_minutes = int(data.get("default_duration_minutes"))
+        duration = _required_int(
+            data.get("default_duration_minutes"),
+            "default_duration_minutes")
+        if not 15 <= duration <= 480 or duration % 5:
+            raise _field_validation_error(
+                "default_duration_minutes",
+                "Длительность должна быть от 15 до 480 минут с шагом 5 минут.",
+                code="invalid_step")
+        session_type.default_duration_minutes = duration
     if "color_key" in data:
-        session_type.color_key = validate_schedule_color_key(data.get("color_key"))
+        try:
+            session_type.color_key = validate_schedule_color_key(data.get("color_key"))
+        except ValidationError as exc:
+            raise _field_validation_error(
+                "color_key", "Выберите допустимый цвет расписания.",
+                code="invalid_choice") from exc
     if "is_active" in data:
         session_type.is_active = _bool_value(data.get("is_active"), True)
     session_type.full_clean()
@@ -134,7 +164,9 @@ def dictionary_translation_payload(translation):
 def apply_dictionary_translation(translation, data):
     data = data.get("translation") or data
     if "key_id" in data:
-        translation.key = get_object_or_404(DictionaryKey, pk=data.get("key_id"))
+        translation.key = _object_for_field(
+            DictionaryKey.objects.filter(is_active=True), data.get("key_id"),
+            "key_id", "ключ словаря")
     if "language_code" in data:
         translation.language_code = data.get("language_code", "") or ""
     if "value" in data:
@@ -161,8 +193,9 @@ def notification_translation_payload(translation):
 def apply_notification_translation(translation, data):
     data = data.get("translation") or data
     if "template_id" in data:
-        translation.template = get_object_or_404(
-            NotificationTemplate, pk=data.get("template_id"))
+        translation.template = _object_for_field(
+            NotificationTemplate.objects.all(), data.get("template_id"),
+            "template_id", "шаблон")
     if "language_code" in data:
         translation.language_code = data.get("language_code", "") or ""
     if "subject" in data:

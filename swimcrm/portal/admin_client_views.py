@@ -109,12 +109,18 @@ def admin_clients(request):
         data["_actor"] = user
         with transaction.atomic():
             account = _create_account(data)
-            client_type = data.get("client_type") or data.get("type")
-            is_adult = _bool_value(data.get("is_adult"), client_type == "adult")
+            participant_data = _participant_data(data)
+            if "is_adult" in data:
+                is_adult = _bool_value(data.get("is_adult"), True)
+            elif "is_account_holder" in participant_data:
+                is_adult = _bool_value(
+                    participant_data.get("is_account_holder"), True)
+            else:
+                is_adult = True
             if is_adult:
                 participant = _create_participant(account, data, is_account_holder=True)
                 audit(user, "participant.created", participant, {"client_id": account.id, "is_account_holder": True})
-            elif _participant_data(data):
+            elif participant_data:
                 participant = _create_participant(account, data, is_account_holder=False)
                 audit(user, "participant.created", participant, {"client_id": account.id, "is_account_holder": False})
         return JsonResponse(_client_detail_payload(account), status=201)

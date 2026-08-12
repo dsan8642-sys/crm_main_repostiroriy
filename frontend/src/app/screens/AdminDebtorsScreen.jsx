@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { api, downloadFile } from '../../api.js'
+import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
@@ -26,7 +26,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
     })
 
     async function loadLogs() {
-      try { setLogs((await api.get('/api/admin/notifications/logs/?event_type=mass_mailing')).logs || []) } catch (err) { setError(err.message) }
+      try { setLogs((await api.get('/api/admin/notifications/logs/?event_type=mass_mailing')).logs || []) } catch (err) { setError(apiErrorMessage(err, 'Не удалось загрузить историю уведомлений.')) }
     }
 
     useEffect(() => { loadLogs() }, [])
@@ -52,7 +52,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
         await loadLogs()
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message || 'Не удалось отправить напоминания.')
+        setError(apiErrorMessage(err, 'Не удалось отправить напоминания.'))
       } finally {
         setBusyId(null)
       }
@@ -60,7 +60,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
 
     async function retryNotification(log) {
       setBusyId(`retry-${log.id}`); setError('')
-      try { await api.post(`/api/admin/notifications/logs/${log.id}/retry/`); setMessage('Уведомление повторно поставлено в очередь.'); await loadLogs() } catch (err) { setError(err.message) } finally { setBusyId(null) }
+      try { await api.post(`/api/admin/notifications/logs/${log.id}/retry/`); setMessage('Уведомление повторно поставлено в очередь.'); await loadLogs() } catch (err) { setError(apiErrorMessage(err, 'Не удалось повторить отправку.')) } finally { setBusyId(null) }
     }
 
     const logsFor = (clientId) => logs.filter((log) => String(log.recipient_id) === String(clientId))

@@ -18,7 +18,15 @@ def admin_payments(request):
     user = _admin_required(request)
     if request.method == "POST":
         data = _json_body(request)
-        participant = get_object_or_404(Student, pk=_payment_data(data).get("participant_id") or _payment_data(data).get("student_id"))
+        payment_data = _payment_data(data)
+        participant = _object_for_field(
+            Student.objects.select_related("parent__user"),
+            payment_data.get("participant_id") or payment_data.get("student_id"),
+            "participant_id",
+            "участника",
+        )
+        _require_active_participant(
+            participant, "receive new payments", field="participant_id")
         payment = _create_payment_for_participant(participant, data, actor=user)
         return JsonResponse(_payment_payload(payment), status=201)
     qs = Payment.objects.select_related("student", "confirmed_by").prefetch_related(
@@ -45,7 +53,9 @@ def admin_payment_detail(request, payment_id):
         if "method" in data:
             method = normalize_payment_method(data["method"])
             if method not in PaymentMethod.values:
-                raise ValidationError("invalid payment method")
+                raise _field_validation_error(
+                    "method", "Выберите допустимый способ оплаты.",
+                    code="invalid_choice")
             if payment.method != method:
                 changes["method"] = {"from": payment.method, "to": method}
                 payment.method = method

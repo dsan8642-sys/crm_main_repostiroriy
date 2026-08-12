@@ -99,24 +99,44 @@ def admin_credentials(request):
     data = _json_body(request)
     current_password = str(data.get("current_password") or "")
     if not current_password or not user.check_password(current_password):
-        raise ValidationError("Current password is incorrect")
+        raise ValidationError({
+            "current_password": ValidationError(
+                "Текущий пароль указан неверно.", code="invalid",
+            ),
+        })
 
     old_username = user.username
     new_username = str(data.get("username") or old_username).strip()
     new_password = str(data.get("new_password") or "")
     if not new_username:
-        raise ValidationError("username cannot be empty")
-    User._meta.get_field("username").run_validators(new_username)
+        raise ValidationError({
+            "username": ValidationError("Укажите логин.", code="required"),
+        })
+    try:
+        User._meta.get_field("username").run_validators(new_username)
+    except ValidationError as exc:
+        raise ValidationError({"username": exc}) from exc
     if User.objects.exclude(pk=user.pk).filter(username__iexact=new_username).exists():
-        raise ValidationError("username already exists")
+        raise ValidationError({
+            "username": ValidationError(
+                "Этот логин уже используется.", code="duplicate",
+            ),
+        })
     if new_username == old_username and not new_password:
-        raise ValidationError("Provide a new username or password")
+        raise ValidationError({
+            "username": ValidationError(
+                "Измените логин или укажите новый пароль.", code="no_changes",
+            ),
+        })
 
     password_changed = bool(new_password)
     with transaction.atomic():
         user.username = new_username
         if password_changed:
-            password_validation.validate_password(new_password, user=user)
+            try:
+                password_validation.validate_password(new_password, user=user)
+            except ValidationError as exc:
+                raise ValidationError({"new_password": exc}) from exc
             user.set_password(new_password)
         user.save(update_fields=["username", "password"] if password_changed else ["username"])
         audit(user, "admin.credentials.updated", user, {

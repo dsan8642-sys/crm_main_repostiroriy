@@ -1,14 +1,36 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { api, downloadFile } from '../../api.js'
+import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
 import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from '../formErrors.js'
+
+const TOP_UP_FIELD_IDS = {
+  amount: 'client-top-up-amount', file: 'client-top-up-file',
+}
+const PROFILE_FIELD_IDS = {
+  firstName: 'client-profile-first-name', lastName: 'client-profile-last-name',
+  email: 'client-profile-email', phone: 'client-profile-phone',
+  language: 'client-profile-language',
+}
+const PROFILE_FIELD_MAP = {
+  'account.first_name': 'firstName', first_name: 'firstName',
+  'account.last_name': 'lastName', last_name: 'lastName',
+  'account.email': 'email', email: 'email',
+  'account.phone': 'phone', phone: 'phone',
+  'account.preferred_language': 'language', preferred_language: 'language',
+}
 
 export function createClientScreens(components, icons, reloadRoleData, parentData = {}) {
-  const { Table, StatusPill, Money, Button, Banner, Avatar, Input } = components
+  const { Table, StatusPill, Money, Button, Banner, Avatar, Input, Select } = components
   const I = icons
 
   function ReceiptAction({ payment }) {
@@ -110,7 +132,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           if (active) setRows((payload.sessions || []).map(normalize))
         })
         .catch((err) => {
-          if (active) setError(err.message)
+          if (active) setError(apiErrorMessage(err, 'Не удалось загрузить расписание.'))
         })
       return () => { active = false }
     }, [child?.studentId, range.dateFrom, range.dateTo])
@@ -135,6 +157,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const [amount, setAmount] = useState('')
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
+    const [fieldErrors, setFieldErrors] = useState({})
     const [busy, setBusy] = useState(false)
     const child = (parentData.children || []).find((item) => item.id === kid)
     const charges = (parentData.charges || []).filter(
@@ -147,16 +170,21 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     async function createTopUpRequest() {
       const amountNumber = Number(amount)
       if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-        setError('Укажите сумму пополнения больше нуля.')
-        document.getElementById('client-top-up-amount')?.focus()
+        const nextErrors = { amount: 'Укажите сумму пополнения больше нуля.' }
+        setFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, TOP_UP_FIELD_IDS)
         return
       }
       if (!file) {
-        setError('Приложите подтверждение банковского перевода: PDF, JPG или PNG.')
-        fileInputRef.current?.focus()
+        const nextErrors = { file: 'Приложите подтверждение банковского перевода: PDF, JPG или PNG.' }
+        setFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, TOP_UP_FIELD_IDS)
         return
       }
       setBusy(true)
+      setFieldErrors({})
       const formData = new FormData()
       if (child?.studentId) formData.set('student_id', child.studentId)
       formData.set('amount_minor', String(Math.round(amountNumber * 100)))
@@ -170,7 +198,12 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         setAmount('')
         reloadRoleData?.('client')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, {
+          amount_minor: 'amount', file: 'file', currency: 'amount',
+        })
+        setFieldErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось отправить запрос на пополнение.'))
+        focusFirstFieldError(nextErrors, TOP_UP_FIELD_IDS)
       } finally {
         setBusy(false)
       }
@@ -187,10 +220,11 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           <div className="ops-inline-note" role="status">Участник: <strong>{child?.name || 'не выбран'}</strong> · текущий баланс: <Money amount={child?.balance || 0} signed /></div>
           <p className="muted" style={{ margin: '6px 0 14px' }}>Запрос не меняет баланс автоматически. Администратор проверит перевод, после чего сумма будет зачислена или запрос будет отклонён.</p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
-            <Input id="client-top-up-amount" label="Сумма пополнения" type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="240.00" />
+            <Input id={TOP_UP_FIELD_IDS.amount} label="Сумма пополнения" type="number" min="0.01" step="0.01" value={amount} error={fieldErrors.amount} onChange={(event) => { setAmount(event.target.value); setFieldErrors((current) => clearFieldError(current, 'amount')) }} placeholder="240.00" />
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               Файл подтверждения
-              <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+              <input id={TOP_UP_FIELD_IDS.file} ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" aria-invalid={Boolean(fieldErrors.file)} aria-describedby={fieldErrors.file ? `${TOP_UP_FIELD_IDS.file}-error` : undefined} onChange={(event) => { setFile(event.target.files?.[0] || null); setFieldErrors((current) => clearFieldError(current, 'file')) }} />
+              {fieldErrors.file && <small id={`${TOP_UP_FIELD_IDS.file}-error`} className="ops-field-error" role="alert">{fieldErrors.file}</small>}
             </label>
             <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>Отправить запрос</Button>
           </div>
@@ -265,8 +299,12 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     })
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
+    const [fieldErrors, setFieldErrors] = useState({})
     const [busy, setBusy] = useState(false)
-    const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
+    const update = (field, value) => {
+      setForm((current) => ({ ...current, [field]: value }))
+      setFieldErrors((current) => clearFieldError(current, field))
+    }
 
     useEffect(() => {
       setForm({
@@ -280,6 +318,8 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     async function saveProfile() {
       setBusy(true)
+      setError(null)
+      setFieldErrors({})
       try {
         await api.post('/api/client/profile/', {
           account: {
@@ -294,9 +334,22 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         setError(null)
         reloadRoleData?.('client', { studentId: (parentData.children || []).find((item) => item.id === kid)?.studentId })
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, PROFILE_FIELD_MAP)
+        setFieldErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось сохранить профиль.'))
+        focusFirstFieldError(nextErrors, PROFILE_FIELD_IDS)
       } finally {
         setBusy(false)
+      }
+    }
+
+    async function disconnectTelegram() {
+      setError(null)
+      try {
+        await api.post('/api/client/profile/', { account: { telegram_disconnect: true } })
+        await reloadRoleData?.('client')
+      } catch (err) {
+        setError(apiErrorMessage(err, 'Не удалось отключить Telegram.'))
       }
     }
 
@@ -308,12 +361,12 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         <BusyBanner Banner={Banner} show={busy}>Сохраняю профиль...</BusyBanner>
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(180px, 1fr))', gap: 10 }}>
-            <Input label="Имя" value={form.firstName} onChange={(event) => update('firstName', event.target.value)} />
-            <Input label="Фамилия" value={form.lastName} onChange={(event) => update('lastName', event.target.value)} />
-            <Input label="Email" value={form.email} onChange={(event) => update('email', event.target.value)} />
-            <Input label="Телефон" value={form.phone} onChange={(event) => update('phone', event.target.value)} />
-            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? 'Подключён' : 'Не подключён'}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={async () => { await api.post('/api/client/profile/', { account: { telegram_disconnect: true } }); reloadRoleData?.('client') }}>Отключить</Button>}</div>
-            <label>Язык интерфейса<select value={form.language} onChange={(event) => update('language', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></select><small className="muted">Язык доставки указан в истории сообщений.</small></label>
+            <Input id={PROFILE_FIELD_IDS.firstName} label="Имя" value={form.firstName} error={fieldErrors.firstName} onChange={(event) => update('firstName', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.lastName} label="Фамилия" value={form.lastName} error={fieldErrors.lastName} onChange={(event) => update('lastName', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => update('email', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.phone} label="Телефон" value={form.phone} error={fieldErrors.phone} onChange={(event) => update('phone', event.target.value)} />
+            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? 'Подключён' : 'Не подключён'}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={disconnectTelegram}>Отключить</Button>}</div>
+            <Select id={PROFILE_FIELD_IDS.language} label="Язык интерфейса" value={form.language} error={fieldErrors.language} hint="Язык доставки указан в истории сообщений." onChange={(event) => update('language', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></Select>
           </div>
           <div style={{ marginTop: 12 }}>
             <Button variant="primary" loading={busy} disabled={busy} onClick={saveProfile}>Сохранить профиль</Button>
@@ -370,7 +423,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         setError(null)
         reloadRoleData?.('client')
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось сохранить согласие.'))
       } finally {
         setBusyType(null)
       }
@@ -398,7 +451,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           : null)
         reloadRoleData?.('client', { studentId: child?.studentId })
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось сохранить согласия.'))
       } finally {
         setBusyType(null)
       }

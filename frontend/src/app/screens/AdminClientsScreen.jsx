@@ -1,10 +1,62 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { api, downloadFile } from '../../api.js'
+import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
+import { updateClientIdentity } from '../clientContracts.js'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { DateField } from '../DateTimeField.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
+
+const CLIENT_FIELD_MAP = {
+  'account.first_name': 'firstName',
+  'account.last_name': 'lastName',
+  'account.email': 'email',
+  'account.username': 'username',
+  'account.phone': 'phone',
+  'participant.birth_date': 'birthDate',
+  'participant.group_id': 'groupId',
+  birth_date: 'birthDate',
+  group_id: 'groupId',
+}
+
+const CLIENT_FIELD_IDS = {
+  firstName: 'admin-client-firstName',
+  lastName: 'admin-client-lastName',
+  email: 'admin-client-email',
+  username: 'admin-client-username',
+  phone: 'admin-client-phone',
+  birthDate: 'admin-client-birthDate',
+  groupId: 'admin-client-groupId',
+}
+
+const CLIENT_EDIT_FIELD_MAP = {
+  'account.first_name': 'accountFirstName',
+  'account.last_name': 'accountLastName',
+  'account.email': 'accountEmail',
+  'account.username': 'accountUsername',
+  'account.phone': 'accountPhone',
+  birth_date: 'birthDate',
+  group_id: 'groupId',
+}
+
+const PARTICIPANT_FIELD_MAP = {
+  'participant.first_name': 'firstName',
+  'participant.last_name': 'lastName',
+  'participant.birth_date': 'birthDate',
+  'participant.email': 'email',
+  'participant.group_id': 'groupId',
+  first_name: 'firstName',
+  last_name: 'lastName',
+  birth_date: 'birthDate',
+  email: 'email',
+  group_id: 'groupId',
+}
 
 export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
@@ -19,12 +71,10 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       lastName: '',
       email: '',
       username: '',
+      usernameManual: false,
       phone: '',
-      participantFirstName: '',
-      participantLastName: '',
       birthDate: '',
       groupId: '',
-      isAdult: false,
     })
     const [participantForm, setParticipantForm] = useState({
       clientId: '',
@@ -39,6 +89,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       accountFirstName: '',
       accountLastName: '',
       accountEmail: '',
+      accountUsername: '',
       accountPhone: '',
       firstName: '',
       lastName: '',
@@ -49,6 +100,9 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     })
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
+    const [clientFieldErrors, setClientFieldErrors] = useState({})
+    const [participantFieldErrors, setParticipantFieldErrors] = useState({})
+    const [clientEditFieldErrors, setClientEditFieldErrors] = useState({})
     const [busy, setBusy] = useState(false)
     const [quickAction, setQuickAction] = useState(null)
     const [query, setQuery] = useState('')
@@ -91,9 +145,25 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       return `${row.currentSubscriptionRemaining} из ${row.currentSubscriptionTotal}`
     }
 
-    const updateClientForm = (field, value) => setClientForm((current) => ({ ...current, [field]: value }))
-    const updateParticipantForm = (field, value) => setParticipantForm((current) => ({ ...current, [field]: value }))
-    const updateClientEditForm = (field, value) => setClientEditForm((current) => ({ ...current, [field]: value }))
+    const updateClientForm = (field, value) => {
+      setClientFieldErrors((current) => {
+        let next = clearFieldError(current, field)
+        if (!clientForm.usernameManual
+            && ['firstName', 'lastName', 'email', 'phone'].includes(field)) {
+          next = clearFieldError(next, 'username')
+        }
+        return next
+      })
+      setClientForm((current) => updateClientIdentity(current, field, value))
+    }
+    const updateParticipantForm = (field, value) => {
+      setParticipantFieldErrors((current) => clearFieldError(current, field))
+      setParticipantForm((current) => ({ ...current, [field]: value }))
+    }
+    const updateClientEditForm = (field, value) => {
+      setClientEditFieldErrors((current) => clearFieldError(current, field))
+      setClientEditForm((current) => ({ ...current, [field]: value }))
+    }
 
     function splitFullName(name) {
       const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
@@ -102,10 +172,12 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
     async function openClientEdit(row) {
       setEditingClient(row)
+      setClientEditFieldErrors({})
       setClientEditForm({
         accountFirstName: '',
         accountLastName: '',
         accountEmail: row.email || '',
+        accountUsername: '',
         accountPhone: row.phone || '',
         firstName: row.first || '',
         lastName: row.last || '',
@@ -126,10 +198,11 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           accountFirstName: account.first_name || accountName.firstName,
           accountLastName: account.last_name || accountName.lastName,
           accountEmail: account.email || '',
+          accountUsername: account.username || '',
           accountPhone: account.phone || row.phone || '',
         }))
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось загрузить данные клиента.'))
       } finally {
         setBusy(false)
       }
@@ -138,12 +211,11 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     async function createClient() {
       setBusy(true)
       setError(null)
+      setClientFieldErrors({})
       try {
-        const participantFirstName = clientForm.participantFirstName || clientForm.firstName
-        const participantLastName = clientForm.participantLastName || clientForm.lastName
         await api.post('/api/admin/clients/', {
-          client_type: clientForm.isAdult ? 'adult' : 'family',
-          is_adult: clientForm.isAdult,
+          client_type: 'adult',
+          is_adult: true,
           account: {
             first_name: clientForm.firstName,
             last_name: clientForm.lastName,
@@ -152,11 +224,11 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             phone: clientForm.phone,
           },
           participant: {
-            first_name: participantFirstName,
-            last_name: participantLastName,
+            first_name: clientForm.firstName,
+            last_name: clientForm.lastName,
             birth_date: clientForm.birthDate || null,
             group_id: clientForm.groupId || null,
-            is_account_holder: clientForm.isAdult,
+            is_account_holder: true,
           },
         })
         setMessage('Клиент создан.')
@@ -166,16 +238,17 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           lastName: '',
           email: '',
           username: '',
+          usernameManual: false,
           phone: '',
-          participantFirstName: '',
-          participantLastName: '',
           birthDate: '',
           groupId: '',
-          isAdult: false,
         })
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, CLIENT_FIELD_MAP)
+        setClientFieldErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось создать клиента.'))
+        setTimeout(() => focusFirstFieldError(nextErrors, CLIENT_FIELD_IDS), 0)
       } finally {
         setBusy(false)
       }
@@ -183,11 +256,14 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
     async function addParticipant() {
       if (!participantForm.clientId) {
-        setError('Выберите аккаунт клиента.')
+        setParticipantFieldErrors({ clientId: 'Выберите аккаунт клиента.' })
+        setTimeout(() => focusFirstFieldError(
+          { clientId: true }, { clientId: 'admin-participant-clientId' }), 0)
         return
       }
       setBusy(true)
       setError(null)
+      setParticipantFieldErrors({})
       try {
         await api.post(`/api/admin/clients/${participantForm.clientId}/participants/`, {
           participant: {
@@ -203,7 +279,17 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         setParticipantForm({ clientId: participantForm.clientId, firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, PARTICIPANT_FIELD_MAP)
+        setParticipantFieldErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось добавить участника.'))
+        setTimeout(() => focusFirstFieldError(nextErrors, {
+          clientId: 'admin-participant-clientId',
+          firstName: 'admin-participant-firstName',
+          lastName: 'admin-participant-lastName',
+          birthDate: 'admin-participant-birthDate',
+          email: 'admin-participant-email',
+          groupId: 'admin-participant-groupId',
+        }), 0)
       } finally {
         setBusy(false)
       }
@@ -213,6 +299,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       if (!editingClient) return
       setBusy(true)
       setError(null)
+      setClientEditFieldErrors({})
       try {
         if (editingClient.clientId) {
           await api.post(`/api/admin/clients/${editingClient.clientId}/`, {
@@ -220,6 +307,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               first_name: clientEditForm.accountFirstName,
               last_name: clientEditForm.accountLastName,
               email: clientEditForm.accountEmail,
+              username: clientEditForm.accountUsername,
               phone: clientEditForm.accountPhone,
             },
           })
@@ -238,7 +326,24 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         setMessage('Данные клиента и участника обновлены.')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, {
+          ...CLIENT_EDIT_FIELD_MAP,
+          ...PARTICIPANT_FIELD_MAP,
+        })
+        setClientEditFieldErrors(nextErrors)
+        setError(formErrorMessage(err, 'Не удалось сохранить данные клиента.'))
+        setTimeout(() => focusFirstFieldError(nextErrors, {
+          accountFirstName: 'admin-client-edit-accountFirstName',
+          accountLastName: 'admin-client-edit-accountLastName',
+          accountEmail: 'admin-client-edit-accountEmail',
+          accountUsername: 'admin-client-edit-accountUsername',
+          accountPhone: 'admin-client-edit-accountPhone',
+          firstName: 'admin-client-edit-firstName',
+          lastName: 'admin-client-edit-lastName',
+          birthDate: 'admin-client-edit-birthDate',
+          email: 'admin-client-edit-email',
+          groupId: 'admin-client-edit-groupId',
+        }), 0)
       } finally {
         setBusy(false)
       }
@@ -259,7 +364,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         setClientAction(null)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось изменить статус клиента.'))
       } finally {
         setBusy(false)
       }
@@ -294,26 +399,22 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           <div className="card card-pad">
             <div className="eyebrow" style={{ marginBottom: 10 }}>Новый клиент</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Input label="Имя владельца аккаунта" value={clientForm.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
-              <Input label="Фамилия владельца" value={clientForm.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
-              <Input label="Email" value={clientForm.email} onChange={(event) => updateClientForm('email', event.target.value)} />
-              <Input label="Логин, если email не указан" value={clientForm.username} onChange={(event) => updateClientForm('username', event.target.value)} />
-              <Input label="Телефон" value={clientForm.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
-              <Input label="Имя участника" value={clientForm.participantFirstName} onChange={(event) => updateClientForm('participantFirstName', event.target.value)} placeholder="Как у владельца" />
-              <Input label="Фамилия участника" value={clientForm.participantLastName} onChange={(event) => updateClientForm('participantLastName', event.target.value)} placeholder="Как у владельца" />
-              <DateField label="Дата рождения" value={clientForm.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
+              <Input id="admin-client-firstName" label="Имя владельца аккаунта" value={clientForm.firstName} error={clientFieldErrors.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
+              <Input id="admin-client-lastName" label="Фамилия владельца" value={clientForm.lastName} error={clientFieldErrors.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
+              <Input id="admin-client-email" label="Email" value={clientForm.email} error={clientFieldErrors.email} onChange={(event) => updateClientForm('email', event.target.value)} />
+              <Input id="admin-client-username" label="Логин" value={clientForm.username} error={clientFieldErrors.username} hint="Автоматически из email, телефона или имени; можно изменить." onChange={(event) => updateClientForm('username', event.target.value)} />
+              <Input id="admin-client-phone" label="Телефон" value={clientForm.phone} error={clientFieldErrors.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
+              <DateField id="admin-client-birthDate" label="Дата рождения" value={clientForm.birthDate} error={clientFieldErrors.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
                 Группа
-                <select value={clientForm.groupId} onChange={(event) => updateClientForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
+                <select id="admin-client-groupId" value={clientForm.groupId} aria-invalid={Boolean(clientFieldErrors.groupId)} aria-describedby={clientFieldErrors.groupId ? 'admin-client-groupId-error' : undefined} onChange={(event) => updateClientForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
                   <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
+                {clientFieldErrors.groupId && <small id="admin-client-groupId-error" className="ops-field-error" role="alert">{clientFieldErrors.groupId}</small>}
               </label>
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 'var(--fs-sm)' }}>
-              <input type="checkbox" checked={clientForm.isAdult} onChange={(event) => updateClientForm('isAdult', event.target.checked)} />
-              Взрослый клиент сам является участником
-            </label>
+            <p className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>Владелец аккаунта будет создан как участник. Другого участника можно добавить отдельным действием.</p>
             <div style={{ marginTop: 12 }}>
               <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>Создать клиента</Button>
               <Button variant="secondary" disabled={busy} onClick={() => setQuickAction(null)} style={{ marginLeft: 8 }}>Закрыть</Button>
@@ -327,8 +428,10 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <SearchableSelect
                 className="ops-grid-full"
+                inputId="admin-participant-clientId"
                 label="Аккаунт клиента"
                 value={participantForm.clientId}
+                error={participantFieldErrors.clientId}
                 onChange={(value) => updateParticipantForm('clientId', value)}
                 options={clientOptions.map((row) => clientSelectOption(row, {
                   valueKey: 'clientId',
@@ -336,13 +439,13 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                 }))}
                 placeholder="Найдите аккаунт по имени или фамилии"
               />
-              <Input label="Имя" value={participantForm.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
-              <Input label="Фамилия" value={participantForm.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
-              <DateField label="Дата рождения" value={participantForm.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
-              <Input label="Email" value={participantForm.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
+              <Input id="admin-participant-firstName" label="Имя" value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
+              <Input id="admin-participant-lastName" label="Фамилия" value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
+              <DateField id="admin-participant-birthDate" label="Дата рождения" value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
+              <Input id="admin-participant-email" label="Email" value={participantForm.email} error={participantFieldErrors.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', gridColumn: '1 / -1' }}>
                 Группа
-                <select value={participantForm.groupId} onChange={(event) => updateParticipantForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
+                <select id="admin-participant-groupId" value={participantForm.groupId} aria-invalid={Boolean(participantFieldErrors.groupId)} aria-describedby={participantFieldErrors.groupId ? 'admin-participant-groupId-error' : undefined} onChange={(event) => updateParticipantForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
                   <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
@@ -360,17 +463,18 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование клиента и участника</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10 }}>
-              <Input label="Имя владельца" value={clientEditForm.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
-              <Input label="Фамилия владельца" value={clientEditForm.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
-              <Input label="Email владельца" value={clientEditForm.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
-              <Input label="Телефон владельца" value={clientEditForm.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
-              <Input label="Имя участника" value={clientEditForm.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
-              <Input label="Фамилия участника" value={clientEditForm.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
-              <DateField label="Дата рождения" value={clientEditForm.birthDate} onChange={(value) => updateClientEditForm('birthDate', value)} />
-              <Input label="Email участника" value={clientEditForm.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
+              <Input id="admin-client-edit-accountFirstName" label="Имя владельца" value={clientEditForm.accountFirstName} error={clientEditFieldErrors.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
+              <Input id="admin-client-edit-accountLastName" label="Фамилия владельца" value={clientEditForm.accountLastName} error={clientEditFieldErrors.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
+              <Input id="admin-client-edit-accountEmail" label="Email владельца" value={clientEditForm.accountEmail} error={clientEditFieldErrors.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
+              <Input id="admin-client-edit-accountUsername" label="Логин" value={clientEditForm.accountUsername} error={clientEditFieldErrors.accountUsername} onChange={(event) => updateClientEditForm('accountUsername', event.target.value)} />
+              <Input id="admin-client-edit-accountPhone" label="Телефон владельца" value={clientEditForm.accountPhone} error={clientEditFieldErrors.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
+              <Input id="admin-client-edit-firstName" label="Имя участника" value={clientEditForm.firstName} error={clientEditFieldErrors.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
+              <Input id="admin-client-edit-lastName" label="Фамилия участника" value={clientEditForm.lastName} error={clientEditFieldErrors.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
+              <DateField id="admin-client-edit-birthDate" label="Дата рождения" value={clientEditForm.birthDate} error={clientEditFieldErrors.birthDate} onChange={(value) => updateClientEditForm('birthDate', value)} />
+              <Input id="admin-client-edit-email" label="Email участника" value={clientEditForm.email} error={clientEditFieldErrors.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
                 Группа
-                <select value={clientEditForm.groupId} onChange={(event) => updateClientEditForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
+                <select id="admin-client-edit-groupId" value={clientEditForm.groupId} aria-invalid={Boolean(clientEditFieldErrors.groupId)} aria-describedby={clientEditFieldErrors.groupId ? 'admin-client-edit-groupId-error' : undefined} onChange={(event) => updateClientEditForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
                   <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
@@ -404,6 +508,8 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <option value="with">Есть</option>
                   <option value="without">Нет</option>
                 </select>
+                {clientEditFieldErrors.groupId && <small id="admin-client-edit-groupId-error" className="ops-field-error" role="alert">{clientEditFieldErrors.groupId}</small>}
+                {participantFieldErrors.groupId && <small id="admin-participant-groupId-error" className="ops-field-error" role="alert">{participantFieldErrors.groupId}</small>}
               </label>
               <label className="ops-client-filter-field">
                 <span>Баланс</span>

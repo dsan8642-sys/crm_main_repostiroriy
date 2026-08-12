@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, time
 
 from django.conf import settings
@@ -84,8 +85,9 @@ def _parse_date(value, field):
         return None
     try:
         return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise ValidationError(f"{field}: expected date YYYY-MM-DD") from exc
+    except (TypeError, ValueError) as exc:
+        raise _field_validation_error(
+            field, "Укажите корректную дату.", code="invalid_date") from exc
 
 
 def _parse_time(value, field):
@@ -93,8 +95,9 @@ def _parse_time(value, field):
         return None
     try:
         return time.fromisoformat(value)
-    except ValueError as exc:
-        raise ValidationError(f"{field}: expected time HH:MM") from exc
+    except (TypeError, ValueError) as exc:
+        raise _field_validation_error(
+            field, "Укажите время в формате ЧЧ:ММ.", code="invalid_time") from exc
 
 
 def _parse_datetime(value, field):
@@ -103,7 +106,8 @@ def _parse_datetime(value, field):
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError as exc:
-        raise ValidationError(f"{field}: expected ISO datetime") from exc
+        raise _field_validation_error(
+            field, "Укажите корректные дату и время.", code="invalid_datetime") from exc
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed)
     return parsed
@@ -119,33 +123,199 @@ def _bool_value(value, default=False):
     return bool(value)
 
 
+def _object_for_field(queryset, value, field, label):
+    if value in (None, ""):
+        raise _field_validation_error(
+            field, f"Выберите {label}.", code="required")
+    if isinstance(value, bool) or (
+            isinstance(value, float) and not value.is_integer()):
+        raise _field_validation_error(
+            field, f"Выбранный {label} недоступен.", code="invalid_choice")
+    try:
+        object_id = int(value)
+        if object_id <= 0:
+            raise ValueError
+        return queryset.get(pk=object_id)
+    except (queryset.model.DoesNotExist, TypeError, ValueError) as exc:
+        raise _field_validation_error(
+            field, f"Выбранный {label} недоступен.", code="invalid_choice") from exc
+
+
 def _unique_username(base):
-    base = (base or "client").strip().replace(" ", "_")[:140] or "client"
+    base = (base or "client").strip()[:140] or "client"
     username = base
     counter = 1
-    while User.objects.filter(username=username).exists():
+    while (
+        User.objects.filter(
+            Q(username__iexact=username) | Q(email__iexact=username)
+        ).exists()
+        or ParentAccount.objects.filter(email__iexact=username).exists()
+        or (
+            re.fullmatch(r"[\d\s()+.-]+", username)
+            and _phone_in_accounts(ParentAccount.objects.all(), username)
+        )
+    ):
         counter += 1
-        username = f"{base}_{counter}"[:150]
+        username = f"{base}.{counter}"[:150]
     return username
 
 
-def _portal_identity(email, username, *, exclude_user_id=None):
+def _field_name(prefix, name):
+    return f"{prefix}.{name}" if prefix else name
+
+
+def _phone_digits(value):
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _phone_in_accounts(accounts, value):
+    digits = _phone_digits(value)
+    return bool(digits) and any(
+        _phone_digits(phone) == digits
+        for phone in accounts.exclude(phone="").values_list("phone", flat=True)
+    )
+
+
+def _phone_in_usernames(users, value):
+    digits = _phone_digits(value)
+    return bool(digits) and any(
+        re.fullmatch(r"[\d\s()+.-]+", username or "")
+        and _phone_digits(username) == digits
+        for username in users.values_list("username", flat=True)
+    )
+
+
+def _field_validation_error(field, message, *, code="invalid"):
+    return ValidationError({field: ValidationError(message, code=code)})
+
+
+def _name_login(first_name, last_name):
+    raw = ".".join(
+        part for part in (
+            str(first_name or "").strip().lower(),
+            str(last_name or "").strip().lower(),
+        ) if part
+    )
+    cleaned = re.sub(r"[^\w.@+-]+", ".", raw, flags=re.UNICODE)
+    cleaned = re.sub(r"\.{2,}", ".", cleaned).strip(".@+-_")
+    return cleaned or "client"
+
+
+def _validate_login(login, field):
+    try:
+        User._meta.get_field("username").run_validators(login)
+    except ValidationError as exc:
+        raise _field_validation_error(
+            field,
+            "Логин может содержать только буквы, цифры и символы @/./+/-/_.",
+            code=getattr(exc, "code", None) or "invalid",
+        ) from exc
+
+
+def _portal_identity(
+        email, username, phone=None, first_name=None, last_name=None, *,
+        exclude_user_id=None, field_prefix=""):
     email = str(email or "").strip().lower()
     username = str(username or "").strip()
-    if not email and not username:
-        raise ValidationError("email or explicit username is required")
+    phone_value = str(phone or "").strip()
+    phone_login = _phone_digits(phone_value)
+    email_field = _field_name(field_prefix, "email")
+    username_field = _field_name(field_prefix, "username")
+    phone_field = _field_name(field_prefix, "phone")
+
+    if email:
+        try:
+            User._meta.get_field("email").run_validators(email)
+        except ValidationError as exc:
+            raise _field_validation_error(
+                email_field, "Введите корректный email.", code="invalid",
+            ) from exc
+    if phone_value and not phone_login:
+        raise _field_validation_error(
+            phone_field, "Укажите телефон, содержащий цифры.", code="invalid")
 
     users = User.objects.all()
     accounts = ParentAccount.objects.all()
     if exclude_user_id is not None:
         users = users.exclude(pk=exclude_user_id)
         accounts = accounts.exclude(user_id=exclude_user_id)
-    if email and (users.filter(email__iexact=email).exists() or accounts.filter(email__iexact=email).exists()):
-        raise ValidationError("email already exists")
+    if username:
+        login = username
+        source = "manual"
+    elif email:
+        login = email
+        source = "email"
+    elif phone_login:
+        login = phone_login
+        source = "phone"
+    else:
+        login = _unique_username(_name_login(first_name, last_name))
+        source = "name"
 
-    login = username or email
-    if users.filter(username__iexact=login).exists():
-        raise ValidationError("username already exists")
+    _validate_login(login, username_field)
+
+    if email and (
+        users.filter(email__iexact=email).exists()
+        or users.filter(username__iexact=email).exists()
+        or accounts.filter(email__iexact=email).exists()
+    ):
+        fields = [email_field]
+        message = "Этот email уже используется."
+        if source == "email":
+            fields.append(username_field)
+            message = (
+                "Этот email уже используется как логин. "
+                "Измените email или логин."
+            )
+        raise ValidationError({
+            field: ValidationError(message, code="duplicate")
+            for field in fields
+        })
+
+    phone_contact_conflict = phone_login and (
+        _phone_in_accounts(accounts, phone_login)
+        or _phone_in_usernames(users, phone_login)
+    )
+    if phone_contact_conflict:
+        fields = [phone_field]
+        message = "Этот телефон уже используется."
+        if source == "phone":
+            fields.append(username_field)
+            message = (
+                "Этот телефон уже используется как логин. "
+                "Измените телефон или логин."
+            )
+        raise ValidationError({
+            field: ValidationError(message, code="duplicate")
+            for field in fields
+        })
+
+    login_matches_phone = (
+        re.fullmatch(r"[\d\s()+.-]+", login)
+        and (
+            _phone_in_accounts(accounts, login)
+            or _phone_in_usernames(users, login)
+        )
+    )
+    login_conflict = (
+        users.filter(username__iexact=login).exists()
+        or users.filter(email__iexact=login).exists()
+        or accounts.filter(email__iexact=login).exists()
+        or login_matches_phone
+    )
+    if login_conflict:
+        message = "Этот логин уже используется."
+        fields = [username_field]
+        if source == "email":
+            message = "Этот email уже используется как логин. Измените email или логин."
+            fields.insert(0, email_field)
+        elif source == "phone":
+            message = "Этот телефон уже используется как логин. Измените телефон или логин."
+            fields.insert(0, phone_field)
+        raise ValidationError({
+            field: ValidationError(message, code="duplicate")
+            for field in fields
+        })
     return email, login
 
 
@@ -311,16 +481,24 @@ def _waitlist_payload(entry):
 
 def _apply_waitlist_data(entry, data):
     if "student_id" in data:
-        entry.student = get_object_or_404(Student, pk=data.get("student_id"))
+        entry.student = _object_for_field(
+            Student.objects.select_related("parent__user"),
+            data.get("student_id"), "student_id", "участника")
+        _require_active_participant(
+            entry.student, "be added to the waitlist", field="student_id")
     if "priority" in data:
         try:
             entry.priority = int(data.get("priority") or 0)
         except (TypeError, ValueError) as exc:
-            raise ValidationError("priority must be an integer") from exc
+            raise _field_validation_error(
+                "priority", "Приоритет должен быть целым числом.",
+                code="invalid") from exc
     if "status" in data:
         status = data.get("status")
         if status not in WaitlistStatus.values:
-            raise ValidationError("invalid waitlist status")
+            raise _field_validation_error(
+                "status", "Выберите допустимый статус листа ожидания.",
+                code="invalid_choice")
         entry.status = status
     if "note" in data:
         entry.note = data.get("note", "") or ""
@@ -599,36 +777,41 @@ def _account_data(data):
 def _apply_account_data(account, data):
     account_data = _account_data(data)
     user = account.user
-    if "email" in account_data:
-        email, _ = _portal_identity(
-            account_data.get("email"), user.username, exclude_user_id=user.id)
-        account_data = {**account_data, "email": email}
+    if any(field in account_data for field in ("email", "username", "phone")):
+        email, username = _portal_identity(
+            account_data.get("email", user.email),
+            account_data.get("username", user.username),
+            account_data.get("phone", account.phone),
+            user.first_name,
+            user.last_name,
+            exclude_user_id=user.id,
+            field_prefix="account",
+        )
+        account_data = {**account_data, "email": email, "username": username}
     for field in ("first_name", "last_name", "email"):
         if field in account_data:
             setattr(user, field, account_data.get(field, "") or "")
     if "is_active" in account_data:
         user.is_active = _bool_value(account_data.get("is_active"), True)
     if "username" in account_data and account_data["username"] != user.username:
-        username = str(account_data["username"]).strip()
-        if not username:
-            raise ValidationError("username cannot be empty")
-        if User.objects.exclude(pk=user.pk).filter(username__iexact=username).exists():
-            raise ValidationError("username already exists")
-        user.username = username
+        user.username = account_data["username"]
     user.role = Role.PARENT
     user.save()
 
     if "phone" in account_data:
         phone = account_data.get("phone", "") or ""
-        if phone and ParentAccount.objects.exclude(pk=account.pk).filter(phone=phone).exists():
-            raise ValidationError("phone already exists")
         account.phone = phone
     if "email" in account_data:
         account.email = account_data.get("email", "") or ""
     if "telegram_chat_id" in account_data:
         account.telegram_chat_id = account_data.get("telegram_chat_id", "") or ""
     if "preferred_language" in account_data:
-        account.preferred_language = (account_data.get("preferred_language", "") or "").lower()
+        language = (account_data.get("preferred_language", "") or "").lower()
+        if language not in {"ru", "pl", "en"}:
+            raise _field_validation_error(
+                "account.preferred_language", "Выберите поддерживаемый язык.",
+                code="invalid_choice")
+        account.preferred_language = language
     account.full_clean(exclude=["user"])
     account.save()
     return account
@@ -638,9 +821,11 @@ def _apply_client_account_data(account, data):
     """Client write allowlist; raw provider IDs can be removed but never set."""
     account_data = _account_data(data)
     user = account.user
-    if "email" in account_data:
+    if "email" in account_data or "phone" in account_data:
         email, _ = _portal_identity(
-            account_data.get("email"), user.username, exclude_user_id=user.id)
+            account_data.get("email", user.email), user.username,
+            account_data.get("phone", account.phone),
+            exclude_user_id=user.id, field_prefix="account")
         account_data = {**account_data, "email": email}
     for field in ("first_name", "last_name", "email"):
         if field in account_data:
@@ -648,15 +833,15 @@ def _apply_client_account_data(account, data):
     user.save(update_fields=["first_name", "last_name", "email"])
     if "phone" in account_data:
         phone = account_data.get("phone", "") or ""
-        if phone and ParentAccount.objects.exclude(pk=account.pk).filter(phone=phone).exists():
-            raise ValidationError("phone already exists")
         account.phone = phone
     if "email" in account_data:
         account.email = account_data.get("email", "") or ""
     if "preferred_language" in account_data:
         language = (account_data.get("preferred_language", "") or "").lower()
         if language not in {"ru", "pl", "en"}:
-            raise ValidationError("unsupported preferred_language")
+            raise _field_validation_error(
+                "account.preferred_language", "Выберите поддерживаемый язык.",
+                code="invalid_choice")
         account.preferred_language = language
     if _bool_value(account_data.get("telegram_disconnect")):
         account.telegram_chat_id = ""
@@ -682,11 +867,15 @@ def _apply_client_participant_data(participant, data):
 
 def _create_account(data):
     account_data = _account_data(data)
-    email, username = _portal_identity(
-        account_data.get("email"), account_data.get("username"))
     phone = account_data.get("phone", "") or ""
-    if phone and ParentAccount.objects.filter(phone=phone).exists():
-        raise ValidationError("phone already exists")
+    email, username = _portal_identity(
+        account_data.get("email"),
+        account_data.get("username"),
+        phone,
+        account_data.get("first_name"),
+        account_data.get("last_name"),
+        field_prefix="account",
+    )
     user = User.objects.create_user(
         username=username,
         role=Role.PARENT,
@@ -716,10 +905,14 @@ def _apply_participant_data(participant, data):
         if field in participant_data:
             setattr(participant, field, participant_data.get(field, "") or "")
     if "birth_date" in participant_data:
-        participant.birth_date = _parse_date(participant_data.get("birth_date"), "birth_date")
+        participant.birth_date = _parse_date(
+            participant_data.get("birth_date"), "participant.birth_date")
     if "group_id" in participant_data:
         group_id = participant_data.get("group_id")
-        participant.group = get_object_or_404(Group, pk=group_id) if group_id else None
+        participant.group = (
+            _object_for_field(
+                Group.objects.all(), group_id, "participant.group_id", "группу")
+            if group_id else None)
     if "is_active" in participant_data:
         participant.is_active = _bool_value(participant_data.get("is_active"), True)
     if "is_account_holder" in participant_data:
@@ -727,9 +920,17 @@ def _apply_participant_data(participant, data):
     if participant.is_account_holder:
         existing = Student.objects.filter(parent=participant.parent, is_account_holder=True).exclude(pk=participant.pk)
         if existing.exists():
-            raise ValidationError("client already has an account-holder participant")
+            raise _field_validation_error(
+                "participant.is_account_holder",
+                "У аккаунта уже есть самостоятельный участник.",
+                code="duplicate")
     if not (participant.first_name or participant.last_name):
-        raise ValidationError("participant first_name or last_name is required")
+        raise ValidationError({
+            "participant.first_name": ValidationError(
+                "Укажите имя или фамилию участника.", code="required"),
+            "participant.last_name": ValidationError(
+                "Укажите имя или фамилию участника.", code="required"),
+        })
     participant.full_clean(exclude=["parent"])
     participant.save()
     return participant
@@ -740,8 +941,12 @@ def _create_participant(account, data, *, is_account_holder=False):
     if is_account_holder:
         participant = ensure_account_holder_participant(account)
         if participant_data:
+            holder_data = {
+                key: value for key, value in participant_data.items()
+                if key not in {"first_name", "last_name", "email", "is_account_holder"}
+            }
             return _apply_participant_data(participant, {
-                "participant": {**participant_data, "is_account_holder": True},
+                "participant": {**holder_data, "is_account_holder": True},
             })
         return participant
     participant = Student(
@@ -769,45 +974,58 @@ def _subscription_type_data(data):
 
 def _required_int(value, field):
     if value in (None, ""):
-        raise ValidationError(f"{field} is required")
+        raise _field_validation_error(
+            field, "Заполните это поле.", code="required")
+    if isinstance(value, bool) or (
+            isinstance(value, float) and not value.is_integer()):
+        raise _field_validation_error(
+            field, "Укажите целое число.", code="invalid_integer")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise ValidationError(f"{field} must be an integer") from exc
+        raise _field_validation_error(
+            field, "Укажите целое число.", code="invalid_integer") from exc
 
 
 def _positive_int(value, field):
     parsed = _required_int(value, field)
     if parsed <= 0:
-        raise ValidationError(f"{field} must be greater than zero")
+        raise _field_validation_error(
+            field, "Укажите число больше нуля.", code="min_value")
     return parsed
 
 
 def _nullable_positive_int(value, field):
     def invalid(message):
-        raise ValidationError({field: message})
+        raise _field_validation_error(field, message, code="invalid_integer")
 
     if value in (None, ""):
         return None
     if isinstance(value, bool):
-        invalid("Must be an integer.")
+        invalid("Укажите целое число.")
     if isinstance(value, float) and not value.is_integer():
-        invalid("Must be an integer.")
+        invalid("Укажите целое число.")
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        invalid("Must be an integer.")
+        invalid("Укажите целое число.")
     if str(value).strip() not in {str(parsed), f"+{parsed}"}:
-        invalid("Must be an integer.")
+        invalid("Укажите целое число.")
     if parsed <= 0:
-        invalid("Must be greater than zero.")
+        invalid("Укажите число больше нуля.")
     return parsed
 
 
 def _create_trainer(data):
     trainer_data = _trainer_data(data)
     email, username = _portal_identity(
-        trainer_data.get("email"), trainer_data.get("username"))
+        trainer_data.get("email"),
+        trainer_data.get("username"),
+        trainer_data.get("phone"),
+        trainer_data.get("first_name"),
+        trainer_data.get("last_name"),
+        field_prefix="trainer",
+    )
     user = User.objects.create_user(
         username=username,
         role=Role.TRAINER,
@@ -827,22 +1045,24 @@ def _create_trainer(data):
 def _apply_trainer_data(trainer, data):
     trainer_data = _trainer_data(data)
     user = trainer.user
-    if "email" in trainer_data:
-        email, _ = _portal_identity(
-            trainer_data.get("email"), user.username, exclude_user_id=user.id)
-        trainer_data = {**trainer_data, "email": email}
+    if "email" in trainer_data or "username" in trainer_data:
+        email, username = _portal_identity(
+            trainer_data.get("email", user.email),
+            trainer_data.get("username", user.username),
+            trainer_data.get("phone", trainer.phone),
+            user.first_name,
+            user.last_name,
+            exclude_user_id=user.id,
+            field_prefix="trainer",
+        )
+        trainer_data = {**trainer_data, "email": email, "username": username}
     for field in ("first_name", "last_name", "email"):
         if field in trainer_data:
             setattr(user, field, trainer_data.get(field, "") or "")
     if "user_is_active" in trainer_data:
         user.is_active = _bool_value(trainer_data.get("user_is_active"), True)
     if "username" in trainer_data and trainer_data["username"] != user.username:
-        username = str(trainer_data["username"]).strip()
-        if not username:
-            raise ValidationError("username cannot be empty")
-        if User.objects.exclude(pk=user.pk).filter(username__iexact=username).exists():
-            raise ValidationError("username already exists")
-        user.username = username
+        user.username = trainer_data["username"]
     user.role = Role.TRAINER
     user.save()
     if "phone" in trainer_data:
@@ -862,12 +1082,23 @@ def _apply_group_data(group, data):
         group.description = group_data.get("description", "") or ""
     if "default_trainer_id" in group_data:
         trainer_id = group_data.get("default_trainer_id")
-        group.default_trainer = get_object_or_404(Trainer, pk=trainer_id) if trainer_id else None
+        group.default_trainer = (
+            _object_for_field(
+                Trainer.objects.filter(is_active=True, user__is_active=True),
+                trainer_id, "default_trainer_id", "тренера")
+            if trainer_id else None)
     if "price_minor" in group_data:
         price_minor = group_data.get("price_minor")
-        group.price_minor = None if price_minor in (None, "") else int(price_minor)
+        try:
+            group.price_minor = None if price_minor in (None, "") else int(price_minor)
+        except (TypeError, ValueError) as exc:
+            raise _field_validation_error(
+                "price_minor", "Укажите корректную цену.",
+                code="invalid_integer") from exc
         if group.price_minor is not None and group.price_minor < 0:
-            raise ValidationError("group price cannot be negative")
+            raise _field_validation_error(
+                "price_minor", "Цена не может быть отрицательной.",
+                code="min_value")
     if "currency" in group_data:
         group.currency = group_data.get("currency") or settings.DEFAULT_CURRENCY
     if "default_capacity" in group_data:
@@ -878,7 +1109,8 @@ def _apply_group_data(group, data):
     if "is_active" in group_data:
         group.is_active = _bool_value(group_data.get("is_active"), True)
     if not group.name:
-        raise ValidationError("group name is required")
+        raise _field_validation_error(
+            "name", "Укажите название группы.", code="required")
     group.full_clean()
     group.save()
     return group
@@ -894,13 +1126,16 @@ def _apply_subscription_type_data(subscription_type, data):
             setattr(subscription_type, field, _required_int(subscription_type_data.get(field), field))
     if "sessions_count" in subscription_type_data:
         value = subscription_type_data.get("sessions_count")
-        subscription_type.sessions_count = int(value) if value not in (None, "") else None
+        subscription_type.sessions_count = (
+            _positive_int(value, "sessions_count")
+            if value not in (None, "") else None)
     if "is_individual" in subscription_type_data:
         subscription_type.is_individual = _bool_value(subscription_type_data.get("is_individual"))
     if "is_active" in subscription_type_data:
         subscription_type.is_active = _bool_value(subscription_type_data.get("is_active"), True)
     if not subscription_type.name:
-        raise ValidationError("subscription type name is required")
+        raise _field_validation_error(
+            "name", "Укажите название абонемента.", code="required")
     subscription_type.full_clean()
     subscription_type.save()
     return subscription_type
@@ -914,27 +1149,46 @@ def _payment_data(data):
     return data.get("payment") or data
 
 
-def _require_active_participant(participant, action):
+def _require_active_participant(participant, action, field=None):
     if not participant.is_active:
+        if field:
+            raise _field_validation_error(
+                field, "Выбранный участник находится в архиве.",
+                code="invalid_choice")
         raise ValidationError(f"archived participant cannot {action}")
     if participant.parent_id and not participant.parent.user.is_active:
+        if field:
+            raise _field_validation_error(
+                field, "Аккаунт выбранного участника находится в архиве.",
+                code="invalid_choice")
         raise ValidationError(f"archived client account cannot {action}")
     return participant
 
 
 def _create_charge_for_participant(participant, data, *, actor=None, subscription=None):
-    _require_active_participant(participant, "receive new charges")
+    _require_active_participant(
+        participant, "receive new charges", field="participant_id")
     charge_data = _charge_data(data)
     subscription_id = charge_data.get("subscription_id")
     if subscription_id:
-        subscription = get_object_or_404(Subscription, pk=subscription_id, student=participant)
+        subscription = _object_for_field(
+            Subscription.objects.filter(student=participant), subscription_id,
+            "subscription_id", "абонемент")
+    amount_minor = _positive_int(charge_data.get("amount_minor"), "amount_minor")
+    currency = charge_data.get("currency", settings.DEFAULT_CURRENCY)
+    try:
+        Money(amount_minor, currency)
+    except (TypeError, ValueError) as exc:
+        raise _field_validation_error(
+            "currency", "Укажите поддерживаемую валюту.",
+            code="invalid_choice") from exc
     charge = Charge.objects.create(
         student=participant,
         subscription=subscription,
         description=charge_data.get("description") or (
             subscription.subscription_type.name if subscription else "Charge"),
-        amount_minor=int(charge_data["amount_minor"]),
-        currency=charge_data.get("currency", "PLN"),
+        amount_minor=amount_minor,
+        currency=currency,
         due_date=_parse_date(charge_data.get("due_date"), "due_date") or timezone.localdate(),
         created_by=actor,
     )
@@ -958,20 +1212,27 @@ def _create_subscription_charge(subscription, *, actor=None, due_date=None):
 
 
 def _create_payment_for_participant(participant, data, *, actor=None):
-    _require_active_participant(participant, "receive new payments")
+    _require_active_participant(
+        participant, "receive new payments", field="participant_id")
     payment_data = _payment_data(data)
     method = normalize_payment_method(payment_data.get("method", PaymentMethod.CASH))
     if method not in PaymentMethod.values:
-        raise ValidationError("invalid payment method")
+        raise _field_validation_error(
+            "method", "Выберите допустимый способ оплаты.",
+            code="invalid_choice")
     desired_status = payment_data.get("status")
     if desired_status and desired_status not in PaymentStatus.values:
-        raise ValidationError("invalid payment status")
+        raise _field_validation_error(
+            "status", "Выберите допустимый статус платежа.",
+            code="invalid_choice")
     amount_minor = _positive_int(payment_data.get("amount_minor"), "amount_minor")
     currency = payment_data.get("currency", settings.DEFAULT_CURRENCY)
     try:
         Money(amount_minor, currency)
     except (TypeError, ValueError) as exc:
-        raise ValidationError(str(exc)) from exc
+        raise _field_validation_error(
+            "currency", "Укажите поддерживаемую валюту.",
+            code="invalid_choice") from exc
     payment = Payment.objects.create(
         student=participant,
         amount_minor=amount_minor,
@@ -995,90 +1256,179 @@ def _create_payment_for_participant(participant, data, *, actor=None):
 
 def _session_changes_from_data(data, *, current_session=None):
     changes = {}
+    current_type = getattr(current_session, "session_type", SessionType.GROUP)
+    requested_type = data.get("session_type") or current_type
+    if requested_type not in {
+            SessionType.GROUP, SessionType.INDIVIDUAL, SessionType.SPLIT}:
+        raise _field_validation_error(
+            "session_type", "Выберите корректный тип занятия.",
+            code="invalid_choice")
+    if "session_type" in data:
+        changes["session_type"] = requested_type
     if "trainer_id" in data:
         trainer_id = data.get("trainer_id")
         if current_session is not None and str(current_session.trainer_id) == str(trainer_id):
             changes["trainer"] = current_session.trainer
         else:
-            changes["trainer"] = get_object_or_404(
+            changes["trainer"] = _object_for_field(
                 Trainer.objects.filter(is_active=True, user__is_active=True),
-                pk=trainer_id,
+                trainer_id,
+                "trainer_id",
+                "тренера",
             )
     if "substitute_trainer_id" in data:
         trainer_id = data.get("substitute_trainer_id")
-        changes["substitute_trainer"] = get_object_or_404(Trainer, pk=trainer_id) if trainer_id else None
+        changes["substitute_trainer"] = (
+            _object_for_field(
+                Trainer.objects.all(), trainer_id,
+                "substitute_trainer_id", "замещающего тренера")
+            if trainer_id else None)
     if "start_at" in data:
         changes["start_at"] = _parse_datetime(data.get("start_at"), "start_at")
+        if changes["start_at"] is None:
+            raise _field_validation_error(
+                "start_at", "Укажите дату и время начала.", code="required")
     if "end_at" in data:
         changes["end_at"] = _parse_datetime(data.get("end_at"), "end_at")
     if "duration_minutes" in data:
-        try:
-            changes["duration_minutes"] = int(data.get("duration_minutes"))
-        except (TypeError, ValueError) as exc:
-            raise ValidationError("duration_minutes must be an integer") from exc
+        changes["duration_minutes"] = _required_int(
+            data.get("duration_minutes"), "duration_minutes")
     if "price_minor" in data:
         value = data.get("price_minor")
-        try:
-            changes["price_minor"] = None if value in (None, "") else int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError("price_minor must be an integer") from exc
+        changes["price_minor"] = (
+            None if value in (None, "")
+            else _required_int(value, "price_minor"))
         if changes["price_minor"] is not None and changes["price_minor"] < 0:
-            raise ValidationError("price_minor cannot be negative")
+            raise _field_validation_error(
+                "price_minor", "Цена не может быть отрицательной.",
+                code="min_value")
     if "currency" in data:
         changes["currency"] = (data.get("currency") or settings.DEFAULT_CURRENCY).upper()
     if "location" in data:
         changes["location"] = data.get("location", "") or ""
+        if not changes["location"].strip():
+            raise _field_validation_error(
+                "location", "Выберите локацию.", code="required")
     if "max_participants" in data:
-        changes["max_participants"] = int(data.get("max_participants"))
+        changes["max_participants"] = _positive_int(
+            data.get("max_participants"), "max_participants")
     if "notes" in data:
         changes["notes"] = data.get("notes", "") or ""
     if "is_cancelled" in data:
         changes["is_cancelled"] = _bool_value(data.get("is_cancelled"))
     if "group_id" in data:
         group_id = data.get("group_id")
-        changes["group"] = get_object_or_404(Group, pk=group_id) if group_id else None
-        if group_id:
-            changes["individual_student"] = None
-            changes["session_type"] = SessionType.GROUP
+        changes["group"] = (
+            _object_for_field(
+                Group.objects.all(), group_id, "group_id", "группу")
+            if group_id else None)
     if "individual_student_id" in data:
         student_id = data.get("individual_student_id")
-        changes["individual_student"] = get_object_or_404(Student, pk=student_id) if student_id else None
+        changes["individual_student"] = (
+            _object_for_field(
+                Student.objects.select_related("parent__user"), student_id,
+                "individual_student_id", "участника")
+            if student_id else None)
         if student_id:
-            _require_active_participant(changes["individual_student"], "be assigned to sessions")
-            changes["group"] = None
-            changes["session_type"] = SessionType.INDIVIDUAL
+            _require_active_participant(
+                changes["individual_student"], "be assigned to sessions",
+                field="individual_student_id")
+    final_type = changes.get("session_type", current_type)
+    final_group = changes.get("group", getattr(current_session, "group", None))
+    final_student = changes.get(
+        "individual_student",
+        getattr(current_session, "individual_student", None),
+    )
+    if final_type == SessionType.GROUP:
+        if "individual_student_id" in data and "session_type" not in data:
+            raise _field_validation_error(
+                "individual_student_id",
+                "Для группового занятия выберите группу.",
+                code="invalid_choice")
+        if final_group is None:
+            raise _field_validation_error(
+                "group_id", "Выберите группу.", code="required")
+        changes["individual_student"] = None
+    else:
+        if "group_id" in data and "session_type" not in data:
+            raise _field_validation_error(
+                "group_id",
+                "Для индивидуального или split-занятия выберите участника.",
+                code="invalid_choice")
+        if final_student is None:
+            raise _field_validation_error(
+                "individual_student_id", "Выберите участника.",
+                code="required")
+        changes["group"] = None
     return changes
 
 
 def _create_session_from_data(data, *, actor=None):
     if "template_id" in data:
-        raise ValidationError("template_id is no longer supported")
-    trainer = get_object_or_404(
+        raise _field_validation_error(
+            "template_id", "Создание занятия по шаблону больше не поддерживается.",
+            code="unsupported")
+    trainer = _object_for_field(
         Trainer.objects.filter(is_active=True, user__is_active=True),
-        pk=data.get("trainer_id"),
+        data.get("trainer_id"),
+        "trainer_id",
+        "тренера",
     )
     group = None
     individual_student = None
-    session_type = data.get("session_type") or SessionType.GROUP
-    if data.get("individual_student_id"):
-        individual_student = get_object_or_404(Student, pk=data.get("individual_student_id"))
-        _require_active_participant(individual_student, "be assigned to new sessions")
-        session_type = session_type if session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT} else SessionType.INDIVIDUAL
+    requested_type = data.get("session_type")
+    session_type = requested_type or (
+        SessionType.INDIVIDUAL
+        if data.get("individual_student_id") else SessionType.GROUP)
+    if session_type not in {SessionType.GROUP, SessionType.INDIVIDUAL, SessionType.SPLIT}:
+        raise _field_validation_error(
+            "session_type", "Выберите корректный тип занятия.",
+            code="invalid_choice")
+    if session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}:
+        individual_student = _object_for_field(
+            Student.objects.select_related("parent__user"),
+            data.get("individual_student_id"),
+            "individual_student_id",
+            "участника",
+        )
+        _require_active_participant(
+            individual_student, "be assigned to new sessions",
+            field="individual_student_id")
     else:
-        group = get_object_or_404(Group, pk=data.get("group_id"))
+        group = _object_for_field(
+            Group.objects.all(), data.get("group_id"), "group_id", "группу")
         session_type = SessionType.GROUP
+    start_at = _parse_datetime(data.get("start_at"), "start_at")
+    if start_at is None:
+        raise _field_validation_error(
+            "start_at", "Укажите дату и время начала.", code="required")
+    location = str(data.get("location", "") or "").strip()
+    if not location:
+        raise _field_validation_error(
+            "location", "Выберите локацию.", code="required")
+    max_participants = _positive_int(
+        data.get("max_participants"), "max_participants")
+    price_minor = data.get("price_minor")
+    if price_minor not in (None, ""):
+        price_minor = _required_int(price_minor, "price_minor")
+        if price_minor < 0:
+            raise _field_validation_error(
+                "price_minor", "Цена не может быть отрицательной.",
+                code="min_value")
+    else:
+        price_minor = None
     return create_session(
         trainer=trainer,
-        start_at=_parse_datetime(data.get("start_at"), "start_at"),
+        start_at=start_at,
         end_at=_parse_datetime(data.get("end_at"), "end_at") if data.get("end_at") else None,
         duration_minutes=data.get("duration_minutes"),
-        location=data.get("location", "") or "",
-        max_participants=int(data.get("max_participants")),
+        location=location,
+        max_participants=max_participants,
         group=group,
         session_type=session_type,
         individual_student=individual_student,
         manually_modified=_bool_value(data.get("is_manually_modified")),
-        price_minor=data.get("price_minor"),
+        price_minor=price_minor,
         currency=data.get("currency"),
         notes=data.get("notes", "") or "",
         actor=actor,
@@ -1101,7 +1451,8 @@ def _default_billing_student_for_client(account):
         return ensure_account_holder_participant(account)
     if len(participants) == 1:
         return participants[0]
-    raise ValidationError("student_id is required when the client account has multiple participants")
+    raise _field_validation_error(
+        "student_id", "Выберите участника аккаунта.", code="required")
 
 
 def _parent_from_request(request):

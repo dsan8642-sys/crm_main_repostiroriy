@@ -1,4 +1,5 @@
 import hashlib
+import re
 import secrets
 from datetime import timedelta
 
@@ -37,6 +38,17 @@ def _username_for_login(login_value):
     ).values_list("id", flat=True))
     user_ids.update(ParentAccount.objects.filter(
         email__iexact=login_value).values_list("user_id", flat=True))
+    if re.fullmatch(r"[\d\s()+.-]+", login_value):
+        phone_login = re.sub(r"\D", "", login_value)
+        if phone_login:
+            user_ids.update(User.objects.filter(
+                username__iexact=phone_login).values_list("id", flat=True))
+            user_ids.update(
+                user_id
+                for user_id, phone in ParentAccount.objects.exclude(phone="")
+                .values_list("user_id", "phone")
+                if re.sub(r"\D", "", phone) == phone_login
+            )
     if len(user_ids) != 1:
         return None
     return User.objects.only("username").get(pk=user_ids.pop()).get_username()
@@ -61,12 +73,20 @@ def auth_login(request):
     login_value = str(data.get("login") or data.get("username") or data.get("email") or "").strip()
     password = str(data.get("password") or "")
     if not login_value or not password:
-        return _error("Login and password are required", status=400)
+        errors = {}
+        if not login_value:
+            errors["login"] = ValidationError(
+                "Укажите логин, email или телефон.", code="required")
+        if not password:
+            errors["password"] = ValidationError(
+                "Укажите пароль.", code="required")
+        raise ValidationError(errors)
 
     username = _username_for_login(login_value)
     user = authenticate(request, username=username, password=password) if username else None
     if user is None or not user.is_active or not _profile_allows_login(user):
-        return _error("Invalid login or password", status=400)
+        raise ValidationError(
+            "Неверный логин или пароль.", code="invalid_credentials")
 
     login(request, user)
     request.session.pop(OTP_SESSION_KEY, None)
@@ -208,11 +228,18 @@ def auth_activate(request):
     try:
         data = _json_body(request)
     except ValidationError:
-        return _error("Activation code and password are required", status=400)
+        raise
     token = str(data.get("activation_token") or data.get("token") or "").strip()
     password = str(data.get("password") or "")
     if not token or not password:
-        return _error("Activation code and password are required", status=400)
+        errors = {}
+        if not token:
+            errors["activation_token"] = ValidationError(
+                "Укажите одноразовый код доступа.", code="required")
+        if not password:
+            errors["password"] = ValidationError(
+                "Укажите новый пароль.", code="required")
+        raise ValidationError(errors)
 
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with transaction.atomic():
@@ -223,16 +250,27 @@ def auth_activate(request):
             .first()
         )
         if activation is None or not activation.is_valid:
-            return _error("Activation code is invalid or expired", status=400)
+            raise ValidationError({
+                "activation_token": ValidationError(
+                    "Код доступа недействителен или истёк.",
+                    code="invalid",
+                ),
+            })
         user = activation.user or (activation.parent.user if activation.parent_id else None)
         if user is None or user.role not in {Role.PARENT, Role.TRAINER}:
-            return _error("Activation code is invalid or expired", status=400)
+            raise ValidationError({
+                "activation_token": ValidationError(
+                    "Код доступа недействителен или истёк.",
+                    code="invalid",
+                ),
+            })
         if not user.is_active or not _profile_allows_login(user):
-            return _error("Portal access is unavailable", status=400)
+            raise ValidationError(
+                "Доступ к порталу недоступен.", code="unavailable")
         try:
             validate_password(password, user=user)
         except ValidationError as exc:
-            return _error(list(exc.messages), status=400)
+            raise ValidationError({"password": exc}) from exc
         user.set_password(password)
         user.save(update_fields=["password"])
         activation.used_at = timezone.now()

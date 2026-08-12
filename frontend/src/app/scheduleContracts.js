@@ -96,8 +96,8 @@ export function validateAdminSessionForm(form) {
   if (!validIsoDate(form.date)) errors.date = 'Укажите дату.'
   if (!validTime(form.start)) errors.start = 'Укажите время в формате ЧЧ:ММ.'
   const duration = Number(form.durationMinutes)
-  if (!Number.isInteger(duration) || duration < 15 || duration > 480) {
-    errors.durationMinutes = 'От 15 до 480 минут.'
+  if (!Number.isInteger(duration) || duration < 15 || duration > 480 || duration % 5 !== 0) {
+    errors.durationMinutes = 'От 15 до 480 минут с шагом 5 минут.'
   }
   if (!form.location) errors.location = 'Выберите локацию.'
   const capacity = Number(form.maxParticipants)

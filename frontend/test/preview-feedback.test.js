@@ -176,6 +176,25 @@ test('new session validation identifies fields while notes stay optional', () =>
   assert.equal(errors.notes, undefined)
 })
 
+test('session duration must use five-minute increments for create and edit forms', () => {
+  const base = {
+    trainerId: '2',
+    date: '2026-08-12',
+    start: '17:00',
+    location: 'Pool A',
+    maxParticipants: '8',
+    sessionType: 'group',
+    groupId: '3',
+    participantId: '',
+    price: '',
+    notes: '',
+  }
+
+  assert.equal(validateAdminSessionForm({ ...base, durationMinutes: '15' }).durationMinutes, undefined)
+  assert.equal(validateAdminSessionForm({ ...base, durationMinutes: '480' }).durationMinutes, undefined)
+  assert.match(validateAdminSessionForm({ ...base, durationMinutes: '17' }).durationMinutes, /5/)
+})
+
 test('period count excludes adjacent month cells and labels the active period', () => {
   const sessions = [
     { startAt: '2026-07-31T17:00:00+02:00' },

@@ -418,7 +418,11 @@ class TrainerPortalApiRule(TestCase):
             data=json.dumps({"student_id": other_student.id, "status": AttendanceStatus.PRESENT}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["errors"]["student_id"][0]["code"],
+            "invalid_choice",
+        )
         self.assertFalse(other_student.attendance.exists())
 
 
@@ -698,11 +702,125 @@ class AdminPortalApiRule(TestCase):
         self.assertTrue(participant.is_account_holder)
         self.assertEqual(participant.full_name, "Nowak Anna")
 
+    def test_admin_can_create_self_participant_client_with_phone_login_by_default(self):
+        response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({
+                "account": {
+                    "first_name": "Piotr",
+                    "last_name": "Telefon",
+                    "phone": "+48 500-111-222",
+                },
+                "participant": {
+                    "birth_date": "1990-04-12",
+                    "group_id": self.group.id,
+                },
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        account = ParentAccount.objects.get(pk=response.json()["account"]["id"])
+        participant = Student.objects.get(parent=account)
+        self.assertEqual(account.user.username, "48500111222")
+        self.assertEqual(participant.first_name, "Piotr")
+        self.assertEqual(participant.last_name, "Telefon")
+        self.assertTrue(participant.is_account_holder)
+
+        account.user.set_password("Str0ngPass!123")
+        account.user.save(update_fields=["password"])
+        self.client.logout()
+        login = self.client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "login": "+48 500-111-222",
+                "password": "Str0ngPass!123",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user"]["username"], "48500111222")
+
+    def test_admin_client_login_priority_is_manual_then_email_then_phone(self):
+        email_response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({"account": {
+                "first_name": "Email",
+                "last_name": "Priority",
+                "email": "  EMAIL.Login@Example.COM ",
+                "phone": "+48 501-222-333",
+            }}),
+            content_type="application/json",
+        )
+        manual_response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({"account": {
+                "first_name": "Manual",
+                "last_name": "Priority",
+                "username": "chosen.login",
+                "email": "manual@example.com",
+                "phone": "+48 502-333-444",
+            }}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(email_response.status_code, 201)
+        self.assertEqual(email_response.json()["account"]["username"], "email.login@example.com")
+        self.assertEqual(manual_response.status_code, 201)
+        self.assertEqual(manual_response.json()["account"]["username"], "chosen.login")
+
+    def test_contact_login_collision_returns_structured_field_errors_without_suffix(self):
+        f.make_parent(username="collision@example.com")
+
+        response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({"account": {
+                "first_name": "Collision",
+                "last_name": "Client",
+                "email": "COLLISION@example.com",
+            }}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], "validation_error")
+        self.assertEqual(payload["error"], "Проверьте отмеченные поля.")
+        self.assertEqual(payload["errors"]["account.username"][0]["code"], "duplicate")
+        self.assertIn("account.email", payload["errors"])
+        self.assertEqual(payload["non_field_errors"], [])
+        self.assertFalse(ParentAccount.objects.filter(email__iexact="collision@example.com").exists())
+
+    def test_phone_collision_uses_normalized_digits_even_with_manual_login(self):
+        f.make_parent(username="existing-phone-owner", phone="+48 500-111-222")
+
+        response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({"account": {
+                "first_name": "Duplicate",
+                "last_name": "Phone",
+                "username": "different.manual.login",
+                "phone": "48500111222",
+            }}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(
+            payload["errors"]["account.phone"][0]["code"],
+            "duplicate",
+        )
+        self.assertFalse(
+            ParentAccount.objects.filter(
+                user__username="different.manual.login").exists())
+
     def test_admin_can_create_family_client_with_child_participant(self):
         response = self.client.post(
             "/api/admin/clients/",
             data=json.dumps({
                 "client_type": "family",
+                "is_adult": False,
                 "account": {
                     "username": "family_api",
                     "first_name": "Marta",
@@ -727,6 +845,35 @@ class AdminPortalApiRule(TestCase):
         self.assertFalse(participant.is_account_holder)
         self.assertEqual(participant.group, self.group)
         self.assertEqual(participant.birth_date.isoformat(), "2016-05-10")
+
+    def test_admin_client_creation_defaults_to_account_holder_despite_legacy_type(self):
+        response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({
+                "client_type": "family",
+                "account": {
+                    "first_name": "Owner",
+                    "last_name": "Account",
+                    "phone": "+48 503-444-555",
+                },
+                "participant": {
+                    "first_name": "Ignored",
+                    "last_name": "Child",
+                    "birth_date": "1991-06-07",
+                    "group_id": self.group.id,
+                },
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        participant = Student.objects.get(
+            parent_id=response.json()["account"]["id"])
+        self.assertTrue(participant.is_account_holder)
+        self.assertEqual(participant.first_name, "Owner")
+        self.assertEqual(participant.last_name, "Account")
+        self.assertEqual(participant.birth_date.isoformat(), "1991-06-07")
+        self.assertEqual(participant.group_id, self.group.id)
 
     def test_admin_can_update_client_account_and_participant(self):
         account = self.student.parent
@@ -788,6 +935,51 @@ class AdminPortalApiRule(TestCase):
         self.assertFalse(account_response.json()["account"]["is_active"])
         self.assertEqual(participant_response.json()["medical_info"], "Asthma")
         self.assertEqual(participant_response.json()["admin_comments"], "VIP")
+
+    def test_admin_can_change_existing_client_login_without_contact_overwrite(self):
+        account = self.student.parent
+        old_login = account.user.username
+
+        contacts = self.client.patch(
+            f"/api/admin/clients/{account.id}/",
+            data=json.dumps({"account": {
+                "email": "changed-contact@example.com",
+                "phone": "+48 509-111-222",
+            }}),
+            content_type="application/json",
+        )
+        self.assertEqual(contacts.status_code, 200)
+        self.assertEqual(contacts.json()["account"]["username"], old_login)
+
+        changed = self.client.patch(
+            f"/api/admin/clients/{account.id}/",
+            data=json.dumps({"account": {"username": "new.client.login"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json()["account"]["username"], "new.client.login")
+
+        self.client.logout()
+        old_response = self.client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "login": old_login,
+                "password": "Str0ngPass!123",
+            }),
+            content_type="application/json",
+        )
+        new_response = self.client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "login": "new.client.login",
+                "password": "Str0ngPass!123",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(old_response.status_code, 400)
+        self.assertEqual(new_response.status_code, 200)
+        self.assertEqual(new_response.json()["user"]["username"], "new.client.login")
 
     def test_admin_can_soft_archive_client_and_participant(self):
         account = self.student.parent
@@ -977,7 +1169,11 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(session_edit.status_code, 400)
         self.assertEqual(attendance_roster.status_code, 200)
         self.assertFalse(any(row["id"] == self.student.id for row in attendance_roster.json()["students"]))
-        self.assertEqual(attendance_mark.status_code, 403)
+        self.assertEqual(attendance_mark.status_code, 400)
+        self.assertEqual(
+            attendance_mark.json()["errors"]["student_id"][0]["code"],
+            "invalid_choice",
+        )
         self.assertEqual(subscription_detail.status_code, 200)
         self.assertEqual(subscription_status.status_code, 400)
         self.assertEqual(subscription_renew.status_code, 400)
@@ -1775,7 +1971,12 @@ class AdminPortalApiRule(TestCase):
         forbidden = self.client.post(f"/api/admin/schedule/sessions/{cancelled.id}/restore/")
 
         self.assertEqual(conflict.status_code, 400)
-        self.assertIn("Конфликт", " ".join(conflict.json()["error"]))
+        self.assertEqual(
+            conflict.json()["errors"]["start_at"][0]["code"],
+            "schedule_conflict",
+        )
+        self.assertIn(
+            "Конфликт", conflict.json()["errors"]["start_at"][0]["message"])
         self.assertEqual(forbidden.status_code, 403)
 
     def test_admin_attendance_payload_has_bulk_balance_statuses(self):
@@ -1850,6 +2051,87 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(moved.json()["currency"], "EUR")
         self.assertEqual(cancelled.status_code, 200)
         self.assertTrue(cancelled.json()["is_cancelled"])
+
+    def test_admin_session_validation_returns_duration_and_choice_field_errors(self):
+        trainer = f.make_trainer(username="duration_validation_coach")
+        duration = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "group_id": self.group.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-05T17:00:00+02:00",
+                "duration_minutes": 17,
+                "location": "Pool A",
+                "max_participants": 8,
+            }),
+            content_type="application/json",
+        )
+        missing_split_participant = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-05T19:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Lane 2",
+                "max_participants": 2,
+            }),
+            content_type="application/json",
+        )
+        fractional_capacity = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "group_id": self.group.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-05T20:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Pool A",
+                "max_participants": 2.5,
+            }),
+            content_type="application/json",
+        )
+        fractional_price = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "group_id": self.group.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-05T21:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Pool A",
+                "max_participants": 8,
+                "price_minor": 12.5,
+            }),
+            content_type="application/json",
+        )
+        missing_trainer = self.client.post(
+            "/api/admin/schedule/check-conflict/",
+            data=json.dumps({
+                "trainer_id": 999999,
+                "start_at": "2026-06-05T17:00:00+02:00",
+                "duration_minutes": 60,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(duration.status_code, 400)
+        self.assertEqual(duration.json()["errors"]["duration_minutes"][0]["code"], "invalid_step")
+        self.assertEqual(missing_trainer.status_code, 400)
+        self.assertEqual(missing_trainer.json()["errors"]["trainer_id"][0]["code"], "invalid_choice")
+        self.assertEqual(missing_split_participant.status_code, 400)
+        self.assertEqual(
+            missing_split_participant.json()["errors"]["individual_student_id"][0]["code"],
+            "required",
+        )
+        self.assertEqual(fractional_capacity.status_code, 400)
+        self.assertEqual(
+            fractional_capacity.json()["errors"]["max_participants"][0]["code"],
+            "invalid_integer",
+        )
+        self.assertEqual(fractional_price.status_code, 400)
+        self.assertEqual(
+            fractional_price.json()["errors"]["price_minor"][0]["code"],
+            "invalid_integer",
+        )
 
     def test_admin_can_create_individual_session(self):
         trainer = f.make_trainer(username="individual_session_coach")
@@ -1944,6 +2226,19 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.json()["session_type"], "split")
         self.assertEqual(response.json()["individual_student_id"], self.student.id)
         self.assertEqual(response.json()["max_participants"], 2)
+
+        edited = self.client.post(
+            f"/api/admin/schedule/sessions/{response.json()['id']}/",
+            data=json.dumps({
+                "individual_student_id": self.student.id,
+                "location": "Lane 3",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(edited.json()["session_type"], "split")
+        self.assertEqual(edited.json()["location"], "Lane 3")
 
     def test_admin_can_set_and_clear_session_substitute_trainer(self):
         trainer = f.make_trainer(username="scheduled_session_coach")
@@ -2353,6 +2648,11 @@ class AdminPortalApiRule(TestCase):
         )
         self.assertEqual(missing_confirmation.status_code, 400)
         self.assertEqual(
+            missing_confirmation.json()["errors"]
+            ["confirm_financial_effects"][0]["code"],
+            "required",
+        )
+        self.assertEqual(
             ImportBatch.objects.get(pk=preview["batch_id"]).status,
             ImportBatchStatus.PREVIEWED,
         )
@@ -2685,7 +2985,10 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(logs.json()["logs"][0]["id"], log.id)
         self.assertEqual(log_detail.json()["error"], "Provider down")
         self.assertEqual(protected_template_delete.status_code, 400)
-        self.assertIn("notification template is used", protected_template_delete.json()["error"][0])
+        self.assertIn(
+            "notification template is used",
+            protected_template_delete.json()["non_field_errors"][0]["message"],
+        )
         self.assertTrue(NotificationTemplate.objects.filter(pk=template_id).exists())
         self.assertFalse(archived_rule.json()["is_active"])
 

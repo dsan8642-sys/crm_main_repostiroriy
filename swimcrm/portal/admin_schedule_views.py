@@ -5,6 +5,7 @@ from .admin_support import _admin_required
 from .pagination import paginated_payload
 from audit.models import AuditLogEntry
 from scheduling.services import (
+    _duration_minutes,
     commit_copy_period,
     preview_copy_period,
     restore_session,
@@ -15,12 +16,35 @@ from scheduling.services import (
 def admin_schedule_copy_preview(request):
     user = _admin_required(request)
     data = _json_body(request)
+    dates = {
+        field: _parse_date(data.get(field), field)
+        for field in ("source_from", "source_to", "target_from", "target_to")
+    }
+    missing = {
+        field: ValidationError("Укажите дату.", code="required")
+        for field, value in dates.items() if value is None
+    }
+    if missing:
+        raise ValidationError(missing)
+    if dates["source_to"] < dates["source_from"]:
+        raise _field_validation_error(
+            "source_to", "Конечная дата не может быть раньше начальной.",
+            code="invalid_range")
+    if dates["target_to"] < dates["target_from"]:
+        raise _field_validation_error(
+            "target_to", "Конечная дата не может быть раньше начальной.",
+            code="invalid_range")
+    if not any(_bool_value(data.get(field), True) for field in (
+            "include_group", "include_individual", "include_split")):
+        raise _field_validation_error(
+            "include_group", "Выберите хотя бы один тип занятия.",
+            code="required")
     batch, rows = preview_copy_period(
         actor=user,
-        source_from=_parse_date(data.get("source_from"), "source_from"),
-        source_to=_parse_date(data.get("source_to"), "source_to"),
-        target_from=_parse_date(data.get("target_from"), "target_from"),
-        target_to=_parse_date(data.get("target_to"), "target_to"),
+        source_from=dates["source_from"],
+        source_to=dates["source_to"],
+        target_from=dates["target_from"],
+        target_to=dates["target_to"],
         include_group=_bool_value(data.get("include_group"), True),
         include_individual=_bool_value(data.get("include_individual"), True),
         include_split=_bool_value(data.get("include_split"), True),
@@ -36,13 +60,33 @@ def admin_schedule_copy_preview(request):
 def admin_schedule_copy_commit(request):
     user = _admin_required(request)
     data = _json_body(request)
+    batch_id = _positive_int(data.get("batch_id"), "batch_id")
     selected_indices = data.get("selected_indices")
-    if not isinstance(selected_indices, list):
-        raise ValidationError("selected_indices must be a list")
+    if not isinstance(selected_indices, list) or not selected_indices:
+        raise _field_validation_error(
+            "selected_indices", "Выберите занятия для копирования.",
+            code="required")
+    parsed_indices = []
+    for index in selected_indices:
+        if isinstance(index, bool):
+            raise _field_validation_error(
+                "selected_indices", "Некорректный список выбранных занятий.",
+                code="invalid_integer")
+        try:
+            parsed_index = int(index)
+        except (TypeError, ValueError) as exc:
+            raise _field_validation_error(
+                "selected_indices", "Некорректный список выбранных занятий.",
+                code="invalid_integer") from exc
+        if parsed_index <= 0:
+            raise _field_validation_error(
+                "selected_indices", "Некорректный список выбранных занятий.",
+                code="invalid_choice")
+        parsed_indices.append(parsed_index)
     batch, created, skipped = commit_copy_period(
-        batch_id=data.get("batch_id"),
+        batch_id=batch_id,
         actor=user,
-        selected_indices=selected_indices,
+        selected_indices=parsed_indices,
     )
     return JsonResponse({
         "batch_id": batch.id,
@@ -104,7 +148,13 @@ def _session_attendance_payload(session):
 def admin_schedule_sessions(request):
     user = _admin_required(request)
     if request.method == "POST":
-        session = _create_session_from_data(_json_body(request), actor=user)
+        try:
+            session = _create_session_from_data(_json_body(request), actor=user)
+        except ScheduleConflict as exc:
+            raise ValidationError({
+                "start_at": ValidationError(
+                    exc.messages[0], code="schedule_conflict")
+            }) from exc
         return JsonResponse(_session_payload(session), status=201)
     qs = Session.objects.select_related(
         "group", "trainer__user", "substitute_trainer__user", "individual_student", "template"
@@ -116,9 +166,11 @@ def admin_schedule_sessions(request):
     if date_to:
         qs = qs.filter(start_at__date__lte=date_to)
     if request.GET.get("trainer_id"):
-        qs = qs.filter(trainer_id=request.GET["trainer_id"])
+        qs = qs.filter(trainer_id=_positive_int(
+            request.GET["trainer_id"], "trainer_id"))
     if request.GET.get("group_id"):
-        qs = qs.filter(group_id=request.GET["group_id"])
+        qs = qs.filter(group_id=_positive_int(
+            request.GET["group_id"], "group_id"))
     if request.GET.get("cancelled") in {"true", "false"}:
         qs = qs.filter(is_cancelled=request.GET["cancelled"] == "true")
     type_colors = session_type_color_keys()
@@ -145,7 +197,13 @@ def admin_schedule_session_detail(request, session_id):
         return JsonResponse({"deleted": True, "session_id": deleted_id})
     if request.method in {"POST", "PATCH"}:
         changes = _session_changes_from_data(_json_body(request), current_session=session)
-        edit_single_session(session, actor=user, **changes)
+        try:
+            edit_single_session(session, actor=user, **changes)
+        except ScheduleConflict as exc:
+            raise ValidationError({
+                "start_at": ValidationError(
+                    exc.messages[0], code="schedule_conflict")
+            }) from exc
         return JsonResponse(_session_payload(session))
     return JsonResponse(_session_payload(session))
 
@@ -162,13 +220,18 @@ def admin_schedule_session_attendance(request, session_id):
         try:
             student_id = int(data.get("student_id"))
         except (TypeError, ValueError) as exc:
-            raise ValidationError("student_id is required") from exc
+            raise _field_validation_error(
+                "student_id", "Выберите участника.", code="required") from exc
         status = data.get("status")
         if status not in AttendanceStatus.values:
-            raise ValidationError("invalid attendance status")
+            raise _field_validation_error(
+                "status", "Выберите допустимый статус посещения.",
+                code="invalid_choice")
         allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
         if student_id not in allowed_student_ids:
-            raise PermissionDenied("student is not in this session roster")
+            raise _field_validation_error(
+                "student_id", "Участник недоступен в этом занятии.",
+                code="invalid_choice")
         record = set_attendance(session_id=session.id, student=Student.objects.get(pk=student_id),
                                 status=status, actor=user)
         return JsonResponse(_attendance_payload(record))
@@ -185,22 +248,34 @@ def admin_schedule_session_attendance_bulk(request, session_id):
         raise ValidationError("cancelled session is read-only")
     items = _json_body(request).get("items")
     if not isinstance(items, list) or not items:
-        raise ValidationError("items must be a non-empty list")
+        raise _field_validation_error(
+            "items", "Добавьте хотя бы одну отметку посещения.",
+            code="required")
     allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
     normalized = []
     seen = set()
-    for item in items:
+    for index, item in enumerate(items):
         try:
             student_id = int(item.get("student_id"))
         except (AttributeError, TypeError, ValueError) as exc:
-            raise ValidationError("student_id is required") from exc
+            raise _field_validation_error(
+                f"items.{index}.student_id", "Выберите участника.",
+                code="required") from exc
         status = item.get("status")
         if student_id in seen:
-            raise ValidationError("duplicate student_id")
+            raise _field_validation_error(
+                f"items.{index}.student_id",
+                "Участник указан в списке повторно.", code="duplicate")
         if student_id not in allowed_student_ids:
-            raise PermissionDenied("student is not in this session roster")
+            raise _field_validation_error(
+                f"items.{index}.student_id",
+                "Участник недоступен в этом занятии.",
+                code="invalid_choice")
         if status not in AttendanceStatus.values:
-            raise ValidationError("invalid attendance status")
+            raise _field_validation_error(
+                f"items.{index}.status",
+                "Выберите допустимый статус посещения.",
+                code="invalid_choice")
         seen.add(student_id)
         normalized.append((student_id, status))
     students = Student.objects.in_bulk(seen)
@@ -235,16 +310,25 @@ def admin_schedule_session_participants(request, session_id):
     try:
         student_id = int(data.get("student_id"))
     except (TypeError, ValueError) as exc:
-        raise ValidationError("student_id is required") from exc
-    student = get_object_or_404(Student.objects.select_related("parent__user", "group"), pk=student_id)
-    _require_active_participant(student, "be added to sessions")
+        raise _field_validation_error(
+            "student_id", "Выберите участника.", code="required") from exc
+    student = _object_for_field(
+        Student.objects.select_related("parent__user", "group"),
+        student_id, "student_id", "участника")
+    _require_active_participant(
+        student, "be added to sessions", field="student_id")
 
     existing_active_ids = set(_session_roster(session).values_list("id", flat=True))
     participant = SessionParticipant.objects.filter(session=session, student=student).first()
     if student.id in existing_active_ids and not participant:
-        raise ValidationError("student is already in this session roster")
+        raise _field_validation_error(
+            "student_id", "Участник уже добавлен в это занятие.",
+            code="duplicate")
     if student.id not in existing_active_ids and len(existing_active_ids) >= session.max_participants:
-        raise ValidationError(f"session capacity is full ({session.max_participants})")
+        raise _field_validation_error(
+            "student_id",
+            f"В занятии нет свободных мест (вместимость: {session.max_participants}).",
+            code="capacity_full")
 
     created = participant is None
     if created:
@@ -297,10 +381,18 @@ def admin_schedule_session_waitlist(request, session_id):
         try:
             student_id = int(data.get("student_id"))
         except (TypeError, ValueError) as exc:
-            raise ValidationError("student_id is required") from exc
+            raise _field_validation_error(
+                "student_id", "Выберите участника.", code="required") from exc
+        student = _object_for_field(
+            Student.objects.select_related("parent__user", "group"),
+            student_id, "student_id", "участника")
+        _require_active_participant(
+            student, "be added to the waitlist", field="student_id")
         if WaitlistEntry.objects.filter(session=session, student_id=student_id).exists():
-            raise ValidationError("student is already on this session waitlist")
-        entry = WaitlistEntry(session=session)
+            raise _field_validation_error(
+                "student_id", "Участник уже находится в листе ожидания.",
+                code="duplicate")
+        entry = WaitlistEntry(session=session, student=student)
         _apply_waitlist_data(entry, data)
         audit(user, "waitlist.created", entry, {
             "session_id": session.id,
@@ -371,7 +463,11 @@ def admin_schedule_session_cancel(request, session_id):
 def admin_schedule_session_restore(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(Session, pk=session_id)
-    session, restored = restore_session(session, actor=user)
+    try:
+        session, restored = restore_session(session, actor=user)
+    except ScheduleConflict as exc:
+        raise _field_validation_error(
+            "start_at", exc.messages[0], code="schedule_conflict") from exc
     payload = _session_payload(session)
     payload["restored"] = restored
     return JsonResponse(payload)
@@ -381,25 +477,44 @@ def admin_schedule_session_restore(request, session_id):
 def admin_schedule_check_conflict(request):
     _admin_required(request)
     data = _json_body(request)
-    trainer = get_object_or_404(Trainer, pk=data.get("trainer_id"))
+    trainer = _object_for_field(
+        Trainer.objects.filter(is_active=True, user__is_active=True),
+        data.get("trainer_id"), "trainer_id", "тренера")
     try:
         start_at = _parse_datetime(data.get("start_at"), "start_at")
+        if start_at is None:
+            raise _field_validation_error(
+                "start_at", "Укажите дату и время начала.", code="required")
         if data.get("end_at"):
             end_at = _parse_datetime(data.get("end_at"), "end_at")
+            _duration_minutes(start_at=start_at, end_at=end_at)
         else:
-            try:
-                duration_minutes = int(data.get("duration_minutes"))
-            except (TypeError, ValueError) as exc:
-                raise ValidationError("duration_minutes must be an integer") from exc
+            duration_minutes = _duration_minutes(
+                start_at=start_at,
+                duration_minutes=data.get("duration_minutes"),
+            )
             end_at = start_at + timedelta(minutes=duration_minutes)
+        exclude_session_id = data.get("exclude_session_id")
+        if exclude_session_id not in (None, ""):
+            exclude_session_id = _positive_int(
+                exclude_session_id, "exclude_session_id")
         check_trainer_conflict(
             trainer,
             start_at,
             end_at,
-            exclude_session_id=data.get("exclude_session_id"),
+            exclude_session_id=exclude_session_id,
         )
     except ScheduleConflict as exc:
-        return JsonResponse({"has_conflict": True, "error": exc.messages if hasattr(exc, "messages") else str(exc)})
+        message = exc.messages[0] if hasattr(exc, "messages") else str(exc)
+        return JsonResponse({
+            "has_conflict": True,
+            "error": "Проверьте отмеченные поля.",
+            "code": "validation_error",
+            "errors": {
+                "start_at": [{"code": "schedule_conflict", "message": message}],
+            },
+            "non_field_errors": [],
+        })
     return JsonResponse({"has_conflict": False})
 
 

@@ -48,10 +48,15 @@ async function request(path, options = {}) {
   const payload = contentType.includes('application/json') ? await response.json() : await response.text()
   if (!response.ok) {
     const locale = document.documentElement.lang?.split('-')[0] || 'ru'
-    const error = new Error(safeErrorMessage(response.status, locale))
-    error.code = `HTTP_${response.status || 'NETWORK'}`
+    const payloadMessage = typeof payload?.error === 'string' ? payload.error.trim() : ''
+    const error = new Error(payloadMessage || safeErrorMessage(response.status, locale))
+    error.code = payload?.code || `HTTP_${response.status || 'NETWORK'}`
+    error.httpCode = `HTTP_${response.status || 'NETWORK'}`
     error.status = response.status
     error.payload = payload
+    error.fieldErrors = payload?.errors && typeof payload.errors === 'object' ? payload.errors : {}
+    error.nonFieldErrors = Array.isArray(payload?.non_field_errors) ? payload.non_field_errors : []
+    error.message = apiErrorMessage(error, error.message)
     throw error
   }
   return payload
@@ -80,6 +85,14 @@ export async function fetchAllPages(path, key, pageSize = 200) {
 
 export function apiErrorMessage(error, fallback = 'Не удалось выполнить запрос.') {
   const payload = error?.payload
+  const itemMessage = (item) => typeof item === 'string' ? item : item?.message
+  const nonFieldMessage = (error?.nonFieldErrors || payload?.non_field_errors || [])
+    .map(itemMessage).filter(Boolean).join(' ')
+  if (nonFieldMessage) return nonFieldMessage
+  const firstFieldItems = Object.values(error?.fieldErrors || payload?.errors || {})[0]
+  const fieldMessage = (Array.isArray(firstFieldItems) ? firstFieldItems : [firstFieldItems])
+    .map(itemMessage).filter(Boolean).join(' ')
+  if (fieldMessage) return fieldMessage
   if (typeof payload === 'string' && payload.trim()) return payload.trim()
   if (Array.isArray(payload?.error)) return payload.error.filter(Boolean).join(', ')
   if (typeof payload?.error === 'string' && payload.error.trim()) return payload.error.trim()

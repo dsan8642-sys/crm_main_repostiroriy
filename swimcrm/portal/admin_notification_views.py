@@ -72,11 +72,16 @@ def _apply_template_data(template, data):
         if field in data:
             setattr(template, field, data.get(field, "") or "")
     if template.event_type not in EventType.values:
-        raise ValidationError("invalid event_type")
+        raise _field_validation_error(
+            "event_type", "Выберите допустимое событие.",
+            code="invalid_choice")
     if template.channel not in SUPPORTED_NOTIFICATION_CHANNELS:
-        raise ValidationError("invalid channel")
+        raise _field_validation_error(
+            "channel", "Выберите допустимый канал.",
+            code="invalid_choice")
     if not template.body:
-        raise ValidationError("body is required")
+        raise _field_validation_error(
+            "body", "Введите текст уведомления.", code="required")
     template.full_clean()
     template.save()
     return template
@@ -88,20 +93,29 @@ def _apply_rule_data(rule, data):
         if field in data:
             setattr(rule, field, data.get(field, "") or "")
     if "template_id" in data:
-        rule.template = get_object_or_404(NotificationTemplate, pk=data.get("template_id"))
+        rule.template = _object_for_field(
+            NotificationTemplate.objects.all(), data.get("template_id"),
+            "template_id", "шаблон")
     if "offset_minutes" in data:
         try:
             rule.offset_minutes = int(data.get("offset_minutes"))
         except (TypeError, ValueError) as exc:
-            raise ValidationError("offset_minutes must be an integer") from exc
+            raise _field_validation_error(
+                "offset_minutes", "Введите целое количество минут.",
+                code="invalid_integer") from exc
     if "is_active" in data:
         rule.is_active = _bool_value(data.get("is_active"), True)
     if rule.event_type not in EventType.values:
-        raise ValidationError("invalid event_type")
+        raise _field_validation_error(
+            "event_type", "Выберите допустимое событие.",
+            code="invalid_choice")
     if rule.channel not in SUPPORTED_NOTIFICATION_CHANNELS:
-        raise ValidationError("invalid channel")
+        raise _field_validation_error(
+            "channel", "Выберите допустимый канал.",
+            code="invalid_choice")
     if not rule.template_id:
-        raise ValidationError("template_id is required")
+        raise _field_validation_error(
+            "template_id", "Выберите шаблон.", code="required")
     rule.full_clean()
     rule.save()
     return rule
@@ -259,9 +273,12 @@ def admin_mass_mail(request):
         client_ids = data.get("parent_ids") or []
     channel = data.get("channel")
     if channel not in SUPPORTED_NOTIFICATION_CHANNELS:
-        raise ValidationError("invalid mailing channel")
+        raise _field_validation_error(
+            "channel", "Выберите допустимый канал рассылки.",
+            code="invalid_choice")
     if not data.get("body"):
-        raise ValidationError("body is required")
+        raise _field_validation_error(
+            "body", "Введите текст сообщения.", code="required")
     result = queue_mass_mailing(
         audience=data.get("audience", "all"),
         channel=channel,

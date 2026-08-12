@@ -2,7 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { PAYMENT_METHODS, errorCode, participantKey, paymentMethodLabel, resourceState, safeErrorMessage } from '../src/contracts.js'
-import { fetchResourceMap } from '../src/api.js'
+import { api, apiErrorMessage, fetchResourceMap } from '../src/api.js'
+import { clientAutoLogin, updateClientIdentity } from '../src/app/clientContracts.js'
+import { fieldErrorsFromApi, formErrorMessage } from '../src/app/formErrors.js'
 
 test('resource states are discriminated and reject unknown variants', () => {
   assert.deepEqual(resourceState('ok', { data: [1] }), { state: 'ok', data: [1] })
@@ -36,4 +38,80 @@ test('safe errors, payment methods and keys are deterministic', () => {
   assert.equal(paymentMethodLabel('card', 'pl'), 'Karta')
   assert.equal(participantKey(4, 9), 'client-4-participant-9')
   assert.throws(() => participantKey(null, 9))
+})
+
+test('api errors preserve structured field and non-field validation details', async () => {
+  const originalDocument = globalThis.document
+  const originalFetch = globalThis.fetch
+  globalThis.document = {
+    cookie: 'csrftoken=test-token',
+    documentElement: { lang: 'ru' },
+  }
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: 'Проверьте отмеченные поля.',
+    code: 'validation_error',
+    errors: {
+      'account.email': [{ code: 'duplicate', message: 'Этот email уже используется.' }],
+    },
+    non_field_errors: [{ code: 'conflict', message: 'Данные конфликтуют.' }],
+  }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' },
+  })
+
+  try {
+    await assert.rejects(
+      api.post('/api/admin/clients/', {}),
+      (error) => {
+        assert.equal(error.code, 'validation_error')
+        assert.equal(error.fieldErrors['account.email'][0].code, 'duplicate')
+        assert.equal(error.nonFieldErrors[0].message, 'Данные конфликтуют.')
+        assert.equal(apiErrorMessage(error), 'Данные конфликтуют.')
+        return true
+      },
+    )
+  } finally {
+    globalThis.document = originalDocument
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('client login stays automatic until the administrator edits it', () => {
+  const email = clientAutoLogin({
+    firstName: 'Anna', lastName: 'Nowak',
+    email: ' ANNA@Example.COM ', phone: '+48 500-111-222',
+  })
+  const phone = clientAutoLogin({ phone: '+48 500-111-222' })
+  const name = clientAutoLogin({ firstName: 'Jan', lastName: 'Kowalski' })
+  assert.equal(email, 'anna@example.com')
+  assert.equal(phone, '48500111222')
+  assert.equal(name, 'jan.kowalski')
+
+  const manual = updateClientIdentity({
+    firstName: 'Anna', lastName: 'Nowak', email: '', phone: '',
+    username: 'anna.nowak', usernameManual: false,
+  }, 'username', 'custom.login')
+  assert.deepEqual(
+    updateClientIdentity(manual, 'email', 'anna@example.com'),
+    { ...manual, email: 'anna@example.com' },
+  )
+  assert.equal(updateClientIdentity(manual, 'username', '').username, 'anna.nowak')
+})
+
+test('structured api fields map to local form fields without a generic banner', () => {
+  const error = {
+    fieldErrors: {
+      'account.email': [{ code: 'duplicate', message: 'Email занят.' }],
+      'account.username': [{ code: 'duplicate', message: 'Логин занят.' }],
+    },
+    nonFieldErrors: [],
+  }
+  assert.deepEqual(fieldErrorsFromApi(error, {
+    'account.email': 'email',
+    'account.username': 'username',
+  }), {
+    email: 'Email занят.',
+    username: 'Логин занят.',
+  })
+  assert.equal(formErrorMessage(error), null)
 })

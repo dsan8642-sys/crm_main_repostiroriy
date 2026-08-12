@@ -293,7 +293,7 @@ class Prompt05AccessLifecycleTest(TestCase):
             400,
         )
 
-    def test_creation_rejects_duplicate_email_and_missing_login(self):
+    def test_creation_rejects_duplicate_email_and_uses_phone_login(self):
         account, _ = self._unactivated_parent("prompt05_duplicate")
         duplicate = self.admin_client.post(
             "/api/admin/trainers/",
@@ -312,7 +312,8 @@ class Prompt05AccessLifecycleTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(duplicate.status_code, 400)
-        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.status_code, 201)
+        self.assertEqual(missing.json()["account"]["username"], "48555123456")
 
     def test_non_admin_cannot_issue_access(self):
         account, _ = self._unactivated_parent("prompt05_non_admin")

@@ -1,4 +1,4 @@
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, PermissionDenied, ValidationError
 from django.http import Http404, JsonResponse
 
 
@@ -35,9 +35,35 @@ class ApiExceptionMiddleware:
     def _json_validation_error(self, request, exception):
         if not request.path.startswith("/api/"):
             raise exception
+        errors = {}
+        non_field_errors = []
+        if hasattr(exception, "error_dict"):
+            for field, field_errors in exception.error_dict.items():
+                target = non_field_errors if field == NON_FIELD_ERRORS else errors.setdefault(field, [])
+                target.extend(self._validation_items(field_errors))
+        else:
+            non_field_errors = self._validation_items(
+                getattr(exception, "error_list", [exception]))
         payload = {
-            "error": exception.messages if hasattr(exception, "messages") else str(exception),
+            "error": "Проверьте отмеченные поля.",
+            "code": "validation_error",
+            "errors": errors,
+            "non_field_errors": non_field_errors,
         }
-        if hasattr(exception, "message_dict"):
-            payload["errors"] = exception.message_dict
         return JsonResponse(payload, status=400)
+
+    @staticmethod
+    def _validation_items(field_errors):
+        items = []
+        for error in field_errors:
+            message = getattr(error, "message", str(error))
+            params = getattr(error, "params", None) or {}
+            try:
+                message = message % params
+            except (KeyError, TypeError, ValueError):
+                pass
+            items.append({
+                "code": getattr(error, "code", None) or "invalid",
+                "message": str(message),
+            })
+        return items

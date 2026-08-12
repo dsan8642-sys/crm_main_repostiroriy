@@ -14,6 +14,8 @@ export function ScheduleColorPicker({
   onChange,
   disabled = false,
   name,
+  id,
+  error,
 }) {
   const generatedName = useId()
   const [expanded, setExpanded] = useState(false)
@@ -23,9 +25,10 @@ export function ScheduleColorPicker({
   const panelId = `${groupName}-options`
 
   return (
-    <fieldset className="ops-schedule-color-picker" disabled={disabled}>
+    <fieldset className="ops-schedule-color-picker" disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={error ? `${panelId}-error` : undefined}>
       <legend>{label}</legend>
       <button
+        id={id}
         aria-controls={panelId}
         aria-expanded={expanded}
         aria-label={`Выбрать цвет. Сейчас: ${selectedOption.label}`}
@@ -74,6 +77,7 @@ export function ScheduleColorPicker({
           </div>
         </div>
       )}
+      {error && <small id={`${panelId}-error`} className="ops-field-error" role="alert">{error}</small>}
     </fieldset>
   )
 }

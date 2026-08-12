@@ -40,7 +40,7 @@ def check_trainer_conflict(trainer, start_at, end_at, exclude_session_id=None):
     qs = qs.filter(start_at__lt=end_at, end_at__gt=start_at)
     if qs.exists():
         raise ScheduleConflict(
-            f"Конфликт: тренер уже занят в интервале "
+            f"Конфликт: тренер {trainer} уже занят в интервале "
             f"{timezone.localtime(start_at):%d.%m %H:%M}–{timezone.localtime(end_at):%H:%M}")
 
 
@@ -115,19 +115,44 @@ def _duration_minutes(*, start_at, end_at=None, duration_minutes=None):
     duration_was_explicit = duration_minutes is not None
     if duration_minutes is None:
         if end_at is None:
-            raise ValidationError("duration_minutes or end_at is required")
+            raise ValidationError({
+                "duration_minutes": ValidationError(
+                    "Укажите длительность занятия.", code="required")})
         duration_minutes = round((end_at - start_at).total_seconds() / 60)
+    if isinstance(duration_minutes, bool) or (
+            isinstance(duration_minutes, float)
+            and not duration_minutes.is_integer()):
+        raise ValidationError({
+            "duration_minutes": ValidationError(
+                "Длительность должна быть целым числом минут.",
+                code="invalid_integer",
+            )
+        })
     try:
         duration_minutes = int(duration_minutes)
     except (TypeError, ValueError) as exc:
-        raise ValidationError("duration_minutes must be an integer") from exc
+        raise ValidationError({
+            "duration_minutes": ValidationError(
+                "Длительность должна быть целым числом минут.",
+                code="invalid_integer",
+            )
+        }) from exc
     if not 15 <= duration_minutes <= 480 or duration_minutes % 5:
-        raise ValidationError(
-            "duration_minutes must be between 15 and 480 in five-minute increments")
+        raise ValidationError({
+            "duration_minutes": ValidationError(
+                "Длительность должна быть от 15 до 480 минут с шагом 5 минут.",
+                code="invalid_step",
+            )
+        })
     if end_at is not None and duration_was_explicit:
         expected_end = start_at + timedelta(minutes=duration_minutes)
         if end_at != expected_end:
-            raise ValidationError("end_at conflicts with duration_minutes")
+            raise ValidationError({
+                "duration_minutes": ValidationError(
+                    "Длительность не совпадает со временем окончания.",
+                    code="conflict",
+                )
+            })
     return duration_minutes
 
 
@@ -163,9 +188,15 @@ def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, loc
         try:
             price_minor = int(price_minor)
         except (TypeError, ValueError) as exc:
-            raise ValidationError("price_minor must be an integer") from exc
+            raise ValidationError({
+                "price_minor": ValidationError(
+                    "Укажите корректную цену.", code="invalid_integer"),
+            }) from exc
         if price_minor < 0:
-            raise ValidationError("price_minor cannot be negative")
+            raise ValidationError({
+                "price_minor": ValidationError(
+                    "Цена не может быть отрицательной.", code="min_value"),
+            })
     currency = (currency or default_currency or settings.DEFAULT_CURRENCY).upper()
     session = Session(
         trainer=trainer, start_at=start_at, end_at=end_at, location=location,
@@ -283,7 +314,12 @@ def commit_copy_period(*, batch_id, actor, selected_indices):
         expires_at__gt=timezone.now(),
     ).first()
     if batch is None:
-        raise ValidationError("Schedule batch не найден, истёк или уже применён")
+        raise ValidationError({
+            "batch_id": ValidationError(
+                "Пакет копирования не найден, истёк или уже применён.",
+                code="invalid_choice",
+            ),
+        })
     params = dict(batch.input_data)
     for key in ("source_from", "source_to", "target_from", "target_to"):
         params[key] = datetime.fromisoformat(params[key]).date()
@@ -291,7 +327,10 @@ def commit_copy_period(*, batch_id, actor, selected_indices):
     selected = {int(index) for index in selected_indices}
     available = {row["index"] for row in current_rows}
     if not selected or selected - available:
-        raise ValidationError("Выбраны неизвестные строки schedule batch")
+        raise ValidationError({
+            "selected_indices": ValidationError(
+                "Выбраны неизвестные занятия.", code="invalid_choice"),
+        })
     created = []
     skipped = []
     for row in current_rows:

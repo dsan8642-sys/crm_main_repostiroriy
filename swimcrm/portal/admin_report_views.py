@@ -25,9 +25,20 @@ def admin_debtors(request):
 @require_GET
 def admin_upcoming(request):
     _admin_required(request)
-    within_days = int(request.GET.get("within_days", "7"))
-    min_sessions = request.GET.get("min_sessions")
-    min_sessions = int(min_sessions) if min_sessions not in (None, "") else None
+    within_days = _required_int(
+        request.GET.get("within_days", "7"), "within_days")
+    min_sessions_value = request.GET.get("min_sessions")
+    min_sessions = (
+        _required_int(min_sessions_value, "min_sessions")
+        if min_sessions_value not in (None, "") else None)
+    if within_days < 0:
+        raise _field_validation_error(
+            "within_days", "Укажите неотрицательное число дней.",
+            code="min_value")
+    if min_sessions is not None and min_sessions < 0:
+        raise _field_validation_error(
+            "min_sessions", "Укажите неотрицательное число занятий.",
+            code="min_value")
     return JsonResponse({"upcoming": [{
         "student": _student_payload(row.student),
         "subscription": _subscription_payload(row.subscription),
@@ -42,7 +53,18 @@ def admin_income_report(request):
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     if not date_from or not date_to:
-        raise ValidationError("date_from Рё date_to РѕР±СЏР·Р°С‚РµР»СЊРЅС‹")
+        missing = {}
+        if not date_from:
+            missing["date_from"] = ValidationError(
+                "Укажите начальную дату.", code="required")
+        if not date_to:
+            missing["date_to"] = ValidationError(
+                "Укажите конечную дату.", code="required")
+        raise ValidationError(missing)
+    if date_to < date_from:
+        raise _field_validation_error(
+            "date_to", "Конечная дата не может быть раньше начальной.",
+            code="invalid_range")
     currency = request.GET.get("currency", "PLN")
     total = income_for_period(date_from, date_to, currency)
     return JsonResponse({
@@ -60,7 +82,9 @@ def admin_income_report(request):
 def admin_export(request, entity, fmt):
     _admin_required(request)
     if fmt not in {"xlsx", "csv"}:
-        raise ValidationError("fmt РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ xlsx РёР»Рё csv")
+        raise _field_validation_error(
+            "fmt", "Формат должен быть CSV или XLSX.",
+            code="invalid_choice")
     filename, content = export_entity(entity, fmt)
     content_type = "text/csv; charset=utf-8" if fmt == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     response = HttpResponse(content, content_type=content_type)

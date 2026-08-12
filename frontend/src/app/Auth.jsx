@@ -1,5 +1,16 @@
 import React, { useState } from 'react'
 import { api } from '../api.js'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from './formErrors.js'
+
+const AUTH_FIELD_MAP = { activation_token: 'activationToken' }
+const AUTH_FIELD_IDS = {
+  login: 'auth-login', activationToken: 'auth-activation-token', password: 'auth-password',
+}
 
 function EyeIcon({ size = 18 }) {
   return (
@@ -32,14 +43,24 @@ export function LoginScreen({ design, apiState, onLogin }) {
   const [activationMode, setActivationMode] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState({})
   const [message, setMessage] = useState('')
 
   async function submit(event) {
     event.preventDefault()
     setError('')
+    setFieldErrors({})
     setMessage('')
-    if (activationMode && password.length < 8) {
-      setError('Пароль должен содержать минимум 8 символов.')
+    const nextErrors = {}
+    if (activationMode && !activationToken.trim()) nextErrors.activationToken = 'Укажите одноразовый код доступа.'
+    if (!activationMode && !loginValue.trim()) nextErrors.login = 'Укажите логин, email или телефон.'
+    if (!password) nextErrors.password = activationMode ? 'Укажите новый пароль.' : 'Укажите пароль.'
+    if (activationMode && password && password.length < 8) {
+      nextErrors.password = 'Пароль должен содержать минимум 8 символов.'
+    }
+    if (Object.keys(nextErrors).length) {
+      setFieldErrors(nextErrors)
+      focusFirstFieldError(nextErrors, AUTH_FIELD_IDS)
       return
     }
     setBusy(true)
@@ -56,7 +77,12 @@ export function LoginScreen({ design, apiState, onLogin }) {
         await onLogin({ login: loginValue, password })
       }
     } catch (err) {
-      setError(err.message || (activationMode ? 'Не удалось активировать доступ' : 'Не удалось войти'))
+      const nextFieldErrors = fieldErrorsFromApi(err, AUTH_FIELD_MAP)
+      setFieldErrors(nextFieldErrors)
+      setError(formErrorMessage(
+        err, activationMode ? 'Не удалось активировать доступ.' : 'Не удалось войти.',
+      ) || '')
+      focusFirstFieldError(nextFieldErrors, AUTH_FIELD_IDS)
     } finally {
       setBusy(false)
     }
@@ -76,22 +102,24 @@ export function LoginScreen({ design, apiState, onLogin }) {
         )}
         {!activationMode && (
           <label style={{ display: 'grid', gap: 6 }}>
-            <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Логин или email</span>
-            <input className="input" autoComplete="username" value={loginValue} onChange={(event) => setLoginValue(event.target.value)} />
+            <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Логин, email или телефон</span>
+            <input id={AUTH_FIELD_IDS.login} className="input" autoComplete="username" value={loginValue} aria-invalid={Boolean(fieldErrors.login)} aria-describedby={fieldErrors.login ? `${AUTH_FIELD_IDS.login}-error` : undefined} onChange={(event) => { setLoginValue(event.target.value); setFieldErrors((current) => clearFieldError(current, 'login')) }} />
+            {fieldErrors.login && <small id={`${AUTH_FIELD_IDS.login}-error`} className="ops-field-error" role="alert">{fieldErrors.login}</small>}
           </label>
         )}
         {activationMode && (
           <label style={{ display: 'grid', gap: 6 }}>
             <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Одноразовый код доступа</span>
-            <input className="input" autoComplete="one-time-code" value={activationToken} onChange={(event) => setActivationToken(event.target.value)} />
+            <input id={AUTH_FIELD_IDS.activationToken} className="input" autoComplete="one-time-code" value={activationToken} aria-invalid={Boolean(fieldErrors.activationToken)} aria-describedby={fieldErrors.activationToken ? `${AUTH_FIELD_IDS.activationToken}-error` : undefined} onChange={(event) => { setActivationToken(event.target.value); setFieldErrors((current) => clearFieldError(current, 'activationToken')) }} />
+            {fieldErrors.activationToken && <small id={`${AUTH_FIELD_IDS.activationToken}-error`} className="ops-field-error" role="alert">{fieldErrors.activationToken}</small>}
           </label>
         )}
         <label style={{ display: 'grid', gap: 6 }}>
           <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{activationMode ? 'Новый пароль' : 'Пароль'}</span>
           <div style={{ position: 'relative', display: 'flex' }}>
-            <input className="input" autoComplete={activationMode ? 'new-password' : 'current-password'}
+            <input id={AUTH_FIELD_IDS.password} className="input" autoComplete={activationMode ? 'new-password' : 'current-password'}
               type={showPassword ? 'text' : 'password'} style={{ width: '100%', paddingRight: 40 }}
-              value={password} onChange={(event) => setPassword(event.target.value)} />
+              value={password} aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? `${AUTH_FIELD_IDS.password}-error` : undefined} onChange={(event) => { setPassword(event.target.value); setFieldErrors((current) => clearFieldError(current, 'password')) }} />
             <button type="button" onClick={() => setShowPassword((value) => !value)}
               aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
               title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
@@ -101,6 +129,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>
+          {fieldErrors.password && <small id={`${AUTH_FIELD_IDS.password}-error`} className="ops-field-error" role="alert">{fieldErrors.password}</small>}
           {activationMode && <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Минимум 8 символов.</span>}
         </label>
         <Button type="submit" loading={busy}
@@ -108,7 +137,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
           <icons.Logout size={16} style={{ transform: 'rotate(180deg)' }} />
           {activationMode ? 'Установить новый пароль' : 'Войти'}
         </Button>
-        <button type="button" className="ops-link-button" onClick={() => { setActivationMode((value) => !value); setError(''); setMessage('') }}>
+        <button type="button" className="ops-link-button" onClick={() => { setActivationMode((value) => !value); setError(''); setFieldErrors({}); setMessage('') }}>
           {activationMode ? 'Вернуться ко входу' : 'У меня есть код доступа'}
         </button>
       </form>

@@ -6,9 +6,13 @@ def admin_participant_subscriptions(request, participant_id):
     user = _admin_required(request)
     participant = get_object_or_404(Student.objects.select_related("parent", "group"), pk=participant_id)
     if request.method == "POST":
-        _require_active_participant(participant, "receive new subscriptions")
+        _require_active_participant(
+            participant, "receive new subscriptions", field="participant_id")
         data = _json_body(request)
-        subscription_type = get_object_or_404(SubscriptionType, pk=data.get("subscription_type_id"))
+        subscription_type = _object_for_field(
+            SubscriptionType.objects.filter(is_active=True),
+            data.get("subscription_type_id"), "subscription_type_id",
+            "тип абонемента")
         start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
         with transaction.atomic():
             subscription = create_subscription(
@@ -37,7 +41,9 @@ def admin_subscription_detail(request, subscription_id):
         data = _json_body(request)
         status = data.get("status")
         if status not in SubscriptionStatus.values:
-            raise ValidationError("invalid subscription status")
+            raise _field_validation_error(
+                "status", "Выберите допустимый статус абонемента.",
+                code="invalid_choice")
         subscription.status = status
         subscription.save(update_fields=["status"])
         audit(user, "subscription.updated", subscription, {"status": status})
@@ -54,7 +60,10 @@ def admin_subscription_renew(request, subscription_id):
     data = _json_body(request)
     subscription_type = subscription.subscription_type
     if data.get("subscription_type_id"):
-        subscription_type = get_object_or_404(SubscriptionType, pk=data.get("subscription_type_id"))
+        subscription_type = _object_for_field(
+            SubscriptionType.objects.filter(is_active=True),
+            data.get("subscription_type_id"), "subscription_type_id",
+            "тип абонемента")
     start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
     with transaction.atomic():
         new_subscription = renew_subscription(
@@ -78,10 +87,25 @@ def admin_subscription_freeze(request, subscription_id):
         pk=subscription_id)
     _require_active_participant(subscription.student, "freeze subscriptions")
     data = _json_body(request)
+    start_date = _parse_date(data.get("start_date"), "start_date")
+    end_date = _parse_date(data.get("end_date"), "end_date")
+    missing = {}
+    if start_date is None:
+        missing["start_date"] = ValidationError(
+            "Укажите дату начала заморозки.", code="required")
+    if end_date is None:
+        missing["end_date"] = ValidationError(
+            "Укажите дату окончания заморозки.", code="required")
+    if missing:
+        raise ValidationError(missing)
+    if end_date < start_date:
+        raise _field_validation_error(
+            "end_date", "Дата окончания не может быть раньше даты начала.",
+            code="invalid_range")
     freeze = freeze_subscription(
         subscription=subscription,
-        start_date=_parse_date(data.get("start_date"), "start_date"),
-        end_date=_parse_date(data.get("end_date"), "end_date"),
+        start_date=start_date,
+        end_date=end_date,
         reason=data.get("reason", "") or "",
         created_by=user,
     )
@@ -103,9 +127,10 @@ def admin_subscription_adjust(request, subscription_id):
         pk=subscription_id)
     _require_active_participant(subscription.student, "receive subscription adjustments")
     data = _json_body(request)
+    delta = _required_int(data.get("delta"), "delta")
     entry = manual_adjust(
         subscription=subscription,
-        delta=int(data.get("delta")),
+        delta=delta,
         note=data.get("note", "") or "",
         created_by=user,
     )

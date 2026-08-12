@@ -35,7 +35,9 @@ def _optional_int_query(request, name):
     try:
         return int(raw)
     except (TypeError, ValueError) as exc:
-        raise ValidationError(f"{name} must be an integer") from exc
+        raise ValidationError({
+            name: ValidationError("Введите целое число.", code="invalid"),
+        }) from exc
 @require_http_methods(["GET", "POST"])
 def admin_settings_locations(request):
     require_admin_settings(request)

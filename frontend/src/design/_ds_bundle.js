@@ -504,13 +504,15 @@ __ds_scope.Button = Button;
 
 // components/forms/Checkbox.jsx
 try { (() => {
-function Checkbox({ label, checked = false, indeterminate = false, disabled = false, onChange, id, style, ...rest }) {
+function Checkbox({ label, checked = false, indeterminate = false, disabled = false, onChange, id, error, style, ...rest }) {
   const ref = React.useRef(null);
   React.useEffect(() => {
     if (ref.current) ref.current.indeterminate = indeterminate && !checked;
   }, [indeterminate, checked]);
   const on = checked || indeterminate;
-  return /* @__PURE__ */ React.createElement(
+  const inputId = id || (label ? `check-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, /* @__PURE__ */ React.createElement(
     "label",
     {
       style: {
@@ -534,7 +536,7 @@ function Checkbox({ label, checked = false, indeterminate = false, disabled = fa
           height: 17,
           flexShrink: 0,
           borderRadius: "var(--radius-xs)",
-          border: `1.5px solid ${on ? "var(--primary)" : "var(--border-strong)"}`,
+          border: `1.5px solid ${error ? "var(--red-500)" : on ? "var(--primary)" : "var(--border-strong)"}`,
           background: on ? "var(--primary)" : "var(--surface-card)",
           transition: "var(--transition-control)",
           display: "inline-flex",
@@ -552,14 +554,16 @@ function Checkbox({ label, checked = false, indeterminate = false, disabled = fa
           checked,
           disabled,
           onChange,
-          id,
+          id: inputId,
+          "aria-invalid": error ? true : rest["aria-invalid"],
+          "aria-describedby": error ? errorId : rest["aria-describedby"],
           style: { position: "absolute", opacity: 0, width: "100%", height: "100%", margin: 0, cursor: "inherit" },
           ...rest
         }
       )
     ),
     label && /* @__PURE__ */ React.createElement("span", null, label)
-  );
+  ), error && /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error));
 }
 __ds_scope.Checkbox = Checkbox;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Checkbox.jsx", error: String((e && e.message) || e) }); }
@@ -628,6 +632,7 @@ function Input({
 }) {
   const heights = { sm: "var(--control-h-sm)", md: "var(--control-h-md)", lg: "var(--control-h-lg)" };
   const inputId = id || (label ? `in-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
   const hasAffix = prefix || suffix;
   const field = /* @__PURE__ */ React.createElement(
     "div",
@@ -665,7 +670,9 @@ function Input({
           color: "var(--text-strong)",
           ...style
         },
-        ...rest
+        ...rest,
+        "aria-invalid": error ? true : rest["aria-invalid"],
+        "aria-describedby": error ? errorId : rest["aria-describedby"]
       }
     ),
     suffix && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--text-faint)", display: "inline-flex", fontSize: "var(--fs-sm)" } }, suffix)
@@ -691,9 +698,11 @@ function Input({
         boxShadow: error ? "0 0 0 3px rgba(214,63,54,0.14)" : "none",
         ...style
       },
-      ...rest
+      ...rest,
+      "aria-invalid": error ? true : rest["aria-invalid"],
+      "aria-describedby": error ? errorId : rest["aria-describedby"]
     }
-  ), error ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
+  ), error ? /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
 }
 const labelStyle = {
   font: "var(--text-label)",
@@ -766,6 +775,7 @@ const { labelStyle } = __ds_scope;
 function Select({ label, hint, error, required = false, size = "md", children, id, style, containerStyle, ...rest }) {
   const heights = { sm: "var(--control-h-sm)", md: "var(--control-h-md)", lg: "var(--control-h-lg)" };
   const inputId = id || (label ? `sel-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5, ...containerStyle } }, label && /* @__PURE__ */ React.createElement("label", { htmlFor: inputId, style: labelStyle }, label, required && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red-500)", marginLeft: 3 } }, "*")), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "flex" } }, /* @__PURE__ */ React.createElement(
     "select",
     {
@@ -789,7 +799,9 @@ function Select({ label, hint, error, required = false, size = "md", children, i
         transition: "var(--transition-control)",
         ...style
       },
-      ...rest
+      ...rest,
+      "aria-invalid": error ? true : rest["aria-invalid"],
+      "aria-describedby": error ? errorId : rest["aria-describedby"]
     },
     children
   ), /* @__PURE__ */ React.createElement(
@@ -802,15 +814,17 @@ function Select({ label, hint, error, required = false, size = "md", children, i
       style: { position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-muted)" }
     },
     /* @__PURE__ */ React.createElement("path", { d: "M6 9l6 6 6-6", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })
-  )), error ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
+  )), error ? /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
 }
 __ds_scope.Select = Select;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Select.jsx", error: String((e && e.message) || e) }); }
 
 // components/forms/Switch.jsx
 try { (() => {
-function Switch({ checked = false, disabled = false, onChange, label, id, style, ...rest }) {
-  return /* @__PURE__ */ React.createElement(
+function Switch({ checked = false, disabled = false, onChange, label, id, error, style, ...rest }) {
+  const inputId = id || (label ? `switch-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, /* @__PURE__ */ React.createElement(
     "label",
     {
       style: {
@@ -861,14 +875,16 @@ function Switch({ checked = false, disabled = false, onChange, label, id, style,
           checked,
           disabled,
           onChange,
-          id,
+          id: inputId,
+          "aria-invalid": error ? true : rest["aria-invalid"],
+          "aria-describedby": error ? errorId : rest["aria-describedby"],
           style: { position: "absolute", opacity: 0, width: "100%", height: "100%", margin: 0, cursor: "inherit" },
           ...rest
         }
       )
     ),
     label && /* @__PURE__ */ React.createElement("span", null, label)
-  );
+  ), error && /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error));
 }
 __ds_scope.Switch = Switch;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Switch.jsx", error: String((e && e.message) || e) }); }
@@ -878,6 +894,7 @@ try { (() => {
 const { labelStyle } = __ds_scope;
 function Textarea({ label, hint, error, required = false, rows = 3, id, style, containerStyle, ...rest }) {
   const inputId = id || (label ? `ta-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5, ...containerStyle } }, label && /* @__PURE__ */ React.createElement("label", { htmlFor: inputId, style: labelStyle }, label, required && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red-500)", marginLeft: 3 } }, "*")), /* @__PURE__ */ React.createElement(
     "textarea",
     {
@@ -900,9 +917,11 @@ function Textarea({ label, hint, error, required = false, rows = 3, id, style, c
         transition: "var(--transition-control)",
         ...style
       },
-      ...rest
+      ...rest,
+      "aria-invalid": error ? true : rest["aria-invalid"],
+      "aria-describedby": error ? errorId : rest["aria-describedby"]
     }
-  ), error ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
+  ), error ? /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
 }
 __ds_scope.Textarea = Textarea;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Textarea.jsx", error: String((e && e.message) || e) }); }

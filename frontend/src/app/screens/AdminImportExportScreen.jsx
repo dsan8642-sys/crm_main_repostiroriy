@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api, downloadFile } from '../../api.js'
+import { api, apiErrorMessage, downloadFile } from '../../api.js'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from '../formErrors.js'
 
 const DATASETS = [
   { kind: 'trainers', label: 'Тренеры', help: 'Сначала импортируйте тренеров.' },
@@ -44,7 +50,13 @@ function useImportTab(kind, effectMode, reloadRoleData) {
   const [meta, setMeta] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState({})
   const [importMode, setImportMode] = useState('create_only')
+
+  function updateSelected(value) {
+    setSelected(value)
+    setFieldErrors((current) => clearFieldError(current, 'selectedIndices'))
+  }
 
   function applyPreview(payload) {
     const nextRows = payload.rows || []
@@ -67,8 +79,11 @@ function useImportTab(kind, effectMode, reloadRoleData) {
   }
 
   async function runPreview(targetFile = file, targetMapping = mapping) {
-    if (!targetFile) return
-    setBusy(true); setError(''); setSummary(null)
+    if (!targetFile) {
+      setFieldErrors({ file: 'Выберите CSV или XLSX-файл.' })
+      return
+    }
+    setBusy(true); setError(''); setFieldErrors({}); setSummary(null)
     try {
       const form = new FormData()
       form.set('file', targetFile)
@@ -77,7 +92,17 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       if (kind === 'groups') form.set('import_mode', importMode)
       applyPreview(await api.postForm(`/api/admin/import/${kind}/preview/`, form))
     } catch (err) {
-      setError(err.payload?.error || err.message)
+      const nextErrors = fieldErrorsFromApi(err, {
+        file: 'file', mapping: 'mapping', effect_mode: 'effectMode', import_mode: 'importMode',
+      })
+      setFieldErrors(nextErrors)
+      setError(formErrorMessage(err, 'Не удалось проверить файл.') || '')
+      focusFirstFieldError(nextErrors, {
+        file: `admin-import-${kind}-file`,
+        mapping: `admin-import-${kind}-mapping-0`,
+        effectMode: 'admin-import-attendance-effect-mode',
+        importMode: `admin-import-${kind}-mode`,
+      })
       setRows([]); setBatchId(null); setSelected([])
     } finally {
       setBusy(false)
@@ -85,7 +110,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
   }
 
   async function selectFile(nextFile) {
-    setFile(nextFile); setRows([]); setBatchId(null); setSummary(null); setError('')
+    setFile(nextFile); setRows([]); setBatchId(null); setSummary(null); setError(''); setFieldErrors({})
     setHeaders([]); setMapping({}); setFieldOptions([]); setMeta({}); setSelected([])
     if (nextFile) await runPreview(nextFile, {})
   }
@@ -102,7 +127,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       }
       return payload.row
     } catch (err) {
-      setError(err.payload?.error || err.message)
+      setError(apiErrorMessage(err, 'Не удалось сохранить строку импорта.'))
     } finally {
       setBusy(false)
     }
@@ -117,7 +142,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       setCounts(payload.counts || {})
       if (patch.excluded) setSelected([])
     } catch (err) {
-      setError(err.payload?.error || err.message)
+      setError(apiErrorMessage(err, 'Не удалось изменить выбранные строки.'))
     } finally {
       setBusy(false)
     }
@@ -128,6 +153,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
     const selectedIndices = selected.filter((index) => available.has(index))
     if (!batchId || !selectedIndices.length) return
     setBusy(true); setError('')
+    setFieldErrors((current) => clearFieldError(current, 'selectedIndices'))
     try {
       const payload = await api.post(`/api/admin/import/${kind}/commit/`, {
         batch_id: batchId,
@@ -138,22 +164,36 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       setRows([]); setBatchId(null); setFile(null); setHeaders([]); setSelected([])
       if (reloadRoleData) await reloadRoleData('admin')
     } catch (err) {
-      setError(err.payload?.error || err.message)
+      const nextErrors = fieldErrorsFromApi(err, {
+        selected_indices: 'selectedIndices',
+        confirm_financial_effects: 'confirmFinancialEffects',
+        approve_possible_duplicates: 'possibleDuplicates',
+      })
+      delete nextErrors.batch_id
+      setFieldErrors((current) => ({ ...current, ...nextErrors }))
+      setError(err.fieldErrors?.batch_id
+        ? apiErrorMessage(err, 'Предварительная проверка импорта устарела. Выполните её заново.')
+        : formErrorMessage(err, 'Не удалось выполнить импорт.') || '')
+      focusFirstFieldError(nextErrors, {
+        selectedIndices: `admin-import-${kind}-selected-indices`,
+        confirmFinancialEffects: 'admin-import-attendance-financial-confirmation',
+        possibleDuplicates: `admin-import-${kind}-possible-duplicates`,
+      })
     } finally {
       setBusy(false)
     }
   }
 
   function toggle(index) {
-    setSelected((current) => current.includes(index)
+    updateSelected((current) => current.includes(index)
       ? current.filter((item) => item !== index)
       : [...current, index])
   }
 
   return {
-    kind, file, headers, mapping, setMapping, fieldOptions, rows, selected, setSelected,
+    kind, file, headers, mapping, setMapping, fieldOptions, rows, selected, setSelected: updateSelected,
     batchId, counts, summary, meta, busy, error, setError, selectFile, runPreview,
-    patchRow, bulkPatch, commit, toggle, importMode, setImportMode,
+    patchRow, bulkPatch, commit, toggle, importMode, setImportMode, fieldErrors, setFieldErrors,
   }
 }
 
@@ -183,7 +223,7 @@ function ClientSearch({ Button, disabled, onChoose }) {
       const payload = await api.get(`/api/admin/import/client-search/?q=${encodeURIComponent(query.trim())}`)
       setResults(payload.clients || [])
     } catch (err) {
-      setError(err.payload?.error || err.message)
+      setError(apiErrorMessage(err, 'Не удалось найти клиента.'))
     }
   }
 
@@ -317,15 +357,17 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       {state.kind === 'attendance' && financial.controls}
       {state.kind === 'groups' && <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
         <span className="eyebrow">Безопасный режим конфликта</span>
-        <select value={state.importMode} disabled={Boolean(state.file)}
-          onChange={(event) => state.setImportMode(event.target.value)}>
+        <select id={`admin-import-${state.kind}-mode`} value={state.importMode} disabled={Boolean(state.file)} aria-invalid={Boolean(state.fieldErrors.importMode)} aria-describedby={state.fieldErrors.importMode ? `admin-import-${state.kind}-mode-error` : undefined}
+          onChange={(event) => { state.setImportMode(event.target.value); state.setFieldErrors((current) => clearFieldError(current, 'importMode')) }}>
           <option value="create_only">Создать только новые, существующие пропустить</option>
           <option value="update_existing">Обновить только существующие</option>
           <option value="upsert">Создать новые или обновить существующие</option>
         </select>
+        {state.fieldErrors.importMode && <small id={`admin-import-${state.kind}-mode-error`} className="ops-field-error" role="alert">{state.fieldErrors.importMode}</small>}
       </label>}
-      <input type="file" accept=".xlsx,.xlsm,.csv" disabled={state.busy}
-        onChange={(event) => state.selectFile(event.target.files?.[0] || null)} />
+      <input id={`admin-import-${state.kind}-file`} type="file" accept=".xlsx,.xlsm,.csv" disabled={state.busy} aria-invalid={Boolean(state.fieldErrors.file)} aria-describedby={state.fieldErrors.file ? `admin-import-${state.kind}-file-error` : undefined}
+        onChange={(event) => { state.setFieldErrors((current) => clearFieldError(current, 'file')); state.selectFile(event.target.files?.[0] || null) }} />
+      {state.fieldErrors.file && <small id={`admin-import-${state.kind}-file-error`} className="ops-field-error" role="alert">{state.fieldErrors.file}</small>}
     </div>
 
     {state.error && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
@@ -340,12 +382,13 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       <div className="eyebrow">Сопоставление колонок</div>
       <div className="ops-form-grid" style={{ marginTop: 8 }}>
         {state.headers.filter((header) => !['schema_version', 'exported_at', 'source_system', 'entity_type'].includes(header))
-          .map((header) => <label key={header}>
+          .map((header, index) => <label key={header}>
             <span>{header}{state.meta.sourceSamples?.[header]
               ? <small className="muted"> · пример: {state.meta.sourceSamples[header]}</small>
               : null}</span>
-            <select value={state.mapping[header] || ''}
-              onChange={(event) => state.setMapping({ ...state.mapping, [header]: event.target.value })}>
+            <select id={`admin-import-${state.kind}-mapping-${index}`} value={state.mapping[header] || ''}
+              aria-invalid={Boolean(state.fieldErrors.mapping)}
+              onChange={(event) => { state.setMapping({ ...state.mapping, [header]: event.target.value }); state.setFieldErrors((current) => clearFieldError(current, 'mapping')) }}>
               <option value="">— не использовать —</option>
               {state.fieldOptions.map((field) => <option key={field.key} value={field.key}>
                 {field.label}{field.required ? ' *' : ''}
@@ -353,6 +396,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
             </select>
           </label>)}
       </div>
+      {state.fieldErrors.mapping && <small className="ops-field-error" role="alert">{state.fieldErrors.mapping}</small>}
       {state.meta.unusedHeaders?.length > 0 && <p className="muted">
         Неиспользуемые колонки: {state.meta.unusedHeaders.join(', ')}
       </p>}
@@ -407,17 +451,25 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
 
       {state.kind === 'payments' && hasPossibleDuplicates && <label className="card card-pad"
         style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <input type="checkbox" checked={possibleDuplicates} onChange={(event) => onDuplicates(event.target.checked)} />
-        <span>Я проверил вероятные дубликаты и явно разрешаю выбранные строки без Reference ID.</span>
+        <input id={`admin-import-${state.kind}-possible-duplicates`} type="checkbox" checked={possibleDuplicates}
+          aria-invalid={Boolean(state.fieldErrors.possibleDuplicates)}
+          aria-describedby={state.fieldErrors.possibleDuplicates ? `admin-import-${state.kind}-possible-duplicates-error` : undefined}
+          onChange={(event) => { onDuplicates(event.target.checked); state.setFieldErrors((current) => clearFieldError(current, 'possibleDuplicates')) }} />
+        <span>Я проверил вероятные дубликаты и явно разрешаю выбранные строки без Reference ID.
+          {state.fieldErrors.possibleDuplicates && <small id={`admin-import-${state.kind}-possible-duplicates-error`} className="ops-field-error" role="alert">{state.fieldErrors.possibleDuplicates}</small>}
+        </span>
       </label>}
       {state.kind === 'attendance' && financial.warning}
       <div className="ops-button-row">
-        <Button variant="primary" loading={state.busy} disabled={!canCommit}
+        <Button id={`admin-import-${state.kind}-selected-indices`} variant="primary" loading={state.busy} disabled={!canCommit}
+          aria-invalid={Boolean(state.fieldErrors.selectedIndices)}
+          aria-describedby={state.fieldErrors.selectedIndices ? `admin-import-${state.kind}-selected-indices-error` : undefined}
           onClick={() => state.commit({
             ...(state.kind === 'payments' ? { approve_possible_duplicates: possibleDuplicates } : {}),
             ...(state.kind === 'attendance' && financial.required ? { confirm_financial_effects: true } : {}),
           })}>Подтвердить импорт выбранных строк</Button>
       </div>
+      {state.fieldErrors.selectedIndices && <small id={`admin-import-${state.kind}-selected-indices-error`} className="ops-field-error" role="alert">{state.fieldErrors.selectedIndices}</small>}
     </>}
   </div>
 }
@@ -448,7 +500,7 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
         const payload = await api.get('/api/admin/system/imports/')
         setBatches(payload.batches || [])
       } catch (err) {
-        setBatchesError(err.payload?.error || err.message)
+        setBatchesError(apiErrorMessage(err, 'Не удалось загрузить историю импортов.'))
       }
     }
 
@@ -466,7 +518,7 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
         })
         await loadBatches()
       } catch (err) {
-        setBatchesError(err.payload?.error || err.message)
+        setBatchesError(apiErrorMessage(err, 'Не удалось откатить импорт.'))
       }
     }
 
@@ -475,7 +527,7 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
       try {
         await downloadFile(`/api/admin/export/${entity}/${fmt}/`, `${entity}.${fmt}`)
       } catch (err) {
-        setExportError(err.payload?.error || err.message)
+        setExportError(apiErrorMessage(err, 'Не удалось подготовить экспорт.'))
       } finally {
         setExportBusy(null)
       }
@@ -486,17 +538,24 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
       confirmed: financialConfirmed,
       controls: <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
         <span className="eyebrow">Режим импорта</span>
-        <select value={attendanceEffectMode} disabled={Boolean(attendance.file)}
-          onChange={(event) => { setAttendanceEffectMode(event.target.value); setFinancialConfirmed(false) }}>
+        <select id="admin-import-attendance-effect-mode" value={attendanceEffectMode} disabled={Boolean(attendance.file)}
+          aria-invalid={Boolean(attendance.fieldErrors.effectMode)}
+          aria-describedby={attendance.fieldErrors.effectMode ? 'admin-import-attendance-effect-mode-error' : undefined}
+          onChange={(event) => { setAttendanceEffectMode(event.target.value); setFinancialConfirmed(false); attendance.setFieldErrors((current) => clearFieldError(current, 'effectMode')) }}>
           <option value="history_only">Только история, без списаний и начислений</option>
           <option value="apply_financial">Применить списания или начисления</option>
         </select>
+        {attendance.fieldErrors.effectMode && <small id="admin-import-attendance-effect-mode-error" className="ops-field-error" role="alert">{attendance.fieldErrors.effectMode}</small>}
       </label>,
       warning: attendanceEffectMode === 'apply_financial'
         ? <label className="card card-pad" style={{ display: 'flex', gap: 10 }}>
-          <input type="checkbox" checked={financialConfirmed}
-            onChange={(event) => setFinancialConfirmed(event.target.checked)} />
-          <span>Я подтверждаю финансовые последствия для выбранных строк.</span>
+          <input id="admin-import-attendance-financial-confirmation" type="checkbox" checked={financialConfirmed}
+            aria-invalid={Boolean(attendance.fieldErrors.confirmFinancialEffects)}
+            aria-describedby={attendance.fieldErrors.confirmFinancialEffects ? 'admin-import-attendance-financial-confirmation-error' : undefined}
+            onChange={(event) => { setFinancialConfirmed(event.target.checked); attendance.setFieldErrors((current) => clearFieldError(current, 'confirmFinancialEffects')) }} />
+          <span>Я подтверждаю финансовые последствия для выбранных строк.
+            {attendance.fieldErrors.confirmFinancialEffects && <small id="admin-import-attendance-financial-confirmation-error" className="ops-field-error" role="alert">{attendance.fieldErrors.confirmFinancialEffects}</small>}
+          </span>
         </label>
         : <Banner tone="info">Безопасный режим: история без изменений баланса.</Banner>,
     }

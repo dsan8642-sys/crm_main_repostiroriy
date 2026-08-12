@@ -4,6 +4,7 @@ import { formatTime } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
 
 export function attendanceSessionDisplayStatus(session, now = Date.now()) {
   if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
@@ -34,6 +35,9 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const [detail, setDetail] = useState(null)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
+    const [rowErrors, setRowErrors] = useState({})
+    const [studentError, setStudentError] = useState(null)
+    const [cancelReasonError, setCancelReasonError] = useState(null)
     const [busyId, setBusyId] = useState(null)
     const [loading, setLoading] = useState(false)
     const [cancelReason, setCancelReason] = useState('')
@@ -53,7 +57,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
           if (alive) setDetail(payload)
         })
         .catch((err) => {
-          if (alive) setError(err.message)
+          if (alive) setError(apiErrorMessage(err, 'Не удалось загрузить состав занятия.'))
         })
         .finally(() => {
           if (alive) setLoading(false)
@@ -74,6 +78,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       if (!selectedSessionId) return
       setBusyId(`mark-${row.id}`)
       setError(null)
+      setRowErrors((current) => {
+        const next = { ...current }
+        delete next[row.id]
+        return next
+      })
       try {
         const record = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, {
           student_id: row.id,
@@ -88,7 +97,9 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         setMessage('Посещаемость сохранена.')
         reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const message = apiErrorMessage(err, 'Не удалось сохранить посещаемость.')
+        setRowErrors((current) => ({ ...current, [row.id]: message }))
+        document.querySelector(`#admin-attendance-row-${row.id} button`)?.focus()
       } finally {
         setBusyId(null)
       }
@@ -96,7 +107,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
 
     async function markAllPresent() {
       if (!selectedSessionId || !rows.length) return
-      setBusyId('mark-all'); setError(null)
+      setBusyId('mark-all'); setError(null); setRowErrors({})
       try {
         const payload = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/bulk/`, {
           items: rows.map((row) => ({ student_id: row.id, status: 'present' })),
@@ -105,13 +116,29 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         const byStudent = new Map(records.map((record) => [record.participant_id, record]))
         setDetail((current) => ({ ...current, students: current.students.map((row) => ({ ...row, attendance: byStudent.get(row.id) || row.attendance })) }))
         setMessage(`Отмечены присутствующими: ${records.length}.`)
-      } catch (err) { setError(err.message) } finally { setBusyId(null) }
+      } catch (err) {
+        const nextRowErrors = {}
+        for (const [field, items] of Object.entries(err.fieldErrors || {})) {
+          const match = field.match(/^items\.(\d+)\./)
+          const row = match ? rows[Number(match[1])] : null
+          const message = (Array.isArray(items) ? items : [items])
+            .map((item) => typeof item === 'string' ? item : item?.message)
+            .filter(Boolean).join(' ')
+          if (row && message) nextRowErrors[row.id] = message
+        }
+        setRowErrors(nextRowErrors)
+        if (Object.keys(nextRowErrors).length) {
+          const firstId = Object.keys(nextRowErrors)[0]
+          document.querySelector(`#admin-attendance-row-${firstId} button`)?.focus()
+        } else setError(apiErrorMessage(err, 'Не удалось сохранить посещаемость.'))
+      } finally { setBusyId(null) }
     }
 
     async function addStudent() {
       if (!selectedSessionId || !selectedStudentId) return
       setBusyId('add')
       setError(null)
+      setStudentError(null)
       try {
         const payload = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/participants/`, {
           student_id: selectedStudentId,
@@ -121,7 +148,10 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         setMessage('Участник добавлен в это занятие.')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, { student_id: 'studentId' })
+        setStudentError(nextErrors.studentId || null)
+        setError(formErrorMessage(err, 'Не удалось добавить участника.'))
+        if (nextErrors.studentId) document.getElementById('admin-attendance-add-student')?.focus()
       } finally {
         setBusyId(null)
       }
@@ -137,7 +167,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         setMessage('Участник убран из этого занятия.')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, 'Не удалось убрать участника из занятия.'))
       } finally {
         setBusyId(null)
       }
@@ -147,13 +177,17 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       if (!selectedSessionId) return
       setBusyId('cancel-session')
       setError(null)
+      setCancelReasonError(null)
       try {
         await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/cancel/`, { reason: cancelReason })
         setMessage('Занятие отменено. История не удалена.')
         setCancelReason('')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, { reason: 'reason' })
+        setCancelReasonError(nextErrors.reason || null)
+        setError(formErrorMessage(err, 'Не удалось отменить занятие.'))
+        if (nextErrors.reason) document.getElementById('admin-attendance-cancel-reason')?.focus()
       } finally {
         setBusyId(null)
       }
@@ -241,7 +275,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 <StatusPill status={selectedDisplayStatus} tone={selectedDisplayStatus === 'done' ? 'present' : undefined} size="sm" />
               </div>
             </div>
-            <div className="ops-inline-add"><Input label="Причина отмены или переноса" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>
+            <div className="ops-inline-add"><Input id="admin-attendance-cancel-reason" label="Причина отмены или переноса" value={cancelReason} error={cancelReasonError} onChange={(event) => { setCancelReason(event.target.value); setCancelReasonError(null) }} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>
             {selectedSession?.notes && <div className="ops-inline-note">{selectedSession.notes}</div>}
           </div>
 
@@ -249,9 +283,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
             <div className="eyebrow" style={{ marginBottom: 10 }}>Добавить участника</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end' }}>
               <SearchableSelect
+                inputId="admin-attendance-add-student"
                 label="Клиент / ученик"
                 value={selectedStudentId}
-                onChange={setSelectedStudentId}
+                error={studentError}
+                onChange={(value) => { setSelectedStudentId(value); setStudentError(null) }}
                 options={availableStudents.map((client) => clientSelectOption(client, {
                   description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}`,
                 }))}
@@ -296,7 +332,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 header: 'Посещаемость',
                 width: 340,
                 render: (row) => (
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div id={`admin-attendance-row-${row.id}`} role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {options.map((option) => (
                       <Button
                         key={option.value}
@@ -309,6 +345,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                         {option.label}{option.consumes ? ' -1' : ''}
                       </Button>
                     ))}
+                    {rowErrors[row.id] && <small id={`admin-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
                   </div>
                 ),
               },

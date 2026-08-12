@@ -94,7 +94,12 @@ def freeze_subscription(*, subscription, start_date, end_date, created_by=None, 
 def manual_adjust(*, subscription, delta, created_by=None, note=""):
     """Rule 1: admin correction is a separate ledger row, not an edit."""
     if delta == 0:
-        raise ValidationError("Корректировка на 0 не имеет смысла")
+        raise ValidationError({
+            "delta": ValidationError(
+                "Корректировка не может быть равна нулю.",
+                code="invalid",
+            ),
+        })
     entry = SessionLedgerEntry.objects.create(
         subscription=subscription, delta=delta, reason=LedgerReason.MANUAL,
         created_by=created_by, note=note)

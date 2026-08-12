@@ -237,7 +237,9 @@ def client_create_top_up_request(request):
     student = _student_owned_by_client(account, student_id) if student_id else _default_billing_student_for_client(account)
     file = request.FILES.get("file")
     if file is None:
-        raise ValidationError("Нужно приложить подтверждение банковского перевода")
+        raise _field_validation_error(
+            "file", "Приложите подтверждение банковского перевода.",
+            code="required")
     payment, receipt = create_client_top_up_request(
         student=student,
         account=account,

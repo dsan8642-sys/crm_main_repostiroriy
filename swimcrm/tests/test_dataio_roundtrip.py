@@ -468,7 +468,10 @@ class ImportSchemaValidationTest(TestCase):
             "/api/admin/import/clients/preview/",
             {"file": SimpleUploadedFile(filename, unsupported)})
         self.assertEqual(response.status_code, 400)
-        self.assertIn("schema_version", " ".join(response.json()["error"]))
+        self.assertIn(
+            "schema_version",
+            " ".join(item["message"] for item in response.json()["errors"]["file"]),
+        )
 
     def test_preview_rejects_more_than_row_limit_without_creating_batch(self):
         content = (
@@ -485,5 +488,8 @@ class ImportSchemaValidationTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("5 000 строк", " ".join(response.json()["error"]))
+        self.assertIn(
+            "5 000 строк",
+            " ".join(item["message"] for item in response.json()["errors"]["file"]),
+        )
         self.assertFalse(ImportBatch.objects.exists())
