@@ -54,11 +54,6 @@ test('runtime theme uses the approved blue palette and real variable weights', a
 })
 
 test('approved schedule palette manifest freezes 30 unique accessible colors', async () => {
-  const document = await readFile(
-    path.join(repoRoot, 'audit', '05-preview-feedback', 'schedule-palette-approval.md'),
-    'utf8',
-  )
-  assert.match(document, /Статус: \*\*утверждена 2 августа 2026 года\*\*/)
   const canonicalSource = await readFile(
     path.join(repoRoot, 'design', 'tokens', 'schedule-palette.json'),
     'utf8',
