@@ -41,8 +41,11 @@ from scheduling.models import (Session, SessionParticipant,
                                SessionType, WaitlistEntry, WaitlistStatus)
 from scheduling.services import (ScheduleConflict, check_trainer_conflict,
                                  create_session, delete_session, edit_single_session,
-                                 promote_waitlist_entry,
-                                 session_roster_students)
+                                 promote_waitlist_entry, require_mutable_split_roster,
+                                 split_second_participant,
+                                 session_roster_students, split_roster_student_ids,
+                                 split_roster_students)
+from scheduling.services import sync_split_second_student
 from students.models import Student
 from students.services import ensure_account_holder_participant
 from subscriptions.models import Subscription, SubscriptionStatus
@@ -389,6 +392,45 @@ def _session_payload(session, *, type_color_keys=None):
             "id": session.individual_student_id,
             "full_name": session.individual_student.full_name,
         }
+    roster = []
+    roster_ids = set()
+    if (
+        session.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
+        and session.individual_student_id
+    ):
+        student = session.individual_student
+        roster.append({"id": student.id, "full_name": student.full_name})
+        roster_ids.add(student.id)
+        prefetched = getattr(session, "_prefetched_objects_cache", {}).get("participants")
+        participant_rows = (
+            sorted(
+                (
+                    participant for participant in prefetched
+                    if participant.status == SessionParticipantStatus.ACTIVE
+                ),
+                key=lambda participant: (participant.created_at, participant.id),
+            )
+            if prefetched is not None
+            else session.participants.filter(
+                status=SessionParticipantStatus.ACTIVE,
+            ).select_related("student", "student__parent__user").order_by("created_at", "id")
+        )
+        for participant in participant_rows:
+            if participant.student_id not in roster_ids:
+                roster.append({
+                    "id": participant.student_id,
+                    "full_name": participant.student.full_name,
+                })
+                roster_ids.add(participant.student_id)
+    participants_count = (
+        len(roster)
+        if session.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
+        else _session_roster(session).count()
+    )
+    second_participant = (
+        split_second_participant(session)
+        if session.session_type == SessionType.SPLIT else None
+    )
     return {
         "id": session.id,
         "start_at": timezone.localtime(session.start_at).isoformat(),
@@ -419,7 +461,11 @@ def _session_payload(session, *, type_color_keys=None):
         "max_participants": session.max_participants,
         "price_minor": session.price_minor,
         "currency": session.currency,
-        "participants_count": len(_session_roster(session)),
+        "participants_count": participants_count,
+        "roster": roster,
+        "second_student_id": (
+            second_participant.student_id if second_participant else None
+        ),
         "waitlist_active_count": waitlist_active_count,
         "notes": session.notes,
     }
@@ -555,7 +601,10 @@ def _group_payload(group):
         "default_capacity": group.default_capacity,
         "color_key": stored_schedule_color_key(group.color_key),
         "is_active": group.is_active,
-        "participants_count": group.students.count(),
+        "participants_count": group.students.filter(
+            is_active=True,
+            parent__user__is_active=True,
+        ).count(),
     }
 
 
@@ -1363,6 +1412,53 @@ def _session_changes_from_data(data, *, current_session=None):
     return changes
 
 
+_SECOND_STUDENT_UNSET = object()
+
+
+def _split_second_student_from_data(
+        data, *, session_type, individual_student):
+    if "second_student_id" not in data:
+        return _SECOND_STUDENT_UNSET
+    student_id = data.get("second_student_id")
+    if session_type != SessionType.SPLIT:
+        raise _field_validation_error(
+            "second_student_id",
+            "Второго клиента можно выбрать только для Split-тренировки.",
+            code="invalid_choice",
+        )
+    if student_id in (None, ""):
+        return None
+    second_student = _object_for_field(
+        Student.objects.select_related("parent__user"),
+        student_id,
+        "second_student_id",
+        "второго участника",
+    )
+    _require_active_participant(
+        second_student, "be assigned to split sessions",
+        field="second_student_id")
+    if individual_student and second_student.id == individual_student.id:
+        raise _field_validation_error(
+            "second_student_id",
+            "Выберите другого второго клиента.",
+            code="duplicate",
+        )
+    return second_student
+
+
+def _ensure_capacity_for_roster(session):
+    if session.session_type != SessionType.SPLIT:
+        return
+    roster_size = len(split_roster_student_ids(session))
+    if session.max_participants < roster_size:
+        raise _field_validation_error(
+            "max_participants",
+            f"Лимит не может быть меньше текущего состава ({roster_size}).",
+            code="capacity_below_roster",
+        )
+
+
+@transaction.atomic
 def _create_session_from_data(data, *, actor=None):
     if "template_id" in data:
         raise _field_validation_error(
@@ -1408,6 +1504,18 @@ def _create_session_from_data(data, *, actor=None):
             "location", "Выберите локацию.", code="required")
     max_participants = _positive_int(
         data.get("max_participants"), "max_participants")
+    second_student = _split_second_student_from_data(
+        data,
+        session_type=session_type,
+        individual_student=individual_student,
+    )
+    if second_student is not _SECOND_STUDENT_UNSET and second_student is not None:
+        if max_participants < 2:
+            raise _field_validation_error(
+                "max_participants",
+                "Для двух клиентов установите лимит не меньше 2.",
+                code="capacity_below_roster",
+            )
     price_minor = data.get("price_minor")
     if price_minor not in (None, ""):
         price_minor = _required_int(price_minor, "price_minor")
@@ -1417,7 +1525,7 @@ def _create_session_from_data(data, *, actor=None):
                 code="min_value")
     else:
         price_minor = None
-    return create_session(
+    session = create_session(
         trainer=trainer,
         start_at=start_at,
         end_at=_parse_datetime(data.get("end_at"), "end_at") if data.get("end_at") else None,
@@ -1433,6 +1541,10 @@ def _create_session_from_data(data, *, actor=None):
         notes=data.get("notes", "") or "",
         actor=actor,
     )
+    if second_student is not _SECOND_STUDENT_UNSET and second_student is not None:
+        sync_split_second_student(session, second_student, actor=actor)
+    _ensure_capacity_for_roster(session)
+    return session
 
 
 def _student_queryset_for_parent(parent):
@@ -1514,7 +1626,10 @@ def _visible_parent_sessions(students, date_from=None, date_to=None):
     qs = qs.filter(
         Q(group_id__in=group_ids)
         | Q(individual_student_id__in=student_ids)
-        | Q(participants__student_id__in=student_ids)
+        | Q(
+            participants__student_id__in=student_ids,
+            participants__status=SessionParticipantStatus.ACTIVE,
+        )
     ).distinct()
     if date_from:
         qs = qs.filter(start_at__date__gte=date_from)

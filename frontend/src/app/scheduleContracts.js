@@ -104,6 +104,17 @@ export function validateAdminSessionForm(form) {
   if (!Number.isInteger(capacity) || capacity < 1) errors.maxParticipants = 'Укажите число больше нуля.'
   if (form.sessionType === 'group' && !form.groupId) errors.groupId = 'Выберите группу.'
   if (form.sessionType !== 'group' && !form.participantId) errors.participantId = 'Выберите участника.'
+  if (
+    form.sessionType === 'split'
+    && form.secondParticipantId
+    && String(form.secondParticipantId) === String(form.participantId)
+  ) errors.secondParticipantId = 'Выберите другого второго клиента.'
+  const selectedRosterSize = form.sessionType === 'split'
+    ? 1 + Number(form.extraParticipantCount || 0) + (form.secondParticipantId ? 1 : 0)
+    : Number(form.rosterCount || 0)
+  if (Number.isInteger(capacity) && capacity > 0 && selectedRosterSize > capacity) {
+    errors.maxParticipants = `Лимит не может быть меньше текущего состава (${selectedRosterSize}).`
+  }
   if (form.price !== '' && (!Number.isFinite(Number(form.price)) || Number(form.price) < 0)) {
     errors.price = 'Цена не может быть отрицательной.'
   }

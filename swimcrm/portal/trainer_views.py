@@ -105,14 +105,22 @@ def trainer_session_detail(request, session_id):
                 "comment": attendance[student.id].comment,
                 "marked_at": timezone.localtime(attendance[student.id].marked_at).isoformat(),
             } if student.id in attendance else None,
-        } for student in _session_roster(session)],
+        } for student in (
+            split_roster_students(session)
+            if session.session_type == SessionType.SPLIT
+            else _session_roster(session)
+        )],
     })
 
 
 @require_POST
+@transaction.atomic
 def trainer_mark_attendance(request, session_id):
     trainer = _trainer_from_request(request)
-    session = get_object_or_404(Session.objects.filter(_effective_trainer_filter(trainer)), pk=session_id)
+    session = get_object_or_404(
+        Session.objects.select_for_update().filter(_effective_trainer_filter(trainer)),
+        pk=session_id,
+    )
     data = _json_body(request)
     try:
         student_id = int(data.get("student_id"))
@@ -124,7 +132,11 @@ def trainer_mark_attendance(request, session_id):
         raise _field_validation_error(
             "status", "Выберите допустимый статус посещения.",
             code="invalid_choice")
-    allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+    allowed_student_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else _session_roster(session).values_list("id", flat=True)
+    )
     if student_id not in allowed_student_ids:
         raise _field_validation_error(
             "student_id", "Участник недоступен в этом занятии.",
@@ -160,7 +172,11 @@ def trainer_bulk_attendance(request, session_id):
         raise _field_validation_error(
             "items", "За один запрос можно сохранить не более 500 отметок.",
             code="max_items")
-    allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+    allowed_student_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else _session_roster(session).values_list("id", flat=True)
+    )
     normalized = []
     seen = set()
     for index, item in enumerate(items):

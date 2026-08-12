@@ -152,7 +152,8 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
       sourceLabel: paymentSourceLabel(payment.source),
       affectsBalance: Boolean(payment.affects_balance),
       events: payment.events || [],
-      receipt: payment.receipt?.original_name || payment.comment || '',
+      comment: payment.comment || '',
+      receipt: payment.receipt?.original_name || '',
       receiptUrl: payment.receipt?.download_url || null,
       studentId: payment.student_id,
     })),
@@ -222,6 +223,49 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
 
 export function mapAdminPortalData({ reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, sessions, payments, debtors }) {
   const groupRows = groups.groups || []
+  const clientRows = (clients.clients || []).map((client) => ({
+    id: participantKey(client.client_id, client.id),
+    clientId: client.client_id,
+    studentId: client.id,
+    first: client.first_name,
+    last: client.last_name,
+    born: client.birth_date || '-',
+    parent: client.is_account_holder ? client.full_name : 'Аккаунт клиента',
+    isAccountHolder: Boolean(client.is_account_holder),
+    phone: client.client_phone || '',
+    email: client.email || '',
+    groupId: client.group?.id || '',
+    group: client.group?.name || 'Индивидуально',
+    trainer: '',
+    isActive: client.is_active,
+    accountActive: client.client_is_active !== false,
+    balance: asAccountBalance(client.balance_minor),
+    balanceMinor: client.balance_minor || 0,
+    currency: client.currency || 'PLN',
+    hasCurrentSubscription: Boolean(client.has_current_subscription),
+    currentSubscriptionRemaining: client.current_subscription_remaining,
+    currentSubscriptionTotal: client.current_subscription_total,
+    currentSubscriptionIsUnlimited: Boolean(client.current_subscription_is_unlimited),
+    isRecentlyActive: Boolean(client.is_recently_active),
+    lastPresentAt: client.last_present_at || null,
+    sub: '',
+    subLeft: null,
+    subEnds: '-',
+    med: '',
+    emergency: [client.emergency_contact_name, client.emergency_contact_phone].filter(Boolean).join(' · '),
+  }))
+  const blacklistedByAccount = new Map()
+  clientRows.filter((row) => !row.accountActive).forEach((row) => {
+    const current = blacklistedByAccount.get(row.clientId)
+    if (!current || (row.isAccountHolder && !current.isAccountHolder)) {
+      blacklistedByAccount.set(row.clientId, {
+        ...row,
+        blacklistSearchText: current?.blacklistSearchText || '',
+      })
+    }
+    const representative = blacklistedByAccount.get(row.clientId)
+    representative.blacklistSearchText += ` ${row.first} ${row.last} ${row.phone} ${row.email} ${row.group}`
+  })
   return {
     sessionTypeConfigs: sessionTypeConfigs?.session_types || [],
     locations: (reference?.locations || []).filter((location) => location.is_active !== false),
@@ -266,37 +310,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       isIndividual: type.is_individual,
       active: type.is_active,
     })),
-    clients: (clients.clients || []).map((client) => ({
-      id: participantKey(client.client_id, client.id),
-      clientId: client.client_id,
-      studentId: client.id,
-      first: client.first_name,
-      last: client.last_name,
-      born: client.birth_date || '-',
-      parent: client.is_account_holder ? client.full_name : 'Аккаунт клиента',
-      phone: client.client_phone || '',
-      email: client.email || '',
-      groupId: client.group?.id || '',
-      group: client.group?.name || 'Индивидуально',
-      trainer: '',
-      isActive: client.is_active,
-      accountActive: client.is_active !== false,
-      status: client.client_is_active === false ? 'blacklisted' : (client.is_active ? 'active' : 'inactive'),
-      balance: asAccountBalance(client.balance_minor),
-      balanceMinor: client.balance_minor || 0,
-      currency: client.currency || 'PLN',
-      hasCurrentSubscription: Boolean(client.has_current_subscription),
-      currentSubscriptionRemaining: client.current_subscription_remaining,
-      currentSubscriptionTotal: client.current_subscription_total,
-      currentSubscriptionIsUnlimited: Boolean(client.current_subscription_is_unlimited),
-      isRecentlyActive: Boolean(client.is_recently_active),
-      lastPresentAt: client.last_present_at || null,
-      sub: '',
-      subLeft: null,
-      subEnds: '-',
-      med: '',
-      emergency: [client.emergency_contact_name, client.emergency_contact_phone].filter(Boolean).join(' · '),
-    })),
+    clients: clientRows.filter((row) => row.accountActive && row.isActive),
+    blacklistedClients: Array.from(blacklistedByAccount.values()),
     sessions: (sessions.sessions || []).map((session) => ({
       id: `s${session.id}`,
       sessionId: session.id,
@@ -322,6 +337,10 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       limit: session.max_participants || 0,
       status: sessionStatus(session),
       individualParticipant: session.individual_participant || null,
+      roster: session.roster || [],
+      secondStudentId: Object.prototype.hasOwnProperty.call(session, 'second_student_id')
+        ? session.second_student_id || ''
+        : session.roster?.[1]?.id || '',
     })),
     roster: [],
     payments: (payments.payments || []).map((payment) => ({
@@ -340,7 +359,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       events: payment.events || [],
       date: payment.paid_at,
       status: statusFromPayment(payment.status),
-      receipt: payment.receipt?.original_name || payment.comment || null,
+      comment: payment.comment || '',
+      receipt: payment.receipt?.original_name || null,
       receiptUrl: payment.receipt?.download_url || null,
     })),
     debtors: (debtors.debtors || []).map((row) => ({

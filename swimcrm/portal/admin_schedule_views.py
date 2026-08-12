@@ -97,7 +97,11 @@ def admin_schedule_copy_commit(request):
 
 
 def _session_attendance_payload(session):
-    roster = list(_session_roster(session))
+    roster = (
+        split_roster_students(session)
+        if session.session_type == SessionType.SPLIT
+        else list(_session_roster(session))
+    )
     student_ids = [student.id for student in roster]
     charge_totals = {
         row["student_id"]: row["total"] or 0
@@ -112,6 +116,7 @@ def _session_attendance_payload(session):
         ).values("student_id").annotate(total=Sum("amount_minor"))
     }
     attendance = {record.student_id: record for record in session.attendance.select_related("student")}
+    split_roster_locked = session.session_type == SessionType.SPLIT and bool(attendance)
     one_off_participants = {
         participant.student_id: participant
         for participant in session.participants.filter(
@@ -139,7 +144,9 @@ def _session_attendance_payload(session):
                 "status": one_off_participants[student.id].status,
                 "note": one_off_participants[student.id].note,
             } if student.id in one_off_participants else None,
-            "can_remove_from_session": student.id in one_off_participants,
+            "can_remove_from_session": (
+                student.id in one_off_participants and not split_roster_locked
+            ),
         } for student in roster],
     }
 
@@ -157,7 +164,10 @@ def admin_schedule_sessions(request):
             }) from exc
         return JsonResponse(_session_payload(session), status=201)
     qs = Session.objects.select_related(
-        "group", "trainer__user", "substitute_trainer__user", "individual_student", "template"
+        "group", "trainer__user", "substitute_trainer__user",
+        "individual_student__parent__user", "template"
+    ).prefetch_related(
+        "participants__student__parent__user"
     ).order_by("start_at", "id")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
@@ -183,12 +193,16 @@ def admin_schedule_sessions(request):
 
 
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])
+@transaction.atomic
 def admin_schedule_session_detail(request, session_id):
     user = _admin_required(request)
-    session = get_object_or_404(
-        Session.objects.select_related(
-            "group", "trainer__user", "substitute_trainer__user", "individual_student", "template"
-        ), pk=session_id)
+    sessions = Session.objects.select_related(
+            "group", "trainer__user", "substitute_trainer__user",
+            "individual_student__parent__user", "template"
+        )
+    if request.method != "GET":
+        sessions = sessions.select_for_update()
+    session = get_object_or_404(sessions, pk=session_id)
     if request.method == "DELETE":
         data = _json_body(request)
         if data.get("force") is not True or str(data.get("confirm_session_id")) != str(session.id):
@@ -196,7 +210,73 @@ def admin_schedule_session_detail(request, session_id):
         deleted_id = delete_session(session, actor=user, force=True)
         return JsonResponse({"deleted": True, "session_id": deleted_id})
     if request.method in {"POST", "PATCH"}:
-        changes = _session_changes_from_data(_json_body(request), current_session=session)
+        data = _json_body(request)
+        changes = _session_changes_from_data(data, current_session=session)
+        final_type = changes.get("session_type", session.session_type)
+        final_student = changes.get("individual_student", session.individual_student)
+        second_student = _split_second_student_from_data(
+            data,
+            session_type=final_type,
+            individual_student=final_student,
+        )
+        current_second = split_second_participant(session)
+        preserved_extra_ids = set(session.participants.filter(
+            status=SessionParticipantStatus.ACTIVE,
+        ).exclude(
+            pk=current_second.pk if current_second is not None else None,
+        ).values_list("student_id", flat=True))
+        desired_second_id = (
+            current_second.student_id if (
+                second_student is _SECOND_STUDENT_UNSET
+                and current_second is not None
+            ) else getattr(second_student, "id", None)
+        )
+        if (
+            final_type == SessionType.SPLIT
+            and final_student is not None
+            and (
+                final_student.id == desired_second_id
+                or final_student.id in preserved_extra_ids
+            )
+        ):
+            raise _field_validation_error(
+                "individual_student_id",
+                "Клиент 1 уже входит в состав Split-тренировки.",
+                code="duplicate",
+            )
+        changes_base_student = (
+            "individual_student" in changes
+            and getattr(changes["individual_student"], "id", None) != session.individual_student_id
+            and session.session_type == SessionType.SPLIT
+        )
+        changes_split_type = (
+            "session_type" in changes
+            and changes["session_type"] != session.session_type
+            and (
+                session.session_type == SessionType.SPLIT
+                or changes["session_type"] == SessionType.SPLIT
+            )
+        )
+        leaves_split_with_extras = (
+            session.session_type == SessionType.SPLIT
+            and final_type != SessionType.SPLIT
+            and session.participants.filter(
+                status=SessionParticipantStatus.ACTIVE,
+            ).exists()
+        )
+        if leaves_split_with_extras:
+            raise _field_validation_error(
+                "session_type",
+                "Сначала удалите дополнительных участников Split-тренировки.",
+                code="roster_not_empty",
+            )
+        if (
+            (changes_base_student or changes_split_type)
+            and session.attendance.exists()
+        ):
+            raise ValidationError(
+                "Состав Split нельзя менять после появления отметок посещаемости."
+            )
         try:
             edit_single_session(session, actor=user, **changes)
         except ScheduleConflict as exc:
@@ -204,17 +284,41 @@ def admin_schedule_session_detail(request, session_id):
                 "start_at": ValidationError(
                     exc.messages[0], code="schedule_conflict")
             }) from exc
+        if second_student is not _SECOND_STUDENT_UNSET:
+            try:
+                sync_split_second_student(session, second_student, actor=user)
+            except ValidationError as exc:
+                if "already an additional" in str(exc):
+                    raise _field_validation_error(
+                        "second_student_id",
+                        "Участник уже входит в дополнительный состав.",
+                        code="duplicate",
+                    ) from exc
+                raise
+        if (
+            final_type == SessionType.SPLIT
+            and (
+                "max_participants" in changes
+                or "session_type" in changes
+                or "individual_student" in changes
+                or second_student is not _SECOND_STUDENT_UNSET
+            )
+        ):
+            _ensure_capacity_for_roster(session)
         return JsonResponse(_session_payload(session))
     return JsonResponse(_session_payload(session))
 
 
 @require_http_methods(["GET", "POST"])
+@transaction.atomic
 def admin_schedule_session_attendance(request, session_id):
     user = _admin_required(request)
-    session = get_object_or_404(
-        Session.objects.select_related(
-            "group", "trainer__user", "substitute_trainer__user", "individual_student"
-        ), pk=session_id)
+    sessions = Session.objects.select_related(
+        "group", "trainer__user", "substitute_trainer__user", "individual_student"
+    )
+    if request.method == "POST":
+        sessions = sessions.select_for_update()
+    session = get_object_or_404(sessions, pk=session_id)
     if request.method == "POST":
         data = _json_body(request)
         try:
@@ -227,7 +331,11 @@ def admin_schedule_session_attendance(request, session_id):
             raise _field_validation_error(
                 "status", "Выберите допустимый статус посещения.",
                 code="invalid_choice")
-        allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+        allowed_student_ids = set(
+            split_roster_student_ids(session)
+            if session.session_type == SessionType.SPLIT
+            else _session_roster(session).values_list("id", flat=True)
+        )
         if student_id not in allowed_student_ids:
             raise _field_validation_error(
                 "student_id", "Участник недоступен в этом занятии.",
@@ -251,7 +359,11 @@ def admin_schedule_session_attendance_bulk(request, session_id):
         raise _field_validation_error(
             "items", "Добавьте хотя бы одну отметку посещения.",
             code="required")
-    allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+    allowed_student_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else _session_roster(session).values_list("id", flat=True)
+    )
     normalized = []
     seen = set()
     for index, item in enumerate(items):
@@ -296,10 +408,11 @@ def admin_schedule_session_attendance_bulk(request, session_id):
 
 
 @require_POST
+@transaction.atomic
 def admin_schedule_session_participants(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(
-        Session.objects.select_related(
+        Session.objects.select_for_update().select_related(
             "group", "trainer__user", "substitute_trainer__user", "individual_student"
         ),
         pk=session_id,
@@ -307,6 +420,7 @@ def admin_schedule_session_participants(request, session_id):
     data = _json_body(request)
     if session.is_cancelled:
         raise ValidationError("cancelled sessions cannot receive participants")
+    require_mutable_split_roster(session)
     try:
         student_id = int(data.get("student_id"))
     except (TypeError, ValueError) as exc:
@@ -318,9 +432,13 @@ def admin_schedule_session_participants(request, session_id):
     _require_active_participant(
         student, "be added to sessions", field="student_id")
 
-    existing_active_ids = set(_session_roster(session).values_list("id", flat=True))
+    existing_active_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else _session_roster(session).values_list("id", flat=True)
+    )
     participant = SessionParticipant.objects.filter(session=session, student=student).first()
-    if student.id in existing_active_ids and not participant:
+    if student.id in existing_active_ids:
         raise _field_validation_error(
             "student_id", "Участник уже добавлен в это занятие.",
             code="duplicate")
@@ -347,14 +465,16 @@ def admin_schedule_session_participants(request, session_id):
 
 
 @require_http_methods(["DELETE"])
+@transaction.atomic
 def admin_schedule_session_participant_detail(request, session_id, student_id):
     user = _admin_required(request)
     session = get_object_or_404(
-        Session.objects.select_related(
+        Session.objects.select_for_update().select_related(
             "group", "trainer__user", "substitute_trainer__user", "individual_student"
         ),
         pk=session_id,
     )
+    require_mutable_split_roster(session)
     participant = SessionParticipant.objects.filter(
         session=session,
         student_id=student_id,

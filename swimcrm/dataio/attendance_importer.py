@@ -31,7 +31,10 @@ from dataio.models import ImportEffectMode
 from scheduling.models import (Session, SessionParticipant,
                                SessionParticipantSource, SessionParticipantStatus,
                                SessionType)
-from scheduling.services import ScheduleConflict, create_session, session_roster_students
+from scheduling.services import (ScheduleConflict, create_session,
+                                 require_mutable_split_roster,
+                                 session_roster_students,
+                                 split_roster_student_ids)
 from students.models import Student
 
 from .contracts import prepare_rows
@@ -310,9 +313,14 @@ def preview(headers, rows, mapping=None):
 
 def _ensure_roster(session, student, actor):
     """Attach `student` to the session if not already covered by the base roster."""
-    roster_ids = set(session_roster_students(session).values_list("id", flat=True))
+    roster_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else session_roster_students(session).values_list("id", flat=True)
+    )
     if student.id in roster_ids:
         return
+    require_mutable_split_roster(session)
     if len(roster_ids) >= session.max_participants:
         raise ValidationError(f"Превышен лимит участников занятия ({session.max_participants})")
     participant = SessionParticipant(
@@ -369,8 +377,13 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
                             currency=r.get("currency") or None)
                         created_sessions += 1
                 else:
-                    session = Session.objects.select_for_update().get(pk=r["session_id"])
+                    session = Session.objects.get(pk=r["session_id"])
 
+                # Serialize the roster-freeze check with every attendance write.
+                # The WILL_CREATE_SESSION path may have reused a session that
+                # appeared after preview, so it needs the same row lock as the
+                # MATCHED path before `_ensure_roster` inspects attendance.
+                session = Session.objects.select_for_update().get(pk=session.pk)
                 if AttendanceRecord.objects.filter(session=session, student=student).exists():
                     skipped += 1
                     continue

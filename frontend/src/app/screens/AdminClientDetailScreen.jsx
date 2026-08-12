@@ -13,6 +13,7 @@ import { DateField } from '../DateTimeField.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
 import { validIsoDate } from '../scheduleContracts.js'
+import { FormModal } from '../FormModal.jsx'
 
 const PARTICIPANT_FIELD_IDS = {
   firstName: 'admin-client-participant-first-name',
@@ -60,9 +61,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const [financeAction, setFinanceAction] = useState(null)
     const [editingAccount, setEditingAccount] = useState(false)
     const [accountForm, setAccountForm] = useState({ firstName: '', lastName: '', email: '', username: '', phone: '', telegramChatId: '', preferredLanguage: 'ru' })
+    const [accountBaseline, setAccountBaseline] = useState(null)
     const [accountFieldErrors, setAccountFieldErrors] = useState({})
     const [editingParticipant, setEditingParticipant] = useState(null)
     const [participantForm, setParticipantForm] = useState({ firstName: '', lastName: '', birthDate: '', email: '', groupId: '', isActive: true })
+    const [participantBaseline, setParticipantBaseline] = useState(null)
     const [participantFieldErrors, setParticipantFieldErrors] = useState({})
     const [paymentForm, setPaymentForm] = useState({
       participantId: '',
@@ -72,6 +75,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       comment: '',
     })
     const [paymentFieldErrors, setPaymentFieldErrors] = useState({})
+    const [paymentBaseline, setPaymentBaseline] = useState(null)
     const [financeForm, setFinanceForm] = useState({
       participantId: '',
       subscriptionId: '',
@@ -88,6 +92,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       adjustNote: '',
     })
     const [financeFieldErrors, setFinanceFieldErrors] = useState({})
+    const [financeBaseline, setFinanceBaseline] = useState(null)
 
     useEffect(() => {
       if (!fallbackClientId) return
@@ -117,7 +122,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const attendance = detail?.attendance || []
     const consents = detail?.consents || []
     const summary = detail?.summary || {}
-    const accountArchived = participants.length > 0 && participants.every((item) => item.is_active === false)
+    const accountArchived = account.is_active === false || (participants.length > 0 && participants.every((item) => item.is_active === false))
     const subscriptionTypes = adminData.subscriptionTypes || []
     const groups = adminData.groups || []
 
@@ -226,6 +231,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         })
         setMessage('Оплата добавлена и подтверждена.')
         setPaymentPanelOpen(false)
+        setPaymentBaseline(null)
         setPaymentForm((current) => ({
           ...current,
           amount: '',
@@ -248,12 +254,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     function openParticipantEdit(participant) {
       setEditingParticipant(participant)
       setParticipantFieldErrors({})
-      setParticipantForm({ firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupId: participant.group?.id || '', isActive: participant.is_active })
+      const next = { firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupId: participant.group?.id || '', isActive: participant.is_active }
+      setParticipantForm(next)
+      setParticipantBaseline(next)
     }
 
     function openAccountEdit() {
       setAccountFieldErrors({})
-      setAccountForm({
+      const next = {
         firstName: account.first_name || '',
         lastName: account.last_name || '',
         email: account.email || '',
@@ -261,7 +269,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         phone: account.phone || '',
         telegramChatId: account.telegram_chat_id || '',
         preferredLanguage: account.preferred_language || 'ru',
-      })
+      }
+      setAccountForm(next)
+      setAccountBaseline(next)
       setEditingAccount(true)
     }
 
@@ -286,6 +296,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         } })
         setMessage('Данные владельца аккаунта обновлены.')
         setEditingAccount(false)
+        setAccountBaseline(null)
         refreshDetail()
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, {
@@ -327,7 +338,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setActionBusy('participant'); setError(null); setParticipantFieldErrors({})
       try {
         await api.post(`/api/admin/participants/${editingParticipant.id}/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_id: participantForm.groupId || null, is_active: participantForm.isActive } })
-        setMessage('Данные участника обновлены.'); setEditingParticipant(null); refreshDetail()
+        setMessage('Данные участника обновлены.'); setEditingParticipant(null); setParticipantBaseline(null); refreshDetail()
       } catch (err) {
         const nextFieldErrors = fieldErrorsFromApi(err, {
           'participant.first_name': 'firstName', first_name: 'firstName',
@@ -433,6 +444,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           setMessage('Остаток занятий скорректирован.')
         }
         setFinanceAction(null)
+        setFinanceBaseline(null)
         refreshDetail()
       } catch (err) {
         const nextFieldErrors = fieldErrorsFromApi(err, {
@@ -527,21 +539,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           </div>
         </div>
 
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {error && !editingAccount && !editingParticipant && !financeAction && !paymentPanelOpen && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <ToastNotice id="admin-client-detail-result" message={message} />
         {activationInfo && <div style={{ marginBottom: 12 }}><AccessCodeCard info={activationInfo} Button={Button} onClose={() => setActivationInfo(null)} /></div>}
         <BusyBanner id="admin-client-detail-busy" show={loading}>Загружаю карточку клиента...</BusyBanner>
         {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>Клиент находится в чёрном списке.</strong> Данные и история доступны только для просмотра. Восстановите клиента, чтобы снова выполнять действия.</Banner>}
 
-        {editingAccount && (
-          <div className="card card-pad ops-edit-panel">
-            <div className="ops-section-head">
-              <div>
-                <div className="eyebrow">Редактирование клиента</div>
-                <h3 className="section-title">Владелец аккаунта</h3>
-              </div>
-              <Button variant="subtle" disabled={actionBusy != null} onClick={() => setEditingAccount(false)}>Закрыть</Button>
-            </div>
+        <FormModal open={editingAccount} title="Редактирование клиента" description="Владелец аккаунта" size="lg" busy={actionBusy != null} dirty={Boolean(accountBaseline) && JSON.stringify(accountForm) !== JSON.stringify(accountBaseline)} onRequestClose={() => { if (accountBaseline) setAccountForm(accountBaseline); setEditingAccount(false); setAccountBaseline(null); setAccountFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" loading={actionBusy === 'account'} disabled={actionBusy != null} onClick={saveAccount}>Сохранить изменения</Button></>}>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               <Input id="admin-client-detail-firstName" label="Имя" value={accountForm.firstName} error={accountFieldErrors.firstName} onChange={(event) => updateAccountForm('firstName', event.target.value)} />
               <Input id="admin-client-detail-lastName" label="Фамилия" value={accountForm.lastName} error={accountFieldErrors.lastName} onChange={(event) => updateAccountForm('lastName', event.target.value)} />
@@ -551,12 +556,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <Input id="admin-client-detail-telegram" label="Telegram / соцсеть" value={accountForm.telegramChatId} error={accountFieldErrors.telegramChatId} onChange={(event) => updateAccountForm('telegramChatId', event.target.value)} />
               <Select id="admin-client-detail-language" label="Язык интерфейса" value={accountForm.preferredLanguage} error={accountFieldErrors.preferredLanguage} onChange={(event) => updateAccountForm('preferredLanguage', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></Select>
             </div>
-            <div className="ops-button-row">
-              <Button variant="primary" loading={actionBusy === 'account'} disabled={actionBusy != null} onClick={saveAccount}>Сохранить изменения</Button>
-              <Button variant="secondary" disabled={actionBusy != null} onClick={() => setEditingAccount(false)}>Отмена</Button>
-            </div>
-          </div>
-        )}
+        </FormModal>
 
         <div className="kpi-grid" style={{ marginBottom: 16 }}>
           <div className="kpi">
@@ -584,7 +584,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         </div>
 
         <div className="ops-action-strip" aria-label="Финансовые действия клиента">
-          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={() => { setTab('payments'); setPaymentPanelOpen(true); setPaymentFieldErrors({}); setFinanceAction(null) }}>
+          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={() => { setTab('payments'); setPaymentPanelOpen(true); setPaymentBaseline({ ...paymentForm }); setPaymentFieldErrors({}); setFinanceAction(null); setFinanceBaseline(null) }}>
             <span>Добавить оплату</span>
             <small>Наличные или bank transfer / IBAN</small>
           </button>
@@ -600,7 +600,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               type="button"
               className={`ops-action-card${financeAction === value ? ' is-active' : ''}`}
               disabled={accountArchived}
-              onClick={() => { setFinanceAction((current) => current === value ? null : value); setFinanceFieldErrors({}); setPaymentPanelOpen(false) }}
+              onClick={() => { setFinanceAction(value); setFinanceBaseline({ ...financeForm }); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
             >
               <span>{label}</span>
               <small>{hint}</small>
@@ -612,12 +612,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           </button>
         </div>
 
-        {financeAction && (
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>
-              {{ charge: 'Новое списание', issue: 'Продажа абонемента', renew: 'Продление абонемента', freeze: 'Заморозка абонемента', adjust: 'Корректировка остатка' }[financeAction]}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(160px, 1fr))', gap: 10, alignItems: 'end' }}>
+        <FormModal open={Boolean(financeAction)} title={{ charge: 'Новое списание', issue: 'Продажа абонемента', renew: 'Продление абонемента', freeze: 'Заморозка абонемента', adjust: 'Корректировка остатка' }[financeAction] || 'Финансовая операция'} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>Сохранить</Button></>}>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+            <div className="ops-form-grid">
               {(financeAction === 'charge' || financeAction === 'issue') && (
                 <SearchableSelect
                   inputId={FINANCE_FIELD_IDS.participantId}
@@ -670,12 +667,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 </>
               )}
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>Сохранить</Button>
-              <Button variant="secondary" disabled={actionBusy != null} onClick={() => { setFinanceAction(null); setFinanceFieldErrors({}) }}>Закрыть</Button>
-            </div>
-          </div>
-        )}
+        </FormModal>
 
         <div className="toolbar">
           <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
@@ -690,8 +682,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {tab === 'participants' && (
           <div>
-          {editingParticipant && <div className="card card-pad" style={{ marginBottom: 12 }}>
-            <div className="eyebrow">Редактирование участника</div>
+          <FormModal open={Boolean(editingParticipant)} title="Редактирование участника" size="lg" busy={actionBusy != null} dirty={Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline)} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>Сохранить</Button></>}>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               <Input id={PARTICIPANT_FIELD_IDS.firstName} label="Имя" value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
               <Input id={PARTICIPANT_FIELD_IDS.lastName} label="Фамилия" value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
@@ -700,8 +692,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <Select id={PARTICIPANT_FIELD_IDS.groupId} label="Группа" value={participantForm.groupId} error={participantFieldErrors.groupId} onChange={(event) => updateParticipantForm('groupId', event.target.value)}><option value="">Индивидуально</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</Select>
               <Checkbox id={PARTICIPANT_FIELD_IDS.isActive} label="Активен" checked={participantForm.isActive} error={participantFieldErrors.isActive} onChange={(event) => updateParticipantForm('isActive', event.target.checked)} />
             </div>
-            <div className="ops-button-row"><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>Сохранить</Button><Button variant="secondary" onClick={() => { setEditingParticipant(null); setParticipantFieldErrors({}) }}>Отмена</Button></div>
-          </div>}
+          </FormModal>
           <Table
             rows={participants}
             emptyLabel="Участников нет"
@@ -735,10 +726,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {tab === 'payments' && (
           <div>
-            {paymentPanelOpen && (
-              <div className="card card-pad" style={{ marginBottom: 16 }}>
-                <div className="eyebrow" style={{ marginBottom: 10 }}>Ручная оплата</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.4fr) repeat(3, minmax(140px, 1fr))', gap: 10, alignItems: 'end' }}>
+            <FormModal open={paymentPanelOpen} title="Ручная оплата" size="lg" busy={actionBusy != null} dirty={Boolean(paymentBaseline) && JSON.stringify(paymentForm) !== JSON.stringify(paymentBaseline)} onRequestClose={() => { if (paymentBaseline) setPaymentForm(paymentBaseline); setPaymentPanelOpen(false); setPaymentBaseline(null); setPaymentFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>Сохранить оплату</Button></>}>
+                {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+                <div className="ops-form-grid">
                   <SearchableSelect
                     inputId={PAYMENT_FIELD_IDS.participantId}
                     label="Участник"
@@ -756,13 +746,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                       <option value="other">Другое</option>
                   </Select>
                   <Input id={PAYMENT_FIELD_IDS.comment} label="Комментарий" value={paymentForm.comment} error={paymentFieldErrors.comment} onChange={(event) => updatePaymentForm('comment', event.target.value)} placeholder="Опционально" />
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
-                    <Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>Сохранить оплату</Button>
-                    <Button variant="secondary" disabled={actionBusy != null} onClick={() => { setPaymentPanelOpen(false); setPaymentFieldErrors({}) }}>Закрыть</Button>
-                  </div>
                 </div>
-              </div>
-            )}
+            </FormModal>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(320px, 1fr)', gap: 14 }}>
             <div>
@@ -846,7 +831,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <div className="strong">Архивировать аккаунт</div>
                   <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Аккаунт и участники станут неактивными, история сохранится.</div>
                 </div>
-                <Button variant="secondary" loading={actionBusy === 'archive'} disabled={actionBusy != null || loading || account.is_active === false} onClick={() => setConfirmAction({ type: 'archive' })}>Архивировать</Button>
+                <Button variant="secondary" loading={actionBusy === 'archive'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'archive' })}>Архивировать</Button>
               </div>
               {accountArchived && <div className="ops-privacy-row">
                 <div>
@@ -860,7 +845,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <div className="strong">Анонимизировать персональные данные</div>
                   <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Удаляет контакты, чувствительные данные, согласия и файлы; финансовая история остаётся без персональных данных.</div>
                 </div>
-                <Button variant="danger" loading={actionBusy === 'anonymize'} disabled={actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'anonymize' })}>Анонимизировать</Button>
+                <Button variant="danger" loading={actionBusy === 'anonymize'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'anonymize' })}>Анонимизировать</Button>
               </div>
             </div>
           </div>

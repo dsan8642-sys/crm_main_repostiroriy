@@ -93,6 +93,11 @@ export function scheduleEventHeading(session) {
 }
 
 export function scheduleEventSupportingLabel(session) {
+  if (session.sessionType === 'split' && session.roster?.length) {
+    const visible = session.roster.slice(0, 2).map((participant) => participant.full_name)
+    const hiddenCount = session.roster.length - visible.length
+    return `${visible.join(' · ')}${hiddenCount > 0 ? ` · +${hiddenCount}` : ''}`
+  }
   return session.sessionType === 'group'
     ? scheduleEventTypeLabel(session)
     : session.individualParticipant?.full_name || null
@@ -115,6 +120,12 @@ export function scheduleOccupancyLabel(session) {
 export function ScheduleEventContent({ session }) {
   const occupancy = scheduleOccupancy(session)
   const supportingLabel = scheduleEventSupportingLabel(session)
+  const splitRosterNames = session.sessionType === 'split'
+    ? session.roster?.slice(0, 2).map((participant) => participant.full_name).join(' · ')
+    : null
+  const hiddenSplitCount = session.sessionType === 'split'
+    ? Math.max((session.roster?.length || 0) - 2, 0)
+    : 0
   return (
     <>
       <span className="ops-event-primary">
@@ -122,7 +133,9 @@ export function ScheduleEventContent({ session }) {
         {occupancy && <span className="ops-event-occupancy" aria-label={scheduleOccupancyLabel(session)}>{occupancy}</span>}
       </span>
       <strong className="ops-event-title">{scheduleEventHeading(session)}</strong>
-      {supportingLabel && <span className="ops-event-type">{supportingLabel}</span>}
+      {supportingLabel && (splitRosterNames
+        ? <span className="ops-event-type is-split-roster"><span className="ops-event-roster-names">{splitRosterNames}</span>{hiddenSplitCount > 0 && <span className="ops-event-roster-count">· +{hiddenSplitCount}</span>}</span>
+        : <span className="ops-event-type">{supportingLabel}</span>)}
       {session.trainer && <small className="ops-event-secondary ops-event-trainer">{session.trainer}</small>}
       {session.location && <small className="ops-event-secondary ops-event-location">{session.location}</small>}
     </>
@@ -135,6 +148,9 @@ export function eventAccessibleLabel(session) {
     `${session.start}-${session.end}`,
     title,
     session.group && session.group !== title ? session.group : null,
+    session.sessionType === 'split'
+      ? session.roster?.map((participant) => participant.full_name).join(', ')
+      : null,
     scheduleOccupancyLabel(session),
     session.trainer,
     session.location,

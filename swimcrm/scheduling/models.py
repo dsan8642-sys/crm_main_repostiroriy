@@ -226,6 +226,66 @@ class SessionParticipant(models.Model):
         if (self.student_id and self.student.parent_id and
                 not self.student.parent.user.is_active and self.status == SessionParticipantStatus.ACTIVE):
             raise ValidationError("archived client accounts cannot have active session participants")
+        if not self.session_id:
+            return
+
+        original = None
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).values(
+                "session_id", "student_id", "status",
+            ).first()
+        composition_changed = original is None or any((
+            original["session_id"] != self.session_id,
+            original["student_id"] != self.student_id,
+            original["status"] != self.status,
+        ))
+
+        locked_sessions = []
+        session = self.session
+        if session.session_type == SessionType.SPLIT and session.attendance.exists():
+            locked_sessions.append(session)
+        if original and original["session_id"] != self.session_id:
+            previous_session = Session.objects.filter(
+                pk=original["session_id"],
+                session_type=SessionType.SPLIT,
+            ).first()
+            if previous_session is not None and previous_session.attendance.exists():
+                locked_sessions.append(previous_session)
+        if composition_changed and locked_sessions:
+            raise ValidationError(
+                "Split roster cannot be changed after attendance has been recorded")
+
+        if (
+            session.session_type == SessionType.SPLIT
+            and self.status == SessionParticipantStatus.ACTIVE
+        ):
+            if self.student_id == session.individual_student_id:
+                raise ValidationError({
+                    "student": "The primary Split client is already in the roster",
+                })
+            roster_ids = set(session.participants.filter(
+                status=SessionParticipantStatus.ACTIVE,
+            ).exclude(pk=self.pk).values_list("student_id", flat=True))
+            if session.individual_student_id:
+                roster_ids.add(session.individual_student_id)
+            roster_ids.add(self.student_id)
+            if len(roster_ids) > session.max_participants:
+                raise ValidationError({
+                    "student": (
+                        "Split roster exceeds session capacity "
+                        f"({session.max_participants})"
+                    ),
+                })
+
+    def delete(self, *args, **kwargs):
+        if (
+            self.session_id
+            and self.session.session_type == SessionType.SPLIT
+            and self.session.attendance.exists()
+        ):
+            raise ValidationError(
+                "Split roster cannot be changed after attendance has been recorded")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.student} -> {self.session} ({self.source}/{self.status})"
@@ -349,6 +409,94 @@ class Session(models.Model):
         expected_end = self.start_at + timedelta(minutes=self.duration_minutes)
         if self.end_at != expected_end:
             raise ValidationError("end_at must equal start_at + duration_minutes")
+
+        errors = {}
+        original = (
+            type(self).objects.filter(pk=self.pk).values(
+                "session_type", "individual_student_id",
+            ).first()
+            if self.pk else None
+        )
+        primary_assignment_changed = (
+            original is None
+            or original["session_type"] != self.session_type
+            or original["individual_student_id"] != self.individual_student_id
+        )
+        if (
+            primary_assignment_changed
+            and self.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
+            and self.individual_student_id
+        ):
+            if not self.individual_student.is_active:
+                errors["individual_student"] = ValidationError(
+                    "Inactive client cannot be assigned to a session",
+                    code="inactive",
+                )
+            elif not self.individual_student.parent.user.is_active:
+                errors["individual_student"] = ValidationError(
+                    "Archived client account cannot be assigned to a session",
+                    code="inactive",
+                )
+            elif (
+                self.pk
+                and self.session_type == SessionType.SPLIT
+                and self.participants.filter(
+                    student_id=self.individual_student_id,
+                    status=SessionParticipantStatus.ACTIVE,
+                ).exists()
+            ):
+                errors["individual_student"] = ValidationError(
+                    "The primary Split client is already in the roster",
+                    code="duplicate",
+                )
+
+        if not self.pk:
+            if errors:
+                raise ValidationError(errors)
+            return
+
+        if (
+            original
+            and original["session_type"] == SessionType.SPLIT
+            and self.session_type != SessionType.SPLIT
+            and self.participants.filter(
+                status=SessionParticipantStatus.ACTIVE,
+            ).exists()
+        ):
+            errors["session_type"] = ValidationError(
+                "Remove active Split participants before changing session type",
+                code="roster_not_empty",
+            )
+
+        if (
+            original
+            and self.attendance.exists()
+            and (
+                original["session_type"] == SessionType.SPLIT
+                or self.session_type == SessionType.SPLIT
+            )
+        ):
+            if original["session_type"] != self.session_type:
+                errors["session_type"] = (
+                    "Split session type cannot change after attendance has been recorded")
+            if original["individual_student_id"] != self.individual_student_id:
+                errors["individual_student"] = (
+                    "Primary Split client cannot change after attendance has been recorded")
+
+        if self.session_type == SessionType.SPLIT:
+            roster_ids = set(self.participants.filter(
+                status=SessionParticipantStatus.ACTIVE,
+            ).values_list("student_id", flat=True))
+            if self.individual_student_id:
+                roster_ids.add(self.individual_student_id)
+            if len(roster_ids) > self.max_participants:
+                errors["max_participants"] = ValidationError(
+                    "Split capacity cannot be lower than its current roster "
+                    f"({len(roster_ids)})",
+                    code="capacity_below_roster",
+                )
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
         return f"{self.start_at:%d.%m %H:%M} · {self.location}"

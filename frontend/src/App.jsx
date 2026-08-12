@@ -90,6 +90,7 @@ export default function App() {
   const [health, setHealth] = useState({ state: 'loading' })
   const [apiState, setApiState] = useState({ state: 'loading' })
   const [initialRole, setInitialRole] = useState('admin')
+  const [currentUser, setCurrentUser] = useState(null)
   const [authRequired, setAuthRequired] = useState(null)
   const [bootstrapError, setBootstrapError] = useState(null)
 
@@ -143,6 +144,7 @@ export default function App() {
     const payload = await productionLogin(credentials)
     const role = payload.user?.role === 'parent' ? 'client' : payload.user?.role
     if (!ROLE_META[role]) throw new Error('Для этой роли интерфейс пока не настроен')
+    setCurrentUser(payload.user)
     setInitialRole(role)
     await loadRoleData(role)
     setAuthRequired(false)
@@ -154,6 +156,7 @@ export default function App() {
       await productionLogout()
     } finally {
       setPortalData(EMPTY_PORTAL_DATA)
+      setCurrentUser(null)
       window.history.replaceState({}, '', window.location.pathname)
       setAuthRequired(true)
       setApiState({ state: 'error', role: 'unknown', error: 'Требуется вход', status: 403 })
@@ -174,6 +177,7 @@ export default function App() {
         const me = await fetchMe()
         const role = me.role === 'parent' ? 'client' : me.role
         if (alive && ROLE_META[role]) {
+          setCurrentUser(me)
           setInitialRole(role)
           await loadRoleData(role)
           setAuthRequired(false)
@@ -237,6 +241,7 @@ export default function App() {
           health={health}
           apiState={apiState}
           initialRole={initialRole}
+          currentUser={currentUser}
           reloadRoleData={loadRoleData}
           onLogout={handleProductionLogout}
         />

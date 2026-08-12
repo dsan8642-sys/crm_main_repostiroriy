@@ -1,5 +1,8 @@
 """Import/export module 5.10 extension: attendance history import."""
-from django.test import TestCase
+from threading import Event, Thread
+
+from django.db import close_old_connections, connection, transaction
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 
 from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
@@ -7,7 +10,12 @@ from catalog.models import Group
 from dataio import attendance_importer as ai
 from dataio.importer import parse_source
 from dataio.models import ImportEffectMode
-from scheduling.models import Session, SessionParticipant, SessionType
+from scheduling.models import (
+    Session,
+    SessionParticipant,
+    SessionParticipantStatus,
+    SessionType,
+)
 from scheduling.services import create_session
 from subscriptions.models import LedgerReason, SessionLedgerEntry
 
@@ -86,6 +94,100 @@ class AttendanceImportPreviewTest(TestCase):
         pv = ai.preview(headers, rows)
         self.assertEqual(pv[0].status, ai.ERROR)
         self.assertTrue(any("группа не найдена" in e.lower() for e in pv[0].errors))
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class AttendanceImportConcurrencyTest(TransactionTestCase):
+    def test_first_attendance_and_imported_split_roster_change_are_serialized(self):
+        trainer = f.make_trainer(username="split_import_race")
+        first = f.make_student(first="First", last="Import Race")
+        second = f.make_student(first="Second", last="Import Race")
+        outside = f.make_student(first="Outside", last="Import Race")
+        session = create_session(
+            trainer=trainer,
+            individual_student=first,
+            session_type=SessionType.SPLIT,
+            start_at=f.dt(2026, 9, 12, 17),
+            duration_minutes=60,
+            location="Split import race",
+            max_participants=3,
+        )
+        SessionParticipant.objects.create(session=session, student=second)
+        row = ai.AttendancePreviewRow(
+            index=2,
+            data={},
+            status=ai.MATCHED,
+            resolved={
+                "student_id": outside.id,
+                "session_id": session.id,
+                "status": AttendanceStatus.PRESENT,
+                "comment": "",
+                "marked_at": "",
+            },
+        )
+        lock_ready = Event()
+        release_lock = Event()
+        import_read_attendance = Event()
+        summaries = []
+        failures = []
+
+        def record_first_attendance_while_holding_session_lock():
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    locked = Session.objects.select_for_update().get(pk=session.id)
+                    AttendanceRecord.objects.create(
+                        session=locked,
+                        student=first,
+                        status=AttendanceStatus.PRESENT,
+                    )
+                    lock_ready.set()
+                    if not release_lock.wait(10):
+                        raise AssertionError("test did not release the session lock")
+            except Exception as exc:  # pragma: no cover - surfaced in main thread
+                failures.append(exc)
+            finally:
+                close_old_connections()
+
+        def import_attendance():
+            close_old_connections()
+
+            def observe_attendance_query(execute, sql, params, many, context):
+                result = execute(sql, params, many, context)
+                if "attendance_attendancerecord" in sql.lower():
+                    import_read_attendance.set()
+                return result
+
+            try:
+                with connection.execute_wrapper(observe_attendance_query):
+                    summaries.append(ai.commit([row], actor=None))
+            except Exception as exc:  # pragma: no cover - surfaced in main thread
+                failures.append(exc)
+            finally:
+                close_old_connections()
+
+        lock_thread = Thread(target=record_first_attendance_while_holding_session_lock)
+        import_thread = Thread(target=import_attendance)
+        lock_thread.start()
+        self.assertTrue(lock_ready.wait(5))
+        import_thread.start()
+        # Without the importer row lock this event fires before the attendance
+        # transaction commits, reproducing the stale freeze check. With the
+        # lock it can only fire after `release_lock` below.
+        import_read_attendance.wait(3)
+        release_lock.set()
+        lock_thread.join(10)
+        import_thread.join(10)
+
+        self.assertFalse(lock_thread.is_alive())
+        self.assertFalse(import_thread.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(summaries[0]["created_records"], 0)
+        self.assertFalse(SessionParticipant.objects.filter(
+            session=session,
+            student=outside,
+            status=SessionParticipantStatus.ACTIVE,
+        ).exists())
 
 
 class AttendanceImportCommitTest(TestCase):
@@ -185,6 +287,53 @@ class AttendanceImportCommitTest(TestCase):
         session = Session.objects.get(group=self.group, location="Бассейн E")
         self.assertTrue(SessionParticipant.objects.filter(
             session=session, student=outside_student).exists())
+
+    def test_commit_does_not_expand_an_attended_split_roster(self):
+        first = f.make_student(first="First", last="Import Lock")
+        second = f.make_student(first="Second", last="Import Lock")
+        outside = f.make_student(first="Outside", last="Import Lock")
+        session = create_session(
+            trainer=self.trainer,
+            individual_student=first,
+            session_type=SessionType.SPLIT,
+            start_at=f.dt(2026, 3, 13, 12),
+            duration_minutes=60,
+            location="Pool Split Import",
+            max_participants=3,
+        )
+        SessionParticipant.objects.create(session=session, student=second)
+        set_attendance(
+            session_id=session.id,
+            student=first,
+            status=AttendanceStatus.PRESENT,
+        )
+        row = ai.AttendancePreviewRow(
+            index=2,
+            data={},
+            status=ai.MATCHED,
+            resolved={
+                "student_id": outside.id,
+                "session_id": session.id,
+                "status": AttendanceStatus.PRESENT,
+                "comment": "",
+                "marked_at": "",
+            },
+        )
+
+        summary = ai.commit([row], actor=None)
+
+        self.assertEqual(summary["created_records"], 0)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(len(summary["errors"]), 1)
+        self.assertFalse(SessionParticipant.objects.filter(
+            session=session,
+            student=outside,
+            status="active",
+        ).exists())
+        self.assertFalse(AttendanceRecord.objects.filter(
+            session=session,
+            student=outside,
+        ).exists())
 
     def test_commit_reports_trainer_conflict_as_row_error(self):
         # An existing session already occupies coach_commit at this exact time.

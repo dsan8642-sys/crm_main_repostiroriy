@@ -232,6 +232,35 @@ Admins may later set `"substitute_trainer_id"` on a concrete session. The
 response keeps `"trainer_id"` as the originally scheduled trainer and exposes
 `"effective_trainer_id"` as the trainer used for delivery/payroll.
 
+For a Split session, send the required base client and an optional second
+client in the same atomic request:
+
+```json
+{
+  "session_type": "split",
+  "individual_student_id": 10,
+  "second_student_id": 11,
+  "trainer_id": 1,
+  "start_at": "2026-07-06T17:00:00+02:00",
+  "duration_minutes": 60,
+  "location": "Pool A",
+  "max_participants": 4,
+  "price_minor": 16000
+}
+```
+
+`second_student_id` may be omitted or `null`. On PATCH, omission preserves the
+current second client while `null` removes that slot; participants added after
+the second slot are preserved. Admin individual/Split payloads include ordered
+`roster` entries (`id`, `full_name`) and `second_student_id` (which remains
+`null` when that slot is empty even if later participants exist). A Split roster
+cannot change after any attendance has been recorded, and its capacity cannot
+be reduced below the enrolled roster. Archiving a client does not rewrite this
+historical roster. A Split with active additional participants cannot be changed
+to another session type until those participants are removed. The snapshot price
+is the total Split price: an uncovered present client is charged
+`floor(price_minor / enrolled roster size)`.
+
 ### Check Trainer Conflict
 
 `POST /api/admin/schedule/check-conflict/`
@@ -278,6 +307,22 @@ or:
 Messages due inside a matching quiet-hours window are stored as `deferred` and
 rescheduled to the nearest allowed delivery time by the Django notification
 service.
+
+### Administrative Reports
+
+- `GET /api/admin/reports/session-counts/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
+  returns non-cancelled session counts by effective trainer and by
+  `group`/`individual`/`split`. An optional `trainer_id` narrows the result.
+- `GET /api/admin/reports/session-counts/xlsx/` accepts the same filters and
+  exports every matching trainer row.
+- `GET /api/admin/reports/income/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&currency=PLN`
+  returns confirmed payments by `paid_at`, cash/non-cash totals, and a paginated
+  `payments` list. Currency values are never mixed or converted.
+- `GET /api/admin/reports/income/xlsx/` accepts the same period and currency and
+  exports every matching payment, independently of API pagination.
+
+All report date boundaries are inclusive Warsaw calendar dates. Report XLSX
+routes require the same administrator authorization as their JSON counterparts.
 
 ### Configure Payroll Rules
 

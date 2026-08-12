@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { formatTime } from '../../mappers.js'
 import { DateField, TimeField } from '../DateTimeField.jsx'
+import { FormModal } from '../FormModal.jsx'
 import {
   CalendarNavigation,
   eventAccessibleLabel,
@@ -33,6 +34,7 @@ import {
 } from '../formErrors.js'
 
 const EMPTY_SCHEDULE_FILTERS = {
+  sessionType: '',
   trainerId: '',
   groupId: '',
   location: '',
@@ -43,6 +45,7 @@ const SESSION_FIELD_MAP = {
   session_type: 'sessionType',
   group_id: 'groupId',
   individual_student_id: 'participantId',
+  second_student_id: 'secondParticipantId',
   trainer_id: 'trainerId',
   start_at: ['date', 'start'],
   duration_minutes: 'durationMinutes',
@@ -67,6 +70,7 @@ const SESSION_FIELD_IDS = {
   sessionType: 'admin-session-sessionType',
   groupId: 'admin-session-groupId',
   participantId: 'admin-session-participantId',
+  secondParticipantId: 'admin-session-secondParticipantId',
   trainerId: 'admin-session-trainerId',
   date: 'admin-session-date',
   start: 'admin-session-start',
@@ -80,6 +84,7 @@ const SESSION_FIELD_IDS = {
 function normalizeSession(session) {
   if (session.startAt) return session
   const participant = session.individual_participant || null
+  const roster = session.roster || (participant ? [participant] : [])
   return {
     id: `s${session.id}`,
     sessionId: session.id,
@@ -105,6 +110,10 @@ function normalizeSession(session) {
     limit: session.max_participants || 0,
     status: session.is_cancelled ? 'cancelled' : 'planned',
     individualParticipant: participant,
+    roster,
+    secondStudentId: Object.prototype.hasOwnProperty.call(session, 'second_student_id')
+      ? session.second_student_id || ''
+      : roster[1]?.id || '',
   }
 }
 
@@ -141,6 +150,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       notes: '',
       sessionType: 'group',
       participantId: '',
+      secondParticipantId: '',
+      rosterCount: 0,
+      extraParticipantCount: 0,
     })
     const [copyForm, setCopyForm] = useState({
       sourceFrom: '',
@@ -153,11 +165,17 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     })
     const [copyPreview, setCopyPreview] = useState(null)
     const [editingSession, setEditingSession] = useState(null)
+    const [sessionFormBaseline, setSessionFormBaseline] = useState(null)
+    const [copyFormBaseline, setCopyFormBaseline] = useState(null)
+    const [sessionEditBaseline, setSessionEditBaseline] = useState(null)
     const [confirmDelete, setConfirmDelete] = useState(null)
     const [sessionEditForm, setSessionEditForm] = useState({
       sessionType: 'group',
       groupId: '',
       participantId: '',
+      secondParticipantId: '',
+      rosterCount: 0,
+      extraParticipantCount: 0,
       trainerId: '',
       date: '',
       start: '',
@@ -183,6 +201,13 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const [draftFilters, setDraftFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
     const filterPopoverRef = useRef(null)
     const [rangeRefresh, setRangeRefresh] = useState(0)
+
+    useEffect(() => {
+      if (actionPanel === 'session') setSessionFormBaseline({ ...sessionForm })
+      else setSessionFormBaseline(null)
+      if (actionPanel === 'copy') setCopyFormBaseline({ ...copyForm })
+      else setCopyFormBaseline(null)
+    }, [actionPanel])
 
     useEffect(() => {
       if (!filtersOpen) return undefined
@@ -268,6 +293,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const visibleSessions = scheduleSessions.filter((session) => (
       sessionIsoDate(session) >= range.dateFrom
       && sessionIsoDate(session) <= range.dateTo
+      && (!filters.sessionType || session.sessionType === filters.sessionType)
       && (!filters.trainerId || String(session.trainerId) === filters.trainerId)
       && (!filters.groupId || String(session.groupId) === filters.groupId)
       && (!filters.location || session.location === filters.location)
@@ -307,6 +333,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       setSessionForm((current) => ({
         ...current,
         sessionType,
+        secondParticipantId: sessionType === 'split' ? current.secondParticipantId : '',
+        rosterCount: sessionType === 'split'
+          ? Math.max(current.secondParticipantId ? 2 : 1, Number(current.rosterCount || 0))
+          : 0,
         durationMinutes: String(defaults?.default_duration_minutes || 60),
         maxParticipants: newSessionCapacity({
           groupCapacity: sessionType === 'group' ? group?.defaultCapacity : null,
@@ -374,10 +404,17 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     function openSessionEdit(session) {
       setEditingSession(session)
       setEditFieldErrors({})
-      setSessionEditForm({
+      const roster = session.roster || []
+      const nextForm = {
         sessionType: session.sessionType || 'group',
         groupId: session.groupId || '',
         participantId: session.individualParticipant?.id || '',
+        secondParticipantId: session.sessionType === 'split' ? session.secondStudentId || '' : '',
+        rosterCount: roster.length || Number(session.count || 0),
+        extraParticipantCount: Math.max(
+          roster.length - 1 - (session.secondStudentId ? 1 : 0),
+          0,
+        ),
         trainerId: session.trainerId || '',
         date: sessionIsoDate(session),
         start: session.start,
@@ -386,7 +423,32 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         location: session.location || '',
         maxParticipants: String(session.limit || 0),
         notes: session.notes || '',
-      })
+      }
+      setSessionEditForm(nextForm)
+      setSessionEditBaseline(nextForm)
+    }
+
+    function closeSessionCreate() {
+      if (sessionFormBaseline) setSessionForm({ ...sessionFormBaseline })
+      setActionPanel(null)
+      setFieldErrors({})
+      setError(null)
+    }
+
+    function closePeriodCopy() {
+      if (copyFormBaseline) setCopyForm({ ...copyFormBaseline })
+      setActionPanel(null)
+      setCopyFieldErrors({})
+      setCopyPreview(null)
+      setError(null)
+    }
+
+    function closeSessionEdit() {
+      if (sessionEditBaseline) setSessionEditForm({ ...sessionEditBaseline })
+      setEditingSession(null)
+      setSessionEditBaseline(null)
+      setEditFieldErrors({})
+      setError(null)
     }
 
     function validateNewSession() {
@@ -438,6 +500,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           session_type: sessionForm.sessionType,
           group_id: sessionForm.sessionType === 'group' ? sessionForm.groupId : null,
           individual_student_id: sessionForm.sessionType !== 'group' ? sessionForm.participantId : null,
+          ...(sessionForm.sessionType === 'split'
+            ? { second_student_id: sessionForm.secondParticipantId || null }
+            : {}),
           trainer_id: sessionForm.trainerId,
           start_at: startAt,
           duration_minutes: Number(sessionForm.durationMinutes || 60),
@@ -494,7 +559,12 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         await api.patch(`/api/admin/schedule/sessions/${editingSession.sessionId}/`, {
           ...(sessionEditForm.sessionType === 'group'
             ? { group_id: sessionEditForm.groupId }
-            : { individual_student_id: sessionEditForm.participantId }),
+            : {
+                individual_student_id: sessionEditForm.participantId,
+                ...(sessionEditForm.sessionType === 'split'
+                  ? { second_student_id: sessionEditForm.secondParticipantId || null }
+                  : {}),
+              }),
           trainer_id: sessionEditForm.trainerId,
           start_at: startAt,
           duration_minutes: Number(sessionEditForm.durationMinutes || 60),
@@ -703,6 +773,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             {filtersOpen && (
               <div id="admin-schedule-filters" className="ops-filter-popover" role="dialog" aria-label="Фильтры расписания">
                 <div className="ops-form-grid">
+                  <label>Тип тренировки<select value={draftFilters.sessionType} onChange={(event) => setDraftFilters({ ...draftFilters, sessionType: event.target.value })}><option value="">Все</option><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит</option></select></label>
                   <label>Тренер<select value={draftFilters.trainerId} onChange={(event) => setDraftFilters({ ...draftFilters, trainerId: event.target.value })}><option value="">Все</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
                   <label>Группа<select value={draftFilters.groupId} onChange={(event) => setDraftFilters({ ...draftFilters, groupId: event.target.value })}><option value="">Все</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
                   <label>Локация<select value={draftFilters.location} onChange={(event) => setDraftFilters({ ...draftFilters, location: event.target.value })}><option value="">Все</option>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
@@ -717,7 +788,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           </div>
         </div>
         <ToastNotice id="admin-schedule-result" message={message} tone="success" />
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {error && !actionPanel && !editingSession && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         {loadError && <Banner tone="warning" style={{ marginBottom: 12 }} onClose={() => setLoadError(null)}>{loadError}</Banner>}
         <BusyBanner id="admin-schedule-busy" show={busy}>Сохраняю изменения расписания...</BusyBanner>
 
@@ -739,12 +810,21 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           <button type="button" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => { setActionPanel((current) => current === 'copy' ? null : 'copy'); setCopyFieldErrors({}) }}><span>Копировать период</span></button>
         </div>
 
-        {actionPanel === 'session' && (
+        <FormModal
+          open={actionPanel === 'session'}
+          title="Новое занятие"
+          size="lg"
+          busy={busy}
+          dirty={Boolean(sessionFormBaseline) && JSON.stringify(sessionForm) !== JSON.stringify(sessionFormBaseline)}
+          onRequestClose={closeSessionCreate}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" disabled={busy} onClick={createSession}>Создать занятие</Button></>}
+        >
           <div className="card card-pad ops-schedule-form-card">
-            <div className="eyebrow">Новое занятие</div>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid ops-schedule-form-grid">
               <label>Тип занятия<select id="admin-session-sessionType" value={sessionForm.sessionType} aria-invalid={Boolean(fieldErrors.sessionType)} aria-describedby={fieldErrors.sessionType ? 'admin-session-sessionType-error' : undefined} onChange={(event) => updateSessionType(event.target.value)}>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code} disabled={type.configured === false}>{type.label || type.code}</option>)}</select>{fieldErrors.sessionType && <small id="admin-session-sessionType-error" className="ops-field-error" role="alert">{fieldErrors.sessionType}</small>}</label>
-              {sessionForm.sessionType !== 'group' && <SearchableSelect inputId="admin-session-participantId" label="Участник" value={sessionForm.participantId} onChange={(value) => updateSessionForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant))} error={fieldErrors.participantId} />}
+              {sessionForm.sessionType !== 'group' && <SearchableSelect inputId="admin-session-participantId" label={sessionForm.sessionType === 'split' ? 'Клиент 1' : 'Участник'} value={sessionForm.participantId} onChange={(value) => { updateSessionForm('participantId', value); if (String(value) === String(sessionForm.secondParticipantId)) updateSessionForm('secondParticipantId', '') }} options={participants.map((participant) => clientSelectOption(participant))} error={fieldErrors.participantId} />}
+              {sessionForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-secondParticipantId" label="Клиент 2 (необязательно)" value={sessionForm.secondParticipantId} onChange={(value) => updateSessionForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionForm.participantId)).map((participant) => clientSelectOption(participant))} error={fieldErrors.secondParticipantId} />}
               {sessionForm.sessionType === 'group' && <label>Группа<select id="admin-session-groupId" value={sessionForm.groupId} aria-invalid={Boolean(fieldErrors.groupId)} aria-describedby={fieldErrors.groupId ? 'admin-session-groupId-error' : undefined} onChange={(event) => updateNewSessionGroup(event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{fieldErrors.groupId && <small id="admin-session-groupId-error" className="ops-field-error" role="alert">{fieldErrors.groupId}</small>}</label>}
               <label>Тренер<select id="admin-session-trainerId" value={sessionForm.trainerId} aria-invalid={Boolean(fieldErrors.trainerId)} aria-describedby={fieldErrors.trainerId ? 'admin-session-trainerId-error' : undefined} onChange={(event) => updateSessionForm('trainerId', event.target.value)}><option value="">Выберите тренера</option>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{fieldErrors.trainerId && <small id="admin-session-trainerId-error" className="ops-field-error" role="alert">{fieldErrors.trainerId}</small>}</label>
               <DateField id="admin-session-date" label="Дата" value={sessionForm.date} onChange={(value) => updateSessionForm('date', value)} required error={fieldErrors.date} />
@@ -756,16 +836,20 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
               <Input id="admin-session-notes" label="Заметки" value={sessionForm.notes} error={fieldErrors.notes} onChange={(event) => updateSessionForm('notes', event.target.value)} />
             </div>
             <div className="muted">Окончание: {endTime(sessionForm.start, sessionForm.durationMinutes)}</div>
-            <div className="ops-button-row">
-              <Button variant="primary" disabled={busy} onClick={createSession}>Создать занятие</Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setActionPanel(null)}>Закрыть</Button>
-            </div>
           </div>
-        )}
+        </FormModal>
 
-        {actionPanel === 'copy' && (
+        <FormModal
+          open={actionPanel === 'copy'}
+          title="Копирование расписания за период"
+          size="lg"
+          busy={busy}
+          dirty={Boolean(copyFormBaseline) && JSON.stringify(copyForm) !== JSON.stringify(copyFormBaseline)}
+          onRequestClose={closePeriodCopy}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" disabled={busy} onClick={previewPeriodCopy}>Проверить</Button>{copyPreview && <Button id={COPY_FIELD_IDS.selectedIndices} variant="secondary" disabled={busy || !copyPreview.selectedIndices.length} aria-invalid={Boolean(copyFieldErrors.selectedIndices)} aria-describedby={copyFieldErrors.selectedIndices ? `${COPY_FIELD_IDS.selectedIndices}-error` : undefined} onClick={commitPeriodCopy}>Скопировать {copyPreview.selectedIndices.length}</Button>}</>}
+        >
           <div className="card card-pad ops-schedule-form-card">
-            <div className="eyebrow">Копирование расписания за период</div>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               <DateField id={COPY_FIELD_IDS.sourceFrom} label="Источник с" value={copyForm.sourceFrom} error={copyFieldErrors.sourceFrom} onChange={(value) => updateCopyForm('sourceFrom', value)} required />
               <DateField id={COPY_FIELD_IDS.sourceTo} label="Источник по" value={copyForm.sourceTo} error={copyFieldErrors.sourceTo} onChange={(value) => updateCopyForm('sourceTo', value)} required min={copyForm.sourceFrom || undefined} />
@@ -774,21 +858,34 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             </div>
             <div className="ops-button-row">
               {[['includeGroup', 'Групповые'], ['includeIndividual', 'Индивидуальные'], ['includeSplit', 'Сплит']].map(([field, label]) => <Checkbox id={COPY_FIELD_IDS[field]} key={field} label={label} checked={copyForm[field]} error={copyFieldErrors[field]} onChange={(event) => updateCopyForm(field, event.target.checked)} />)}
-              <Button variant="primary" disabled={busy} onClick={previewPeriodCopy}>Проверить</Button>
-              {copyPreview && <Button id={COPY_FIELD_IDS.selectedIndices} variant="secondary" disabled={busy || !copyPreview.selectedIndices.length} aria-invalid={Boolean(copyFieldErrors.selectedIndices)} aria-describedby={copyFieldErrors.selectedIndices ? `${COPY_FIELD_IDS.selectedIndices}-error` : undefined} onClick={commitPeriodCopy}>Скопировать {copyPreview.selectedIndices.length}</Button>}
             </div>
             {copyFieldErrors.selectedIndices && <small id={`${COPY_FIELD_IDS.selectedIndices}-error`} className="ops-field-error" role="alert">{copyFieldErrors.selectedIndices}</small>}
             {copyPreview && <div className="muted">Готово: {copyPreview.selectedIndices.length}; конфликты или пропуски: {copyPreview.rows.length - copyPreview.selectedIndices.length}. Запись начнётся только после подтверждения.</div>}
           </div>
-        )}
+        </FormModal>
 
-        {editingSession && (
+        <FormModal
+          open={editingSession != null}
+          title="Редактирование занятия"
+          size="lg"
+          busy={busy}
+          dirty={Boolean(sessionEditBaseline) && JSON.stringify(sessionEditForm) !== JSON.stringify(sessionEditBaseline)}
+          suspended={confirmDelete != null}
+          onRequestClose={closeSessionEdit}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(editingSession)}>Удалить занятие</Button><Button variant="primary" disabled={busy} onClick={saveSessionEdit}>Сохранить занятие</Button></>}
+        >
           <div className="card card-pad ops-schedule-form-card">
-            <div className="eyebrow">Редактирование занятия</div>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               {sessionEditForm.sessionType === 'group'
                 ? <label>Группа<select id="admin-session-edit-groupId" value={sessionEditForm.groupId} aria-invalid={Boolean(editFieldErrors.groupId)} aria-describedby={editFieldErrors.groupId ? 'admin-session-edit-groupId-error' : undefined} onChange={(event) => updateSessionEditForm('groupId', event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{editFieldErrors.groupId && <small id="admin-session-edit-groupId-error" className="ops-field-error" role="alert">{editFieldErrors.groupId}</small>}</label>
-                : <SearchableSelect inputId="admin-session-edit-participantId" label="Участник" value={sessionEditForm.participantId} onChange={(value) => updateSessionEditForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant))} error={editFieldErrors.participantId} />}
+                : <SearchableSelect inputId="admin-session-edit-participantId" label={sessionEditForm.sessionType === 'split' ? 'Клиент 1' : 'Участник'} value={sessionEditForm.participantId} onChange={(value) => { updateSessionEditForm('participantId', value); if (String(value) === String(sessionEditForm.secondParticipantId)) updateSessionEditForm('secondParticipantId', '') }} options={participants.filter((participant) => !editingSession?.roster?.slice(1).filter((row) => String(row.id) !== String(editingSession?.secondStudentId)).some((row) => String(row.id) === String(participant.studentId))).map((participant) => clientSelectOption(participant))} error={editFieldErrors.participantId} />}
+              {sessionEditForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-edit-secondParticipantId" label="Клиент 2 (необязательно)" value={sessionEditForm.secondParticipantId} onChange={(value) => updateSessionEditForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionEditForm.participantId) && !editingSession?.roster?.slice(1).filter((row) => String(row.id) !== String(editingSession?.secondStudentId)).some((row) => String(row.id) === String(participant.studentId))).map((participant) => clientSelectOption(participant))} error={editFieldErrors.secondParticipantId} />}
+              {sessionEditForm.sessionType === 'split' && editingSession?.roster?.length > 0 && <div className="ops-grid-full ops-split-roster-summary" aria-label="Полный состав Split">
+                <span className="muted">Текущий полный состав</span>
+                <strong>{editingSession.roster.map((participant) => participant.full_name).join(' · ')}</strong>
+                {editingSession.roster.length > 2 && <small className="muted">Участники после Клиента 2 сохраняются этой формой и управляются на экране посещаемости.</small>}
+              </div>}
               <label>Тренер<select id="admin-session-edit-trainerId" value={sessionEditForm.trainerId} aria-invalid={Boolean(editFieldErrors.trainerId)} aria-describedby={editFieldErrors.trainerId ? 'admin-session-edit-trainerId-error' : undefined} onChange={(event) => updateSessionEditForm('trainerId', event.target.value)}>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{editFieldErrors.trainerId && <small id="admin-session-edit-trainerId-error" className="ops-field-error" role="alert">{editFieldErrors.trainerId}</small>}</label>
               <DateField id="admin-session-edit-date" label="Дата" value={sessionEditForm.date} onChange={(value) => updateSessionEditForm('date', value)} required error={editFieldErrors.date} />
               <TimeField id="admin-session-edit-start" label="Начало" value={sessionEditForm.start} onChange={(value) => updateSessionEditForm('start', value)} required error={editFieldErrors.start} />
@@ -799,13 +896,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
               <Input id="admin-session-edit-notes" label="Заметки" value={sessionEditForm.notes} error={editFieldErrors.notes} onChange={(event) => updateSessionEditForm('notes', event.target.value)} />
             </div>
             <div className="muted">Окончание: {endTime(sessionEditForm.start, sessionEditForm.durationMinutes)}</div>
-            <div className="ops-button-row">
-              <Button variant="primary" disabled={busy} onClick={saveSessionEdit}>Сохранить занятие</Button>
-              <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(editingSession)}>Удалить занятие</Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setEditingSession(null)}>Закрыть</Button>
-            </div>
           </div>
-        )}
+        </FormModal>
 
         <div className="ops-calendar-toolbar">
           <CalendarNavigation

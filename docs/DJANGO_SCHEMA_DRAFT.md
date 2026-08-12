@@ -279,7 +279,13 @@ Payroll status values:
 Rules:
 
 - `individual` should have a single student context;
-- `split` should have at most two participants;
+- `split` has one required base student and may have additional participants up
+  to its editable capacity; creation and edit expose an optional second student;
+- after the first attendance record is created, the `split` roster is immutable;
+- later participant/account archiving does not shrink that enrolled historical
+  roster, its capacity accounting, or its price divisor;
+- a one-off `split` price is shared across the enrolled roster with integer minor-
+  unit rounding down; one enrolled student pays the full snapshot price;
 - these constraints should be enforced in service logic and, where practical, at
   the data level.
 

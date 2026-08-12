@@ -195,6 +195,33 @@ test('session duration must use five-minute increments for create and edit forms
   assert.match(validateAdminSessionForm({ ...base, durationMinutes: '17' }).durationMinutes, /5/)
 })
 
+test('split form keeps clients distinct and capacity above the preserved roster', () => {
+  const base = {
+    trainerId: '2',
+    date: '2026-08-12',
+    start: '17:00',
+    durationMinutes: '60',
+    location: 'Pool A',
+    maxParticipants: '4',
+    sessionType: 'split',
+    participantId: '11',
+    secondParticipantId: '12',
+    extraParticipantCount: 2,
+    price: '160',
+    notes: '',
+  }
+
+  assert.deepEqual(validateAdminSessionForm(base), {})
+  assert.match(validateAdminSessionForm({
+    ...base,
+    secondParticipantId: '11',
+  }).secondParticipantId, /другого/)
+  assert.match(validateAdminSessionForm({
+    ...base,
+    maxParticipants: '3',
+  }).maxParticipants, /текущего состава \(4\)/)
+})
+
 test('period count excludes adjacent month cells and labels the active period', () => {
   const sessions = [
     { startAt: '2026-07-31T17:00:00+02:00' },

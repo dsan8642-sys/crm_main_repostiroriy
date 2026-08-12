@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { api, apiErrorMessage } from '../../api.js'
 import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
+import { FormModal } from '../FormModal.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
@@ -16,11 +17,14 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const clients = adminData.clients || []
     const sessions = adminData.sessions || []
     const initial = rows.find((row) => String(row.groupId) === String(groupId)) || null
+    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }
     const [selected, setSelected] = useState(initial)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState(false)
+    const [addingMember, setAddingMember] = useState(false)
     const [candidateId, setCandidateId] = useState('')
-    const [form, setForm] = useState({ name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true })
+    const [form, setForm] = useState(initialForm)
+    const [formBaseline, setFormBaseline] = useState(initial ? initialForm : null)
     const [capacityError, setCapacityError] = useState('')
     const [fieldErrors, setFieldErrors] = useState({})
     const [message, setMessage] = useState(null)
@@ -36,7 +40,9 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
       setCapacityError('')
       setFieldErrors({})
-      setForm({ name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active })
+      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
+      setForm(next)
+      setFormBaseline(next)
     }
 
     async function saveGroup(isNew = false) {
@@ -75,6 +81,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         else await api.post(`/api/admin/groups/${selected.groupId}/`, payload)
         setMessage(isNew ? 'Группа создана.' : 'Карточка группы обновлена.')
         setCreating(false); setEditing(false)
+        setFormBaseline(null)
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, {
@@ -104,6 +111,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         await api.post(`/api/admin/participants/${studentId}/`, { participant: { group_id: nextGroupId || null } })
         setMessage(nextGroupId ? 'Участник добавлен в группу.' : 'Участник убран из группы.')
         setCandidateId('')
+        setAddingMember(false)
         await reloadRoleData?.('admin')
       } catch (err) { setError(apiErrorMessage(err, 'Не удалось изменить состав группы.')) } finally { setBusy(false) }
     }
@@ -115,31 +123,44 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     }
 
     const editor = (
-      <div className="card card-pad" style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>{creating ? 'Новая группа' : 'Редактирование группы'}</div>
+      <>
+        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="ops-form-grid"><Input id="admin-group-name" label="Название" value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label="Описание" value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label="Вместимость" hint="Значение по умолчанию для новых групповых тренировок." inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-price" label="Цена занятия" hint="Списывается за посещение без абонемента. Пусто — не списывать." inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label="Тренер по умолчанию" value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Checkbox id="admin-group-isActive" label="Активна" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
         <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
-        <div className="ops-button-row"><Button variant="primary" disabled={busy || !form.name} onClick={() => saveGroup(creating)}>Сохранить</Button><Button variant="secondary" onClick={() => { setCreating(false); setEditing(false) }}>Отмена</Button></div>
-      </div>
+      </>
     )
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">Группы</h1><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm({ name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }) }}>Новая группа</Button></div>
+        <div className="page-head"><div><h1 className="page-title">Группы</h1><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>Новая группа</Button></div>
         <ToastNotice id="admin-groups-result" message={message} />
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {error && !creating && !editing && !addingMember && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Обновляю состав группы...</BusyBanner>
-        {creating && editor}
+        <FormModal
+          open={creating || editing}
+          title={creating ? 'Новая группа' : 'Редактирование группы'}
+          size="lg"
+          busy={busy}
+          dirty={Boolean(formBaseline) && JSON.stringify(form) !== JSON.stringify(formBaseline)}
+          onRequestClose={() => { if (formBaseline) setForm(formBaseline); setCreating(false); setEditing(false); setFormBaseline(null); setFieldErrors({}); setCapacityError(''); setError(null) }}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={busy || !form.name} onClick={() => saveGroup(creating)}>Сохранить</Button></>}
+        >
+          {editor}
+        </FormModal>
 
         {selected && !creating && <section className="card ops-entity-card" aria-label={`Карточка группы ${selected.name}`}>
-          <div className="ops-entity-head"><div><div className="eyebrow">Карточка группы</div><h3>{selected.name}</h3><div className="muted">{selected.description || 'Описание не добавлено'}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => setEditing((value) => !value)}>Редактировать</Button><Button variant="subtle" onClick={() => setSelected(null)}>Закрыть</Button></div></div>
-          {editing && editor}
+          <div className="ops-entity-head"><div><div className="eyebrow">Карточка группы</div><h3>{selected.name}</h3><div className="muted">{selected.description || 'Описание не добавлено'}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>Редактировать</Button><Button variant="subtle" onClick={() => setSelected(null)}>Закрыть</Button></div></div>
           <div className="ops-summary-grid"><div><span>Тренер</span><strong>{selected.trainer || 'Не назначен'}</strong></div><div><span>Участники</span><strong>{members.length}</strong></div><div><span>Вместимость</span><strong>{capacity ?? 'Не задана'}</strong></div><div><span>Ближайшие занятия</span><strong>{groupSessions.length}</strong></div></div>
           <div className="ops-detail-grid">
-            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{members.length} / {capacity ?? 'Не задана'}</Badge></div><div className="ops-inline-add"><SearchableSelect inputAriaLabel="Добавить участника" value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || 'Без группы' }))} /><Button size="sm" variant="primary" disabled={!candidateId || busy} onClick={() => moveParticipant(candidateId, selected.groupId)}>Добавить</Button></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => moveParticipant(client.studentId, null)}>Убрать</Button></div>)}{!members.length && <div className="empty">В группе пока нет участников.</div>}</div>
+            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{members.length} / {capacity ?? 'Не задана'}</Badge><Button size="sm" variant="primary" disabled={busy} onClick={() => { setCandidateId(''); setAddingMember(true) }}>Добавить</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => moveParticipant(client.studentId, null)}>Убрать</Button></div>)}{!members.length && <div className="empty">В группе пока нет участников.</div>}</div>
             <div><div className="eyebrow">Расписание группы</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>Занятий нет. Открыть расписание</button>}</div>
           </div>
         </section>}
+
+        <FormModal open={addingMember} title="Добавить участника в группу" size="sm" busy={busy} dirty={Boolean(candidateId)} onRequestClose={() => { setAddingMember(false); setCandidateId(''); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={!candidateId || busy} onClick={() => moveParticipant(candidateId, selected?.groupId)}>Добавить</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <SearchableSelect inputAriaLabel="Добавить участника" value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || 'Без группы' }))} />
+        </FormModal>
 
         <Table rows={rows} emptyLabel="Групп пока нет" columns={[
           { key: 'name', header: 'Группа', render: (row) => <button type="button" className="ops-link-button" onClick={() => openGroup(row)}><span className="strong">{row.name}</span></button> },

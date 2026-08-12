@@ -6,6 +6,7 @@ import {
   focusFirstFieldError,
   formErrorMessage,
 } from '../formErrors.js'
+import { FormModal } from '../FormModal.jsx'
 
 const DATASETS = [
   { kind: 'trainers', label: 'Тренеры', help: 'Сначала импортируйте тренеров.' },
@@ -241,7 +242,7 @@ function ClientSearch({ Button, disabled, onChoose }) {
   </div>
 }
 
-function RowEditor({ state, row, Button, onClose }) {
+function RowEditor({ state, row, Button, Banner, onClose }) {
   const editable = state.fieldOptions.filter((field) => field.editable)
   const readOnly = state.fieldOptions.filter((field) => !field.editable && row.data?.[field.key])
   const [values, setValues] = useState(() => Object.fromEntries(
@@ -252,13 +253,13 @@ function RowEditor({ state, row, Button, onClose }) {
   }, [row.index])
 
   async function save() {
-    await state.patchRow(row.index, { data: values })
-    onClose()
+    const saved = await state.patchRow(row.index, { data: values })
+    if (saved) onClose()
   }
 
   async function assign(client) {
-    await state.patchRow(row.index, { relations: { client_id: client.id } })
-    onClose()
+    const saved = await state.patchRow(row.index, { relations: { client_id: client.id } })
+    if (saved) onClose()
   }
 
   async function clearClient() {
@@ -268,11 +269,10 @@ function RowEditor({ state, row, Button, onClose }) {
     } })
   }
 
-  return <div className="card card-pad" style={{ margin: '12px 0', display: 'grid', gap: 12 }}>
-    <div className="ops-button-row" style={{ justifyContent: 'space-between' }}>
-      <strong>Исправление строки {row.index}</strong>
-      <Button size="sm" variant="subtle" onClick={onClose}>Закрыть</Button>
-    </div>
+  const baseline = Object.fromEntries(editable.map((field) => [field.key, row.data?.[field.key] ?? '']))
+
+  return <FormModal open title={`Исправление строки ${row.index}`} size="lg" busy={state.busy} dirty={JSON.stringify(values) !== JSON.stringify(baseline)} onRequestClose={onClose} footer={({ requestClose }) => <><Button variant="secondary" disabled={state.busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>Сохранить исправления</Button></>}>
+    {state.error && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
     <div className="ops-form-grid">
       {editable.map((field) => <label key={field.key}>
         {field.label}{field.required ? ' *' : ''}
@@ -294,10 +294,7 @@ function RowEditor({ state, row, Button, onClose }) {
         </Button>}
       </div>
     </>}
-    <div className="ops-button-row">
-      <Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>Сохранить исправления</Button>
-    </div>
-  </div>
+  </FormModal>
 }
 
 function ImportWorkspace({ state, dataset, components, financial, possibleDuplicates, onFinancial, onDuplicates }) {
@@ -370,7 +367,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       {state.fieldErrors.file && <small id={`admin-import-${state.kind}-file-error`} className="ops-field-error" role="alert">{state.fieldErrors.file}</small>}
     </div>
 
-    {state.error && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
+    {state.error && !editing && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
     <ImportSummary summary={state.summary} />
     {state.meta.ownExport && <Banner tone="success">Собственный export CRM распознан автоматически · schema {state.meta.schema}</Banner>}
     {state.meta.duplicateFile && <Banner tone="warning">Этот файл уже был импортирован. Проверьте дубликаты перед commit.</Banner>}
@@ -427,7 +424,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       <Table rows={visibleRows} rowKey={(row) => row.row_key || row.index} columns={columns} density="sm"
         emptyLabel="Нет строк для выбранного фильтра" />
       {editing && <RowEditor state={state} row={state.rows.find((row) => row.index === editing)}
-        Button={Button} onClose={() => setEditing(null)} />}
+        Button={Button} Banner={Banner} onClose={() => { state.setError(''); setEditing(null) }} />}
       <div className="card card-pad" style={{ display: 'grid', gap: 10 }}>
         <div className="eyebrow">Массовые действия · выбрано {state.selected.length}</div>
         <div className="ops-button-row">

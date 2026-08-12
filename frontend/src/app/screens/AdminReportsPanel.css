@@ -1,0 +1,156 @@
+.ops-reports-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.ops-report-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 280px));
+  gap: 12px;
+  align-items: end;
+}
+
+.ops-report-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 12px;
+}
+
+.ops-report-toolbar > :first-child {
+  width: min(100%, 360px);
+}
+
+.ops-report-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.ops-report-kpi {
+  min-width: 0;
+}
+
+.ops-report-kpi .kpi-value {
+  overflow-wrap: anywhere;
+}
+
+.ops-report-chart {
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.ops-report-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ops-report-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ops-report-chart-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.ops-report-chart-legend .is-group,
+.ops-report-chart-bar.is-group {
+  background: #2687c9;
+}
+
+.ops-report-chart-legend .is-personal,
+.ops-report-chart-bar.is-personal {
+  background: #f0aa4b;
+}
+
+.ops-report-chart-scroll {
+  min-width: 560px;
+  overflow-x: auto;
+}
+
+.ops-report-chart-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 220px) minmax(360px, 1fr);
+  gap: 14px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.ops-report-chart-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ops-report-chart-bars {
+  display: grid;
+  gap: 6px;
+}
+
+.ops-report-chart-track {
+  position: relative;
+  min-height: 20px;
+  border-radius: 5px;
+  background: var(--surface-soft, #edf2f7);
+  overflow: hidden;
+}
+
+.ops-report-chart-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+}
+
+.ops-report-chart-track span {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ops-report-table {
+  overflow-x: auto;
+}
+
+.ops-report-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 700px) {
+  .ops-report-filters,
+  .ops-report-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-report-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ops-report-toolbar > :first-child {
+    width: 100%;
+  }
+
+  .ops-report-pagination {
+    justify-content: space-between;
+  }
+}

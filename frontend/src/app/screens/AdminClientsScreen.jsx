@@ -11,6 +11,7 @@ import {
 import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { DateField } from '../DateTimeField.jsx'
+import { FormModal } from '../FormModal.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 
 const CLIENT_FIELD_MAP = {
@@ -62,6 +63,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
   return function ApiAdminClients({ go }) {
     const rows = adminData.clients || []
+    const blacklistedRows = adminData.blacklistedClients || []
     const groups = adminData.groups || []
     const clientOptions = Array.from(
       new Map(rows.filter((row) => row.clientId).map((row) => [row.clientId, row])).values(),
@@ -85,6 +87,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       groupId: '',
     })
     const [editingClient, setEditingClient] = useState(null)
+    const [clientEditBaseline, setClientEditBaseline] = useState(null)
     const [clientEditForm, setClientEditForm] = useState({
       accountFirstName: '',
       accountLastName: '',
@@ -111,12 +114,13 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     const [balanceFilter, setBalanceFilter] = useState('all')
     const [activityFilter, setActivityFilter] = useState('all')
     const [clientAction, setClientAction] = useState(null)
+    const [mobileActionsFor, setMobileActionsFor] = useState(null)
     const scopedRows = scope === 'blacklist'
-      ? Array.from(new Map(rows.filter((row) => row.accountActive === false).map((row) => [row.clientId, row])).values())
-      : rows.filter((row) => row.accountActive !== false && row.isActive)
+      ? blacklistedRows
+      : rows
     const filteredRows = scopedRows.filter((row) => {
       const needle = query.trim().toLocaleLowerCase('ru-RU')
-      if (needle && ![row.first, row.last, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))) return false
+      if (needle && ![row.first, row.last, row.phone, row.email, row.group, row.blacklistSearchText].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))) return false
       if (subscriptionFilter === 'with' && !row.hasCurrentSubscription) return false
       if (subscriptionFilter === 'without' && row.hasCurrentSubscription) return false
       if (balanceFilter === 'positive' && row.balance <= 0) return false
@@ -131,12 +135,27 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       : scope === 'blacklist'
         ? 'Чёрный список пуст'
         : 'Активных клиентов пока нет'
+    const clientFormDirty = Object.entries(clientForm).some(([key, value]) => key !== 'usernameManual' && Boolean(value))
+    const participantFormDirty = Object.values(participantForm).some(Boolean)
+    const clientEditDirty = Boolean(clientEditBaseline) && JSON.stringify(clientEditForm) !== JSON.stringify(clientEditBaseline)
 
     function resetFilters() {
       setQuery('')
       setSubscriptionFilter('all')
       setBalanceFilter('all')
       setActivityFilter('all')
+    }
+
+    function closeQuickAction() {
+      if (quickAction === 'client') {
+        setClientForm({ firstName: '', lastName: '', email: '', username: '', usernameManual: false, phone: '', birthDate: '', groupId: '' })
+        setClientFieldErrors({})
+      } else if (quickAction === 'participant') {
+        setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
+        setParticipantFieldErrors({})
+      }
+      setError(null)
+      setQuickAction(null)
     }
 
     const subscriptionUsage = (row) => {
@@ -173,7 +192,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     async function openClientEdit(row) {
       setEditingClient(row)
       setClientEditFieldErrors({})
-      setClientEditForm({
+      const initialForm = {
         accountFirstName: '',
         accountLastName: '',
         accountEmail: row.email || '',
@@ -185,7 +204,9 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         email: row.email || '',
         groupId: row.groupId || '',
         isActive: row.isActive,
-      })
+      }
+      setClientEditForm(initialForm)
+      setClientEditBaseline(initialForm)
       if (!row.clientId) return
       setBusy(true)
       setError(null)
@@ -193,14 +214,18 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         const detail = await api.get(`/api/admin/clients/${row.clientId}/`)
         const account = detail.account || {}
         const accountName = splitFullName(account.full_name)
-        setClientEditForm((current) => ({
+        setClientEditForm((current) => {
+          const next = {
           ...current,
           accountFirstName: account.first_name || accountName.firstName,
           accountLastName: account.last_name || accountName.lastName,
           accountEmail: account.email || '',
           accountUsername: account.username || '',
           accountPhone: account.phone || row.phone || '',
-        }))
+          }
+          setClientEditBaseline(next)
+          return next
+        })
       } catch (err) {
         setError(apiErrorMessage(err, 'Не удалось загрузить данные клиента.'))
       } finally {
@@ -276,7 +301,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         })
         setMessage('Участник добавлен к аккаунту клиента.')
         setQuickAction(null)
-        setParticipantForm({ clientId: participantForm.clientId, firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
+        setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, PARTICIPANT_FIELD_MAP)
@@ -323,6 +348,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           },
         })
         setEditingClient(null)
+        setClientEditBaseline(null)
         setMessage('Данные клиента и участника обновлены.')
         await reloadRoleData?.('admin')
       } catch (err) {
@@ -379,7 +405,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           </div>
         </div>
         <ToastNotice id="admin-clients-result" message={message} />
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {error && !quickAction && !editingClient && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Сохраняю данные клиента...</BusyBanner>
 
         <div className="ops-action-strip">
@@ -393,11 +419,21 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           </button>
         </div>
 
-        {quickAction && (
-        <div style={{ display: 'grid', gridTemplateColumns: quickAction === 'client' ? 'minmax(320px, 1fr)' : 'minmax(320px, 1fr)', gap: 14, marginBottom: 16 }}>
-          {quickAction === 'client' && (
-          <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Новый клиент</div>
+        <FormModal
+          open={quickAction === 'client'}
+          title="Новый клиент"
+          size="lg"
+          busy={busy}
+          dirty={clientFormDirty}
+          onRequestClose={closeQuickAction}
+          footer={({ requestClose }) => (
+            <>
+              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button>
+              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>Создать клиента</Button>
+            </>
+          )}
+        >
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Input id="admin-client-firstName" label="Имя владельца аккаунта" value={clientForm.firstName} error={clientFieldErrors.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
               <Input id="admin-client-lastName" label="Фамилия владельца" value={clientForm.lastName} error={clientFieldErrors.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
@@ -415,16 +451,23 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               </label>
             </div>
             <p className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>Владелец аккаунта будет создан как участник. Другого участника можно добавить отдельным действием.</p>
-            <div style={{ marginTop: 12 }}>
-              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>Создать клиента</Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setQuickAction(null)} style={{ marginLeft: 8 }}>Закрыть</Button>
-            </div>
-          </div>
-          )}
+        </FormModal>
 
-          {quickAction === 'participant' && (
-          <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Новый участник аккаунта</div>
+        <FormModal
+          open={quickAction === 'participant'}
+          title="Новый участник аккаунта"
+          size="lg"
+          busy={busy}
+          dirty={participantFormDirty}
+          onRequestClose={closeQuickAction}
+          footer={({ requestClose }) => (
+            <>
+              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button>
+              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={addParticipant}>Добавить участника</Button>
+            </>
+          )}
+        >
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <SearchableSelect
                 className="ops-grid-full"
@@ -449,20 +492,27 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
+                {participantFieldErrors.groupId && <small id="admin-participant-groupId-error" className="ops-field-error" role="alert">{participantFieldErrors.groupId}</small>}
               </label>
             </div>
-            <div style={{ marginTop: 12 }}>
-              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={addParticipant}>Добавить участника</Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setQuickAction(null)} style={{ marginLeft: 8 }}>Закрыть</Button>
-            </div>
-          </div>
+        </FormModal>
+
+        <FormModal
+          open={Boolean(editingClient)}
+          title="Редактирование клиента и участника"
+          size="lg"
+          busy={busy}
+          dirty={clientEditDirty}
+          onRequestClose={() => { if (clientEditBaseline) setClientEditForm(clientEditBaseline); setEditingClient(null); setClientEditBaseline(null); setClientEditFieldErrors({}); setError(null) }}
+          footer={({ requestClose }) => (
+            <>
+              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button>
+              <Button variant="primary" loading={busy} disabled={busy} onClick={saveClientEdit}>Сохранить</Button>
+            </>
           )}
-        </div>
-        )}
-        {editingClient && (
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Редактирование клиента и участника</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10 }}>
+        >
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+            <div className="ops-form-grid">
               <Input id="admin-client-edit-accountFirstName" label="Имя владельца" value={clientEditForm.accountFirstName} error={clientEditFieldErrors.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
               <Input id="admin-client-edit-accountLastName" label="Фамилия владельца" value={clientEditForm.accountLastName} error={clientEditFieldErrors.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
               <Input id="admin-client-edit-accountEmail" label="Email владельца" value={clientEditForm.accountEmail} error={clientEditFieldErrors.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
@@ -478,18 +528,14 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <option value="">Индивидуально</option>
                   {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
                 </select>
+                {clientEditFieldErrors.groupId && <small id="admin-client-edit-groupId-error" className="ops-field-error" role="alert">{clientEditFieldErrors.groupId}</small>}
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                 <input type="checkbox" checked={clientEditForm.isActive} onChange={(event) => updateClientEditForm('isActive', event.target.checked)} />
                 Активен
               </label>
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" loading={busy} disabled={busy} onClick={saveClientEdit}>Сохранить</Button>
-              <Button variant="secondary" disabled={busy} onClick={() => setEditingClient(null)}>Закрыть</Button>
-            </div>
-          </div>
-        )}
+        </FormModal>
         <div className="ops-command-row">
           <div className="ops-client-list-tools">
             <div className="seg" aria-label="Режим списка клиентов">
@@ -508,8 +554,6 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <option value="with">Есть</option>
                   <option value="without">Нет</option>
                 </select>
-                {clientEditFieldErrors.groupId && <small id="admin-client-edit-groupId-error" className="ops-field-error" role="alert">{clientEditFieldErrors.groupId}</small>}
-                {participantFieldErrors.groupId && <small id="admin-participant-groupId-error" className="ops-field-error" role="alert">{participantFieldErrors.groupId}</small>}
               </label>
               <label className="ops-client-filter-field">
                 <span>Баланс</span>
@@ -558,13 +602,12 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <small>{row.lastPresentAt ? formatDate(row.lastPresentAt) : 'Не посещал'}</small>
                 </span>
               ) },
-              { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.status} size="sm" /> },
               {
                 key: 'act',
                 header: '',
-                width: 170,
+                width: 260,
                 render: (row) => (
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div className="ops-client-row-actions">
                     <Button size="sm" variant="subtle" disabled={busy || !row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>Карточка</Button>
                     {scope === 'active' ? (
                       <>
@@ -581,20 +624,18 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           />
         </div>
         <div className="ops-client-mobile-list">
-          {filteredRows.map((row) => {
-            const Card = row.clientId ? 'button' : 'article'
-            return (
-              <Card
-                key={row.id}
-                type={row.clientId ? 'button' : undefined}
-                className={`ops-client-mobile-card${row.clientId ? ' is-linked' : ''}`}
+          {filteredRows.map((row) => (
+            <article key={row.id} className={`ops-client-mobile-card${row.clientId ? ' is-linked' : ''}`}>
+              <button
+                type="button"
+                className="ops-client-mobile-link"
+                disabled={!row.clientId}
                 aria-label={row.clientId ? `Открыть профиль клиента ${row.last} ${row.first}` : undefined}
                 onClick={row.clientId ? () => go?.('clientDetail', { clientId: row.clientId }) : undefined}
               >
                 <span className="ops-client-mobile-person">
                   <Avatar name={`${row.first} ${row.last}`} size={32} />
                   <strong>{row.last} {row.first}</strong>
-                  <StatusPill status={row.status} size="sm" />
                 </span>
                 <span className="ops-client-mobile-details">
                   <span><small>Телефон</small><span className="mono">{row.phone || '-'}</span></span>
@@ -604,9 +645,30 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <span><small>Баланс</small><Money amount={row.balance} signed currency="zł" /></span>
                   <span><small>Активность</small><span>{row.isRecentlyActive ? 'Активен' : 'Неактивен'} · {row.lastPresentAt ? formatDate(row.lastPresentAt) : 'Не посещал'}</span></span>
                 </span>
-              </Card>
-            )
-          })}
+              </button>
+              <button
+                type="button"
+                className="ops-client-mobile-actions-trigger"
+                aria-label="Действия клиента"
+                aria-expanded={mobileActionsFor === row.id}
+                onClick={() => setMobileActionsFor((current) => current === row.id ? null : row.id)}
+              >
+                ⋮
+              </button>
+              {mobileActionsFor === row.id && (
+                <div className="ops-client-mobile-actions" role="group" aria-label={`Действия: ${row.last} ${row.first}`}>
+                  {scope === 'active' ? (
+                    <>
+                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => { setMobileActionsFor(null); openClientEdit(row) }}>Изменить</Button>
+                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => { setMobileActionsFor(null); setClientAction({ type: 'archive', row }) }}>В чёрный список</Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="primary" disabled={busy} onClick={() => { setMobileActionsFor(null); setClientAction({ type: 'restore', row }) }}>Восстановить</Button>
+                  )}
+                </div>
+              )}
+            </article>
+          ))}
           {!filteredRows.length && <div className="empty">{emptyLabel}</div>}
         </div>
         {clientAction && (

@@ -60,7 +60,6 @@ export function roleNav(role, icons, data) {
       { key: 'trainers', label: 'Тренеры', icon: <icons.TrainerWhistle size={17} />, count: data.AdminData?.trainers?.length, section: 'Операции' },
       { key: 'groups', label: 'Группы', icon: <icons.GroupMembers size={17} />, count: data.AdminData?.groups?.length, section: 'Операции' },
       { key: 'schedule', label: 'Расписание', icon: <icons.Calendar size={17} />, section: 'Операции' },
-      { key: 'attendance', label: 'Занятие', icon: <icons.Check size={17} />, section: 'Операции' },
       {
         key: 'payments',
         label: 'Платежи',

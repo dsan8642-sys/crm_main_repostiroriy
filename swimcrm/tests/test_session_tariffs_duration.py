@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from attendance.models import AttendanceStatus
 from attendance.services import set_attendance
-from scheduling.models import SessionType, SessionTypeConfig
+from scheduling.models import SessionParticipant, SessionType, SessionTypeConfig
 from scheduling.services import create_session, edit_single_session
 
 from . import factories as f
@@ -101,6 +101,7 @@ class SessionTariffAndDurationTest(TestCase):
             session_type=SessionType.SPLIT,
             individual_student=self.student,
         )
+        SessionParticipant.objects.create(session=session, student=second)
         set_attendance(
             session_id=session.id, student=self.student, status=AttendanceStatus.PRESENT)
         set_attendance(

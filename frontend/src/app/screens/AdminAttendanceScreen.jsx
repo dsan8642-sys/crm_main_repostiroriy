@@ -5,6 +5,7 @@ import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
+import { FormModal } from '../FormModal.jsx'
 
 export function attendanceSessionDisplayStatus(session, now = Date.now()) {
   if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
@@ -42,6 +43,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const [loading, setLoading] = useState(false)
     const [cancelReason, setCancelReason] = useState('')
     const [bulkPending, setBulkPending] = useState(false)
+    const [formAction, setFormAction] = useState(null)
 
     useEffect(() => {
       if (sessionId) setSelectedSessionId(sessionId)
@@ -145,6 +147,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         })
         setDetail(payload)
         setSelectedStudentId('')
+        setFormAction(null)
         setMessage('Участник добавлен в это занятие.')
         await reloadRoleData?.('admin')
       } catch (err) {
@@ -182,6 +185,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/cancel/`, { reason: cancelReason })
         setMessage('Занятие отменено. История не удалена.')
         setCancelReason('')
+        setFormAction(null)
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, { reason: 'reason' })
@@ -218,7 +222,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const selectedEnd = selectedSession?.end_at ? formatTime(selectedSession.end_at) : selectedSession?.end
     const selectedStatus = selectedSession?.is_cancelled || selectedSession?.isCancelled ? 'cancelled' : selectedSession?.status
     const selectedDisplayStatus = attendanceSessionDisplayStatus(selectedSession)
-    const sessionTypeLabel = { group: 'Групповое', individual: 'Индивидуальное', split: 'Сплит для двоих' }[selectedSession?.session_type || selectedSession?.sessionType] || 'Групповое'
+    const sessionTypeLabel = { group: 'Групповое', individual: 'Индивидуальное', split: 'Split-тренировка' }[selectedSession?.session_type || selectedSession?.sessionType] || 'Групповое'
 
     return (
       <div className="page page-wide">
@@ -233,7 +237,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
           </div>
         </div>
         <ToastNotice id="admin-attendance-result" message={message} />
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {error && !formAction && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         {selectedStatus === 'cancelled' && <Banner tone="warning" title="Занятие отменено" style={{ marginBottom: 12 }}>Доступно только чтение. История сохранена. <Button size="sm" variant="secondary" disabled={busyId != null} loading={busyId === 'restore-session'} onClick={restoreSelectedSession}>Восстановить тренировку</Button></Banner>}
         <BusyBanner Banner={Banner} show={loading}>Загружаю состав занятия...</BusyBanner>
         <BusyBanner Banner={Banner} show={busyId != null && !loading}>Сохраняю изменение...</BusyBanner>
@@ -275,30 +279,20 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 <StatusPill status={selectedDisplayStatus} tone={selectedDisplayStatus === 'done' ? 'present' : undefined} size="sm" />
               </div>
             </div>
-            <div className="ops-inline-add"><Input id="admin-attendance-cancel-reason" label="Причина отмены или переноса" value={cancelReason} error={cancelReasonError} onChange={(event) => { setCancelReason(event.target.value); setCancelReasonError(null) }} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>
+            <div className="ops-button-row" style={{ marginTop: 12 }}><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setSelectedStudentId(''); setStudentError(null); setFormAction('add') }}>Добавить участника</Button><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setCancelReason(''); setCancelReasonError(null); setFormAction('cancel') }}>Отменить занятие</Button></div>
             {selectedSession?.notes && <div className="ops-inline-note">{selectedSession.notes}</div>}
           </div>
-
-          <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Добавить участника</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end' }}>
-              <SearchableSelect
-                inputId="admin-attendance-add-student"
-                label="Клиент / ученик"
-                value={selectedStudentId}
-                error={studentError}
-                onChange={(value) => { setSelectedStudentId(value); setStudentError(null) }}
-                options={availableStudents.map((client) => clientSelectOption(client, {
-                  description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}`,
-                }))}
-              />
-              <Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button>
-            </div>
-            <div className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>
-              Добавление создаёт разовое участие только в этом занятии. Основной состав группы не меняется.
-            </div>
-          </div>
         </div>
+
+        <FormModal open={formAction === 'add'} title="Добавить участника" description="Добавление создаёт разовое участие только в этом занятии. Основной состав группы не меняется." size="sm" busy={busyId === 'add'} dirty={Boolean(selectedStudentId)} onRequestClose={() => { setFormAction(null); setSelectedStudentId(''); setStudentError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId === 'add'} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <SearchableSelect inputId="admin-attendance-add-student" label="Клиент / ученик" value={selectedStudentId} error={studentError} onChange={(value) => { setSelectedStudentId(value); setStudentError(null) }} options={availableStudents.map((client) => clientSelectOption(client, { description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}` }))} />
+        </FormModal>
+
+        <FormModal open={formAction === 'cancel'} title="Отменить занятие" description="Причина сохранится в истории занятия." size="sm" busy={busyId === 'cancel-session'} dirty={Boolean(cancelReason)} onRequestClose={() => { setFormAction(null); setCancelReason(''); setCancelReasonError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId === 'cancel-session'} onClick={() => requestClose('cancel')}>Назад</Button><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <Input id="admin-attendance-cancel-reason" label="Причина отмены или переноса" value={cancelReason} error={cancelReasonError} onChange={(event) => { setCancelReason(event.target.value); setCancelReasonError(null) }} placeholder="Причина сохранится в истории" />
+        </FormModal>
 
         <div className="card" style={{ overflow: 'hidden' }}>
           <Table

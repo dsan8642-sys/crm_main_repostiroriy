@@ -27,7 +27,9 @@ def admin_api_contract(request):
 def admin_reference(request):
     _admin_required(request)
     q = request.GET.get("q", "").strip()
-    participants = Student.objects.select_related("parent", "group").filter(is_active=True)
+    participants = Student.objects.select_related(
+        "parent", "parent__user", "group"
+    ).filter(is_active=True, parent__user__is_active=True)
     if q:
         participants = participants.filter(
             Q(first_name__icontains=q) | Q(last_name__icontains=q) |
@@ -87,18 +89,35 @@ def admin_ops_status(request):
 def admin_dashboard(request):
     _admin_required(request)
     today = timezone.localdate()
-    pending_payments = Payment.objects.filter(status=PaymentStatus.PENDING)
-    overdue_charges = Charge.objects.filter(due_date__lt=today)
+    active_participant = {
+        "student__is_active": True,
+        "student__parent__user__is_active": True,
+    }
+    pending_payments = Payment.objects.filter(
+        status=PaymentStatus.PENDING,
+        **active_participant,
+    )
+    overdue_charges = Charge.objects.filter(
+        due_date__lt=today,
+        **active_participant,
+    )
     confirmed_payments_today = Payment.objects.filter(
-        status=PaymentStatus.CONFIRMED, confirmed_at__date=today)
+        status=PaymentStatus.CONFIRMED,
+        confirmed_at__date=today,
+        **active_participant,
+    )
     debtor_rows = debtors()
     upcoming_rows = upcoming(within_days=7)
     return JsonResponse({
         "clients": {
-            "accounts": ParentAccount.objects.count(),
-            "participants": Student.objects.count(),
-            "active_participants": Student.objects.filter(is_active=True).count(),
-            "adult_account_holders": Student.objects.filter(is_account_holder=True, is_active=True).count(),
+            "accounts": ParentAccount.objects.filter(user__is_active=True).count(),
+            "participants": Student.objects.filter(
+                is_active=True, parent__user__is_active=True).count(),
+            "active_participants": Student.objects.filter(
+                is_active=True, parent__user__is_active=True).count(),
+            "adult_account_holders": Student.objects.filter(
+                is_account_holder=True, is_active=True,
+                parent__user__is_active=True).count(),
         },
         "operations": {
             "active_trainers": Trainer.objects.filter(is_active=True).count(),
@@ -115,8 +134,16 @@ def admin_dashboard(request):
             "debtors": len(debtor_rows),
         },
         "subscriptions": {
-            "active": Subscription.objects.filter(status=SubscriptionStatus.ACTIVE).count(),
-            "frozen": Subscription.objects.filter(status=SubscriptionStatus.FROZEN).count(),
+            "active": Subscription.objects.filter(
+                status=SubscriptionStatus.ACTIVE,
+                student__is_active=True,
+                student__parent__user__is_active=True,
+            ).count(),
+            "frozen": Subscription.objects.filter(
+                status=SubscriptionStatus.FROZEN,
+                student__is_active=True,
+                student__parent__user__is_active=True,
+            ).count(),
             "upcoming_expiry": len(upcoming_rows),
         },
     })

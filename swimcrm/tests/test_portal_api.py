@@ -110,6 +110,35 @@ class ClientPortalApiRule(TestCase):
         self.assertIn("Ковальский Ян", names)
         self.assertNotIn("Новак Ева", names)
 
+    def test_cancelled_split_participation_does_not_keep_session_visible(self):
+        session = create_session(
+            trainer=self.trainer,
+            individual_student=self.student,
+            session_type=SessionType.SPLIT,
+            start_at=f.dt(2026, 9, 1, 17),
+            duration_minutes=60,
+            location="Split visibility",
+            max_participants=2,
+        )
+        participant = SessionParticipant.objects.create(
+            session=session,
+            student=self.other_student,
+        )
+        participant.status = SessionParticipantStatus.CANCELLED
+        participant.save(update_fields=["status", "updated_at"])
+        self.client.force_login(self.other_parent.user)
+
+        schedule = self.client.get(
+            "/api/client/schedule/",
+            {"date_from": "2026-09-01", "date_to": "2026-09-01"},
+        )
+        overview = self.client.get("/api/client/overview/")
+
+        self.assertEqual(schedule.status_code, 200)
+        self.assertNotIn(session.id, [row["id"] for row in schedule.json()["sessions"]])
+        next_session = overview.json()["participants"][0]["next_session"]
+        self.assertTrue(next_session is None or next_session["id"] != session.id)
+
     def test_client_can_update_profile_and_consents(self):
         profile = self.client.post(
             "/api/client/profile/",
@@ -1045,6 +1074,132 @@ class AdminPortalApiRule(TestCase):
             entity_id=str(account.id),
         ).exists())
 
+    def test_archived_account_is_excluded_from_working_projections(self):
+        account = self.student.parent
+        subscription_type = f.make_sub_type(
+            name="Archived projection pack",
+            sessions=4,
+            days=30,
+        )
+        create_subscription(
+            student=self.student,
+            subscription_type=subscription_type,
+            start_date=date.today(),
+            created_by=self.admin,
+        )
+        frozen_student = f.make_student(
+            parent=account,
+            group=self.group,
+            first="Frozen",
+            last="Archived Projection",
+        )
+        frozen_subscription = create_subscription(
+            student=frozen_student,
+            subscription_type=f.make_sub_type(
+                name="Archived frozen projection pack",
+                sessions=4,
+                days=30,
+            ),
+            start_date=date.today(),
+            created_by=self.admin,
+        )
+        frozen_subscription.status = SubscriptionStatus.FROZEN
+        frozen_subscription.save(update_fields=["status"])
+        Payment.objects.create(
+            student=self.student,
+            amount_minor=1000,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.PENDING,
+        )
+        Payment.objects.create(
+            student=self.student,
+            amount_minor=2000,
+            currency="PLN",
+            paid_at=date.today(),
+            status=PaymentStatus.CONFIRMED,
+            confirmed_at=timezone.now(),
+        )
+        account.user.is_active = False
+        account.user.save(update_fields=["is_active"])
+        # Preserve an active participant to cover inconsistent legacy rows: the
+        # account state remains authoritative for every working projection.
+        self.student.is_active = True
+        self.student.save(update_fields=["is_active"])
+
+        reference = self.client.get("/api/admin/reference/")
+        active_clients = self.client.get("/api/admin/clients/", {"active": "true"})
+        archived_clients = self.client.get("/api/admin/clients/", {"active": "false"})
+        debtor_rows = self.client.get("/api/admin/debtors/")
+        dashboard = self.client.get("/api/admin/dashboard/")
+        groups = self.client.get("/api/admin/groups/")
+        income_history = self.client.get(
+            "/api/admin/reports/income/",
+            {
+                "date_from": date.today().isoformat(),
+                "date_to": date.today().isoformat(),
+                "currency": "PLN",
+            },
+        )
+        create_participant = self.client.post(
+            f"/api/admin/clients/{account.id}/participants/",
+            data=json.dumps({
+                "participant": {"first_name": "Blocked", "last_name": "Child"},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(reference.status_code, 200)
+        self.assertNotIn(
+            self.student.id,
+            [row["id"] for row in reference.json()["participants"]],
+        )
+        self.assertNotIn(
+            self.student.id,
+            [row["id"] for row in active_clients.json()["clients"]],
+        )
+        self.assertEqual(active_clients.json()["pagination"]["total"], 0)
+        self.assertIn(
+            self.student.id,
+            [row["id"] for row in archived_clients.json()["clients"]],
+        )
+        self.assertEqual(archived_clients.json()["pagination"]["total"], 2)
+        self.assertEqual(debtor_rows.status_code, 200)
+        self.assertNotIn(
+            self.student.id,
+            [row["student_id"] for row in debtor_rows.json()["debtors"]],
+        )
+        self.assertEqual(
+            dashboard.json()["clients"]["active_participants"],
+            Student.objects.filter(
+                is_active=True, parent__user__is_active=True).count(),
+        )
+        self.assertEqual(
+            dashboard.json()["clients"],
+            {
+                "accounts": 0,
+                "participants": 0,
+                "active_participants": 0,
+                "adult_account_holders": 0,
+            },
+        )
+        self.assertEqual(
+            dashboard.json()["finance"],
+            {
+                "pending_payments": 0,
+                "pending_payments_minor": 0,
+                "confirmed_today_minor": 0,
+                "overdue_charges": 0,
+                "overdue_charges_minor": 0,
+                "debtors": 0,
+            },
+        )
+        self.assertEqual(dashboard.json()["subscriptions"]["active"], 0)
+        self.assertEqual(dashboard.json()["subscriptions"]["frozen"], 0)
+        self.assertEqual(groups.json()["groups"][0]["participants_count"], 0)
+        self.assertEqual(income_history.json()["total_minor"], 2000)
+        self.assertEqual(create_participant.status_code, 400)
+
     def test_admin_settings_routes_replace_separate_configuration_panel(self):
         created = self.client.post(
             "/api/admin/settings/locations/",
@@ -1663,6 +1818,9 @@ class AdminPortalApiRule(TestCase):
         )
         self.assertNotIn("color_key", trainer_row)
         self.assertNotIn("color_key", client_row)
+        self.assertIn("roster", admin_row)
+        self.assertNotIn("roster", trainer_row)
+        self.assertNotIn("roster", client_row)
 
     def test_schedule_list_loads_session_type_colors_once(self):
         trainer = f.make_trainer(username="palette_query_coach")
@@ -2208,11 +2366,13 @@ class AdminPortalApiRule(TestCase):
 
     def test_admin_can_create_split_session_for_two_clients(self):
         trainer = f.make_trainer(username="split_session_coach")
+        second = f.make_student(first="Berta", last="Split")
         response = self.client.post(
             "/api/admin/schedule/sessions/",
             data=json.dumps({
                 "session_type": "split",
                 "individual_student_id": self.student.id,
+                "second_student_id": second.id,
                 "trainer_id": trainer.id,
                 "start_at": "2026-06-02T19:00:00+02:00",
                 "end_at": "2026-06-02T20:00:00+02:00",
@@ -2226,6 +2386,11 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.json()["session_type"], "split")
         self.assertEqual(response.json()["individual_student_id"], self.student.id)
         self.assertEqual(response.json()["max_participants"], 2)
+        self.assertEqual(
+            [row["id"] for row in response.json()["roster"]],
+            [self.student.id, second.id],
+        )
+        self.assertEqual(response.json()["participants_count"], 2)
 
         edited = self.client.post(
             f"/api/admin/schedule/sessions/{response.json()['id']}/",
@@ -2239,6 +2404,464 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(edited.status_code, 200)
         self.assertEqual(edited.json()["session_type"], "split")
         self.assertEqual(edited.json()["location"], "Lane 3")
+        self.assertEqual(
+            [row["id"] for row in edited.json()["roster"]],
+            [self.student.id, second.id],
+        )
+
+        duplicate_patch = self.client.patch(
+            f"/api/admin/schedule/sessions/{response.json()['id']}/",
+            data=json.dumps({"individual_student_id": second.id}),
+            content_type="application/json",
+        )
+        unchanged = self.client.get(
+            f"/api/admin/schedule/sessions/{response.json()['id']}/",
+        )
+
+        self.assertEqual(duplicate_patch.status_code, 400)
+        self.assertEqual(
+            duplicate_patch.json()["errors"]["individual_student_id"][0]["code"],
+            "duplicate",
+        )
+        self.assertEqual(
+            [row["id"] for row in unchanged.json()["roster"]],
+            [self.student.id, second.id],
+        )
+
+        invalid_type_change = self.client.patch(
+            f"/api/admin/schedule/sessions/{response.json()['id']}/",
+            data=json.dumps({"session_type": SessionType.INDIVIDUAL}),
+            content_type="application/json",
+        )
+        self.assertEqual(invalid_type_change.status_code, 400)
+        self.assertEqual(
+            invalid_type_change.json()["errors"]["session_type"][0]["code"],
+            "roster_not_empty",
+        )
+
+    def test_admin_split_create_rejects_duplicate_second_student_atomically(self):
+        trainer = f.make_trainer(username="split_atomic_coach")
+        response = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "individual_student_id": self.student.id,
+                "second_student_id": self.student.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-08T19:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Lane Atomic",
+                "max_participants": 2,
+            }),
+            content_type="application/json",
+        )
+        listing = self.client.get(
+            "/api/admin/schedule/sessions/",
+            {"date_from": "2026-06-08", "date_to": "2026-06-08"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["errors"]["second_student_id"][0]["code"],
+            "duplicate",
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()["sessions"], [])
+
+    def test_admin_split_second_student_must_be_active_and_fit_capacity(self):
+        trainer = f.make_trainer(username="split_second_validation_coach")
+        second = f.make_student(first="Second", last="Inactive")
+        second.is_active = False
+        second.save(update_fields=["is_active"])
+        common = {
+            "session_type": "split",
+            "individual_student_id": self.student.id,
+            "second_student_id": second.id,
+            "trainer_id": trainer.id,
+            "duration_minutes": 60,
+            "location": "Lane Validation",
+            "max_participants": 2,
+        }
+        inactive = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                **common,
+                "start_at": "2026-06-11T17:00:00+02:00",
+            }),
+            content_type="application/json",
+        )
+        second.is_active = True
+        second.save(update_fields=["is_active"])
+        over_capacity = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                **common,
+                "start_at": "2026-06-11T19:00:00+02:00",
+                "max_participants": 1,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(inactive.status_code, 400)
+        self.assertIn("second_student_id", inactive.json()["errors"])
+        self.assertEqual(over_capacity.status_code, 400)
+        self.assertEqual(
+            over_capacity.json()["errors"]["max_participants"][0]["code"],
+            "capacity_below_roster",
+        )
+
+    def test_admin_can_replace_split_second_student_and_roster_freezes_after_attendance(self):
+        trainer = f.make_trainer(username="split_roster_coach")
+        second = f.make_student(first="Second", last="Original")
+        replacement = f.make_student(first="Second", last="Replacement")
+        extra = f.make_student(first="Third", last="Preserved")
+        waiting = f.make_student(first="Fourth", last="Waiting")
+        created = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "individual_student_id": self.student.id,
+                "second_student_id": second.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-09T19:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Lane Roster",
+                "max_participants": 4,
+            }),
+            content_type="application/json",
+        )
+        session_id = created.json()["id"]
+        third = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/participants/",
+            data=json.dumps({"student_id": extra.id}),
+            content_type="application/json",
+        )
+        replaced = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"second_student_id": replacement.id}),
+            content_type="application/json",
+        )
+        too_small = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"max_participants": 2}),
+            content_type="application/json",
+        )
+        removed_before_attendance = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"second_student_id": None}),
+            content_type="application/json",
+        )
+        readded_before_attendance = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"second_student_id": second.id}),
+            content_type="application/json",
+        )
+        changed_base = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"individual_student_id": replacement.id}),
+            content_type="application/json",
+        )
+        duplicate_manual_add = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/participants/",
+            data=json.dumps({"student_id": replacement.id}),
+            content_type="application/json",
+        )
+        waitlist = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/waitlist/",
+            data=json.dumps({"student_id": waiting.id}),
+            content_type="application/json",
+        )
+        attendance = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/attendance/",
+            data=json.dumps({
+                "student_id": replacement.id,
+                "status": AttendanceStatus.PRESENT,
+            }),
+            content_type="application/json",
+        )
+        remove_second = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"second_student_id": None}),
+            content_type="application/json",
+        )
+        add_after_attendance = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/participants/",
+            data=json.dumps({"student_id": second.id}),
+            content_type="application/json",
+        )
+        remove_after_attendance = self.client.delete(
+            f"/api/admin/schedule/sessions/{session_id}/participants/{extra.id}/",
+        )
+        promote_after_attendance = self.client.post(
+            f"/api/admin/schedule/waitlist/{waitlist.json()['id']}/promote/",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(third.status_code, 201)
+        self.assertEqual(replaced.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in replaced.json()["roster"]],
+            [self.student.id, replacement.id, extra.id],
+        )
+        self.assertEqual(too_small.status_code, 400)
+        self.assertEqual(
+            too_small.json()["errors"]["max_participants"][0]["code"],
+            "capacity_below_roster",
+        )
+        self.assertEqual(removed_before_attendance.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in removed_before_attendance.json()["roster"]],
+            [self.student.id, extra.id],
+        )
+        self.assertEqual(readded_before_attendance.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in readded_before_attendance.json()["roster"]],
+            [self.student.id, second.id, extra.id],
+        )
+        self.assertEqual(changed_base.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in changed_base.json()["roster"]],
+            [replacement.id, second.id, extra.id],
+        )
+        self.assertEqual(duplicate_manual_add.status_code, 400)
+        self.assertEqual(
+            duplicate_manual_add.json()["errors"]["student_id"][0]["code"],
+            "duplicate",
+        )
+        self.assertEqual(waitlist.status_code, 201)
+        self.assertEqual(attendance.status_code, 200)
+        for response in (
+                remove_second, add_after_attendance,
+                remove_after_attendance, promote_after_attendance):
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("посещаем", str(response.json()).lower())
+        detail = self.client.get(f"/api/admin/schedule/sessions/{session_id}/")
+        self.assertEqual(
+            [row["id"] for row in detail.json()["roster"]],
+            [replacement.id, second.id, extra.id],
+        )
+
+    def test_split_one_off_price_uses_floor_of_active_roster_size(self):
+        trainer = f.make_trainer(username="split_price_api_coach")
+        solo = f.make_student(first="Solo", last="FullPrice")
+        first = f.make_student(first="First", last="Thirds")
+        second = f.make_student(first="Second", last="Thirds")
+        third = f.make_student(first="Third", last="Thirds")
+
+        solo_session = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "individual_student_id": solo.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-10T17:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Lane Price",
+                "max_participants": 3,
+                "price_minor": 10001,
+            }),
+            content_type="application/json",
+        )
+        thirds_session = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "individual_student_id": first.id,
+                "second_student_id": second.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-10T19:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Lane Price",
+                "max_participants": 3,
+                "price_minor": 10001,
+            }),
+            content_type="application/json",
+        )
+        self.client.post(
+            f"/api/admin/schedule/sessions/{thirds_session.json()['id']}/participants/",
+            data=json.dumps({"student_id": third.id}),
+            content_type="application/json",
+        )
+        for session_id, student in (
+            (solo_session.json()["id"], solo),
+            (thirds_session.json()["id"], first),
+            (thirds_session.json()["id"], second),
+            (thirds_session.json()["id"], third),
+        ):
+            marked = self.client.post(
+                f"/api/admin/schedule/sessions/{session_id}/attendance/",
+                data=json.dumps({
+                    "student_id": student.id,
+                    "status": AttendanceStatus.PRESENT,
+                }),
+                content_type="application/json",
+            )
+            self.assertEqual(marked.status_code, 200)
+
+        solo_charges = self.client.get(
+            f"/api/admin/participants/{solo.id}/charges/").json()["charges"]
+        self.assertEqual([row["amount_minor"] for row in solo_charges], [10001])
+        for student in (first, second, third):
+            charges = self.client.get(
+                f"/api/admin/participants/{student.id}/charges/").json()["charges"]
+            self.assertEqual([row["amount_minor"] for row in charges], [3333])
+
+    def test_attended_session_cannot_be_converted_to_split(self):
+        trainer = f.make_trainer(username="split_convert_lock_coach")
+        session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=f.dt(2026, 6, 12, 17),
+            duration_minutes=60,
+            location="Lane Locked Convert",
+            max_participants=4,
+        )
+        set_attendance(
+            session_id=session.id,
+            student=self.student,
+            status=AttendanceStatus.PRESENT,
+            actor=self.admin,
+        )
+        replacement = f.make_student(first="Locked", last="Split")
+
+        response = self.client.patch(
+            f"/api/admin/schedule/sessions/{session.id}/",
+            data=json.dumps({
+                "session_type": "split",
+                "group_id": None,
+                "individual_student_id": replacement.id,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        session.refresh_from_db()
+        self.assertEqual(session.session_type, SessionType.GROUP)
+        self.assertEqual(session.group_id, self.group.id)
+
+        empty_group = f.make_group("Split conversion capacity")
+        extra_one = f.make_student(first="One", last="Conversion Extra")
+        extra_two = f.make_student(first="Two", last="Conversion Extra")
+        new_base = f.make_student(first="Base", last="Conversion")
+        convertible = create_session(
+            trainer=trainer,
+            group=empty_group,
+            start_at=f.dt(2026, 6, 12, 19),
+            duration_minutes=60,
+            location="Lane Capacity Convert",
+            max_participants=2,
+        )
+        for extra in (extra_one, extra_two):
+            added = self.client.post(
+                f"/api/admin/schedule/sessions/{convertible.id}/participants/",
+                data=json.dumps({"student_id": extra.id}),
+                content_type="application/json",
+            )
+            self.assertIn(added.status_code, (200, 201))
+
+        over_capacity = self.client.patch(
+            f"/api/admin/schedule/sessions/{convertible.id}/",
+            data=json.dumps({
+                "session_type": "split",
+                "group_id": None,
+                "individual_student_id": new_base.id,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(over_capacity.status_code, 400)
+        self.assertEqual(
+            over_capacity.json()["errors"]["max_participants"][0]["code"],
+            "capacity_below_roster",
+        )
+        convertible.refresh_from_db()
+        self.assertEqual(convertible.session_type, SessionType.GROUP)
+        self.assertEqual(convertible.group_id, empty_group.id)
+
+    def test_split_historical_roster_stays_visible_and_keeps_charge_share(self):
+        trainer = f.make_trainer(username="split_historical_roster_coach")
+        first = f.make_student(first="First", last="Historical")
+        second = f.make_student(first="Second", last="Historical")
+        created = self.client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "split",
+                "individual_student_id": first.id,
+                "second_student_id": second.id,
+                "trainer_id": trainer.id,
+                "start_at": "2026-06-13T17:00:00+02:00",
+                "duration_minutes": 60,
+                "location": "Lane Historical",
+                "max_participants": 2,
+                "price_minor": 10001,
+            }),
+            content_type="application/json",
+        )
+        session_id = created.json()["id"]
+        second.parent.user.is_active = False
+        second.parent.user.save(update_fields=["is_active"])
+        outside = f.make_student(first="Outside", last="Historical")
+        capacity_full = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/participants/",
+            data=json.dumps({"student_id": outside.id}),
+            content_type="application/json",
+        )
+        first_mark = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/attendance/",
+            data=json.dumps({
+                "student_id": first.id,
+                "status": AttendanceStatus.PRESENT,
+            }),
+            content_type="application/json",
+        )
+
+        remark = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/attendance/",
+            data=json.dumps({
+                "student_id": first.id,
+                "status": AttendanceStatus.EXCUSED,
+            }),
+            content_type="application/json",
+        )
+        restored = self.client.post(
+            f"/api/admin/schedule/sessions/{session_id}/attendance/",
+            data=json.dumps({
+                "student_id": first.id,
+                "status": AttendanceStatus.PRESENT,
+            }),
+            content_type="application/json",
+        )
+        detail = self.client.get(f"/api/admin/schedule/sessions/{session_id}/")
+        attendance_detail = self.client.get(
+            f"/api/admin/schedule/sessions/{session_id}/attendance/",
+        )
+        too_small = self.client.patch(
+            f"/api/admin/schedule/sessions/{session_id}/",
+            data=json.dumps({"max_participants": 1}),
+            content_type="application/json",
+        )
+        charges = self.client.get(
+            f"/api/admin/participants/{first.id}/charges/").json()["charges"]
+
+        self.assertEqual(capacity_full.status_code, 400)
+        self.assertEqual(first_mark.status_code, 200)
+        self.assertEqual(remark.status_code, 200)
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(too_small.status_code, 400)
+        self.assertEqual([row["amount_minor"] for row in charges], [5000, -5000, 5000])
+        self.assertEqual(
+            [row["id"] for row in detail.json()["roster"]],
+            [first.id, second.id],
+        )
+        self.assertEqual(detail.json()["participants_count"], 2)
+        self.assertEqual(
+            [row["id"] for row in attendance_detail.json()["students"]],
+            [first.id, second.id],
+        )
+        self.assertFalse(any(
+            row["can_remove_from_session"]
+            for row in attendance_detail.json()["students"]
+        ))
 
     def test_admin_can_set_and_clear_session_substitute_trainer(self):
         trainer = f.make_trainer(username="scheduled_session_coach")

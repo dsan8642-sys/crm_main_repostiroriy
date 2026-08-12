@@ -135,8 +135,10 @@ def admin_clients(request):
             Q(group__default_trainer__user__first_name__icontains=q) |
             Q(group__default_trainer__user__last_name__icontains=q)
         )
-    if request.GET.get("active") in {"true", "false"}:
-        qs = qs.filter(is_active=request.GET["active"] == "true")
+    if request.GET.get("active") == "true":
+        qs = qs.filter(is_active=True, parent__user__is_active=True)
+    elif request.GET.get("active") == "false":
+        qs = qs.filter(Q(is_active=False) | Q(parent__user__is_active=False))
     if request.GET.get("group_id"):
         qs = qs.filter(group_id=request.GET["group_id"])
     if request.GET.get("trainer_id"):
@@ -214,6 +216,8 @@ def admin_client_restore(request, client_id):
 def admin_client_participants(request, client_id):
     user = _admin_required(request)
     account = get_object_or_404(ParentAccount.objects.select_related("user"), pk=client_id)
+    if not account.user.is_active:
+        raise ValidationError("archived client account cannot receive participants")
     data = _json_body(request)
     is_account_holder = _bool_value(_participant_data(data).get("is_account_holder"))
     with transaction.atomic():

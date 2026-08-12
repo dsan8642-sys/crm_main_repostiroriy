@@ -62,6 +62,122 @@ def session_roster_students(session):
     ).select_related("parent", "parent__user", "group").distinct()
 
 
+def split_roster_student_ids(session):
+    """Stable enrolled Split roster, including participants archived later."""
+    if session.session_type != SessionType.SPLIT:
+        return []
+    student_ids = []
+    if session.individual_student_id:
+        student_ids.append(session.individual_student_id)
+    student_ids.extend(session.participants.filter(
+        status=SessionParticipantStatus.ACTIVE,
+    ).order_by("created_at", "id").values_list("student_id", flat=True))
+    return list(dict.fromkeys(student_ids))
+
+
+def split_roster_students(session):
+    """Ordered enrolled Split students, including participants archived later."""
+    student_ids = split_roster_student_ids(session)
+    students = Student.objects.filter(pk__in=student_ids).select_related(
+        "parent", "parent__user", "group")
+    by_id = {student.id: student for student in students}
+    return [by_id[student_id] for student_id in student_ids if student_id in by_id]
+
+
+def split_roster_is_locked(session):
+    """A recorded attendance row makes a split roster historical."""
+    return (
+        session.session_type == SessionType.SPLIT
+        and session.attendance.exists()
+    )
+
+
+def require_mutable_split_roster(session):
+    if split_roster_is_locked(session):
+        raise ValidationError(
+            "Состав Split нельзя менять после появления отметок посещаемости."
+        )
+
+
+def split_second_participant(session):
+    """Return the active participant occupying the stable second-client slot."""
+    prefetched = getattr(session, "_prefetched_objects_cache", {}).get("participants")
+    rows = (
+        sorted(prefetched, key=lambda participant: (
+            participant.created_at, participant.id))
+        if prefetched is not None
+        else list(session.participants.order_by("created_at", "id"))
+    )
+    if not rows:
+        return None
+    second_position = rows[0].created_at
+    return next((
+        participant for participant in rows
+        if participant.created_at == second_position
+        and participant.status == SessionParticipantStatus.ACTIVE
+    ), None)
+
+
+@transaction.atomic
+def sync_split_second_student(session, second_student, *, actor=None):
+    """Set the first additional Split participant, preserving later additions."""
+    if session.session_type != SessionType.SPLIT:
+        raise ValidationError("second_student_id is available only for split sessions")
+
+    rows = list(session.participants.select_related("student").order_by(
+        "created_at", "id"))
+    second_position = rows[0].created_at if rows else None
+    active = [
+        participant for participant in rows
+        if participant.status == SessionParticipantStatus.ACTIVE
+    ]
+    current = next((
+        participant for participant in active
+        if participant.created_at == second_position
+    ), None)
+    desired_id = second_student.id if second_student is not None else None
+    if current is not None and current.student_id == desired_id:
+        return current
+    if current is None and desired_id is None:
+        return None
+
+    require_mutable_split_roster(session)
+    if desired_id is not None and any(
+            participant.student_id == desired_id and participant != current
+            for participant in active):
+        raise ValidationError("student is already an additional split participant")
+
+    before_id = current.student_id if current is not None else None
+    if current is not None:
+        current.status = SessionParticipantStatus.CANCELLED
+        current.full_clean()
+        current.save(update_fields=["status", "updated_at"])
+
+    participant = None
+    if second_student is not None:
+        participant = next((
+            row for row in rows if row.student_id == second_student.id
+        ), None)
+        if participant is None:
+            participant = SessionParticipant(
+                session=session,
+                student=second_student,
+            )
+        participant.source = SessionParticipantSource.MANUAL
+        participant.status = SessionParticipantStatus.ACTIVE
+        if second_position is not None:
+            participant.created_at = second_position
+        participant.full_clean()
+        participant.save()
+
+    if actor is not None:
+        audit(actor, "session.split_second_student_changed", session, {
+            "before_student_id": before_id,
+            "after_student_id": desired_id,
+        })
+    return participant
+
+
 @transaction.atomic
 def promote_waitlist_entry(entry, *, actor=None):
     """Promote an active waitlist row into the concrete session roster."""
@@ -70,6 +186,7 @@ def promote_waitlist_entry(entry, *, actor=None):
     session = Session.objects.select_for_update().get(pk=entry.session_id)
     if session.is_cancelled:
         raise ValidationError("cancelled sessions cannot promote waitlist entries")
+    require_mutable_split_roster(session)
     if entry.status != WaitlistStatus.ACTIVE:
         raise ValidationError("only active waitlist entries can be promoted")
     if not entry.student.is_active:
@@ -77,7 +194,11 @@ def promote_waitlist_entry(entry, *, actor=None):
     if entry.student.parent_id and not entry.student.parent.user.is_active:
         raise ValidationError("archived client account cannot be promoted from waitlist")
 
-    roster_ids = set(session_roster_students(session).values_list("id", flat=True))
+    roster_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else session_roster_students(session).values_list("id", flat=True)
+    )
     if entry.student_id in roster_ids:
         raise ValidationError("student is already in this session roster")
     if len(roster_ids) >= session.max_participants:

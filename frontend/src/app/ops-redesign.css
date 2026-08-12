@@ -155,7 +155,7 @@ body {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -444,6 +444,41 @@ body {
   font-size: var(--fs-2xs);
 }
 
+.ops-client-row-actions {
+  display: flex;
+  min-width: max-content;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.ops-client-desktop-table .table-wrap {
+  overflow: visible !important;
+}
+
+@media (max-width: 1280px) and (min-width: 961px) {
+  .ops-client-desktop-table th:nth-child(3),
+  .ops-client-desktop-table td:nth-child(3),
+  .ops-client-desktop-table th:nth-child(7),
+  .ops-client-desktop-table td:nth-child(7) {
+    display: none;
+  }
+}
+
+@media (max-width: 1120px) and (min-width: 961px) {
+  .ops-client-desktop-table th:nth-child(5),
+  .ops-client-desktop-table td:nth-child(5) {
+    display: none;
+  }
+
+  .ops-client-row-actions {
+    gap: 2px;
+  }
+
+  .ops-client-row-actions .swim-btn {
+    padding-inline: 4px !important;
+  }
+}
+
 .ops-edit-panel {
   margin-bottom: 16px;
   border-color: color-mix(in srgb, var(--ops-brand) 35%, var(--ops-line));
@@ -650,6 +685,11 @@ textarea {
 }
 
 .ops-mobile-nav {
+  display: none;
+}
+
+.ops-mobile-menu-button,
+.ops-mobile-drawer-layer {
   display: none;
 }
 
@@ -1348,6 +1388,7 @@ button.ops-schedule-detail-row:focus-visible {
   }
 
   .ops-client-mobile-card {
+    position: relative;
     display: grid;
     width: 100%;
     min-width: 0;
@@ -1370,14 +1411,55 @@ button.ops-schedule-detail-row:focus-visible {
     background: var(--primary-soft);
   }
 
-  .ops-client-mobile-card.is-linked:focus-visible {
+  .ops-client-mobile-link:focus-visible,
+  .ops-client-mobile-actions-trigger:focus-visible {
     outline: none;
     box-shadow: var(--ring);
   }
 
+  .ops-client-mobile-link {
+    display: grid;
+    min-width: 0;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ops-client-mobile-actions-trigger {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: var(--surface-card);
+    color: var(--text-muted);
+    font-size: 24px;
+    cursor: pointer;
+  }
+
+  .ops-client-mobile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
   .ops-client-mobile-person {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding-right: 44px;
     align-items: center;
     gap: 8px;
     min-width: 0;
@@ -1505,7 +1587,7 @@ button.ops-schedule-detail-row:focus-visible {
 
 .ops-schedule-event-edit {
   position: absolute;
-  top: 4px;
+  bottom: 4px;
   right: 4px;
   display: flex;
   align-items: center;
@@ -1547,6 +1629,10 @@ button.ops-schedule-detail-row:focus-visible {
   color: var(--text-body, var(--ops-ink));
   text-align: left;
   cursor: pointer;
+}
+
+.ops-schedule-event-wrap .ops-schedule-event {
+  padding-right: 58px;
 }
 
 .ops-schedule-event:hover {
@@ -1612,6 +1698,35 @@ button.ops-schedule-detail-row:focus-visible {
   white-space: nowrap;
 }
 
+.ops-event-type.is-split-roster {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+}
+
+.ops-event-roster-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ops-event-roster-count {
+  flex: 0 0 auto;
+}
+
+.ops-split-roster-summary {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-soft, #f6f8fb);
+}
+
+.ops-split-roster-summary strong {
+  overflow-wrap: anywhere;
+}
+
 .ops-schedule-event.is-cancelled .ops-event-title,
 .ops-schedule-event.is-cancelled .ops-event-type,
 .ops-schedule-event.is-cancelled .ops-event-occupancy {
@@ -1656,7 +1771,7 @@ button.ops-schedule-detail-row:focus-visible {
   }
 
   .ops-schedule-event-edit {
-    top: 3px;
+    bottom: 3px;
     right: 3px;
     width: 34px;
     height: 34px;
@@ -1666,11 +1781,31 @@ button.ops-schedule-detail-row:focus-visible {
     transition: opacity 120ms ease;
   }
 
+  .ops-schedule-event-wrap .ops-schedule-event {
+    padding-right: 46px;
+  }
+
   .ops-schedule-event-wrap:hover .ops-schedule-event-edit,
   .ops-schedule-event-wrap:focus-within .ops-schedule-event-edit {
     visibility: visible;
     opacity: 1;
     pointer-events: auto;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 960px) {
+  .ops-schedule-event-edit {
+    bottom: 4px;
+    right: 4px;
+    width: 44px;
+    height: 44px;
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .ops-schedule-event-wrap .ops-schedule-event {
+    padding-right: 58px;
   }
 }
 
@@ -1697,7 +1832,7 @@ button.ops-schedule-detail-row:focus-visible {
   .ops-sidebar {
     position: sticky;
     top: 0;
-    z-index: 20;
+    z-index: 50;
     width: 100%;
     height: auto;
     flex: none;
@@ -1706,10 +1841,7 @@ button.ops-schedule-detail-row:focus-visible {
   }
 
   .ops-nav {
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    padding: 10px 0 2px;
+    display: none;
   }
 
   .ops-schedule-day {
@@ -1717,8 +1849,6 @@ button.ops-schedule-detail-row:focus-visible {
     border-right: 0;
   }
 
-  .ops-nav-section,
-  .ops-user,
   .ops-brand-sub {
     display: none;
   }
@@ -1727,30 +1857,137 @@ button.ops-schedule-detail-row:focus-visible {
     display: none;
   }
 
-  .ops-sidebar-logout.is-mobile {
-    display: inline-flex;
-  }
-
   .ops-user-wrap {
     display: none;
   }
 
-  .ops-nav-button {
-    width: auto;
-    white-space: nowrap;
-    grid-template-columns: 20px auto auto;
-    flex: 0 0 auto;
+  .ops-mobile-menu-button {
+    display: inline-flex;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #f8fafc;
+    cursor: pointer;
+  }
+
+  .ops-mobile-menu-button:hover,
+  .ops-mobile-menu-button:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .ops-mobile-menu-button > span {
+    display: grid;
+    width: 22px;
+    gap: 3px;
+  }
+
+  .ops-mobile-menu-button i {
+    display: block;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .ops-mobile-drawer-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: block;
+    background: rgba(15, 23, 42, 0.56);
+    animation: swim-fade var(--dur-normal) var(--ease-standard);
+  }
+
+  .ops-mobile-drawer {
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    display: flex;
+    width: min(360px, calc(100vw - 32px));
+    flex-direction: column;
+    background: #101828;
+    color: #f8fafc;
+    box-shadow: -18px 0 48px rgba(15, 23, 42, 0.28);
+    outline: none;
+    animation: swim-drawer var(--dur-slow) var(--ease-out);
+  }
+
+  .ops-mobile-drawer-head {
+    display: flex;
+    min-height: 64px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: max(10px, env(safe-area-inset-top)) 14px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  }
+
+  .ops-mobile-drawer-close {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: transparent;
+    color: #f8fafc;
+    font: inherit;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .ops-mobile-drawer-nav {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px 14px 14px;
+    overscroll-behavior: contain;
+  }
+
+  .ops-mobile-drawer-nav .ops-nav-section {
+    display: block;
+  }
+
+  .ops-mobile-drawer-nav .ops-nav-button {
+    width: 100%;
     min-height: 44px;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    white-space: normal;
+  }
+
+  .ops-mobile-drawer-user-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    align-items: center;
+    padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+  }
+
+  .ops-mobile-drawer-user-wrap .ops-user {
+    min-width: 0;
+    padding: 8px;
   }
 
   .ops-mobile-nav {
-    position: sticky;
+    position: fixed;
+    right: 0;
     bottom: 0;
+    left: 0;
     z-index: 30;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--ops-mobile-nav-count, 5), minmax(0, 1fr));
+    padding-bottom: env(safe-area-inset-bottom);
     border-top: 1px solid var(--border-subtle);
     background: var(--surface-card);
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
   }
 
   .ops-mobile-nav button {
@@ -1761,11 +1998,24 @@ button.ops-schedule-detail-row:focus-visible {
     border: 0;
     background: transparent;
     color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .ops-mobile-nav button small {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ops-mobile-nav button.is-active {
     color: var(--primary);
     font-weight: 600;
+  }
+
+  .scroll {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
   }
 
   .ops-attendance-card {

@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { DateField, TimeField } from '../DateTimeField.jsx'
+import { FormModal } from '../FormModal.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { createAdminImportExportPanel } from './AdminImportExportScreen.jsx'
+import { createAdminReportsPanel } from './AdminReportsPanel.jsx'
 import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
 import {
@@ -54,6 +56,7 @@ const resources = [
   { tab: 'control', id: 'imports', title: 'История импортов', endpoint: '/api/admin/system/imports/', response: 'batches', readOnly: true },
   { tab: 'control', id: 'security', title: 'Доступы и 2FA', endpoint: '/api/admin/system/security/', response: 'users', readOnly: true },
   { tab: 'control', id: 'logs', title: 'Журнал уведомлений', endpoint: '/api/admin/notifications/logs/', response: 'logs', readOnly: true },
+  { tab: 'reports', id: 'reports', title: 'Отчёты', panel: true, readOnly: true },
 ]
 
 const resourceHelp = {
@@ -62,7 +65,7 @@ const resourceHelp = {
 }
 
 const tabs = [
-  ['catalog', 'Справочники'], ['notifications', 'Уведомления'], ['payroll', 'Зарплата'], ['localization', 'Языки'], ['control', 'Контроль'],
+  ['catalog', 'Справочники'], ['notifications', 'Уведомления'], ['payroll', 'Зарплата'], ['localization', 'Языки'], ['control', 'Контроль'], ['reports', 'Отчёты'],
 ]
 
 function displayValue(value) {
@@ -78,8 +81,26 @@ function readOnlyDetails(row) {
   return displayValue(row.entity_type || row.role || row.status || row.channel || row.method || '-')
 }
 
+function formPayload(resource, values) {
+  return Object.fromEntries((resource.fields || []).map(([key, , type]) => {
+    const value = values[key]
+    if (type === 'boolean') return [key, Boolean(value)]
+    if (type === 'number') return [key, value === '' || value == null ? null : Number(value)]
+    if (type === 'schedule-color') {
+      const normalized = normalizeScheduleColorKey(value)
+      return [key, normalized === 'standard' ? null : normalized]
+    }
+    return [key, value ?? '']
+  }))
+}
+
+function credentialValues(username = '') {
+  return { username, currentPassword: '', newPassword: '', confirmPassword: '' }
+}
+
 export function createAdminSettingsScreen(components, reloadRoleData, icons, adminData = {}) {
   const ImportExportPanel = createAdminImportExportPanel(components, icons, reloadRoleData)
+  const ReportsPanel = createAdminReportsPanel(components)
 
   const { Button, Badge, Banner, Tabs, Table, Input, Select, Textarea, Checkbox, StatusPill, Dialog } = components
   return function AdminSettingsScreen() {
@@ -90,17 +111,26 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const [error, setError] = useState(null)
     const [message, setMessage] = useState(null)
     const [editing, setEditing] = useState(null)
+    const [formBaseline, setFormBaseline] = useState({})
+    const [modalError, setModalError] = useState(null)
     const [pendingArchive, setPendingArchive] = useState(null)
     const [form, setForm] = useState({})
     const [fieldErrors, setFieldErrors] = useState({})
-    const [credentials, setCredentials] = useState({
-      username: '', currentPassword: '', newPassword: '', confirmPassword: '',
-    })
+    const [credentialsOpen, setCredentialsOpen] = useState(false)
+    const [credentials, setCredentials] = useState(() => credentialValues())
+    const [credentialBaseline, setCredentialBaseline] = useState(() => credentialValues())
     const [credentialErrors, setCredentialErrors] = useState({})
+    const [credentialModalError, setCredentialModalError] = useState(null)
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
     const tabResources = useMemo(() => resources.filter((item) => item.tab === tab), [tab])
     const rows = data[resource.id] || []
+    const formDirty = useMemo(() => (
+      Boolean(editing) && JSON.stringify(formPayload(resource, form)) !== JSON.stringify(formPayload(resource, formBaseline))
+    ), [editing, form, formBaseline, resource])
+    const credentialsDirty = useMemo(() => (
+      credentialsOpen && JSON.stringify(credentials) !== JSON.stringify(credentialBaseline)
+    ), [credentialBaseline, credentials, credentialsOpen])
 
     const load = async (onlyId) => {
       const loadable = resources.filter((item) => item.endpoint)
@@ -122,20 +152,53 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     useEffect(() => {
       if (!tabResources.some((item) => item.id === resourceId)) setResourceId(tabResources[0]?.id || 'subscriptionTypes')
     }, [tab, tabResources, resourceId])
-    useEffect(() => {
-      if (resourceId !== 'credentials') return
-      api.get('/api/admin/system/credentials/')
-        .then((payload) => setCredentials((current) => ({ ...current, username: payload.username || '' })))
-        .catch((err) => setError(apiErrorMessage(err, 'Не удалось загрузить данные входа.')))
-    }, [resourceId])
-
     function startEdit(row = null) {
       const initial = {}
       ;(resource.fields || []).forEach(([key, , type]) => { initial[key] = row?.[key] ?? (type === 'boolean' ? true : '') })
       setForm(initial)
+      setFormBaseline(initial)
       setFieldErrors({})
-      setError(null)
+      setModalError(null)
+      setCredentialsOpen(false)
       setEditing(row || {})
+    }
+
+    function closeEdit() {
+      setEditing(null)
+      setForm({})
+      setFormBaseline({})
+      setFieldErrors({})
+      setModalError(null)
+    }
+
+    async function openCredentials() {
+      setEditing(null)
+      setCredentialsOpen(true)
+      setCredentialErrors({})
+      setCredentialModalError(null)
+      setLoading(true)
+      try {
+        const payload = await api.get('/api/admin/system/credentials/')
+        const initial = credentialValues(payload.username || '')
+        setCredentials(initial)
+        setCredentialBaseline(initial)
+      } catch (err) {
+        setCredentialModalError(apiErrorMessage(err, 'Не удалось загрузить данные входа.'))
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    function closeCredentials() {
+      setCredentialsOpen(false)
+      setCredentials(credentialBaseline)
+      setCredentialErrors({})
+      setCredentialModalError(null)
+    }
+
+    function selectResource(item) {
+      setResourceId(item.id)
+      if (item.id === 'credentials') openCredentials()
     }
 
     function updateFormField(key, value) {
@@ -155,30 +218,20 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       return (data[source] || []).map((row) => [String(row[valueKey || 'id']), row.name || row.full_name || row.label || row.code || `#${row.id}`])
     }
 
-    function coerce(value, type) {
-      if (type === 'boolean') return Boolean(value)
-      if (type === 'number') return value === '' ? null : Number(value)
-      if (type === 'schedule-color') {
-        const normalized = normalizeScheduleColorKey(value)
-        return normalized === 'standard' ? null : normalized
-      }
-      return value
-    }
-
     async function save() {
-      const payload = Object.fromEntries((resource.fields || []).map(([key, , type]) => [key, coerce(form[key], type)]))
-      setLoading(true); setError(null); setFieldErrors({})
+      const payload = formPayload(resource, form)
+      setLoading(true); setModalError(null); setFieldErrors({})
       try {
         if (editing?.id) await api.patch(resource.detail(editing.id), payload)
         else await api.post(resource.endpoint, payload)
         setMessage(editing?.id ? 'Изменения сохранены.' : 'Запись создана.')
-        setEditing(null)
+        closeEdit()
         await load(resource.id)
         reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err)
         setFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось сохранить запись.'))
+        setModalError(formErrorMessage(err, 'Не удалось сохранить запись.'))
         focusFirstFieldError(nextErrors, Object.fromEntries(
           (resource.fields || []).map(([key]) => [key, `admin-settings-${resource.id}-${key}`]),
         ))
@@ -203,28 +256,26 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
           confirmPassword: 'Повторите новый пароль точно так же.',
         }
         setCredentialErrors(nextErrors)
-        setError(null)
+        setCredentialModalError(null)
         focusFirstFieldError(nextErrors, CREDENTIAL_FIELD_IDS)
         return
       }
-      setLoading(true); setError(null); setCredentialErrors({})
+      setLoading(true); setCredentialModalError(null); setCredentialErrors({})
       try {
         const payload = await api.patch('/api/admin/system/credentials/', {
           username: credentials.username,
           current_password: credentials.currentPassword,
           new_password: credentials.newPassword,
         })
-        setCredentials({
-          username: payload.username,
-          currentPassword: '',
-          newPassword: '',
-          confirmPassword: '',
-        })
+        const nextCredentials = credentialValues(payload.username)
+        setCredentials(nextCredentials)
+        setCredentialBaseline(nextCredentials)
+        setCredentialsOpen(false)
         setMessage('Логин и пароль администратора обновлены. Текущая сессия сохранена.')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, CREDENTIAL_FIELD_MAP)
         setCredentialErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось обновить данные входа.'))
+        setCredentialModalError(formErrorMessage(err, 'Не удалось обновить данные входа.'))
         focusFirstFieldError(nextErrors, CREDENTIAL_FIELD_IDS)
       } finally {
         setLoading(false)
@@ -263,36 +314,70 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
       <ToastNotice id="admin-settings-result" message={message} tone="success" />
       <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
-      <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => setResourceId(item.id)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>
-      <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{resourceHelp[resource.id]}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>
-      {editing && <div className="card card-pad ops-edit-panel">
-        <div className="eyebrow">{editing.id ? 'Редактирование' : 'Новая запись'}</div>
-        <div className="ops-form-grid">{(resource.fields || []).map((field) => {
-          const [key, label, type = 'text'] = field
-          const value = form[key] ?? ''
-          const id = `admin-settings-${resource.id}-${key}`
-          const shared = { id, label, error: fieldErrors[key] }
-          if (type === 'boolean') return <Checkbox key={key} {...shared} checked={Boolean(value)} onChange={(event) => updateFormField(key, event.target.checked)} />
-          if (type === 'textarea') return <Textarea key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} rows="4" containerStyle={{ gridColumn: '1 / -1' }} />
-          if (type === 'select' || type === 'select-ref') return <Select key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</Select>
-          if (type === 'date') return <DateField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
-          if (type === 'time') return <TimeField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
-          if (type === 'schedule-color') return <ScheduleColorPicker key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} disabled={loading} />
-          return <Input key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} type={type} />
-        })}</div>
-        <div className="ops-button-row"><Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button><Button variant="secondary" disabled={loading} onClick={() => { setEditing(null); setFieldErrors({}) }}>Отмена</Button></div>
-      </div>}
+      {tab !== 'reports' && <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => selectResource(item)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>}
+      {tab !== 'reports' && <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{resourceHelp[resource.id]}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>}
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">Изменяются данные текущего администратора. Для подтверждения обязательно введите действующий пароль. Пароль хранится только как Django hash и не выводится в журнал.</p>
-        <div className="ops-form-grid">
-          <Input id={CREDENTIAL_FIELD_IDS.username} label="Новый логин" value={credentials.username} error={credentialErrors.username} onChange={(event) => updateCredentialField('username', event.target.value)} autoComplete="username" />
-          <Input id={CREDENTIAL_FIELD_IDS.currentPassword} label="Текущий пароль" type="password" value={credentials.currentPassword} error={credentialErrors.currentPassword} onChange={(event) => updateCredentialField('currentPassword', event.target.value)} autoComplete="current-password" />
-          <Input id={CREDENTIAL_FIELD_IDS.newPassword} label="Новый пароль (необязательно)" type="password" value={credentials.newPassword} error={credentialErrors.newPassword} onChange={(event) => updateCredentialField('newPassword', event.target.value)} autoComplete="new-password" />
-          <Input id={CREDENTIAL_FIELD_IDS.confirmPassword} label="Повторите новый пароль" type="password" value={credentials.confirmPassword} error={credentialErrors.confirmPassword} onChange={(event) => updateCredentialField('confirmPassword', event.target.value)} autoComplete="new-password" />
-        </div>
-        <Button variant="primary" disabled={loading || !credentials.currentPassword} onClick={saveCredentials}>Обновить данные входа</Button>
+        <Button variant="primary" disabled={loading} onClick={openCredentials}>Изменить данные входа</Button>
       </div>}
-      {resource.panel && resource.id === 'importExport' ? <ImportExportPanel /> : !resource.panel && <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />}
+      {resource.panel && resource.id === 'importExport'
+        ? <ImportExportPanel />
+        : resource.panel && resource.id === 'reports'
+          ? <ReportsPanel />
+          : !resource.panel && <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />}
+      <FormModal
+        open={Boolean(editing)}
+        title={`${editing?.id ? 'Редактирование' : 'Новая запись'} · ${resource.title}`}
+        description={resourceHelp[resource.id]}
+        size={(resource.fields || []).length > 6 ? 'lg' : 'md'}
+        busy={loading}
+        dirty={formDirty}
+        onRequestClose={closeEdit}
+        footer={({ requestClose }) => <>
+          <Button variant="primary" disabled={loading} onClick={save}>Сохранить</Button>
+          <Button variant="secondary" disabled={loading} onClick={() => requestClose('cancel')}>Отмена</Button>
+        </>}
+      >
+        {modalError && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setModalError(null)}>{modalError}</Banner>}
+        <fieldset disabled={loading} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+          <div className="ops-form-grid">{(resource.fields || []).map((field) => {
+            const [key, label, type = 'text'] = field
+            const value = form[key] ?? ''
+            const id = `admin-settings-${resource.id}-${key}`
+            const shared = { id, label, error: fieldErrors[key] }
+            if (type === 'boolean') return <Checkbox key={key} {...shared} checked={Boolean(value)} onChange={(event) => updateFormField(key, event.target.checked)} />
+            if (type === 'textarea') return <Textarea key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} rows="4" containerStyle={{ gridColumn: '1 / -1' }} />
+            if (type === 'select' || type === 'select-ref') return <Select key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)}><option value="">Выберите</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</Select>
+            if (type === 'date') return <DateField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
+            if (type === 'time') return <TimeField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
+            if (type === 'schedule-color') return <ScheduleColorPicker key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} disabled={loading} />
+            return <Input key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} type={type} />
+          })}</div>
+        </fieldset>
+      </FormModal>
+      <FormModal
+        open={credentialsOpen}
+        title="Данные входа администратора"
+        description="Для подтверждения изменений введите текущий пароль."
+        size="md"
+        busy={loading}
+        dirty={credentialsDirty}
+        onRequestClose={closeCredentials}
+        footer={({ requestClose }) => <>
+          <Button variant="primary" disabled={loading || !credentials.currentPassword} onClick={saveCredentials}>Обновить данные входа</Button>
+          <Button variant="secondary" disabled={loading} onClick={() => requestClose('cancel')}>Отмена</Button>
+        </>}
+      >
+        {credentialModalError && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setCredentialModalError(null)}>{credentialModalError}</Banner>}
+        <fieldset disabled={loading} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+          <div className="ops-form-grid">
+            <Input id={CREDENTIAL_FIELD_IDS.username} label="Новый логин" value={credentials.username} error={credentialErrors.username} onChange={(event) => updateCredentialField('username', event.target.value)} autoComplete="username" />
+            <Input id={CREDENTIAL_FIELD_IDS.currentPassword} label="Текущий пароль" type="password" value={credentials.currentPassword} error={credentialErrors.currentPassword} onChange={(event) => updateCredentialField('currentPassword', event.target.value)} autoComplete="current-password" />
+            <Input id={CREDENTIAL_FIELD_IDS.newPassword} label="Новый пароль (необязательно)" type="password" value={credentials.newPassword} error={credentialErrors.newPassword} onChange={(event) => updateCredentialField('newPassword', event.target.value)} autoComplete="new-password" />
+            <Input id={CREDENTIAL_FIELD_IDS.confirmPassword} label="Повторите новый пароль" type="password" value={credentials.confirmPassword} error={credentialErrors.confirmPassword} onChange={(event) => updateCredentialField('confirmPassword', event.target.value)} autoComplete="new-password" />
+          </div>
+        </fieldset>
+      </FormModal>
       {pendingArchive && <Dialog
         open
         title="Убрать запись из рабочего списка?"

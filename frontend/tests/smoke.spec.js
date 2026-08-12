@@ -30,6 +30,20 @@ function localIsoDateTime(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
+async function openShellDestination(page, label) {
+  const sidebarButton = page.locator(`.ops-nav > .ops-nav-button[title="${label}"]`)
+  const mobileMenuButton = page.getByRole('button', { name: 'Открыть меню' })
+  await expect.poll(async () => (
+    await sidebarButton.isVisible() || await mobileMenuButton.isVisible()
+  )).toBe(true)
+  if (await sidebarButton.isVisible()) {
+    await sidebarButton.click()
+    return
+  }
+  await mobileMenuButton.click()
+  await page.locator(`.ops-mobile-drawer-nav .ops-nav-button[title="${label}"]`).click()
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/health/', async (route) => {
     await route.fulfill({
@@ -308,13 +322,13 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
 
   const shellLayout = await page.locator('.ops-sidebar-head').evaluate((head) => {
     const brand = head.querySelector('.ops-brand')?.getBoundingClientRect()
-    const logout = head.querySelector('[aria-label="Выйти"]')?.getBoundingClientRect()
+    const menu = head.querySelector('[aria-label="Открыть меню"]')?.getBoundingClientRect()
     return {
-      sameRow: Boolean(brand && logout && Math.abs(brand.top - logout.top) <= 2),
-      logoutSize: logout ? Math.min(logout.width, logout.height) : 0,
+      sameRow: Boolean(brand && menu && Math.abs(brand.top - menu.top) <= 2),
+      menuSize: menu ? Math.min(menu.width, menu.height) : 0,
     }
   })
-  expect(shellLayout).toEqual({ sameRow: true, logoutSize: 44 })
+  expect(shellLayout).toEqual({ sameRow: true, menuSize: 44 })
 
   const strip = page.locator('.ops-mobile-week-strip')
   await expect(strip.getByRole('tab')).toHaveCount(7)
@@ -390,13 +404,14 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
 
   const width = page.viewportSize()?.width || 0
   const logout = page.getByRole('button', { name: 'Выйти', exact: true })
-  await expect(logout).toHaveCount(1)
   if (width >= 961) {
+    await expect(logout).toHaveCount(1)
     await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
     await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
     await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toHaveCount(0)
   } else {
-    await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toBeVisible()
+    await expect(logout).toHaveCount(0)
+    await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Открыть меню' })).toBeVisible()
   }
 
   await page.getByRole('textbox', { name: 'Опорная дата', exact: true }).fill('2026-08-03')
@@ -444,7 +459,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(77, 89, 103)')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-weight', '500')
     await expect(event.locator('.ops-event-primary')).toHaveCSS('justify-content', 'space-between')
-    await expect(event).toHaveCSS('padding-right', '9px')
+    await expect(event).toHaveCSS('padding-right', '46px')
     expect((await event.boundingBox())?.height || 0).toBeGreaterThanOrEqual(92)
     await expect(event).toHaveCSS('border-top-width', '0px')
     await expect(event).toHaveCSS('border-right-width', '0px')
@@ -483,9 +498,10 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
 
     if (width === 1440) {
       await page.setViewportSize({ width: 769, height: 900 })
-      await expect(page.locator('.ops-schedule-event-edit').first()).toBeHidden()
+      await expect(page.locator('.ops-schedule-event-edit').first()).toBeVisible()
+      await expect(page.locator('.ops-schedule-event-edit').first()).toHaveCSS('width', '44px')
       await page.setViewportSize({ width: 960, height: 900 })
-      await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toBeVisible()
+      await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Открыть меню' })).toBeVisible()
       await page.setViewportSize({ width: 961, height: 900 })
       await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
       await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
@@ -554,6 +570,163 @@ test('attendance shows a past non-cancelled session as completed', async ({ page
   await expect(statusSummary).not.toContainText('Завершено')
 })
 
+test('admin split schedule filters, shows roster summary and submits an optional second client', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'desktop and phone schedule interactions are covered')
+  const errors = collectPageErrors(page)
+  const submittedSessions = []
+  const patchedSessions = []
+  const fixtureStart = new Date(Date.now() + 30 * 60 * 1000)
+  const startAt = localIsoDateTime(fixtureStart)
+  const endAt = localIsoDateTime(new Date(fixtureStart.getTime() + 60 * 60 * 1000))
+  const participants = [
+    { id: 11, client_id: 101, first_name: 'Anna', last_name: 'First', full_name: 'First Anna', is_active: true, client_is_active: true },
+    { id: 12, client_id: 102, first_name: 'Berta', last_name: 'Second', full_name: 'Second Berta', is_active: true, client_is_active: true },
+    { id: 13, client_id: 103, first_name: 'Celina', last_name: 'Third', full_name: 'Third Celina', is_active: true, client_is_active: true },
+  ]
+  const sessions = [
+    {
+      id: 51, start_at: startAt, end_at: endAt, duration_minutes: 60,
+      location: 'Pool A', session_type: 'group', trainer_id: 1, trainer: 'Marek',
+      group: { id: 1, name: 'Delfiny' }, max_participants: 8,
+      participants_count: 3, roster: [], is_cancelled: false,
+    },
+    {
+      id: 52, start_at: startAt, end_at: endAt, duration_minutes: 60,
+      location: 'Pool B', session_type: 'split', presentation_type_label: 'Split-тренировка',
+      trainer_id: 2, trainer: 'Ewa', group: null, individual_student_id: 11,
+      individual_participant: { id: 11, full_name: 'First Anna' },
+      roster: participants.map((row) => ({ id: row.id, full_name: row.full_name })),
+      max_participants: 4, participants_count: 3, is_cancelled: false,
+    },
+  ]
+  const routes = {
+    '/api/csrf/': { ok: true },
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Admin User' },
+    '/api/admin/dashboard/': { metrics: { clients: 3, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [{ id: 1, name: 'Marek' }, { id: 2, name: 'Ewa' }],
+      groups: [{ id: 1, name: 'Delfiny' }], subscription_types: [],
+      locations: [{ id: 1, name: 'Pool A' }, { id: 2, name: 'Pool B' }],
+      session_types: [], participants, choices: { payment_methods: [], notification_channels: [] },
+      notification_settings: {},
+    },
+    '/api/admin/clients/': { clients: participants },
+    '/api/admin/trainers/': { trainers: [{ id: 1, full_name: 'Marek', is_active: true }, { id: 2, full_name: 'Ewa', is_active: true }] },
+    '/api/admin/groups/': { groups: [{ id: 1, name: 'Delfiny', default_capacity: 8, participants_count: 0, is_active: true }] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': {
+      session_types: [
+        { id: 1, code: 'group', label: 'Групповое', default_capacity: 8, default_duration_minutes: 60, is_active: true, configured: true },
+        { id: 2, code: 'individual', label: 'Индивидуальное', default_capacity: 1, default_duration_minutes: 60, is_active: true, configured: true },
+        { id: 3, code: 'split', label: 'Сплит', default_capacity: 2, default_duration_minutes: 60, is_active: true, configured: true },
+      ],
+    },
+    '/api/admin/schedule/sessions/': { sessions },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+  }
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (request.method() === 'POST' && pathname === '/api/admin/schedule/check-conflict/') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ has_conflict: false }) })
+      return
+    }
+    if (request.method() === 'POST' && pathname === '/api/admin/schedule/sessions/') {
+      submittedSessions.push(request.postDataJSON())
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 60 }) })
+      return
+    }
+    if (request.method() === 'PATCH' && pathname === '/api/admin/schedule/sessions/52/') {
+      patchedSessions.push(request.postDataJSON())
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ...sessions[1], roster: [sessions[1].roster[0], sessions[1].roster[2]] }),
+      })
+      return
+    }
+    const payload = pathname === '/api/health/'
+      ? { status: 'ok', service: 'swimcrm' }
+      : routes[pathname]
+    await route.fulfill({
+      status: payload ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(payload || { error: `Unhandled smoke endpoint: ${pathname}` }),
+    })
+  })
+
+  await page.goto('/?role=admin&view=schedule')
+  const splitWrap = page.locator('.ops-schedule-event-wrap:visible').filter({ hasText: 'First Anna' }).first()
+  await expect(splitWrap).toContainText('Second Berta')
+  await expect(splitWrap).toContainText('+1')
+  await expect(splitWrap.locator('.ops-event-roster-count')).toBeVisible()
+
+  const action = splitWrap.locator('.ops-schedule-event-edit')
+  await splitWrap.hover()
+  await expect(action).toBeVisible()
+  const placement = await splitWrap.evaluate((wrap) => {
+    const button = wrap.querySelector('.ops-schedule-event-edit')
+    const outer = wrap.getBoundingClientRect()
+    const inner = button.getBoundingClientRect()
+    return {
+      bottom: outer.bottom - inner.bottom,
+      right: outer.right - inner.right,
+      belowMidpoint: inner.top > outer.top + outer.height / 2,
+    }
+  })
+  expect(placement.bottom).toBeLessThanOrEqual(8)
+  expect(placement.right).toBeLessThanOrEqual(8)
+  expect(placement.belowMidpoint).toBe(true)
+
+  await page.getByRole('button', { name: /Фильтры/ }).click()
+  const filters = page.getByRole('dialog', { name: 'Фильтры расписания' })
+  await filters.getByLabel('Тип тренировки').selectOption('split')
+  await filters.getByRole('button', { name: 'Применить' }).click()
+  await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: /Фильтры · 1/ })).toBeVisible()
+
+  await splitWrap.hover()
+  await action.click()
+  const editForm = page.getByRole('dialog', { name: 'Редактирование занятия' })
+  await expect(editForm.getByRole('combobox', { name: 'Клиент 1' })).toHaveValue('First Anna')
+  await expect(editForm.getByRole('combobox', { name: /Клиент 2/ })).toHaveValue('Second Berta')
+  await expect(editForm.getByLabel('Полный состав Split')).toContainText('First Anna · Second Berta · Third Celina')
+  await editForm.getByRole('combobox', { name: /Клиент 2/ }).fill('')
+  await editForm.getByRole('button', { name: 'Сохранить занятие' }).click()
+  await expect.poll(() => patchedSessions.length).toBe(1)
+  expect(patchedSessions[0].second_student_id).toBeNull()
+
+  await page.getByRole('button', { name: 'Split-тренировка', exact: true }).click()
+  let createForm = page.getByRole('dialog', { name: 'Новое занятие' })
+  let firstClient = createForm.getByRole('combobox', { name: 'Клиент 1' })
+  await firstClient.fill('First Anna')
+  await page.getByRole('option', { name: /First Anna/ }).click()
+  await createForm.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await page.getByRole('button', { name: 'Закрыть без сохранения' }).click()
+  await page.getByRole('button', { name: 'Split-тренировка', exact: true }).click()
+  createForm = page.getByRole('dialog', { name: 'Новое занятие' })
+  firstClient = createForm.getByRole('combobox', { name: 'Клиент 1' })
+  await expect(firstClient).toHaveValue('')
+  await firstClient.fill('First Anna')
+  await page.getByRole('option', { name: /First Anna/ }).click()
+  const secondClient = createForm.getByRole('combobox', { name: /Клиент 2/ })
+  await secondClient.fill('First Anna')
+  await expect(page.getByRole('option', { name: /First Anna/ })).toHaveCount(0)
+  await secondClient.fill('Second Berta')
+  await page.getByRole('option', { name: /Second Berta/ }).click()
+  await createForm.getByLabel('Лимит участников').fill('4')
+  await createForm.getByRole('button', { name: 'Создать занятие' }).click()
+
+  await expect.poll(() => submittedSessions.length).toBe(1)
+  expect(submittedSessions[0]).toMatchObject({
+    session_type: 'split',
+    individual_student_id: '11',
+    second_student_id: '12',
+    max_participants: 4,
+  })
+  expect(errors).toEqual([])
+})
+
 test('admin schedule color pickers stay compact and reveal the approved palette on demand', async ({ page }) => {
   const errors = collectPageErrors(page)
   let submittedColor = null
@@ -608,21 +781,25 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
   })
 
   await page.goto('/')
-  await page.locator('.ops-nav-button[title="Группы"]').click()
+  await openShellDestination(page, 'Группы')
   await page.getByRole('button', { name: 'Карточка', exact: true }).click()
   await page.getByRole('button', { name: 'Редактировать', exact: true }).click()
-  const groupPicker = page.getByRole('group', { name: 'Цвет расписания' })
+  const groupEditor = page.getByRole('dialog', { name: 'Редактирование группы' })
+  const groupPicker = groupEditor.getByRole('group', { name: 'Цвет расписания' })
   const groupTrigger = groupPicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Стандартный', exact: true })
   await expect(groupTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(groupPicker.getByRole('radio')).toHaveCount(0)
   await groupTrigger.click()
   await expect(groupTrigger).toHaveAttribute('aria-expanded', 'true')
   await expect(groupPicker.getByRole('radio')).toHaveCount(31)
+  await groupEditor.getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await expect(groupEditor).toHaveCount(0)
 
-  await page.locator('.ops-nav-button[title="Настройки"]').click()
+  await openShellDestination(page, 'Настройки')
   await page.getByRole('button', { name: /Типы занятий/ }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
-  const typePicker = page.getByRole('group', { name: 'Цвет расписания' })
+  const typeEditor = page.getByRole('dialog', { name: 'Редактирование · Типы занятий' })
+  const typePicker = typeEditor.getByRole('group', { name: 'Цвет расписания' })
   const typeTrigger = typePicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Стандартный', exact: true })
   await expect(typeTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(typePicker.getByRole('radio')).toHaveCount(0)
@@ -636,7 +813,7 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
   await page.keyboard.press('Space')
   await expect(typePicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Лесной', exact: true })).toHaveAttribute('aria-expanded', 'false')
   await expect(typePicker.getByRole('radio')).toHaveCount(0)
-  await page.locator('.ops-edit-panel').getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await typeEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect.poll(() => submittedColor).toBe('forest-01')
   expect(errors).toEqual([])
 })
@@ -690,7 +867,9 @@ test('shared logout stays single-shot for admin, trainer and client', async ({ p
     role = nextRole
     loggedOut = false
     await page.goto(`/?logout-role=${nextRole}`)
-    const logout = page.getByRole('button', { name: 'Выйти', exact: true })
+    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Открыть меню' }).click()
+    const logout = page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })
     await expect(logout).toHaveCount(1)
     await expect(logout).toBeVisible()
     await actions[nextRole](logout)
@@ -699,7 +878,7 @@ test('shared logout stays single-shot for admin, trainer and client', async ({ p
   }
 })
 
-test('admin mobile client list uses one navigation control and no finance actions', async ({ page }) => {
+test('admin mobile client list separates profile navigation from client actions', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile client-card contract')
   const writeRequests = []
   page.on('request', (request) => {
@@ -732,10 +911,16 @@ test('admin mobile client list uses one navigation control and no finance action
   const mobileList = page.locator('.ops-client-mobile-list')
   await expect(mobileList).toBeVisible()
   await expect(mobileList.getByText('Финансы', { exact: true })).toHaveCount(0)
-  await expect(mobileList.getByRole('button')).toHaveCount(1)
+  await expect(mobileList.getByRole('button')).toHaveCount(2)
   const card = mobileList.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })
+  const actionsTrigger = mobileList.getByRole('button', { name: 'Действия клиента' })
   await expect(card).toContainText('jan.long.address@example.test')
   expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+  await actionsTrigger.click()
+  const actions = mobileList.getByRole('group', { name: 'Действия: Kowalski Jan' })
+  await expect(actions.getByRole('button')).toHaveText(['Изменить', 'В чёрный список'])
+  await expect(actions.getByText('Финансы', { exact: true })).toHaveCount(0)
+  await actionsTrigger.click()
   await card.click()
   await expect(page).toHaveURL(/view=clientDetail.*client=10/)
   expect(writeRequests).toEqual([])
@@ -1187,7 +1372,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: 'Сохранить изменения' }).click()
   await expect(page.getByText('Данные владельца аккаунта обновлены.')).toBeVisible()
 
-  await page.locator('.ops-nav-button[title="Клиенты"]').click()
+  await openShellDestination(page, 'Клиенты')
   await expect(page.locator('h1.page-title', { hasText: 'Клиенты' })).toBeVisible()
   const compactClients = (page.viewportSize()?.width || 0) <= 960
   if (compactClients) {
@@ -1210,7 +1395,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     expect(seenAdminEndpoints).toContain('/api/admin/clients/11/restore/')
   }
 
-  await page.locator('.ops-nav-button[title="Тренеры"]').click()
+  await openShellDestination(page, 'Тренеры')
   await expect(page.locator('h1.page-title', { hasText: 'Тренеры' })).toBeVisible()
   await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
   await page.getByRole('button', { name: /Marek Zielinski/ }).first().click()
@@ -1224,7 +1409,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('tab', { name: 'Зарплата и ставки' }).click()
   await expect(page.getByText('Ставки по типам занятий')).toBeVisible()
 
-  await page.locator('.ops-nav-button[title="Группы"]').click()
+  await openShellDestination(page, 'Группы')
   await expect(page.locator('h1.page-title', { hasText: 'Группы' })).toBeVisible()
   await expect(page.getByText('Delfiny').first()).toBeVisible()
   await page.getByRole('button', { name: 'Delfiny', exact: true }).first().click()
@@ -1233,19 +1418,25 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(groupCard).toContainText('Вместимость12')
   await expect(page.getByText('Состав группы')).toBeVisible()
   await groupCard.getByRole('button', { name: 'Редактировать' }).click()
-  const capacityInput = groupCard.getByLabel('Вместимость')
+  const groupEditor = page.getByRole('dialog', { name: 'Редактирование группы' })
+  const capacityInput = groupEditor.getByLabel('Вместимость')
   await expect(capacityInput).toHaveValue('12')
   await capacityInput.fill('0')
-  await groupCard.getByRole('button', { name: 'Сохранить' }).click()
+  await groupEditor.getByRole('button', { name: 'Сохранить' }).click()
   await expect(capacityInput).toHaveAttribute('aria-invalid', 'true')
   await capacityInput.fill('12')
-  await groupCard.getByRole('button', { name: 'Отмена' }).click()
-  const clientCombobox = page.getByRole('combobox', { name: 'Добавить участника' })
+  await groupEditor.getByRole('button', { name: 'Отмена' }).click()
+  await expect(groupEditor).toHaveCount(0)
+  await groupCard.getByRole('button', { name: 'Добавить', exact: true }).click()
+  const memberEditor = page.getByRole('dialog', { name: 'Добавить участника в группу' })
+  const clientCombobox = memberEditor.getByRole('combobox', { name: 'Добавить участника' })
   await clientCombobox.fill('zolc aleks')
   await expect(page.getByRole('option', { name: /Żółć Aleksandra/ })).toBeVisible()
   await clientCombobox.press('Escape')
+  await memberEditor.getByRole('button', { name: 'Отмена' }).click()
+  await expect(memberEditor).toHaveCount(0)
 
-  await page.locator('.ops-nav-button[title="Расписание"]').click()
+  await openShellDestination(page, 'Расписание')
   await expect(page.locator('h1.page-title', { hasText: 'Расписание' })).toBeVisible()
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
   const forestEvent = page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()
@@ -1294,9 +1485,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Тренировка восстановлена.')).toBeVisible()
   await expect(page.getByRole('button', { name: /Групповая тренировка/ })).toBeVisible()
   await page.getByRole('button', { name: /Групповая тренировка/ }).click()
-  const createSessionCard = page.locator('.card').filter({
-    has: page.getByText('Новое занятие', { exact: true }),
-  })
+  const createSessionCard = page.getByRole('dialog', { name: 'Новое занятие' })
   await createSessionCard.getByLabel('Тип занятия').selectOption('individual')
   await expect(createSessionCard.getByLabel('Цена занятия, PLN')).toBeVisible()
   await createSessionCard.getByRole('combobox', { name: 'Участник' }).fill('Jan Kowalski')
@@ -1314,13 +1503,14 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   expect(submittedSessions[0].individual_student_id).toBe('1')
 
   await page.getByRole('button', { name: /Групповая тренировка/ }).click()
-  const invalidCard = page.locator('.card').filter({ has: page.getByText('Новое занятие', { exact: true }) })
+  const invalidCard = page.getByRole('dialog', { name: 'Новое занятие' })
   await expect(invalidCard.getByLabel('Лимит участников')).toHaveValue('12')
   await invalidCard.getByLabel('Тренер').selectOption('')
   await invalidCard.getByRole('button', { name: 'Создать занятие' }).click()
   await expect(invalidCard.getByLabel('Тренер')).toHaveAttribute('aria-invalid', 'true')
   await expect(invalidCard.getByLabel('Тренер')).toBeFocused()
-  await invalidCard.getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await invalidCard.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await page.getByRole('alertdialog', { name: 'Закрыть без сохранения?' }).getByRole('button', { name: 'Закрыть без сохранения' }).click()
 
   await expect(page.getByText(/Недельный план|Weekly plan/i)).toHaveCount(0)
 
@@ -1374,15 +1564,15 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     expect(seenClientFinanceActions, `client card should submit ${endpoint}`).toContain(endpoint)
   }
 
-  await page.locator('.ops-nav-button[title="Платежи"]').click()
+  await openShellDestination(page, 'Платежи')
   await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
   await expect(page.locator('td').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
 
-  await page.locator('.ops-nav-button[title="Должники"]').click()
+  await openShellDestination(page, 'Должники')
   await expect(page.locator('h1.page-title', { hasText: 'Должники' })).toBeVisible()
   await expect(page.getByText('Przeterminowana platnosc').first()).toBeVisible()
 
-  await page.locator('.ops-nav-button[title="Настройки"]').click()
+  await openShellDestination(page, 'Настройки')
   await expect(page.locator('h1.page-title', { hasText: 'Настройки и контроль' })).toBeVisible()
   await expect(page.getByText('Типы абонементов').first()).toBeVisible()
   await page.getByRole('button', { name: /Локации/ }).click()
@@ -1410,7 +1600,10 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const pageHasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(pageHasHorizontalOverflow).toBe(false)
   if ((page.viewportSize()?.width || 0) <= 960) {
-    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Открыть меню' }).click()
+    await expect(page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toBeVisible()
   }
 
@@ -1451,19 +1644,19 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await expect(page.locator('main:visible')).toHaveCount(1)
 
   for (const label of ['Мои занятия', 'Посещаемость', 'Мои группы', 'История']) {
-    await page.locator(`.ops-nav-button[title="${label}"]`).click()
+    await openShellDestination(page, label)
     const pageHeading = page.locator('main:visible h1.page-title')
     await expect(pageHeading).toHaveCount(1)
     if (label !== 'Посещаемость') await expect(pageHeading).toHaveText(label)
     await expect(page.locator('.page')).toBeVisible()
   }
 
-  await page.locator('.ops-nav-button[title="Посещаемость"]').click()
+  await openShellDestination(page, 'Посещаемость')
   await expect(page.getByRole('button', { name: 'Все присутствовали' })).toBeVisible()
-  await page.locator('.ops-nav-button[title="Мои группы"]').click()
+  await openShellDestination(page, 'Мои группы')
   await page.getByRole('button', { name: /Дельфины/ }).click()
   await expect(page.getByText('Иван Петров')).toBeVisible()
-  await page.locator('.ops-nav-button[title="История"]').click()
+  await openShellDestination(page, 'История')
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
@@ -1510,22 +1703,22 @@ test('client can open every menu screen without runtime errors', async ({ page }
   await expect(page.locator('main:visible')).toHaveCount(1)
 
   for (const label of ['Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль', 'Согласия']) {
-    await page.locator(`.ops-nav-button[title="${label}"]`).click()
+    await openShellDestination(page, label)
     await expect(page.getByRole('heading', { level: 1, name: label })).toBeVisible()
     await expect(page.locator('.page')).toBeVisible()
   }
 
-  await page.locator('.ops-nav-button[title="Расписание"]').click()
+  await openShellDestination(page, 'Расписание')
   await page.getByRole('button', { name: 'Список', exact: true }).click()
   await expect(page.locator('[data-testid="client-schedule-list"] .ops-session-tile[data-color-key="gold-01"]')).toHaveCount(1)
   await page.locator('[data-testid="client-schedule-list"] .ops-session-tile').first().click()
   await expect(page.getByText('-1 занятие')).toBeVisible()
-  await page.locator('.ops-nav-button[title="Абонемент"]').click()
+  await openShellDestination(page, 'Абонемент')
   await expect(page.getByText('Осталось занятий')).toBeVisible()
   await expect(page.getByText('Оформлен')).toHaveCount(0)
   await expect(page.getByText('Льготный период')).toHaveCount(0)
   await expect(page.getByText(/История списаний и корректировок/)).toHaveCount(0)
-  await page.locator('.ops-nav-button[title="Согласия"]').click()
+  await openShellDestination(page, 'Согласия')
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
@@ -1670,7 +1863,7 @@ test('admin confirms and rejects pending payments and the nav counter decrements
   const counter = page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')
   await expect(counter).toHaveText('2')
 
-  await page.locator('.ops-nav-button[title="Платежи"]').click()
+  await openShellDestination(page, 'Платежи')
   await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
 
   // Confirm the first pending payment: balance-affecting action, counter must drop 2 -> 1.

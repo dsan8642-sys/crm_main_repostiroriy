@@ -9,6 +9,7 @@ from billing.models import Charge
 from subscriptions.models import (LedgerReason, SessionLedgerEntry,
                                   Subscription, SubscriptionStatus)
 from scheduling.models import Session, SessionType
+from scheduling.services import split_roster_student_ids
 
 from .models import AttendanceRecord, AttendanceStatus, DEDUCTING_STATUSES
 
@@ -57,10 +58,13 @@ def _reconcile_visit_charge(record, session, *, covered_by_subscription, actor):
         and session.price_minor is not None
         and session.price_minor > 0
     )
-    # A split session has one shared snapshot price. Every attendee gets an
-    # equal, deterministic share; an odd minor unit remains uncharged rather
-    # than silently overcharging the pair.
-    divisor = 2 if session.session_type == SessionType.SPLIT else 1
+    # A split session has one shared snapshot price. Every enrolled attendee
+    # gets an equal, deterministic share; an odd minor-unit remainder stays
+    # uncharged instead of silently overcharging anyone.
+    divisor = (
+        max(len(split_roster_student_ids(session)), 1)
+        if session.session_type == SessionType.SPLIT else 1
+    )
     desired = (session.price_minor // divisor) if should_bill else 0
     diff = desired - charged
     if diff == 0:

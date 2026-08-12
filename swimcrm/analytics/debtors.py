@@ -26,7 +26,9 @@ def debtors(currency=None):
     currency = currency or settings.DEFAULT_CURRENCY
     today = timezone.localdate()
     out = []
-    for st in Student.objects.filter(is_active=True).select_related("parent", "group"):
+    for st in Student.objects.filter(
+            is_active=True, parent__user__is_active=True,
+    ).select_related("parent", "parent__user", "group"):
         reasons = []
         bal = student_balance(st, currency)
         if any(cs.is_overdue for cs in charge_statuses(st, currency)):
@@ -58,8 +60,12 @@ def upcoming(within_days=7, min_sessions=None):
     horizon = today + timedelta(days=within_days)
     out = []
     for sub in (Subscription.objects
-                .filter(status__in=[SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN])
-                .select_related("student", "subscription_type")):
+                .filter(
+                    status__in=[SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN],
+                    student__is_active=True,
+                    student__parent__user__is_active=True,
+                )
+                .select_related("student", "student__parent__user", "subscription_type")):
         end = sub.effective_end_date
         remaining = sub.remaining_sessions
         ends_soon = today <= end <= horizon

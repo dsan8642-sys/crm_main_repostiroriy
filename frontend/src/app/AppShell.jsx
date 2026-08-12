@@ -8,6 +8,36 @@ const ROLE_SCREEN_LOADERS = {
   client: () => import('./screens/ClientScreens.jsx'),
 }
 
+const MOBILE_NAV_CONFIG = {
+  admin: [
+    { key: 'overview', label: 'Главная' },
+    { key: 'clients', label: 'Клиенты' },
+    { key: 'schedule', label: 'Расписание' },
+    { key: 'debtors', label: 'Должники' },
+    { key: 'settings', label: 'Ещё' },
+  ],
+  trainer: [
+    { key: 'sessions', label: 'Мои занятия' },
+    { key: 'session', label: 'Посещаемость' },
+    { key: 'groups', label: 'Группы' },
+    { key: 'history', label: 'История' },
+  ],
+  client: [
+    { key: 'home', label: 'Главная' },
+    { key: 'schedule', label: 'Расписание' },
+    { key: 'payments', label: 'Платежи' },
+    { key: 'history', label: 'История' },
+    { key: 'profile', label: 'Профиль' },
+  ],
+}
+
+function activeMobileKey(role, view) {
+  if (role === 'admin' && view === 'clientDetail') return 'clients'
+  if (role === 'admin' && view === 'attendance') return 'schedule'
+  if (role === 'admin' && view === 'reports') return 'settings'
+  return view
+}
+
 function initials(name) {
   return String(name || 'H2O')
     .split(/\s+/)
@@ -26,7 +56,7 @@ function routeState() {
   }
 }
 
-export function AppShell({ design, health, apiState, initialRole, reloadRoleData, onLogout }) {
+export function AppShell({ design, health, apiState, initialRole, currentUser, reloadRoleData, onLogout }) {
   const { t } = useLocale()
   const initialRoute = routeState()
   const [role, setRole] = useState(initialRole || 'admin')
@@ -39,6 +69,8 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
   const [selectedTab, setSelectedTab] = useState(initialRoute.tab)
   const [searchQuery, setSearchQuery] = useState('')
   const [compactSidebar, setCompactSidebar] = useState(() => window.matchMedia('(max-width: 960px)').matches)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [logoutPending, setLogoutPending] = useState(false)
   const [roleScreenBundle, setRoleScreenBundle] = useState({
     role: null,
     module: null,
@@ -52,6 +84,11 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
   Object.assign(roleDataRefs.current.ParentData, data.ParentData)
   const { IconButton } = components
   const meta = ROLE_META[role]
+  const userName = currentUser?.full_name?.trim() || currentUser?.username?.trim() || meta.user
+  const menuButtonRef = useRef(null)
+  const drawerRef = useRef(null)
+  const returnMenuFocusRef = useRef(false)
+  const logoutPendingRef = useRef(false)
   const nav = useMemo(() => roleNav(role, icons, data), [role, icons, data])
   const runtimeScreens = useMemo(() => {
     if (roleScreenBundle.role !== role || !roleScreenBundle.module) return {}
@@ -104,15 +141,70 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 960px)')
-    const update = () => setCompactSidebar(media.matches)
+    const update = () => {
+      setCompactSidebar(media.matches)
+      if (!media.matches) {
+        returnMenuFocusRef.current = false
+        setMobileMenuOpen(false)
+      }
+    }
     update()
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
 
   useEffect(() => {
+    if (!mobileMenuOpen) {
+      if (returnMenuFocusRef.current) {
+        returnMenuFocusRef.current = false
+        menuButtonRef.current?.focus()
+      }
+      return undefined
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const drawer = drawerRef.current
+    const focusableSelector = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const focusFirst = () => drawer?.querySelector(focusableSelector)?.focus()
+    const frame = window.requestAnimationFrame(focusFirst)
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeMobileMenu()
+        return
+      }
+      if (event.key !== 'Tab' || !drawer) return
+      const focusable = [...drawer.querySelectorAll(focusableSelector)]
+      if (!focusable.length) {
+        event.preventDefault()
+        drawer.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [mobileMenuOpen])
+
+  useEffect(() => {
     if (!initialRole) return
     setRole(initialRole)
+    setMobileMenuOpen(false)
     const route = routeState()
     setView(route.role === initialRole && route.view ? route.view : ROLE_META[initialRole].initialView)
   }, [initialRole])
@@ -134,6 +226,8 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     const onPopState = () => {
       const route = routeState()
       if (route.role && route.role !== role) return
+      returnMenuFocusRef.current = false
+      setMobileMenuOpen(false)
       setView(route.view || ROLE_META[role].initialView)
       setSelectedClientId(route.clientId); setSelectedSessionId(route.sessionId)
       setSelectedTrainerSessionId(route.trainerSessionId); setSelectedGroupId(route.groupId)
@@ -158,7 +252,28 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     setSelectedTab(params.tab || null)
     setView(nextView)
     setSearchQuery('')
+    if (mobileMenuOpen) closeMobileMenu()
+    else setMobileMenuOpen(false)
     writeRoute(nextView, params)
+  }
+
+  function closeMobileMenu({ returnFocus = true } = {}) {
+    returnMenuFocusRef.current = returnFocus
+    setMobileMenuOpen(false)
+  }
+
+  function logout() {
+    if (logoutPendingRef.current) return
+    logoutPendingRef.current = true
+    setLogoutPending(true)
+    returnMenuFocusRef.current = false
+    setMobileMenuOpen(false)
+    Promise.resolve(onLogout?.())
+      .catch(() => {})
+      .finally(() => {
+        logoutPendingRef.current = false
+        setLogoutPending(false)
+      })
   }
 
   function changeKid(nextKid) {
@@ -168,13 +283,13 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
     writeRoute(view, { clientId: selectedClientId, sessionId: selectedSessionId, trainerSessionId: selectedTrainerSessionId, groupId: selectedGroupId, tab: selectedTab, kid: nextKid }, true)
   }
 
-  let lastSection = null
-  const mobileKeys = role === 'admin'
-    ? ['overview', 'schedule', 'attendance', 'clients', 'settings']
-    : role === 'trainer'
-      ? ['sessions', 'session', 'groups', 'history']
-      : ['home', 'schedule', 'payments', 'history', 'profile']
-  const mobileNav = mobileKeys.map((key) => nav.find((item) => item.key === key)).filter(Boolean)
+  let sidebarLastSection = null
+  let drawerLastSection = null
+  const mobileNav = MOBILE_NAV_CONFIG[role].map(({ key, label }) => {
+    const item = nav.find((candidate) => candidate.key === key)
+    return item ? { ...item, mobileLabel: label } : null
+  }).filter(Boolean)
+  const navActiveKey = activeMobileKey(role, view)
 
   return (
     <div className="app">
@@ -188,21 +303,33 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
               <div className="ops-brand-sub">операционная панель</div>
             </div>
           </button>
-          {compactSidebar && <IconButton className="ops-sidebar-logout is-mobile" label="Выйти" onClick={onLogout}><icons.Logout size={16} /></IconButton>}
+          {compactSidebar && (
+            <button
+              ref={menuButtonRef}
+              type="button"
+              className="ops-mobile-menu-button"
+              aria-label="Открыть меню"
+              aria-controls="ops-mobile-drawer"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen(true)}
+            >
+              <span aria-hidden="true"><i /><i /><i /><i /></span>
+            </button>
+          )}
         </div>
 
         <nav className="ops-nav" aria-label="Основная навигация">
           {nav.map((item) => {
             const section = item.section || 'Главное'
-            const showSection = section !== lastSection
-            lastSection = section
+            const showSection = section !== sidebarLastSection
+            sidebarLastSection = section
             return (
               <React.Fragment key={item.key}>
                 {showSection && <div className="ops-nav-section">{section}</div>}
                 <button
                   type="button"
-                  className={`ops-nav-button${view === item.key ? ' is-active' : ''}`}
-                  aria-current={view === item.key ? 'page' : undefined}
+                  className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
+                  aria-current={navActiveKey === item.key ? 'page' : undefined}
                   onClick={() => navigate(item.key)}
                   title={item.label}
                 >
@@ -219,15 +346,72 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
 
         <div className="ops-user-wrap">
           <div className="ops-user">
-            <div className="ops-avatar">{initials(meta.user)}</div>
+            <div className="ops-avatar">{initials(userName)}</div>
             <div>
-              <div className="ops-user-name">{meta.user}</div>
-              <div className="ops-user-role">{meta.productRole}</div>
+              <div className="ops-user-name">{userName}</div>
             </div>
           </div>
-          {!compactSidebar && <IconButton className="ops-sidebar-logout is-desktop" label="Выйти" onClick={onLogout}><icons.Logout size={16} /></IconButton>}
+          {!compactSidebar && <IconButton className="ops-sidebar-logout is-desktop" label="Выйти" disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>}
         </div>
       </aside>
+
+      {compactSidebar && mobileMenuOpen && (
+        <div
+          className="ops-mobile-drawer-layer"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeMobileMenu()
+          }}
+        >
+          <aside
+            ref={drawerRef}
+            id="ops-mobile-drawer"
+            className="ops-mobile-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Меню"
+            tabIndex={-1}
+          >
+            <div className="ops-mobile-drawer-head">
+              <strong>Меню</strong>
+              <button type="button" className="ops-mobile-drawer-close" aria-label="Закрыть меню" onClick={() => closeMobileMenu()}>
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+            <nav className="ops-mobile-drawer-nav" aria-label="Навигация в меню">
+              {nav.map((item) => {
+                const section = item.section || 'Главное'
+                const showSection = section !== drawerLastSection
+                drawerLastSection = section
+                return (
+                  <React.Fragment key={`drawer-${item.key}`}>
+                    {showSection && <div className="ops-nav-section">{section}</div>}
+                    <button
+                      type="button"
+                      className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
+                      aria-current={navActiveKey === item.key ? 'page' : undefined}
+                      onClick={() => navigate(item.key)}
+                      title={item.label}
+                    >
+                      <span>{item.icon}</span>
+                      <span>{t(`nav.${role}.${item.key}`, item.label)}</span>
+                      {item.count != null && (
+                        <span className={`ops-nav-count${item.countTone === 'danger' ? ' is-danger' : ''}`}>{item.count}</span>
+                      )}
+                    </button>
+                  </React.Fragment>
+                )
+              })}
+            </nav>
+            <div className="ops-mobile-drawer-user-wrap">
+              <div className="ops-user">
+                <div className="ops-avatar">{initials(userName)}</div>
+                <div className="ops-user-name">{userName}</div>
+              </div>
+              <IconButton className="ops-sidebar-logout" label="Выйти" disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+            </div>
+          </aside>
+        </div>
+      )}
 
       <div className="ops-main">
         <header className="topbar ops-topbar">
@@ -257,8 +441,23 @@ export function AppShell({ design, health, apiState, initialRole, reloadRoleData
             </div>
           )}
         </main>
-        <nav className="ops-mobile-nav" aria-label="Основная мобильная навигация">
-          {mobileNav.map((item, index) => <button key={`mobile-${item.key}`} type="button" aria-current={view === item.key ? 'page' : undefined} className={view === item.key ? 'is-active' : ''} onClick={() => navigate(item.key)}><span>{item.icon}</span><small>{index === mobileNav.length - 1 ? t('shell.more') : t(`nav.${role}.${item.key}`, item.label.replace('Мои ', ''))}</small></button>)}
+        <nav
+          className="ops-mobile-nav"
+          aria-label="Основная мобильная навигация"
+          style={{ '--ops-mobile-nav-count': mobileNav.length }}
+        >
+          {mobileNav.map((item) => (
+            <button
+              key={`mobile-${item.key}`}
+              type="button"
+              aria-current={navActiveKey === item.key ? 'page' : undefined}
+              className={navActiveKey === item.key ? 'is-active' : ''}
+              onClick={() => navigate(item.key)}
+            >
+              <span>{item.icon}</span>
+              <small>{item.mobileLabel}</small>
+            </button>
+          ))}
         </nav>
       </div>
     </div>
