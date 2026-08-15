@@ -4,6 +4,7 @@ import { labelStyle } from './Input.jsx';
 /** SwimCRM Textarea — multi-line field for notes, comments, message bodies. */
 export function Textarea({ label, hint, error, required = false, rows = 3, id, style, containerStyle, ...rest }) {
   const inputId = id || (label ? `ta-${label.replace(/\s+/g, '-').toLowerCase()}` : undefined);
+  const errorId = inputId ? `${inputId}-error` : undefined;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, ...containerStyle }}>
       {label && (
@@ -33,9 +34,11 @@ export function Textarea({ label, hint, error, required = false, rows = 3, id, s
           ...style,
         }}
         {...rest}
+        aria-invalid={error ? true : rest['aria-invalid']}
+        aria-describedby={error ? errorId : rest['aria-describedby']}
       />
       {error ? (
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--red-600)' }}>{error}</span>
+        <span id={errorId} className="ops-field-error" role="alert" style={{ fontSize: 'var(--fs-xs)', color: 'var(--red-600)' }}>{error}</span>
       ) : hint ? (
         <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{hint}</span>
       ) : null}

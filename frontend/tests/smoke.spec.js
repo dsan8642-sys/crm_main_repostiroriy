@@ -3,9 +3,42 @@ import { expect, test } from '@playwright/test'
 async function mockPortal(page, routes) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
-    const payload = url.pathname === '/api/health/'
+    const legacyClientPayments = routes['/api/client/payments/']
+    const compatibilityPayload = url.pathname === '/api/client/charges/' && legacyClientPayments
+      ? { charges: legacyClientPayments.charges || [] }
+      : url.pathname === '/api/client/payment-history/' && legacyClientPayments
+        ? { payments: legacyClientPayments.payments || [] }
+        : null
+    let payload = url.pathname === '/api/health/'
       ? { status: 'ok', service: 'swimcrm' }
-      : routes[url.pathname]
+      : routes[url.pathname] || compatibilityPayload
+    if (url.pathname === '/api/admin/clients/' && payload?.clients) {
+      let rows = [...payload.clients]
+      const active = url.searchParams.get('active')
+      const subscription = url.searchParams.get('subscription')
+      const balance = url.searchParams.get('balance')
+      const activity = url.searchParams.get('activity')
+      const search = (url.searchParams.get('search') || url.searchParams.get('q') || '').toLocaleLowerCase('ru-RU')
+      if (active === 'true') rows = rows.filter((row) => row.client_is_active !== false && row.is_active !== false)
+      if (active === 'false') rows = rows.filter((row) => row.client_is_active === false || row.is_active === false)
+      if (subscription) rows = rows.filter((row) => Boolean(row.has_current_subscription) === (subscription === 'with'))
+      if (balance === 'positive') rows = rows.filter((row) => Number(row.balance_minor || 0) < 0)
+      if (balance === 'negative') rows = rows.filter((row) => Number(row.balance_minor || 0) > 0)
+      if (balance === 'zero') rows = rows.filter((row) => Number(row.balance_minor || 0) === 0)
+      if (activity) rows = rows.filter((row) => Boolean(row.is_recently_active) === (activity === 'active'))
+      if (search) rows = rows.filter((row) => [
+        row.first_name, row.last_name, row.full_name, row.client_phone, row.email, row.group?.name,
+      ].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(search)))
+      const total = rows.length
+      const page = Math.max(1, Number(url.searchParams.get('page') || 1))
+      const pageSize = Math.max(1, Number(url.searchParams.get('page_size') || total || 1))
+      const start = (page - 1) * pageSize
+      payload = {
+        ...payload,
+        clients: rows.slice(start, start + pageSize),
+        pagination: { page, page_size: pageSize, total, total_pages: Math.max(1, Math.ceil(total / pageSize)) },
+      }
+    }
     await route.fulfill({
       status: payload ? 200 : 404,
       contentType: 'application/json',
@@ -132,7 +165,7 @@ test('client and schedule forms show field errors and focus the first invalid fi
     '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
     '/api/admin/reference/': {
       trainers: [{ id: 1, name: 'Marek' }],
-      groups: [{ id: 1, name: 'Delfiny' }],
+      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_capacity: 12, participants_count: 1, is_active: true }],
       subscription_types: [],
       locations: [{ id: 1, name: 'Basen A', is_active: true }],
       session_types: [],
@@ -388,9 +421,15 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
 
   await page.goto('/?role=admin&view=schedule')
   await expect(page.getByRole('heading', { level: 1, name: 'Расписание' })).toBeVisible()
-  await expect(page.locator('.ops-topbar .ops-crumb, .ops-topbar .sub, .ops-topbar h1')).toHaveCount(0)
-  await expect(page.locator('.ops-topbar')).toHaveCSS('background-color', 'rgb(238, 246, 253)')
-  await expect(page.locator('.ops-global-search > input')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  const width = page.viewportSize()?.width || 0
+  if (width >= 768) {
+    await expect(page.locator('.ops-topbar .ops-crumb, .ops-topbar .sub, .ops-topbar h1')).toHaveCount(0)
+    await expect(page.locator('.ops-topbar')).toHaveCSS('background-color', 'rgb(238, 246, 253)')
+    await expect(page.locator('.ops-global-search > input')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  } else {
+    await expect(page.locator('.ops-topbar')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Открыть глобальный поиск' })).toBeVisible()
+  }
   await expect(page.locator('.ops-sidebar')).toHaveCSS('background-color', 'rgb(16, 24, 40)')
 
   const actionCards = page.locator('.ops-action-card')
@@ -402,11 +441,10 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
   await expect(copyPeriodAction.locator('small')).toHaveCount(0)
   await expect(copyPeriodAction).not.toContainText('Предпросмотр перед записью')
 
-  const width = page.viewportSize()?.width || 0
   const logout = page.getByRole('button', { name: 'Выйти', exact: true })
-  if (width >= 961) {
+  if (width >= 768) {
     await expect(logout).toHaveCount(1)
-    await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
+    await expect(page.locator('.ops-sidebar')).toHaveCSS('width', width < 960 ? '76px' : '250px')
     await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
     await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toHaveCount(0)
   } else {
@@ -445,7 +483,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
   await filterPanel.getByLabel('Статус').selectOption('')
   await filterPanel.getByRole('button', { name: 'Применить', exact: true }).click()
 
-  if (width >= 769) {
+  if (width >= 768) {
     const eventWrap = page.locator('.ops-schedule-event-wrap:visible').filter({ hasText: 'Delfiny' }).first()
     const event = eventWrap.locator('.ops-schedule-event')
     await expect(event.locator('.ops-event-occupancy')).toHaveText('6/15')
@@ -459,7 +497,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(77, 89, 103)')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-weight', '500')
     await expect(event.locator('.ops-event-primary')).toHaveCSS('justify-content', 'space-between')
-    await expect(event).toHaveCSS('padding-right', '46px')
+    await expect(event).toHaveCSS('padding-right', width < 960 ? '58px' : '46px')
     expect((await event.boundingBox())?.height || 0).toBeGreaterThanOrEqual(92)
     await expect(event).toHaveCSS('border-top-width', '0px')
     await expect(event).toHaveCSS('border-right-width', '0px')
@@ -468,9 +506,14 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     expect(await event.evaluate((node) => getComputedStyle(node).getPropertyValue('--schedule-card-fill'))).toContain('38%')
     expect(await event.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(232, 245, 233)')
     const action = eventWrap.locator('.ops-schedule-event-edit')
-    await expect(action).toBeHidden()
-    await eventWrap.hover()
-    await expect(action).toBeVisible()
+    if (width < 960) {
+      await expect(action).toBeVisible()
+      await expect(action).toHaveCSS('width', '44px')
+    } else {
+      await expect(action).toBeHidden()
+      await eventWrap.hover()
+      await expect(action).toBeVisible()
+    }
 
     await page.getByRole('button', { name: 'Месяц', exact: true }).click()
     const weekdayHeader = page.getByTestId('month-weekday-header')
@@ -497,12 +540,13 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(dateButton).toHaveCSS('color', 'rgb(17, 24, 39)')
 
     if (width === 1440) {
-      await page.setViewportSize({ width: 769, height: 900 })
+      await page.setViewportSize({ width: 768, height: 900 })
       await expect(page.locator('.ops-schedule-event-edit').first()).toBeVisible()
       await expect(page.locator('.ops-schedule-event-edit').first()).toHaveCSS('width', '44px')
+      await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '76px')
       await page.setViewportSize({ width: 960, height: 900 })
-      await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Открыть меню' })).toBeVisible()
-      await page.setViewportSize({ width: 961, height: 900 })
+      await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Открыть меню' })).toHaveCount(0)
+      await page.reload()
       await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
       await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
     }
@@ -782,7 +826,11 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
 
   await page.goto('/')
   await openShellDestination(page, 'Группы')
-  await page.getByRole('button', { name: 'Карточка', exact: true }).click()
+  if ((page.viewportSize()?.width || 0) <= 767) {
+    await page.locator('.ops-group-compact-card').getByRole('button', { name: 'Delfiny', exact: true }).click()
+  } else {
+    await page.getByRole('button', { name: 'Карточка', exact: true }).click()
+  }
   await page.getByRole('button', { name: 'Редактировать', exact: true }).click()
   const groupEditor = page.getByRole('dialog', { name: 'Редактирование группы' })
   const groupPicker = groupEditor.getByRole('group', { name: 'Цвет расписания' })
@@ -796,7 +844,12 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
   await expect(groupEditor).toHaveCount(0)
 
   await openShellDestination(page, 'Настройки')
-  await page.getByRole('button', { name: /Типы занятий/ }).click()
+  if ((page.viewportSize()?.width || 0) <= 767) {
+    await page.getByRole('button', { name: 'Справочники', exact: true }).click()
+    await page.getByRole('button', { name: /Типы занятий/ }).click()
+  } else {
+    await page.getByRole('button', { name: /Типы занятий/ }).click()
+  }
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   const typeEditor = page.getByRole('dialog', { name: 'Редактирование · Типы занятий' })
   const typePicker = typeEditor.getByRole('group', { name: 'Цвет расписания' })
@@ -913,12 +966,12 @@ test('admin mobile client list separates profile navigation from client actions'
   await expect(mobileList.getByText('Финансы', { exact: true })).toHaveCount(0)
   await expect(mobileList.getByRole('button')).toHaveCount(2)
   const card = mobileList.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })
-  const actionsTrigger = mobileList.getByRole('button', { name: 'Действия клиента' })
-  await expect(card).toContainText('jan.long.address@example.test')
+  const actionsTrigger = mobileList.getByRole('button', { name: 'Действия: Kowalski Jan' })
+  await expect(card).toContainText('Kowalski Jan')
   expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
   await actionsTrigger.click()
-  const actions = mobileList.getByRole('group', { name: 'Действия: Kowalski Jan' })
-  await expect(actions.getByRole('button')).toHaveText(['Изменить', 'В чёрный список'])
+  const actions = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
+  await expect(actions.getByRole('menuitem')).toHaveText(['Профиль', 'Изменить', 'В чёрный список'])
   await expect(actions.getByText('Финансы', { exact: true })).toHaveCount(0)
   await actionsTrigger.click()
   await card.click()
@@ -1010,11 +1063,17 @@ test('admin upcoming sessions stay inside a narrow card', async ({ page }) => {
       status: textBox('Отменено'),
       contentOverflow: row.scrollWidth > row.clientWidth + 1,
       pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      overflowing: [...document.body.querySelectorAll('*')].filter((node) => node.getBoundingClientRect().right > window.innerWidth + 1).slice(0, 8).map((node) => ({
+        className: node.className?.toString?.() || '',
+        tagName: node.tagName,
+        right: Math.round(node.getBoundingClientRect().right),
+        width: Math.round(node.getBoundingClientRect().width),
+      })),
     }
   })
 
   expect(layout.contentOverflow).toBe(false)
-  expect(layout.pageOverflow).toBe(false)
+  expect(layout.pageOverflow, JSON.stringify(layout.overflowing)).toBe(false)
   for (const box of [layout.time, layout.group, layout.trainer, layout.location, layout.status]) {
     expect(box).not.toBeNull()
     expect(box.left).toBeGreaterThanOrEqual(layout.row.left - 1)
@@ -1043,13 +1102,12 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const submittedCredentials = []
   const submittedSessions = []
   const schedulePageSizes = []
-  const requiredAdminBootstrapEndpoints = [
+  const requiredAdminScreenEndpoints = [
     '/api/admin/dashboard/',
     '/api/admin/reference/',
     '/api/admin/clients/',
     '/api/admin/trainers/',
     '/api/admin/groups/',
-    '/api/admin/subscription-types/',
     '/api/admin/schedule/sessions/',
     '/api/admin/payments/',
     '/api/admin/debtors/',
@@ -1061,15 +1119,18 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/dashboard/': { metrics: { clients: 1, active_subscriptions: 1, debtors: 1 } },
     '/api/admin/reference/': {
       trainers: [{ id: 1, full_name: 'Marek Zielinski' }],
-      groups: [{ id: 1, name: 'Delfiny' }],
-      subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN' }],
+      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_capacity: 12, participants_count: 1, is_active: true }],
+      subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN', duration_days: 30, sessions_count: 8, is_unlimited: false, is_individual: false, is_active: true }],
       locations: [{ id: 1, code: 'pool-a', name: 'Basen A' }],
       session_types: [
         { value: 'group', label: 'Grupowe' },
         { value: 'individual', label: 'Indywidualne' },
         { value: 'split', label: 'Split' },
       ],
-      participants: [{ id: 1, full_name: 'Jan Kowalski' }],
+      participants: [
+        { id: 1, client_id: 10, first_name: 'Jan', last_name: 'Kowalski', full_name: 'Jan Kowalski', is_active: true, client_is_active: true, group: { id: 1, name: 'Delfiny' } },
+        { id: 3, client_id: 12, first_name: 'Aleksandra', last_name: 'Żółć', full_name: 'Aleksandra Żółć', is_active: true, client_is_active: true, group: null },
+      ],
       choices: {
         payment_methods: [
           { value: 'cash', label: 'Gotowka' },
@@ -1179,6 +1240,20 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
         { id: 2, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 12000, currency: 'PLN', paid_at: '2026-07-15', method: 'cash', status: 'confirmed', comment: '' },
         { id: 3, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 9000, currency: 'PLN', paid_at: '2026-07-14', method: 'bank_transfer', status: 'rejected', comment: '' },
       ],
+    },
+    '/api/admin/payments/2/': {
+      id: 2,
+      client_id: 10,
+      client: 'Anna Kowalska',
+      participant_id: 1,
+      participant: 'Jan Kowalski',
+      amount_minor: 12000,
+      currency: 'PLN',
+      paid_at: '2026-07-16',
+      method: 'cash',
+      status: 'confirmed',
+      comment: 'manual smoke',
+      events: [{ id: 1, type: 'confirmed', from_status: null, to_status: 'confirmed' }],
     },
     '/api/admin/debtors/': {
       debtors: [{ student: { id: 1, client_id: 10, full_name: 'Jan Kowalski', client_phone: '+48111222333', group: { id: 1, name: 'Delfiny' } }, reasons: ['Przeterminowana platnosc'], balance_minor: 24000, currency: 'PLN', oldest_due_date: '2026-07-10', days_overdue: 11, last_payment_at: '2026-06-20' }],
@@ -1354,7 +1429,10 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   expect(adminIconSignatures.clientsKpi).toBe(adminIconSignatures.clients)
   expect(adminIconSignatures.trainersKpi).toBe(adminIconSignatures.trainers)
   await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
-  await page.getByLabel('Глобальный поиск').fill('Jan Kowalski')
+  if ((page.viewportSize()?.width || 0) <= 767) {
+    await page.getByRole('button', { name: 'Открыть глобальный поиск' }).click()
+  }
+  await page.getByRole('textbox', { name: 'Глобальный поиск', exact: true }).fill('Jan Kowalski')
   await page.getByRole('button', { name: /Jan Kowalski/ }).first().click()
   await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
   await expect(page).toHaveURL(/client=10/)
@@ -1374,7 +1452,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   await openShellDestination(page, 'Клиенты')
   await expect(page.locator('h1.page-title', { hasText: 'Клиенты' })).toBeVisible()
-  const compactClients = (page.viewportSize()?.width || 0) <= 960
+  const compactClients = (page.viewportSize()?.width || 0) <= 767
   if (compactClients) {
     await expect(page.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })).toBeVisible()
   } else {
@@ -1397,8 +1475,9 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   await openShellDestination(page, 'Тренеры')
   await expect(page.locator('h1.page-title', { hasText: 'Тренеры' })).toBeVisible()
-  await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
-  await page.getByRole('button', { name: /Marek Zielinski/ }).first().click()
+  const trainerListSurface = compactClients ? page.locator('.ops-entity-mobile-list') : page.locator('.ops-entity-desktop-table')
+  await expect(trainerListSurface.getByText('Marek Zielinski', { exact: true })).toBeVisible()
+  await trainerListSurface.getByRole('button', { name: /Marek Zielinski/ }).first().click()
   await expect(page.getByRole('region', { name: /Профиль тренера/ })).toBeVisible()
   await page.getByRole('button', { name: 'Восстановить доступ', exact: true }).click()
   await expect(page.getByText('Код восстановления доступа')).toBeVisible()
@@ -1411,8 +1490,9 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   await openShellDestination(page, 'Группы')
   await expect(page.locator('h1.page-title', { hasText: 'Группы' })).toBeVisible()
-  await expect(page.getByText('Delfiny').first()).toBeVisible()
-  await page.getByRole('button', { name: 'Delfiny', exact: true }).first().click()
+  const groupListSurface = compactClients ? page.locator('.ops-entity-mobile-list') : page.locator('.ops-entity-desktop-table')
+  await expect(groupListSurface.getByText('Delfiny', { exact: true })).toBeVisible()
+  await groupListSurface.getByRole('button', { name: 'Delfiny', exact: true }).first().click()
   const groupCard = page.getByRole('region', { name: /Карточка группы/ })
   await expect(groupCard).toBeVisible()
   await expect(groupCard).toContainText('Вместимость12')
@@ -1522,11 +1602,12 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: /Профиль/ }).click()
   await expect(page.getByText('Anna Kowalska').first()).toBeVisible()
   await page.getByRole('tab', { name: /Платежи/ }).click()
-  await page.getByRole('button', { name: /Добавить оплату/ }).click()
-  await page.getByLabel('Сумма').fill('120.00')
-  await page.getByLabel('Комментарий').fill('manual smoke')
-  await page.getByRole('button', { name: /Сохранить оплату/ }).click()
-  await expect(page.getByText('Оплата добавлена и подтверждена.')).toBeVisible()
+  await page.getByRole('button', { name: /Пополнить баланс/ }).click()
+  const paymentDialog = page.getByRole('dialog', { name: 'Пополнить баланс' })
+  await paymentDialog.getByLabel('Сумма, zł').fill('120.00')
+  await paymentDialog.getByLabel('Комментарий').fill('manual smoke')
+  await paymentDialog.getByRole('button', { name: 'Подтвердить оплату' }).click()
+  await expect(page.getByText(/Оплата подтверждена\. Проверенный баланс:/)).toBeVisible()
 
   await page.getByRole('button', { name: /Добавить списание/ }).click()
   await page.getByLabel('Описание').fill('Индивидуальное занятие')
@@ -1566,15 +1647,20 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   await openShellDestination(page, 'Платежи')
   await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
-  await expect(page.locator('td').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
+  if (compactClients) await expect(page.locator('.ops-payment-compact-card').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
+  else await expect(page.locator('td').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
 
   await openShellDestination(page, 'Должники')
   await expect(page.locator('h1.page-title', { hasText: 'Должники' })).toBeVisible()
-  await expect(page.getByText('Przeterminowana platnosc').first()).toBeVisible()
+  if (compactClients) await expect(page.locator('.ops-debtor-compact-card').first()).toBeVisible()
+  else await expect(page.getByText('Przeterminowana platnosc').first()).toBeVisible()
 
   await openShellDestination(page, 'Настройки')
   await expect(page.locator('h1.page-title', { hasText: 'Настройки и контроль' })).toBeVisible()
-  await expect(page.getByText('Типы абонементов').first()).toBeVisible()
+  if (compactClients) {
+    await page.getByRole('button', { name: 'Справочники', exact: true }).click()
+  }
+  await expect(page.getByRole('button', { name: /Типы абонементов/ })).toBeVisible()
   await page.getByRole('button', { name: /Локации/ }).click()
   await page.getByRole('button', { name: 'Добавить', exact: true }).click()
   await page.getByLabel('Код').fill('pool-b')
@@ -1583,7 +1669,13 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Запись создана.')).toBeVisible()
   expect(submittedSettings).toEqual([expect.objectContaining({ code: 'pool-b', name: 'Бассейн B', address: 'Варшава' })])
-  await page.getByRole('tab', { name: 'Контроль' }).click()
+  if (compactClients) {
+    await page.getByRole('button', { name: 'Справочники', exact: true }).click()
+    await page.getByRole('button', { name: 'Категории', exact: true }).click()
+    await page.getByRole('button', { name: 'Контроль', exact: true }).click()
+  } else {
+    await page.getByRole('tab', { name: 'Контроль' }).click()
+  }
   await page.getByRole('button', { name: /Логин и пароль администратора/ }).click()
   await page.getByLabel('Новый логин').fill('admin-renamed')
   await page.getByLabel('Текущий пароль').fill('Str0ngPass!123')
@@ -1599,16 +1691,16 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
   const pageHasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(pageHasHorizontalOverflow).toBe(false)
-  if ((page.viewportSize()?.width || 0) <= 960) {
+  if ((page.viewportSize()?.width || 0) <= 767) {
     await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: 'Открыть меню' }).click()
     await expect(page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
   }
 
-  for (const endpoint of requiredAdminBootstrapEndpoints) {
-    expect(seenAdminEndpoints, `admin bootstrap should request ${endpoint}`).toContain(endpoint)
+  for (const endpoint of requiredAdminScreenEndpoints) {
+    expect(seenAdminEndpoints, `admin workflow should request ${endpoint}`).toContain(endpoint)
   }
   expect(errors).toEqual([])
 })
@@ -1640,6 +1732,9 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
   await expect(page.locator('.ops-sidebar')).toBeVisible()
+  if ((page.viewportSize()?.width || 0) <= 767 && await page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').count() === 0) {
+    await page.getByRole('tab', { name: /Занятий: 1/ }).click()
+  }
   await expect(page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
 
@@ -1702,7 +1797,7 @@ test('client can open every menu screen without runtime errors', async ({ page }
   await expect(page.locator('.ops-sidebar')).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
 
-  for (const label of ['Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль', 'Согласия']) {
+  for (const label of ['Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль']) {
     await openShellDestination(page, label)
     await expect(page.getByRole('heading', { level: 1, name: label })).toBeVisible()
     await expect(page.locator('.page')).toBeVisible()
@@ -1718,7 +1813,9 @@ test('client can open every menu screen without runtime errors', async ({ page }
   await expect(page.getByText('Оформлен')).toHaveCount(0)
   await expect(page.getByText('Льготный период')).toHaveCount(0)
   await expect(page.getByText(/История списаний и корректировок/)).toHaveCount(0)
-  await openShellDestination(page, 'Согласия')
+  await openShellDestination(page, 'Профиль')
+  await page.getByRole('button', { name: 'Согласия', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Согласия' })).toBeVisible()
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
@@ -1758,23 +1855,50 @@ test('admin client filters combine with search and keep the blacklist separate',
   const clientList = page.locator(viewportWidth === 390 ? '.ops-client-mobile-list' : '.ops-client-desktop-table')
   await expect(page.getByText('Найдено: 3')).toBeVisible()
 
+  if (viewportWidth === 390) {
+    const toolsGeometry = await page.locator('.ops-client-list-tools').evaluate((tools) => {
+      const search = tools.querySelector('.ops-search')
+      const filters = tools.querySelector('.ops-client-filter-selects')
+      const selects = [...filters.querySelectorAll('select')]
+      const app = document.querySelector('.app')
+      return {
+        toolsHeight: tools.getBoundingClientRect().height,
+        searchHeight: search.getBoundingClientRect().height,
+        maxSelectHeight: Math.max(...selects.map((select) => select.getBoundingClientRect().height)),
+        toolsOverflow: tools.scrollWidth - tools.clientWidth,
+        filtersOverflow: filters.scrollWidth - filters.clientWidth,
+        appOverflow: app.scrollWidth - app.clientWidth,
+      }
+    })
+    expect(toolsGeometry.toolsHeight).toBeLessThanOrEqual(180)
+    expect(toolsGeometry.searchHeight).toBeLessThanOrEqual(56)
+    expect(toolsGeometry.maxSelectHeight).toBeLessThanOrEqual(56)
+    expect(toolsGeometry.toolsOverflow).toBeLessThanOrEqual(1)
+    expect(toolsGeometry.filtersOverflow).toBeLessThanOrEqual(1)
+    expect(toolsGeometry.appOverflow).toBeLessThanOrEqual(1)
+  }
+
   await page.getByLabel('Абонемент').selectOption('with')
+  await page.getByRole('button', { name: /Применить/ }).click()
   await expect(page.getByText('Найдено: 1')).toBeVisible()
   await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
   await expect(clientList.getByText('2 из 4', { exact: true })).toBeVisible()
   if (viewportWidth === 390) {
-    await expect(clientList.getByText('+5,00 zł', { exact: true })).toBeVisible()
+    await expect(clientList.getByText('+5 zł', { exact: true })).toBeVisible()
     await expect(clientList.getByText(/Активен · 01\.08\.2026/)).toBeVisible()
   }
 
   await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
   await page.getByLabel('Баланс').selectOption('positive')
+  await page.getByRole('button', { name: /Применить/ }).click()
   await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
   await page.getByLabel('Баланс').selectOption('negative')
+  await page.getByRole('button', { name: /Применить/ }).click()
   await expect(clientList.getByText('Debt Boris', { exact: true })).toBeVisible()
 
   await page.getByLabel('Абонемент').selectOption('without')
   await page.getByLabel('Активность').selectOption('inactive')
+  await page.getByRole('button', { name: /Применить/ }).click()
   await expect(page.getByText('Найдено: 1')).toBeVisible()
   await expect(clientList.getByText('Debt Boris', { exact: true })).toBeVisible()
 
@@ -1800,8 +1924,8 @@ test('admin confirms and rejects pending payments and the nav counter decrements
   const status = { 1: 'pending', 4: 'pending' }
   const paymentsPayload = () => ({
     payments: [
-      { id: 1, participant_id: 1, participant: 'Jan Kowalski', amount_minor: 24000, currency: 'PLN', paid_at: '2026-07-16', method: 'bank_transfer', status: status[1], comment: '' },
-      { id: 4, participant_id: 2, participant: 'Piotr Nowak', amount_minor: 15000, currency: 'PLN', paid_at: '2026-07-13', method: 'cash', status: status[4], comment: '' },
+      { id: 1, participant_id: 1, participant: 'Jan Kowalski', client_id: 10, client: 'Anna Kowalska', amount_minor: 24000, currency: 'PLN', paid_at: '2026-07-16', method: 'bank_transfer', status: status[1], comment: '' },
+      { id: 4, participant_id: 2, participant: 'Piotr Nowak', client_id: 11, client: 'Marek Nowak', amount_minor: 15000, currency: 'PLN', paid_at: '2026-07-13', method: 'cash', status: status[4], comment: '' },
     ],
   })
   const routes = {
@@ -1835,13 +1959,22 @@ test('admin confirms and rejects pending payments and the nav counter decrements
     if (method === 'POST' && url.pathname === '/api/admin/payments/1/confirm/') {
       status[1] = 'confirmed'
       seen.add(url.pathname)
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 1, status: 'confirmed', balance_minor: -24000, events: [{ type: 'confirmed' }] }) })
       return
     }
     if (method === 'POST' && url.pathname === '/api/admin/payments/4/reject/') {
       status[4] = 'rejected'
       seen.add(url.pathname)
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 4, status: 'rejected', balance_minor: 0, events: [{ type: 'rejected' }] }) })
+      return
+    }
+    if (method === 'GET' && /^\/api\/admin\/payments\/(1|4)\/$/.test(url.pathname)) {
+      const id = Number(url.pathname.split('/')[4])
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id, status: status[id], events: [{ type: status[id] }] }) })
+      return
+    }
+    if (method === 'GET' && /^\/api\/admin\/clients\/(10|11)\/$/.test(url.pathname)) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ summary: { balance_minor: url.pathname.includes('/10/') ? -24000 : 0 } }) })
       return
     }
     if (url.pathname === '/api/admin/payments/') {
@@ -1866,24 +1999,24 @@ test('admin confirms and rejects pending payments and the nav counter decrements
   await openShellDestination(page, 'Платежи')
   await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
 
-  // Confirm the first pending payment: balance-affecting action, counter must drop 2 -> 1.
-  const confirmTrigger = page.getByRole('row', { name: /Kowalski/ }).getByRole('button', { name: 'Подтвердить' })
+  // Confirm is explicit on the pending card and requires no redundant second dialog.
+  const compactPayments = (page.viewportSize()?.width || 0) <= 767
+  const confirmSurface = compactPayments
+    ? page.locator('.ops-payment-compact-card').filter({ hasText: 'Kowalski' })
+    : page.getByRole('row', { name: /Kowalski/ })
+  const confirmTrigger = confirmSurface.getByRole('button', { name: 'Подтвердить' })
   await confirmTrigger.click()
-  const confirmDialog = page.getByRole('dialog', { name: 'Подтвердить платёж?' })
-  await expect(confirmDialog).toBeVisible()
-  await expect(confirmDialog).toContainText('Jan Kowalski')
-  await expect(confirmDialog.getByRole('button', { name: 'Отмена' })).toBeFocused()
-  await page.keyboard.press('Escape')
-  await expect(confirmDialog).toBeHidden()
-  await expect(confirmTrigger).toBeFocused()
-  await confirmTrigger.click()
-  await page.getByRole('dialog', { name: 'Подтвердить платёж?' }).getByRole('button', { name: 'Подтвердить' }).click()
   await expect(page.getByText('Платёж подтверждён.')).toBeVisible()
   await expect(counter).toHaveText('1')
 
-  // Reject the remaining pending payment through the confirmation dialog: counter 1 -> 0.
-  await page.getByRole('row', { name: /Nowak/ }).getByRole('button', { name: 'Отклонить' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Отклонить' }).click()
+  // Reject requires a persisted audit reason: counter 1 -> 0.
+  const rejectSurface = compactPayments
+    ? page.locator('.ops-payment-compact-card').filter({ hasText: 'Nowak' })
+    : page.getByRole('row', { name: /Nowak/ })
+  await rejectSurface.getByRole('button', { name: 'Отклонить' }).click()
+  const rejectDialog = page.getByRole('dialog', { name: 'Отклонить платёж' })
+  await rejectDialog.getByLabel('Причина отклонения').fill('Перевод не найден')
+  await rejectDialog.getByRole('button', { name: 'Отклонить' }).click()
   await expect(page.getByText('Платёж отклонён.')).toBeVisible()
   await expect(counter).toHaveText('0')
 

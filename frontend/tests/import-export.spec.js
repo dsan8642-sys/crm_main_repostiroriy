@@ -151,7 +151,7 @@ test('admin stages, fixes, reassigns and commits a CRM payment export', async ({
 
   await page.locator('.ops-nav-button[title="Платежи"]').click()
   await page.getByRole('tab', { name: /Подтверждённые 1/ }).click()
-  await expect(page.getByText('Ручной Клиент', { exact: true })).toBeVisible()
+  await expect(page.locator('.ops-entity-desktop-table').getByRole('row').filter({ hasText: 'Ручной Клиент' })).toBeVisible()
   await expect(page.getByText(/76[,.]25|7 625|7625/).first()).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Настройки"]').click()

@@ -1,4 +1,12 @@
 from .support import *
+from .pagination import (
+    choice_param,
+    list_contract_requested,
+    ordered_rows,
+    paginated_payload,
+    positive_int_param,
+    search_param,
+)
 
 
 def _effective_trainer_filter(trainer):
@@ -68,16 +76,42 @@ def trainer_history(request):
         _effective_trainer_filter(trainer), start_at__date__lt=timezone.localdate()
     ).select_related(
         "group", "trainer__user", "substitute_trainer__user", "individual_student"
-    ).order_by("-start_at", "-id")
-    if request.GET.get("group_id"):
-        qs = qs.filter(group_id=request.GET["group_id"])
+    )
+    group_id = positive_int_param(request, "group_id")
+    if group_id:
+        qs = qs.filter(group_id=group_id)
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     if date_from:
         qs = qs.filter(start_at__date__gte=date_from)
     if date_to:
         qs = qs.filter(start_at__date__lte=date_to)
+    q = search_param(request)
+    if q:
+        qs = qs.filter(
+            Q(group__name__icontains=q) |
+            Q(location__icontains=q) |
+            Q(individual_student__first_name__icontains=q) |
+            Q(individual_student__last_name__icontains=q)
+        )
+    status = choice_param(request, "status", {"active", "cancelled"})
+    if status:
+        qs = qs.filter(is_cancelled=status == "cancelled")
+    qs = ordered_rows(request, qs, allowlist={
+        "-date": ("-start_at", "-id"),
+        "date": ("start_at", "id"),
+        "group": ("group__name", "-start_at", "-id"),
+        "-group": ("-group__name", "-start_at", "-id"),
+    }, default="-date")
     type_colors = session_type_color_keys()
+    if list_contract_requested(request, extra_params={"status"}):
+        return JsonResponse(paginated_payload(
+            request,
+            qs,
+            key="sessions",
+            serializer=lambda session: _role_session_payload(
+                session, type_color_keys=type_colors),
+        ))
     return JsonResponse({"sessions": [
         _role_session_payload(session, type_color_keys=type_colors)
         for session in qs[:300]

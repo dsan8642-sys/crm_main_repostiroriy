@@ -52,7 +52,7 @@ export const ROLE_META = {
   },
 }
 
-export function roleNav(role, icons, data) {
+export function roleNav(role, icons, data, counts = {}) {
   if (role === 'admin') {
     return [
       { key: 'overview', label: 'Главная', icon: <icons.Home size={17} /> },
@@ -64,14 +64,14 @@ export function roleNav(role, icons, data) {
         key: 'payments',
         label: 'Платежи',
         icon: <icons.Cash size={17} />,
-        count: data.AdminData?.payments?.filter((payment) => payment.status === 'pending').length,
+        count: counts.pendingPayments ?? data.AdminData?.payments?.filter((payment) => payment.status === 'pending').length,
         section: 'Финансы',
       },
       {
         key: 'debtors',
         label: 'Должники',
         icon: <icons.Alert size={17} />,
-        count: data.AdminData?.debtors?.length,
+        count: counts.debtors ?? data.AdminData?.debtors?.length,
         countTone: 'danger',
         section: 'Финансы',
       },
@@ -82,8 +82,8 @@ export function roleNav(role, icons, data) {
   if (role === 'trainer') {
     return [
       { key: 'sessions', label: 'Мои занятия', icon: <icons.Calendar size={17} /> },
-      { key: 'session', label: 'Посещаемость', icon: <icons.Check size={17} />, section: 'Операции' },
       { key: 'groups', label: 'Мои группы', icon: <icons.Users size={17} />, section: 'Операции' },
+      { key: 'session', label: 'Посещаемость', icon: <icons.Check size={17} />, section: 'Операции' },
       { key: 'history', label: 'История', icon: <icons.File size={17} />, section: 'Операции' },
     ]
   }
@@ -95,7 +95,6 @@ export function roleNav(role, icons, data) {
     { key: 'payments', label: 'Платежи', icon: <icons.Wallet size={17} />, section: 'Аккаунт' },
     { key: 'history', label: 'История', icon: <icons.File size={17} />, section: 'Аккаунт' },
     { key: 'profile', label: 'Профиль', icon: <icons.User size={17} />, section: 'Настройки' },
-    { key: 'consents', label: 'Согласия', icon: <icons.Shield size={17} />, section: 'Настройки' },
   ]
 }
 

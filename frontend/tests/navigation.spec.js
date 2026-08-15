@@ -51,8 +51,8 @@ async function mockPortal(page, routes) {
   })
 }
 
-test('admin mobile shell exposes a drawer and the approved fixed bottom navigation', async ({ page }) => {
-  test.skip(![390, 768].includes(page.viewportSize()?.width || 0), 'mobile shell contract')
+test('admin mobile shell exposes a sticky header and drawer without bottom navigation', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile shell contract')
   await mockPortal(page, adminRoutes)
 
   await page.goto('/?role=admin&view=overview')
@@ -60,11 +60,22 @@ test('admin mobile shell exposes a drawer and the approved fixed bottom navigati
 
   await expect(page.locator('.ops-nav')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Открыть меню' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Открыть глобальный поиск' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
+  await expect(page.locator('.ops-topbar')).toHaveCount(0)
 
-  const bottom = page.getByRole('navigation', { name: 'Основная мобильная навигация' })
-  await expect(bottom.getByRole('button')).toHaveText(['Главная', 'Клиенты', 'Расписание', 'Должники', 'Ещё'])
-  await expect(bottom).toHaveCSS('position', 'fixed')
+  await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
+
+  const mobileHeader = page.locator('.ops-sidebar')
+  await expect(mobileHeader).toHaveCSS('position', 'sticky')
+  await page.evaluate(() => {
+    const spacer = document.createElement('div')
+    spacer.dataset.testid = 'mobile-scroll-spacer'
+    spacer.style.height = '1600px'
+    document.querySelector('#main-content')?.append(spacer)
+    window.scrollTo(0, 700)
+  })
+  await expect.poll(() => mobileHeader.evaluate((node) => Math.round(node.getBoundingClientRect().top))).toBe(0)
 
   const menuButton = page.getByRole('button', { name: 'Открыть меню' })
   await menuButton.click()
@@ -74,7 +85,14 @@ test('admin mobile shell exposes a drawer and the approved fixed bottom navigati
   await expect(drawer.getByText('Администратор', { exact: true })).toHaveCount(0)
   await expect(drawer.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
   await expect(drawer.getByRole('button', { name: /Занятие|Посещаемость/ })).toHaveCount(0)
+  expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
+    'Главная', 'Клиенты', 'Тренеры', 'Группы', 'Расписание', 'Платежи', 'Должники', 'Настройки',
+  ])
   await expect(drawer.evaluate((node) => node.contains(document.activeElement))).resolves.toBe(true)
+  await expect(drawer.evaluate((node) => Math.round(node.getBoundingClientRect().width / window.innerWidth * 100))).resolves.toBe(88)
+  await expect(drawer).toHaveCSS('overflow-y', 'auto')
+  await expect(drawer.locator('.ops-mobile-drawer-nav')).toHaveCSS('overflow-y', 'visible')
+  await expect(drawer.locator('.ops-mobile-drawer-user-wrap')).not.toHaveCSS('position', 'sticky')
 
   await page.keyboard.press('Shift+Tab')
   await expect(drawer.getByRole('button', { name: 'Выйти', exact: true })).toBeFocused()
@@ -83,35 +101,72 @@ test('admin mobile shell exposes a drawer and the approved fixed bottom navigati
   await expect(drawer).toHaveCount(0)
   await expect(menuButton).toBeFocused()
 
+  await page.getByRole('button', { name: 'Открыть глобальный поиск' }).click()
+  const search = page.getByRole('dialog', { name: 'Поиск клиентов и групп' })
+  await expect(search).toBeVisible()
+  await expect(search.getByPlaceholder('Найти клиента или группу')).toBeFocused()
+  await expect(search.getByPlaceholder(/занятие/i)).toHaveCount(0)
+  await page.goBack()
+  await expect(search).toHaveCount(0)
+
   await menuButton.click()
   await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: /^Клиенты/ }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Клиенты' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
   await expect(menuButton).toBeFocused()
 
-  await bottom.getByRole('button', { name: 'Ещё', exact: true }).click()
+  await menuButton.click()
+  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: /^Настройки/ }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Настройки и контроль' })).toBeVisible()
-  await expect(bottom.getByRole('button', { name: 'Ещё', exact: true })).toHaveAttribute('aria-current', 'page')
 
   await menuButton.click()
   await page.locator('.ops-mobile-drawer-layer').click({ position: { x: 4, y: 4 } })
   await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
   await expect(menuButton).toBeFocused()
 
-  await bottom.getByRole('button', { name: 'Клиенты', exact: true }).click()
+  await menuButton.click()
+  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: /^Клиенты/ }).click()
   await menuButton.click()
   await page.goBack()
   await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
+})
 
-  await page.setViewportSize({ width: 960, height: 900 })
-  await expect(menuButton).toBeVisible()
-  await menuButton.click()
-  await expect(page.getByRole('dialog', { name: 'Меню' })).toBeVisible()
-  await page.setViewportSize({ width: 961, height: 900 })
-  await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Открыть меню' })).toHaveCount(0)
-  await expect(page.locator('.ops-nav')).toBeVisible()
-  await expect(bottom).toBeHidden()
+test('shell switches exactly at 767/768 and applies the desktop initial sidebar states', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'one boundary contract run is sufficient')
+  await mockPortal(page, adminRoutes)
+
+  for (const [width, mobile, collapsed] of [
+    [767, true, false],
+    [768, false, true],
+    [959, false, true],
+    [960, false, false],
+  ]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/?role=admin&view=overview')
+    await expect(page.getByRole('heading', { level: 1, name: 'Рабочий стол' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Открыть меню' })).toHaveCount(mobile ? 1 : 0)
+    if (mobile) await expect(page.locator('.ops-nav')).toBeHidden()
+    else await expect(page.locator('.ops-nav')).toBeVisible()
+    if (collapsed) await expect(page.locator('.app')).toHaveClass(/is-sidebar-collapsed/)
+    else await expect(page.locator('.app')).not.toHaveClass(/is-sidebar-collapsed/)
+    if (!mobile) await expect(page.locator('.ops-sidebar')).toHaveCSS('width', collapsed ? '76px' : '250px')
+  }
+})
+
+test('desktop sidebar preference is session-scoped and survives navigation', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop persistence run is sufficient')
+  await mockPortal(page, adminRoutes)
+  await page.goto('/?role=admin&view=overview')
+
+  const shell = page.locator('.app')
+  await expect(shell).not.toHaveClass(/is-sidebar-collapsed/)
+  await page.getByRole('button', { name: 'Свернуть меню' }).click()
+  await expect(shell).toHaveClass(/is-sidebar-collapsed/)
+  await page.reload()
+  await expect(shell).toHaveClass(/is-sidebar-collapsed/)
+  await page.locator('.ops-nav-button[title="Клиенты"]').click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Клиенты' })).toBeVisible()
+  await expect(shell).toHaveClass(/is-sidebar-collapsed/)
 })
 
 test('admin desktop sidebar uses authenticated identity and keeps attendance available only by route', async ({ page }) => {
@@ -158,6 +213,7 @@ test('mobile logout is single-flight under repeated activation', async ({ page }
   })
 
   await page.goto('/?role=admin&view=overview')
+  await page.evaluate(() => window.sessionStorage.setItem('swimcrm.ui.sidebar.admin.1.collapsed', 'true'))
   await page.getByRole('button', { name: 'Открыть меню' }).click()
   const logout = page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })
 
@@ -174,33 +230,94 @@ test('mobile logout is single-flight under repeated activation', async ({ page }
 
   await expect(page.getByRole('heading', { name: 'SwimCRM' })).toBeVisible()
   await expect(page.getByText('Вход в систему', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => Object.keys(window.sessionStorage).filter((key) => key.startsWith('swimcrm.ui.')))).toEqual([])
 })
 
-test('trainer mobile shell keeps four direct destinations and trainer attendance', async ({ page }) => {
+test('trainer mobile shell keeps navigation in the drawer only', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile role navigation contract')
   await mockPortal(page, trainerRoutes)
 
   await page.goto('/')
-  const bottom = page.getByRole('navigation', { name: 'Основная мобильная навигация' })
-  await expect(bottom.getByRole('button')).toHaveText(['Мои занятия', 'Посещаемость', 'Группы', 'История'])
+  await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Открыть меню' }).click()
   const drawer = page.getByRole('dialog', { name: 'Меню' })
   await expect(drawer.getByText('Анна Тренер', { exact: true })).toBeVisible()
   await expect(drawer.getByRole('button', { name: 'Посещаемость', exact: true })).toBeVisible()
+  expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
+    'Мои занятия', 'Мои группы', 'Посещаемость', 'История',
+  ])
 })
 
-test('client mobile shell uses username fallback and the approved five destinations', async ({ page }) => {
+test('client mobile shell uses username fallback and drawer-only navigation', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile role navigation contract')
   await mockPortal(page, clientRoutes)
 
   await page.goto('/')
-  const bottom = page.getByRole('navigation', { name: 'Основная мобильная навигация' })
-  await expect(bottom.getByRole('button')).toHaveText(['Главная', 'Расписание', 'Платежи', 'История', 'Профиль'])
+  await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Открыть меню' }).click()
   const drawer = page.getByRole('dialog', { name: 'Меню' })
   await expect(drawer.getByText('parent-login', { exact: true })).toBeVisible()
   await expect(drawer.getByRole('button', { name: 'Абонемент', exact: true })).toBeVisible()
-  await expect(drawer.getByRole('button', { name: 'Согласия', exact: true })).toBeVisible()
+  await expect(drawer.getByRole('button', { name: 'Согласия', exact: true })).toHaveCount(0)
+  expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
+    'Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль',
+  ])
+  await drawer.getByRole('button', { name: 'Профиль', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Согласия', exact: true })).toBeVisible()
+})
+
+test('client profile dirty guard covers links, browser Back and beforeunload', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'one mobile dirty-guard workflow is sufficient')
+  await mockPortal(page, {
+    ...clientRoutes,
+    '/api/client/profile/': {
+      account: { id: 3, first_name: 'Maria', last_name: 'Nowak', email: 'maria@example.test', preferred_language: 'ru' },
+      participants: [], subscriptions: [],
+    },
+  })
+
+  await page.goto('/?role=client&view=home')
+  await page.getByRole('button', { name: 'Открыть меню' }).click()
+  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Профиль', exact: true }).click()
+  const firstName = page.getByLabel('Имя')
+  await firstName.fill('Marina')
+
+  expect(await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })).toBe(true)
+
+  await page.getByRole('button', { name: 'Согласия', exact: true }).click()
+  const guard = page.getByRole('alertdialog', { name: 'Есть несохранённые изменения' })
+  await expect(guard).toBeVisible()
+  await expect(guard.getByRole('button', { name: 'Остаться', exact: true })).toBeFocused()
+  await guard.getByRole('button', { name: 'Остаться', exact: true }).click()
+  await expect(guard).toHaveCount(0)
+  await expect(firstName).toHaveValue('Marina')
+
+  await page.evaluate(() => window.history.back())
+  await expect(guard).toBeVisible()
+  await guard.getByRole('button', { name: 'Остаться', exact: true }).click()
+  await expect(firstName).toHaveValue('Marina')
+
+  await page.getByRole('button', { name: 'Согласия', exact: true }).click()
+  await guard.getByRole('button', { name: 'Уйти без сохранения', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Согласия' })).toBeVisible()
+  expect(await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })).toBe(false)
+})
+
+test('authenticated role canonicalizes a stale foreign-role URL and clears entity context', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one auth transition contract run is sufficient')
+  await mockPortal(page, clientRoutes)
+
+  await page.goto('/?role=admin&view=clientDetail&client=999&session=444')
+  await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible()
+  await expect(page).toHaveURL(/\?role=client&view=home$/)
 })

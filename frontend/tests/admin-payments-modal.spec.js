@@ -20,7 +20,11 @@ function bootstrapRoutes(payments = []) {
     '/api/csrf/': { ok: true },
     '/api/admin/dashboard/': { metrics: { clients: 2, active_subscriptions: 1, debtors: 0 } },
     '/api/admin/reference/': {
-      trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [],
+      trainers: [], groups: [], subscription_types: [{
+        id: 7, name: '8 занятий', price_minor: 24000, currency: 'PLN',
+        duration_days: 30, sessions_count: 8, is_unlimited: false,
+        is_individual: false, is_active: true,
+      }], locations: [], session_types: [], participants: PARTICIPANTS,
       choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
     },
     '/api/admin/clients/': { clients: PARTICIPANTS },

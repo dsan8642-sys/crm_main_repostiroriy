@@ -12,6 +12,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(100%, 720px);
+  max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
@@ -85,6 +86,7 @@
   right: auto;
   left: 50%;
   width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
   max-height: calc(100dvh - 48px);
   overflow-y: auto;
   transform: translate(-50%, -50%);
@@ -139,7 +141,7 @@
   color: white;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .form-modal-layer {
     align-items: stretch;
     padding: max(8px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom));
@@ -149,7 +151,8 @@
   .form-modal--sm,
   .form-modal--lg {
     width: 100%;
-    max-height: 100%;
+    max-height: 100vh;
+    max-height: 100dvh;
     border-right: 0;
     border-left: 0;
     border-radius: 0;

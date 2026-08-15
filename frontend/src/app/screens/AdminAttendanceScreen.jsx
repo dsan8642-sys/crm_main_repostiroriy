@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage } from '../../api.js'
-import { formatTime } from '../../mappers.js'
+import { formatTime, mapAdminSessionRows } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
+import { dateToIso } from '../scheduleContracts.js'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
 import { FormModal } from '../FormModal.jsx'
+import { ContextBackButton } from '../EntityListPrimitives.jsx'
 
 export function attendanceSessionDisplayStatus(session, now = Date.now()) {
   if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
@@ -25,10 +27,10 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     { value: 'rescheduled', label: 'Перенос', consumes: false },
   ]
 
-  return function ApiAdminAttendance({ go, sessionId }) {
-    const sessions = adminData.sessions || []
+  return function ApiAdminAttendance({ go, back, sessionId }) {
+    const [sessions, setSessions] = useState(() => adminData.sessions || [])
     const clients = adminData.clients || []
-    const today = new Date().toISOString().slice(0, 10)
+    const today = dateToIso(new Date())
     const defaultSession = sessions.find((item) => !item.isCancelled && item.startAt?.slice(0, 10) === today)
       || sessions.find((item) => !item.isCancelled && item.startAt?.slice(0, 10) > today)
     const [selectedSessionId, setSelectedSessionId] = useState(sessionId || defaultSession?.sessionId || '')
@@ -44,6 +46,27 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const [cancelReason, setCancelReason] = useState('')
     const [bulkPending, setBulkPending] = useState(false)
     const [formAction, setFormAction] = useState(null)
+
+    useEffect(() => {
+      let alive = true
+      const now = new Date()
+      const dateFrom = dateToIso(new Date(now.getTime() - 30 * 86400000))
+      const dateTo = dateToIso(new Date(now.getTime() + 60 * 86400000))
+      const query = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        page: '1',
+        page_size: '200',
+      })
+      api.get(`/api/admin/schedule/sessions/?${query}`)
+        .then((payload) => {
+          if (alive) setSessions(mapAdminSessionRows(payload.sessions || []))
+        })
+        .catch((err) => {
+          if (alive) setError(apiErrorMessage(err, 'Не удалось загрузить список занятий.'))
+        })
+      return () => { alive = false }
+    }, [])
 
     useEffect(() => {
       if (sessionId) setSelectedSessionId(sessionId)
@@ -228,11 +251,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       <div className="page page-wide">
         <div className="page-head">
           <div>
+            <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('schedule') : go?.('schedule')}>Расписание</ContextBackButton>
             <h1 className="page-title">Занятие</h1>
             <p className="page-desc">Состав и посещаемость тренировки.</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="secondary" onClick={() => go?.('schedule')}>Назад к расписанию</Button>
             <Button variant="primary" disabled={selectedStatus === 'cancelled' || !rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={() => setBulkPending(true)}>Все присутствовали</Button>
           </div>
         </div>

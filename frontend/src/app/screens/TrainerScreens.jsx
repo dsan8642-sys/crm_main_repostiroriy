@@ -1,11 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage } from '../../api.js'
-import { formatDate, formatShortDate, formatTime, mapTrainerSession } from '../../mappers.js'
+import { formatDate, formatShortDate, formatTime, mapTrainerHistoryRows, mapTrainerSession } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
-import { calendarRange, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
+import { calendarRange, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
+import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
+import { formatEntityDate, groupRowsByDate } from '../entityListContracts.js'
+import { ContextBackButton } from '../EntityListPrimitives.jsx'
+
+const serializeTrainerHistoryFilters = (filters) => {
+  const days = Number(filters.period || 0)
+  return {
+    group_id: filters.group_id,
+    date_from: days ? dateToIso(new Date(Date.now() - days * 86400000)) : '',
+  }
+}
 
 export function createTrainerSessionScreen(components, icons, reloadRoleData, trainerData = {}) {
   const { Button, Avatar, Banner, Dialog, StatusPill } = components
@@ -13,13 +24,18 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
   const options = ['present', 'absent', 'excused', 'rescheduled']
   const labels = { present: 'Был', absent: 'Не был', excused: 'Уважительная', rescheduled: 'Перенос' }
 
-  return function ApiTrainerSession({ go, trainerSessionId }) {
+  return function ApiTrainerSession({ go, back, trainerSessionId }) {
+    const initialSession = (trainerData.sessions || []).find((item) => String(item.sessionId) === String(trainerSessionId || trainerData.activeSessionId))
     const [rows, setRows] = useState(() => [...(trainerData.roster || [])])
-    const [title, setTitle] = useState(trainerData.activeSessionTitle || 'Посещаемость')
+    const [title, setTitle] = useState(initialSession ? `${initialSession.group} · ${initialSession.start}-${initialSession.end}` : trainerData.activeSessionTitle || 'Посещаемость')
     const [sessionMeta, setSessionMeta] = useState({
-      date: trainerData.activeSessionDate || '',
-      status: trainerData.activeSessionStatus,
-      cancelled: Boolean(trainerData.activeSessionCancelled),
+      date: initialSession?.date || trainerData.activeSessionDate || '',
+      start: initialSession?.start || '',
+      end: initialSession?.end || '',
+      group: initialSession?.group || '',
+      location: initialSession?.location || '',
+      status: initialSession?.status || trainerData.activeSessionStatus,
+      cancelled: initialSession ? initialSession.status === 'cancelled' : Boolean(trainerData.activeSessionCancelled),
     })
     const [bulkPending, setBulkPending] = useState(false)
     const [message, setMessage] = useState(null)
@@ -43,7 +59,13 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
           setTitle(`${payload.session?.group?.name || 'Индивидуальное'} · ${formatTime(payload.session?.start_at)}-${formatTime(payload.session?.end_at)}`)
           setSessionMeta({
             date: formatShortDate(payload.session?.start_at),
-            status: payload.session?.is_cancelled ? 'cancelled' : 'planned',
+            start: formatTime(payload.session?.start_at),
+            end: formatTime(payload.session?.end_at),
+            group: payload.session?.group?.name || 'Индивидуальное',
+            location: payload.session?.location || '',
+            status: payload.session?.is_cancelled
+              ? 'cancelled'
+              : Date.parse(payload.session?.end_at) <= Date.now() ? 'done' : 'planned',
             cancelled: Boolean(payload.session?.is_cancelled),
           })
           setRows((payload.students || []).map((student) => ({
@@ -80,6 +102,9 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
         })
         setRows((current) => current.map((item) => item.id === row.id ? { ...item, status } : item))
         setMessage(`${row.name}: ${labels[status]}. Влияние на абонемент: ${status === 'present' || status === 'absent' ? '-1 занятие' : 'без списания'}.`)
+        window.requestAnimationFrame(() => {
+          document.querySelector(`#trainer-attendance-row-${row.id} button:nth-of-type(${options.indexOf(status) + 1})`)?.focus()
+        })
         reloadRoleData?.('trainer')
       } catch (err) {
         const message = apiErrorMessage(err, 'Не удалось сохранить посещаемость.')
@@ -98,6 +123,9 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
         })
         setRows((current) => current.map((row) => ({ ...row, status: 'present' })))
         setMessage(`Отмечены присутствующими: ${result.updated_count}. Списывается по одному занятию у каждого участника.`)
+        window.requestAnimationFrame(() => {
+          document.querySelector('.ops-attendance-actions button:first-of-type')?.focus()
+        })
       } catch (err) {
         const nextRowErrors = {}
         for (const [field, items] of Object.entries(err.fieldErrors || {})) {
@@ -122,12 +150,12 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
       <div className="page">
         <div className="page-head">
           <div>
-            <button onClick={() => go('sessions')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Мои занятия</button>
+            <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('sessions') : go('sessions')}>Мои занятия</ContextBackButton>
             <h1 className="page-title">{title}</h1>
-            <p className="page-desc">{sessionMeta.date} · <StatusPill status={sessionMeta.status || 'planned'} size="sm" /></p>
+            <p className="page-desc">{sessionMeta.date} · {sessionMeta.start}-{sessionMeta.end} · {sessionMeta.group || 'Индивидуальное'} · {sessionMeta.location || 'Локация не указана'} · <StatusPill status={sessionMeta.status || 'planned'} size="sm" /></p>
             <p className="page-desc">Отметьте посещаемость каждого ученика.</p>
           </div>
-          <Button variant="primary" disabled={sessionMeta.cancelled || !rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>Все присутствовали</Button>
+          {!sessionMeta.cancelled && <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>Все присутствовали</Button>}
         </div>
 
         <ToastNotice id="trainer-attendance-result" message={message} />
@@ -144,7 +172,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
                 <div className="strong">{row.name}</div>
                 <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>Данные доступны только в рамках занятия</div>
               </div>
-              <div id={`trainer-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `trainer-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4 }}>
+              {!sessionMeta.cancelled ? <div id={`trainer-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `trainer-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4 }}>
                 {options.map((status) => {
                   const on = row.status === status
                   const consumes = status === 'present' || status === 'absent'
@@ -163,7 +191,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
                   )
                 })}
                 {rowErrors[row.id] && <small id={`trainer-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
-              </div>
+              </div> : <StatusPill status={row.status || 'planned'} size="sm" />}
             </div>
           ))}
           {rows.length === 0 && <div className="muted" style={{ padding: 16 }}>На этом занятии пока нет участников.</div>}
@@ -268,12 +296,21 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
 export function createTrainerHistoryScreen(components, icons, trainerData = {}) {
   const { Button, Badge } = components
   const I = icons
-  return function ApiTrainerHistory({ go }) {
-    const sessions = trainerData.history || []
+  return function ApiTrainerHistory({ go, currentUser }) {
     const groups = trainerData.groups || []
-    const [groupId, setGroupId] = useState('')
-    const [period, setPeriod] = useState('90')
-    const visibleSessions = (groupId ? sessions.filter((session) => String(session.groupId) === String(groupId)) : sessions).filter((session) => !period || new Date(session.rawDate) >= new Date(Date.now() - Number(period) * 86400000))
+    const historyList = useScreenList({
+      path: '/api/trainer/history/',
+      itemKey: 'sessions',
+      mapRows: mapTrainerHistoryRows,
+      role: 'trainer',
+      route: 'history',
+      userKey: currentUser?.id || currentUser?.username,
+      initialFilters: { group_id: '', period: '90' },
+      serializeFilters: serializeTrainerHistoryFilters,
+      defaultOrder: '-date',
+    })
+    const visibleSessions = historyList.rows
+    const dateGroups = useMemo(() => groupRowsByDate(visibleSessions), [visibleSessions])
     return (
       <div className="page">
         <div className="page-head">
@@ -282,28 +319,32 @@ export function createTrainerHistoryScreen(components, icons, trainerData = {}) 
             <p className="page-desc">Завершённые занятия и их состав.</p>
           </div>
         </div>
-        <div className="card card-pad" style={{ marginBottom: 14 }}>
-          <div className="ops-form-grid"><label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
+        <ListToolbar list={historyList} searchLabel="Поиск истории" searchPlaceholder="Группа, участник или локация">
+          <label>
             Группа
-            <select value={groupId} onChange={(event) => setGroupId(event.target.value)} style={{ minHeight: 36 }}>
+            <select value={historyList.draftFilters.group_id} onChange={(event) => historyList.setDraftFilter('group_id', event.target.value)}>
               <option value="">Все группы</option>
               {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
             </select>
-          </label><label>Период<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Вся история</option></select></label></div>
-        </div>
-        <div className="card" style={{ overflow: 'hidden' }}>
-          {visibleSessions.map((session, index) => (
-            <div key={session.id} role="button" tabIndex={0} className={`ops-session-row${session.status === 'cancelled' ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} onClick={() => go('session', { trainerSessionId: session.sessionId })} style={{ ...scheduleColorStyle(session.colorKey), display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}>
-              <span className="mono" style={{ width: 120, fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-strong)' }}>{session.date}</span>
-              <span className="mono" style={{ width: 104, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{session.start}-{session.end}</span>
-              <span className="strong" style={{ width: 140 }}>{session.group}</span>
-              <span className="muted" style={{ flex: 1, fontSize: 'var(--fs-xs)', display: 'inline-flex', alignItems: 'center', gap: 5 }}><I.Location size={13} />{session.location}</span>
-              <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : 'Завершено'}</Badge>
-              <span className="ops-muted-chip">Состав и отметки</span>
-            </div>
+          </label>
+          <label>Период<select value={historyList.draftFilters.period} onChange={(event) => historyList.setDraftFilter('period', event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Вся история</option></select></label>
+        </ListToolbar>
+        <ListFeedback list={historyList} emptyLabel="Истории занятий пока нет" />
+        <div className="ops-history-groups">
+          {dateGroups.map((dateGroup) => (
+            <section key={dateGroup.key} className="card ops-history-date-group" aria-labelledby={`history-date-${dateGroup.key}`}>
+              <h2 id={`history-date-${dateGroup.key}`}>{formatEntityDate(dateGroup.key)}</h2>
+              {dateGroup.rows.map((session) => (
+                <button key={session.id} type="button" className={`ops-history-session${session.status === 'cancelled' ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} onClick={() => go('session', { trainerSessionId: session.sessionId })} style={scheduleColorStyle(session.colorKey)}>
+                  <span className="mono ops-history-session-time">{session.start}-{session.end}</span>
+                  <span className="ops-history-session-main"><strong title={session.group}>{session.group}</strong><small><I.Location size={13} />{session.location || 'Локация не указана'}</small></span>
+                  <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : 'Завершено'}</Badge>
+                </button>
+              ))}
+            </section>
           ))}
-          {visibleSessions.length === 0 && <div className="muted" style={{ padding: 16 }}>Истории занятий пока нет.</div>}
         </div>
+        <ListPagination list={historyList} />
       </div>
     )
   }

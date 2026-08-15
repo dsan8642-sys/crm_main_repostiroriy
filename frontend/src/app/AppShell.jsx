@@ -1,34 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../api.js'
 import { ROLE_META, roleNav, screenFor } from './runtime.jsx'
 import { useLocale } from '../i18n.jsx'
+import {
+  clearSessionUiState,
+  hasUnsavedChanges,
+  readSessionBoolean,
+  useOverlayLayer,
+  writeSessionBoolean,
+} from './uiLifecycle.jsx'
 
 const ROLE_SCREEN_LOADERS = {
   admin: () => import('./screens/AdminScreens.jsx'),
   trainer: () => import('./screens/TrainerScreens.jsx'),
   client: () => import('./screens/ClientScreens.jsx'),
-}
-
-const MOBILE_NAV_CONFIG = {
-  admin: [
-    { key: 'overview', label: 'Главная' },
-    { key: 'clients', label: 'Клиенты' },
-    { key: 'schedule', label: 'Расписание' },
-    { key: 'debtors', label: 'Должники' },
-    { key: 'settings', label: 'Ещё' },
-  ],
-  trainer: [
-    { key: 'sessions', label: 'Мои занятия' },
-    { key: 'session', label: 'Посещаемость' },
-    { key: 'groups', label: 'Группы' },
-    { key: 'history', label: 'История' },
-  ],
-  client: [
-    { key: 'home', label: 'Главная' },
-    { key: 'schedule', label: 'Расписание' },
-    { key: 'payments', label: 'Платежи' },
-    { key: 'history', label: 'История' },
-    { key: 'profile', label: 'Профиль' },
-  ],
 }
 
 function activeMobileKey(role, view) {
@@ -53,24 +38,80 @@ function routeState() {
     role: params.get('role'), view: params.get('view'), clientId: params.get('client'),
     sessionId: params.get('session'), trainerSessionId: params.get('trainerSession'),
     groupId: params.get('group'), tab: params.get('tab'), kid: params.get('kid'),
+    participantId: params.get('participant'), balanceAmount: params.get('amount'),
   }
+}
+
+function allowedView(role, view) {
+  return Boolean(view && ROLE_META[role]?.titles?.[view])
+}
+
+function routeForRole(role, route = routeState()) {
+  const sameRole = route.role === role
+  return {
+    ...route,
+    role,
+    view: sameRole && allowedView(role, route.view) ? route.view : ROLE_META[role].initialView,
+    clientId: sameRole ? route.clientId : null,
+    sessionId: sameRole ? route.sessionId : null,
+    trainerSessionId: sameRole ? route.trainerSessionId : null,
+    groupId: sameRole ? route.groupId : null,
+    tab: sameRole ? route.tab : null,
+    kid: sameRole ? route.kid : null,
+    participantId: sameRole ? route.participantId : null,
+    balanceAmount: sameRole ? route.balanceAmount : null,
+  }
+}
+
+function defaultSidebarCollapsed() {
+  return window.innerWidth >= 768 && window.innerWidth < 960
+}
+
+function sidebarStateKey(role, user) {
+  return `sidebar.${role}.${user?.id || user?.username || 'session'}.collapsed`
+}
+
+function routeUrl(role, view, params = {}) {
+  const query = new URLSearchParams({ role, view })
+  const values = {
+    client: params.clientId,
+    session: params.sessionId,
+    trainerSession: params.trainerSessionId,
+    group: params.groupId,
+    tab: params.tab,
+    kid: role === 'client' ? params.kid : null,
+    participant: role === 'admin' ? params.participantId : null,
+    amount: role === 'admin' ? params.balanceAmount : null,
+  }
+  Object.entries(values).forEach(([key, value]) => {
+    if (value) query.set(key, value)
+  })
+  return `${window.location.pathname}?${query}`
 }
 
 export function AppShell({ design, health, apiState, initialRole, currentUser, reloadRoleData, onLogout }) {
   const { t } = useLocale()
-  const initialRoute = routeState()
+  const initialRoute = routeForRole(initialRole || 'admin')
   const [role, setRole] = useState(initialRole || 'admin')
-  const [view, setView] = useState(initialRoute.view || ROLE_META[initialRole || 'admin'].initialView)
+  const [view, setView] = useState(initialRoute.view)
   const [kid, setKid] = useState(initialRoute.kid || 'k1')
   const [selectedClientId, setSelectedClientId] = useState(initialRoute.clientId)
   const [selectedSessionId, setSelectedSessionId] = useState(initialRoute.sessionId)
   const [selectedTrainerSessionId, setSelectedTrainerSessionId] = useState(initialRoute.trainerSessionId)
   const [selectedGroupId, setSelectedGroupId] = useState(initialRoute.groupId)
   const [selectedTab, setSelectedTab] = useState(initialRoute.tab)
+  const [selectedParticipantId, setSelectedParticipantId] = useState(initialRoute.participantId)
+  const [selectedBalanceAmount, setSelectedBalanceAmount] = useState(initialRoute.balanceAmount)
   const [searchQuery, setSearchQuery] = useState('')
-  const [compactSidebar, setCompactSidebar] = useState(() => window.matchMedia('(max-width: 960px)').matches)
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (
+    readSessionBoolean(sidebarStateKey(initialRole || 'admin', currentUser)) ?? defaultSidebarCollapsed()
+  ))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  const [pendingNavigation, setPendingNavigation] = useState(null)
   const [logoutPending, setLogoutPending] = useState(false)
+  const [adminListCounts, setAdminListCounts] = useState({})
   const [roleScreenBundle, setRoleScreenBundle] = useState({
     role: null,
     module: null,
@@ -85,11 +126,15 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const { IconButton } = components
   const meta = ROLE_META[role]
   const userName = currentUser?.full_name?.trim() || currentUser?.username?.trim() || meta.user
-  const menuButtonRef = useRef(null)
   const drawerRef = useRef(null)
-  const returnMenuFocusRef = useRef(false)
+  const searchOverlayRef = useRef(null)
+  const navigationGuardRef = useRef(null)
   const logoutPendingRef = useRef(false)
-  const nav = useMemo(() => roleNav(role, icons, data), [role, icons, data])
+  const bypassNextPopRef = useRef(false)
+  const currentUrlRef = useRef(window.location.href)
+  const currentHistoryStateRef = useRef(window.history.state || {})
+  const sidebarKey = sidebarStateKey(role, currentUser)
+  const nav = useMemo(() => roleNav(role, icons, data, adminListCounts), [role, icons, data, adminListCounts])
   const runtimeScreens = useMemo(() => {
     if (roleScreenBundle.role !== role || !roleScreenBundle.module) return {}
     const factories = roleScreenBundle.module
@@ -135,78 +180,118 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     if (!needle || role !== 'admin') return []
     const clients = (data.AdminData?.clients || []).filter((row) => [row.first, row.last, `${row.first} ${row.last}`, `${row.last} ${row.first}`, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))).slice(0, 6).map((row) => ({ key: `client-${row.studentId}`, label: `${row.first} ${row.last}`, hint: row.phone || row.email || row.group, view: 'clientDetail', params: { clientId: row.clientId } }))
     const groups = (data.AdminData?.groups || []).filter((row) => row.name.toLocaleLowerCase('ru-RU').includes(needle)).slice(0, 3).map((row) => ({ key: `group-${row.groupId}`, label: row.name, hint: 'Группа', view: 'groups', params: { groupId: row.groupId } }))
-    const sessions = (data.AdminData?.sessions || []).filter((row) => [row.group, row.trainer, row.location, row.date].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))).slice(0, 4).map((row) => ({ key: `session-${row.sessionId}`, label: `${row.date} · ${row.start} · ${row.group}`, hint: row.location, view: 'attendance', params: { sessionId: row.sessionId } }))
-    return [...clients, ...groups, ...sessions].slice(0, 10)
+    return [...clients, ...groups].slice(0, 10)
   }, [searchQuery, role, data])
 
   useEffect(() => {
-    const media = window.matchMedia('(max-width: 960px)')
-    const update = () => {
-      setCompactSidebar(media.matches)
-      if (!media.matches) {
-        returnMenuFocusRef.current = false
-        setMobileMenuOpen(false)
-      }
+    if (role !== 'admin') return undefined
+    let alive = true
+    let requestController = null
+    const loadCounts = () => {
+      requestController?.abort()
+      const controller = new AbortController()
+      requestController = controller
+      Promise.allSettled([
+        api.get('/api/admin/payments/?page=1&page_size=1&status=pending&order=-date', { signal: controller.signal }),
+        api.get('/api/admin/debtors/?page=1&page_size=1&order=-balance', { signal: controller.signal }),
+      ]).then(([paymentsResult, debtorsResult]) => {
+        if (!alive || controller.signal.aborted || requestController !== controller) return
+        setAdminListCounts((current) => ({
+          pendingPayments: paymentsResult.status === 'fulfilled'
+            ? (paymentsResult.value.pagination?.total
+              ?? (paymentsResult.value.payments || []).filter((payment) => payment.status === 'pending').length)
+            : current.pendingPayments,
+          debtors: debtorsResult.status === 'fulfilled'
+            ? (debtorsResult.value.pagination?.total ?? (debtorsResult.value.debtors || []).length)
+            : current.debtors,
+        }))
+      })
     }
-    update()
-    media.addEventListener('change', update)
-    return () => media.removeEventListener('change', update)
-  }, [])
+    loadCounts()
+    window.addEventListener('swimcrm:list-invalidate', loadCounts)
+    return () => {
+      alive = false
+      requestController?.abort()
+      window.removeEventListener('swimcrm:list-invalidate', loadCounts)
+    }
+  }, [role])
 
   useEffect(() => {
-    if (!mobileMenuOpen) {
-      if (returnMenuFocusRef.current) {
-        returnMenuFocusRef.current = false
-        menuButtonRef.current?.focus()
-      }
-      return undefined
+    const mobileMedia = window.matchMedia('(max-width: 767px)')
+    const compactDesktopMedia = window.matchMedia('(min-width: 768px) and (max-width: 959px)')
+    const update = () => {
+      setIsMobile(mobileMedia.matches)
+      if (mobileMedia.matches) return
+      const stored = readSessionBoolean(sidebarKey)
+      setSidebarCollapsed(stored ?? compactDesktopMedia.matches)
+      setMobileMenuOpen(false)
+      setMobileSearchOpen(false)
     }
-
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const drawer = drawerRef.current
-    const focusableSelector = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    const focusFirst = () => drawer?.querySelector(focusableSelector)?.focus()
-    const frame = window.requestAnimationFrame(focusFirst)
-
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeMobileMenu()
-        return
-      }
-      if (event.key !== 'Tab' || !drawer) return
-      const focusable = [...drawer.querySelectorAll(focusableSelector)]
-      if (!focusable.length) {
-        event.preventDefault()
-        drawer.focus()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown)
+    update()
+    mobileMedia.addEventListener('change', update)
+    compactDesktopMedia.addEventListener('change', update)
     return () => {
-      window.cancelAnimationFrame(frame)
-      document.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = previousOverflow
+      mobileMedia.removeEventListener('change', update)
+      compactDesktopMedia.removeEventListener('change', update)
     }
-  }, [mobileMenuOpen])
+  }, [sidebarKey])
+
+  function closeMobileMenu() {
+    setMobileMenuOpen(false)
+    return true
+  }
+
+  function closeMobileSearch() {
+    setMobileSearchOpen(false)
+    return true
+  }
+
+  function closeNavigationGuard() {
+    setPendingNavigation(null)
+    return true
+  }
+
+  const drawerLifecycle = useOverlayLayer({
+    open: isMobile && mobileMenuOpen,
+    id: 'ops-mobile-drawer-layer',
+    elementRef: drawerRef,
+    onRequestClose: closeMobileMenu,
+  })
+  const searchLifecycle = useOverlayLayer({
+    open: isMobile && mobileSearchOpen,
+    id: 'ops-mobile-search-layer',
+    elementRef: searchOverlayRef,
+    onRequestClose: closeMobileSearch,
+    initialFocus: 'input',
+  })
+  const navigationGuardLifecycle = useOverlayLayer({
+    open: Boolean(pendingNavigation),
+    id: 'ops-navigation-guard-layer',
+    elementRef: navigationGuardRef,
+    onRequestClose: closeNavigationGuard,
+    initialFocus: '.ops-navigation-stay',
+  })
 
   useEffect(() => {
     if (!initialRole) return
+    const route = routeForRole(initialRole)
     setRole(initialRole)
     setMobileMenuOpen(false)
-    const route = routeState()
-    setView(route.role === initialRole && route.view ? route.view : ROLE_META[initialRole].initialView)
+    setMobileSearchOpen(false)
+    setView(route.view)
+    setSelectedClientId(route.clientId)
+    setSelectedSessionId(route.sessionId)
+    setSelectedTrainerSessionId(route.trainerSessionId)
+    setSelectedGroupId(route.groupId)
+    setSelectedTab(route.tab)
+    setSelectedParticipantId(route.participantId)
+    setSelectedBalanceAmount(route.balanceAmount)
+    if (route.kid) setKid(route.kid)
+    const canonicalUrl = routeUrl(initialRole, route.view, route)
+    const historyState = { ...currentHistoryStateRef.current, swimcrm: true }
+    window.history.replaceState(historyState, '', canonicalUrl)
+    currentHistoryStateRef.current = historyState
+    currentUrlRef.current = window.location.href
   }, [initialRole])
 
   useEffect(() => {
@@ -223,51 +308,112 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   }, [role])
 
   useEffect(() => {
-    const onPopState = () => {
-      const route = routeState()
-      if (route.role && route.role !== role) return
-      returnMenuFocusRef.current = false
-      setMobileMenuOpen(false)
-      setView(route.view || ROLE_META[role].initialView)
-      setSelectedClientId(route.clientId); setSelectedSessionId(route.sessionId)
-      setSelectedTrainerSessionId(route.trainerSessionId); setSelectedGroupId(route.groupId)
-      setSelectedTab(route.tab); if (route.kid) setKid(route.kid)
+    const onPopState = (event) => {
+      const rawRoute = routeState()
+      const route = routeForRole(role, rawRoute)
+      if (rawRoute.role && rawRoute.role !== role) {
+        const canonicalUrl = routeUrl(role, ROLE_META[role].initialView)
+        const historyState = { swimcrm: true }
+        window.history.replaceState(historyState, '', canonicalUrl)
+        currentHistoryStateRef.current = historyState
+        currentUrlRef.current = window.location.href
+        applyRoute(routeForRole(role), { scrollToTop: true })
+        return
+      }
+      if (bypassNextPopRef.current) {
+        bypassNextPopRef.current = false
+        currentHistoryStateRef.current = event.state || {}
+        currentUrlRef.current = window.location.href
+        applyRoute(route, { scrollToTop: true })
+        return
+      }
+      if (hasUnsavedChanges()) {
+        const targetUrl = window.location.href
+        window.history.pushState(currentHistoryStateRef.current, '', currentUrlRef.current)
+        setPendingNavigation({ kind: 'history', targetUrl })
+        return
+      }
+      currentHistoryStateRef.current = event.state || {}
+      currentUrlRef.current = window.location.href
+      applyRoute(route, { scrollToTop: true })
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [role])
 
+  function applyRoute(route, { scrollToTop = false } = {}) {
+      setMobileMenuOpen(false)
+      setMobileSearchOpen(false)
+      setView(route.view)
+      setSelectedClientId(route.clientId || null)
+      setSelectedSessionId(route.sessionId || null)
+      setSelectedTrainerSessionId(route.trainerSessionId || null)
+      setSelectedGroupId(route.groupId || null)
+      setSelectedTab(route.tab || null)
+      setSelectedParticipantId(route.participantId || null)
+      setSelectedBalanceAmount(route.balanceAmount || null)
+      if (route.kid) setKid(route.kid)
+      setSearchQuery('')
+      if (scrollToTop) window.requestAnimationFrame(() => window.scrollTo(0, 0))
+  }
+
   function writeRoute(nextView, params = {}, replace = false) {
-    const query = new URLSearchParams({ role, view: nextView })
-    const values = { client: params.clientId, session: params.sessionId, trainerSession: params.trainerSessionId, group: params.groupId, tab: params.tab, kid: params.kid || activeKid }
-    Object.entries(values).forEach(([key, value]) => { if (value) query.set(key, value) })
-    window.history[replace ? 'replaceState' : 'pushState']({}, '', `${window.location.pathname}?${query}`)
+    const nextUrl = routeUrl(role, nextView, {
+      ...params,
+      kid: params.kid || activeKid,
+    })
+    const historyState = replace
+      ? { ...currentHistoryStateRef.current, swimcrm: true }
+      : { swimcrm: true, swimcrmReturnUrl: currentUrlRef.current }
+    window.history[replace ? 'replaceState' : 'pushState'](historyState, '', nextUrl)
+    currentHistoryStateRef.current = historyState
+    currentUrlRef.current = window.location.href
+  }
+
+  function commitNavigation(nextView, params = {}) {
+    const safeView = allowedView(role, nextView) ? nextView : ROLE_META[role].initialView
+    applyRoute({ role, view: safeView, ...params }, { scrollToTop: true })
+    writeRoute(safeView, params)
+  }
+
+  function attemptNavigation(nextView, params = {}) {
+    const hasParams = Object.values(params).some((value) => value != null && value !== '')
+    if (nextView === view && !hasParams) return
+    if (hasUnsavedChanges()) {
+      setPendingNavigation({ kind: 'route', nextView, params })
+      return
+    }
+    commitNavigation(nextView, params)
   }
 
   function navigate(nextView, params = {}) {
-    if (params.clientId) setSelectedClientId(params.clientId)
-    if (params.sessionId) setSelectedSessionId(params.sessionId)
-    if (params.trainerSessionId) setSelectedTrainerSessionId(params.trainerSessionId)
-    if (params.groupId) setSelectedGroupId(params.groupId)
-    setSelectedTab(params.tab || null)
-    setView(nextView)
-    setSearchQuery('')
-    if (mobileMenuOpen) closeMobileMenu()
-    else setMobileMenuOpen(false)
-    writeRoute(nextView, params)
+    const proceed = () => attemptNavigation(nextView, params)
+    if (mobileMenuOpen) {
+      drawerLifecycle.requestClose('navigate', proceed)
+      return
+    }
+    if (mobileSearchOpen) {
+      searchLifecycle.requestClose('navigate', proceed)
+      return
+    }
+    proceed()
   }
 
-  function closeMobileMenu({ returnFocus = true } = {}) {
-    returnMenuFocusRef.current = returnFocus
-    setMobileMenuOpen(false)
+  function contextBack(fallbackView, fallbackParams = {}) {
+    if (currentHistoryStateRef.current?.swimcrmReturnUrl) {
+      window.history.back()
+      return
+    }
+    attemptNavigation(fallbackView, fallbackParams)
   }
 
-  function logout() {
+  function performLogout() {
     if (logoutPendingRef.current) return
     logoutPendingRef.current = true
     setLogoutPending(true)
-    returnMenuFocusRef.current = false
+    clearSessionUiState()
     setMobileMenuOpen(false)
+    setMobileSearchOpen(false)
     Promise.resolve(onLogout?.())
       .catch(() => {})
       .finally(() => {
@@ -276,23 +422,49 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       })
   }
 
+  function logout() {
+    const proceed = () => {
+      if (hasUnsavedChanges()) setPendingNavigation({ kind: 'logout' })
+      else performLogout()
+    }
+    if (mobileMenuOpen) drawerLifecycle.requestClose('logout', proceed)
+    else proceed()
+  }
+
+  function confirmPendingNavigation() {
+    const pending = pendingNavigation
+    if (!pending) return
+    navigationGuardLifecycle.requestClose('leave', () => {
+      if (pending.kind === 'route') commitNavigation(pending.nextView, pending.params)
+      else if (pending.kind === 'logout') performLogout()
+      else if (pending.kind === 'history') {
+        bypassNextPopRef.current = true
+        window.history.back()
+      }
+    })
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => {
+      const next = !current
+      writeSessionBoolean(sidebarKey, next)
+      return next
+    })
+  }
+
   function changeKid(nextKid) {
     setKid(nextKid)
     const participant = clientItems.find((item) => item.id === nextKid)
     if (participant?.studentId) reloadRoleData?.('client', { studentId: participant.studentId })
-    writeRoute(view, { clientId: selectedClientId, sessionId: selectedSessionId, trainerSessionId: selectedTrainerSessionId, groupId: selectedGroupId, tab: selectedTab, kid: nextKid }, true)
+    writeRoute(view, { clientId: selectedClientId, sessionId: selectedSessionId, trainerSessionId: selectedTrainerSessionId, groupId: selectedGroupId, tab: selectedTab, participantId: selectedParticipantId, balanceAmount: selectedBalanceAmount, kid: nextKid }, true)
   }
 
   let sidebarLastSection = null
   let drawerLastSection = null
-  const mobileNav = MOBILE_NAV_CONFIG[role].map(({ key, label }) => {
-    const item = nav.find((candidate) => candidate.key === key)
-    return item ? { ...item, mobileLabel: label } : null
-  }).filter(Boolean)
   const navActiveKey = activeMobileKey(role, view)
 
   return (
-    <div className="app">
+    <div className={`app${sidebarCollapsed && !isMobile ? ' is-sidebar-collapsed' : ''}`}>
       <a className="ops-skip-link" href="#main-content">{t('shell.skip')}</a>
       <aside className="ops-sidebar">
         <div className="ops-sidebar-head">
@@ -303,18 +475,31 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               <div className="ops-brand-sub">операционная панель</div>
             </div>
           </button>
-          {compactSidebar && (
-            <button
-              ref={menuButtonRef}
-              type="button"
-              className="ops-mobile-menu-button"
-              aria-label="Открыть меню"
-              aria-controls="ops-mobile-drawer"
-              aria-expanded={mobileMenuOpen}
-              onClick={() => setMobileMenuOpen(true)}
-            >
-              <span aria-hidden="true"><i /><i /><i /><i /></span>
-            </button>
+          {isMobile && (
+            <div className="ops-mobile-head-actions">
+              {role === 'admin' && (
+                <button
+                  type="button"
+                  className="ops-mobile-search-button"
+                  aria-label="Открыть глобальный поиск"
+                  aria-controls="ops-mobile-search"
+                  aria-expanded={mobileSearchOpen}
+                  onClick={() => setMobileSearchOpen(true)}
+                >
+                  <icons.Search size={19} />
+                </button>
+              )}
+              <button
+                type="button"
+                className="ops-mobile-menu-button"
+                aria-label="Открыть меню"
+                aria-controls="ops-mobile-drawer"
+                aria-expanded={mobileMenuOpen}
+                onClick={() => setMobileMenuOpen(true)}
+              >
+                <span aria-hidden="true"><i /><i /><i /><i /></span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -351,15 +536,25 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               <div className="ops-user-name">{userName}</div>
             </div>
           </div>
-          {!compactSidebar && <IconButton className="ops-sidebar-logout is-desktop" label="Выйти" disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>}
+          <IconButton className="ops-sidebar-logout is-desktop" label="Выйти" disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+          <button
+            type="button"
+            className="ops-sidebar-toggle"
+            aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            aria-expanded={!sidebarCollapsed}
+            onClick={toggleSidebar}
+          >
+            {sidebarCollapsed ? <icons.ChevronR size={17} /> : <icons.ChevronL size={17} />}
+            <span>{sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}</span>
+          </button>
         </div>
       </aside>
 
-      {compactSidebar && mobileMenuOpen && (
+      {isMobile && mobileMenuOpen && (
         <div
           className="ops-mobile-drawer-layer"
           onClick={(event) => {
-            if (event.target === event.currentTarget) closeMobileMenu()
+            if (event.target === event.currentTarget) drawerLifecycle.requestClose('backdrop')
           }}
         >
           <aside
@@ -373,7 +568,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
           >
             <div className="ops-mobile-drawer-head">
               <strong>Меню</strong>
-              <button type="button" className="ops-mobile-drawer-close" aria-label="Закрыть меню" onClick={() => closeMobileMenu()}>
+              <button type="button" className="ops-mobile-drawer-close" aria-label="Закрыть меню" onClick={() => drawerLifecycle.requestClose('close-button')}>
                 <span aria-hidden="true">×</span>
               </button>
             </div>
@@ -413,14 +608,75 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         </div>
       )}
 
+      {isMobile && mobileSearchOpen && (
+        <div className="ops-mobile-search-layer">
+          <section
+            ref={searchOverlayRef}
+            id="ops-mobile-search"
+            className="ops-mobile-search"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ops-mobile-search-title"
+            tabIndex={-1}
+          >
+            <header>
+              <h2 id="ops-mobile-search-title">Поиск клиентов и групп</h2>
+              <button type="button" aria-label="Закрыть поиск" onClick={() => searchLifecycle.requestClose('close-button')}>×</button>
+            </header>
+            <label>
+              <span className="sr-only">Глобальный поиск</span>
+              <input
+                autoComplete="off"
+                aria-label="Глобальный поиск"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Найти клиента или группу"
+              />
+            </label>
+            <div className="ops-mobile-search-results" aria-live="polite">
+              {searchQuery && searchResults.map((result) => (
+                <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}>
+                  <strong>{result.label}</strong>
+                  <span>{result.hint}</span>
+                </button>
+              ))}
+              {searchQuery && !searchResults.length && <div className="empty">Ничего не найдено</div>}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {pendingNavigation && (
+        <div className="ops-navigation-guard-layer" data-backdrop-dismiss="false">
+          <section
+            ref={navigationGuardRef}
+            className="ops-navigation-guard"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="ops-navigation-guard-title"
+            aria-describedby="ops-navigation-guard-description"
+            tabIndex={-1}
+          >
+            <h2 id="ops-navigation-guard-title">Есть несохранённые изменения</h2>
+            <p id="ops-navigation-guard-description">Если уйти со страницы, внесённые изменения будут потеряны.</p>
+            <div>
+              <button type="button" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>Остаться</button>
+              <button type="button" className="is-danger" onClick={confirmPendingNavigation}>Уйти без сохранения</button>
+            </div>
+          </section>
+        </div>
+      )}
+
       <div className="ops-main">
-        <header className="topbar ops-topbar">
-          {role === 'admin' && <div className="ops-global-search"><input aria-label="Глобальный поиск" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Найти клиента, группу или занятие" />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">Ничего не найдено</div>}</div>}</div>}
-          <div className="ops-topbar-statuses">
-            <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>Сервер</span>
-            <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>Данные</span>
-          </div>
-        </header>
+        {role === 'admin' && !isMobile && (
+          <header className="topbar ops-topbar">
+            <div className="ops-global-search"><input aria-label="Глобальный поиск" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Найти клиента или группу" />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">Ничего не найдено</div>}</div>}</div>
+            <div className="ops-topbar-statuses">
+              <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>Сервер</span>
+              <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>Данные</span>
+            </div>
+          </header>
+        )}
 
         <main className="scroll" id="main-content" tabIndex={-1}>
           {apiState.state === 'loading' && <div className="ops-api-state" role="status"><strong>Загружаю рабочие данные...</strong><span>Экран обновится автоматически.</span></div>}
@@ -434,31 +690,13 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               </div>
             </div>
           ) : Screen ? (
-            <Screen go={navigate} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} />
+            <Screen go={navigate} back={contextBack} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} initialParticipantId={selectedParticipantId} prefillAmount={selectedBalanceAmount} currentUser={currentUser} />
           ) : (
             <div className="page">
               <div className="card card-pad">Экран пока не подключен.</div>
             </div>
           )}
         </main>
-        <nav
-          className="ops-mobile-nav"
-          aria-label="Основная мобильная навигация"
-          style={{ '--ops-mobile-nav-count': mobileNav.length }}
-        >
-          {mobileNav.map((item) => (
-            <button
-              key={`mobile-${item.key}`}
-              type="button"
-              aria-current={navActiveKey === item.key ? 'page' : undefined}
-              className={navActiveKey === item.key ? 'is-active' : ''}
-              onClick={() => navigate(item.key)}
-            >
-              <span>{item.icon}</span>
-              <small>{item.mobileLabel}</small>
-            </button>
-          ))}
-        </nav>
       </div>
     </div>
   )

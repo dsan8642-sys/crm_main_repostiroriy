@@ -1,5 +1,10 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
+import {
+  assertPaymentReadback,
+  createPaymentAttemptKey,
+  moneyMajorToMinor,
+} from '../financialContracts.js'
 import { asAccountBalance, asMoneyMajor, formatDate, formatShortDate, formatTime, paymentMethodLabel } from '../../mappers.js'
 import {
   clearFieldError,
@@ -14,6 +19,7 @@ import { ToastNotice } from '../ToastProvider.jsx'
 import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
 import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
+import { ContextBackButton } from '../EntityListPrimitives.jsx'
 
 const PARTICIPANT_FIELD_IDS = {
   firstName: 'admin-client-participant-first-name',
@@ -46,7 +52,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
   const { Table, StatusPill, Avatar, Button, Banner, Tabs, Money, Badge, Dialog, Input, Select, Checkbox } = components
   const I = icons
 
-  return function ApiAdminClientDetail({ go, clientId, initialTab }) {
+  return function ApiAdminClientDetail({
+    go, back, clientId, initialTab, initialParticipantId, prefillAmount,
+  }) {
     const fallbackClientId = clientId || adminData.clients?.find((row) => row.clientId)?.clientId
     const [tab, setTab] = useState('participants')
     const [detail, setDetail] = useState(null)
@@ -73,6 +81,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       paidAt: new Date().toISOString().slice(0, 10),
       method: 'cash',
       comment: '',
+      idempotencyKey: createPaymentAttemptKey('admin-payment'),
     })
     const [paymentFieldErrors, setPaymentFieldErrors] = useState({})
     const [paymentBaseline, setPaymentBaseline] = useState(null)
@@ -93,6 +102,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     })
     const [financeFieldErrors, setFinanceFieldErrors] = useState({})
     const [financeBaseline, setFinanceBaseline] = useState(null)
+    const debtPrefillHandledRef = React.useRef(false)
 
     useEffect(() => {
       if (!fallbackClientId) return
@@ -198,15 +208,58 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       }))
     }, [participants, subscriptions, subscriptionTypes])
 
+    useEffect(() => {
+      if (debtPrefillHandledRef.current || !prefillAmount || !participants.length) return
+      const participantId = participants.some((participant) => String(participant.id) === String(initialParticipantId))
+        ? String(initialParticipantId)
+        : String(participants[0].id)
+      const next = {
+        ...paymentForm,
+        participantId,
+        amount: String(prefillAmount),
+        idempotencyKey: createPaymentAttemptKey('admin-payment'),
+      }
+      debtPrefillHandledRef.current = true
+      setTab('payments')
+      setPaymentForm(next)
+      setPaymentBaseline(next)
+      setPaymentFieldErrors({})
+      setFinanceAction(null)
+      setFinanceBaseline(null)
+      setPaymentPanelOpen(true)
+    }, [initialParticipantId, participants, paymentForm, prefillAmount])
+
     function minorFromMajor(value) {
       return Math.round(Number(String(value || 0).replace(',', '.')) * 100)
+    }
+
+    const selectedPaymentParticipant = participants.find((participant) => String(participant.id) === String(paymentForm.participantId))
+    const selectedPaymentBalance = selectedPaymentParticipant
+      ? asAccountBalance(selectedPaymentParticipant.balance_minor)
+      : accountBalance
+
+    function openPaymentPanel() {
+      const next = {
+        ...paymentForm,
+        idempotencyKey: createPaymentAttemptKey('admin-payment'),
+      }
+      setTab('payments')
+      setPaymentForm(next)
+      setPaymentBaseline(next)
+      setPaymentFieldErrors({})
+      setFinanceAction(null)
+      setFinanceBaseline(null)
+      setPaymentPanelOpen(true)
     }
 
     async function createManualPayment() {
       const nextErrors = {}
       if (!paymentForm.participantId) nextErrors.participantId = 'Выберите участника для оплаты.'
-      const amount = Number(String(paymentForm.amount || '').replace(',', '.'))
-      if (!Number.isFinite(amount) || amount <= 0) nextErrors.amount = 'Введите сумму оплаты больше нуля.'
+      let amountMinor = null
+      amountMinor = moneyMajorToMinor(paymentForm.amount)
+      if (!amountMinor) {
+        nextErrors.amount = 'Введите положительную сумму, не более двух знаков после запятой.'
+      }
       if (!validIsoDate(paymentForm.paidAt)) nextErrors.paidAt = 'Введите дату оплаты в формате ГГГГ-ММ-ДД.'
       if (!paymentForm.method) nextErrors.method = 'Выберите способ оплаты.'
       if (Object.keys(nextErrors).length) {
@@ -220,24 +273,31 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setMessage(null)
       setActionBusy('manual-payment')
       try {
-        await api.post('/api/admin/payments/', {
+        const created = await api.post('/api/admin/payments/', {
           participant_id: paymentForm.participantId,
-          amount_minor: minorFromMajor(paymentForm.amount),
+          amount_minor: amountMinor,
           currency: 'PLN',
           paid_at: paymentForm.paidAt,
           method: paymentForm.method,
           comment: paymentForm.comment,
           confirm: true,
+          idempotency_key: paymentForm.idempotencyKey,
         })
-        setMessage('Оплата добавлена и подтверждена.')
+        const paymentReadback = await api.get(`/api/admin/payments/${created.id}/`)
+        assertPaymentReadback(created, paymentReadback, 'confirmed')
+        const clientReadback = await api.get(`/api/admin/clients/${fallbackClientId}/`)
+        setDetail(clientReadback)
+        const checkedBalance = asAccountBalance(clientReadback?.summary?.balance_minor)
+        setMessage(`Оплата подтверждена. Проверенный баланс: ${checkedBalance.toFixed(2).replace('.', ',')} zł.`)
         setPaymentPanelOpen(false)
         setPaymentBaseline(null)
         setPaymentForm((current) => ({
           ...current,
           amount: '',
           comment: '',
+          idempotencyKey: createPaymentAttemptKey('admin-payment'),
         }))
-        refreshDetail()
+        reloadRoleData?.('admin')
       } catch (err) {
         const nextFieldErrors = fieldErrorsFromApi(err, {
           participant_id: 'participantId', amount_minor: 'amount',
@@ -516,7 +576,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <h1 className="page-title">Клиент</h1>
               <p className="page-desc">Выберите клиента из списка.</p>
             </div>
-            <Button variant="secondary" iconLeft={<I.ArrowLeft size={15} />} onClick={() => go?.('clients')}>Клиенты</Button>
+            <Button variant="secondary" iconLeft={<I.ArrowLeft size={15} />} onClick={() => back ? back('clients') : go?.('clients')}>Клиенты</Button>
           </div>
           <Banner tone="warning">Клиент не выбран.</Banner>
         </div>
@@ -527,7 +587,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <button onClick={() => go?.('clients')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Клиенты</button>
+            <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('clients') : go?.('clients')}>Клиенты</ContextBackButton>
             <h1 className="page-title">{account.full_name || account.username || 'Клиент'}</h1>
             <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
           </div>
@@ -584,9 +644,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         </div>
 
         <div className="ops-action-strip" aria-label="Финансовые действия клиента">
-          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={() => { setTab('payments'); setPaymentPanelOpen(true); setPaymentBaseline({ ...paymentForm }); setPaymentFieldErrors({}); setFinanceAction(null); setFinanceBaseline(null) }}>
-            <span>Добавить оплату</span>
-            <small>Наличные или bank transfer / IBAN</small>
+          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={openPaymentPanel}>
+            <span>Пополнить баланс</span>
+            <small>Подтверждение и проверка нового баланса</small>
           </button>
           {[
             ['charge', 'Добавить списание', 'Сумма к оплате'],
@@ -726,8 +786,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {tab === 'payments' && (
           <div>
-            <FormModal open={paymentPanelOpen} title="Ручная оплата" size="lg" busy={actionBusy != null} dirty={Boolean(paymentBaseline) && JSON.stringify(paymentForm) !== JSON.stringify(paymentBaseline)} onRequestClose={() => { if (paymentBaseline) setPaymentForm(paymentBaseline); setPaymentPanelOpen(false); setPaymentBaseline(null); setPaymentFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>Сохранить оплату</Button></>}>
+            <FormModal open={paymentPanelOpen} title="Пополнить баланс" description="Оплата будет подтверждена сразу. Форма закроется только после серверной проверки статуса и нового баланса." size="lg" busy={actionBusy != null} dirty={Boolean(paymentBaseline) && JSON.stringify(paymentForm) !== JSON.stringify(paymentBaseline)} onRequestClose={() => { if (paymentBaseline) setPaymentForm(paymentBaseline); setPaymentPanelOpen(false); setPaymentBaseline(null); setPaymentFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>Подтвердить оплату</Button></>}>
                 {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+                <div className="ops-financial-context" aria-label="Контекст оплаты">
+                  <div><span>Клиент</span><strong>{account.full_name || account.username || '—'}</strong></div>
+                  <div><span>Участник</span><strong>{selectedPaymentParticipant?.full_name || 'Выберите участника'}</strong></div>
+                  <div><span>Текущий баланс</span><strong><Money amount={selectedPaymentBalance} signed currency="zł" /></strong></div>
+                  <div><span>Способ</span><strong>{paymentMethodLabel(paymentForm.method)}</strong></div>
+                </div>
                 <div className="ops-form-grid">
                   <SearchableSelect
                     inputId={PAYMENT_FIELD_IDS.participantId}
@@ -737,7 +803,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                     onChange={(value) => updatePaymentForm('participantId', value)}
                     options={participants.map((participant) => clientSelectOption(participant))}
                   />
-                  <Input id={PAYMENT_FIELD_IDS.amount} label="Сумма" value={paymentForm.amount} error={paymentFieldErrors.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240.00" />
+                  <Input id={PAYMENT_FIELD_IDS.amount} label="Сумма, zł" value={paymentForm.amount} error={paymentFieldErrors.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240,00" inputMode="decimal" />
                   <DateField id={PAYMENT_FIELD_IDS.paidAt} label="Дата оплаты" value={paymentForm.paidAt} error={paymentFieldErrors.paidAt} onChange={(value) => updatePaymentForm('paidAt', value)} />
                   <Select id={PAYMENT_FIELD_IDS.method} label="Способ" value={paymentForm.method} error={paymentFieldErrors.method} onChange={(event) => updatePaymentForm('method', event.target.value)}>
                       <option value="cash">Наличные</option>

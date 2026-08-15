@@ -1,5 +1,11 @@
 ﻿from .support import *
-from .pagination import paginated_payload
+from .pagination import (
+    choice_param,
+    list_contract_requested,
+    ordered_rows,
+    paginated_payload,
+    search_param,
+)
 
 
 @require_http_methods(["GET", "POST"])
@@ -161,22 +167,92 @@ def client_attendance(request):
     student = _participant_for_client_request(request, account)
     qs = AttendanceRecord.objects.filter(student=student).select_related(
         "student", "session", "session__group", "session__trainer__user")
+    date_from = _parse_date(request.GET.get("date_from"), "date_from")
+    date_to = _parse_date(request.GET.get("date_to"), "date_to")
+    if date_from:
+        qs = qs.filter(session__start_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(session__start_at__date__lte=date_to)
+    status = choice_param(request, "status", set(AttendanceStatus.values))
+    if status:
+        qs = qs.filter(status=status)
+    q = search_param(request)
+    if q:
+        qs = qs.filter(
+            Q(session__group__name__icontains=q) |
+            Q(session__location__icontains=q) |
+            Q(session__trainer__user__first_name__icontains=q) |
+            Q(session__trainer__user__last_name__icontains=q)
+        )
+    qs = ordered_rows(request, qs, allowlist={
+        "-date": ("-session__start_at", "-id"),
+        "date": ("session__start_at", "id"),
+        "status": ("status", "-session__start_at", "-id"),
+        "-status": ("-status", "-session__start_at", "-id"),
+    }, default="-date")
     type_colors = session_type_color_keys()
+    context = _participant_context(account, student)
+
+    def serialize(record):
+        return {
+            "id": record.id,
+            "student": _client_student_payload(record.student),
+            "session": _role_session_payload(
+                record.session,
+                participant=student,
+                type_color_keys=type_colors,
+            ),
+            "status": record.status,
+            "deducts": record.deducts,
+            "marked_at": timezone.localtime(record.marked_at).isoformat(),
+            "comment": record.comment,
+        }
+
+    if list_contract_requested(
+            request,
+            extra_params={"status", "date_from", "date_to"}):
+        return JsonResponse(paginated_payload(
+            request,
+            qs,
+            key="attendance",
+            serializer=serialize,
+            extra=context,
+        ))
     return JsonResponse({
-        **_participant_context(account, student),
-        "attendance": [{
-        "id": record.id,
-        "student": _client_student_payload(record.student),
-        "session": _role_session_payload(
-            record.session,
-            participant=student,
-            type_color_keys=type_colors,
-        ),
-        "status": record.status,
-        "deducts": record.deducts,
-        "marked_at": timezone.localtime(record.marked_at).isoformat(),
-        "comment": record.comment,
-    } for record in qs.order_by("-session__start_at", "-id")]})
+        **context,
+        "attendance": [serialize(record) for record in qs],
+    })
+
+
+def _client_charge_payload(charge, allocation=None):
+    outstanding_minor = max(0, charge.amount_minor - (allocation.paid_minor if allocation else 0))
+    if outstanding_minor == 0:
+        status = "paid"
+    elif allocation and allocation.is_overdue:
+        status = "overdue"
+    else:
+        status = "upcoming"
+    return {
+        "id": charge.id,
+        "student_id": charge.student_id,
+        "student": charge.student.full_name,
+        "description": charge.description,
+        "amount": charge.amount.format(),
+        "amount_minor": charge.amount_minor,
+        "paid_minor": charge.amount_minor - outstanding_minor,
+        "outstanding_minor": outstanding_minor,
+        "status": status,
+        "currency": charge.currency,
+        "due_date": charge.due_date.isoformat(),
+    }
+
+
+def _client_payment_history_payload(payment):
+    return {
+        **_payment_payload(payment),
+        "student_id": payment.student_id,
+        "student": payment.student.full_name,
+    }
 
 
 @require_GET
@@ -185,26 +261,100 @@ def client_payments(request):
     student = _participant_for_client_request(request, account)
     charges = Charge.objects.filter(student=student).select_related("student").order_by("-due_date", "-id")
     payments = Payment.objects.filter(student=student).select_related(
-        "student", "confirmed_by").prefetch_related(
+        "student", "student__parent__user", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     return JsonResponse({
         **_participant_context(account, student),
-        "charges": [{
-            "id": charge.id,
-            "student_id": charge.student_id,
-            "student": charge.student.full_name,
-            "description": charge.description,
-            "amount": charge.amount.format(),
-            "amount_minor": charge.amount_minor,
-            "currency": charge.currency,
-            "due_date": charge.due_date.isoformat(),
-        } for charge in charges],
-        "payments": [{
-            **_payment_payload(payment),
-            "student_id": payment.student_id,
-            "student": payment.student.full_name,
-        } for payment in payments],
+        "charges": [_client_charge_payload(charge) for charge in charges],
+        "payments": [
+            _client_payment_history_payload(payment) for payment in payments
+        ],
     })
+
+
+@require_GET
+def client_charges(request):
+    account = _client_account_from_request(request)
+    student = _participant_for_client_request(request, account)
+    qs = Charge.objects.filter(student=student).select_related("student")
+    allocations = {row.charge.id: row for row in charge_statuses(student)}
+    unpaid = [row for row in allocations.values() if row.paid_minor < row.charge.amount_minor]
+    date_from = _parse_date(request.GET.get("date_from"), "date_from")
+    date_to = _parse_date(request.GET.get("date_to"), "date_to")
+    if date_from:
+        qs = qs.filter(due_date__gte=date_from)
+    if date_to:
+        qs = qs.filter(due_date__lte=date_to)
+    status = choice_param(request, "status", {"overdue", "upcoming"})
+    if status == "overdue":
+        qs = qs.filter(pk__in=[row.charge.id for row in unpaid if row.is_overdue])
+    elif status == "upcoming":
+        qs = qs.filter(pk__in=[row.charge.id for row in unpaid if not row.is_overdue])
+    q = search_param(request)
+    if q:
+        qs = qs.filter(description__icontains=q)
+    qs = ordered_rows(request, qs, allowlist={
+        "-date": ("-due_date", "-id"),
+        "date": ("due_date", "id"),
+        "-amount": ("-amount_minor", "-id"),
+        "amount": ("amount_minor", "id"),
+    }, default="date")
+    return JsonResponse(paginated_payload(
+        request,
+        qs,
+        key="charges",
+        serializer=lambda charge: _client_charge_payload(charge, allocations.get(charge.id)),
+        extra={
+            **_participant_context(account, student),
+            "summary": {
+                "unpaid_minor": sum(row.charge.amount_minor - row.paid_minor for row in unpaid),
+                "overdue_count": sum(1 for row in unpaid if row.is_overdue),
+                "currency": settings.DEFAULT_CURRENCY,
+            },
+        },
+    ))
+
+
+@require_GET
+def client_payment_history(request):
+    account = _client_account_from_request(request)
+    student = _participant_for_client_request(request, account)
+    qs = Payment.objects.filter(student=student).select_related(
+        "student", "student__parent__user", "confirmed_by").prefetch_related(
+        "receipts", "events", "events__actor")
+    date_from = _parse_date(request.GET.get("date_from"), "date_from")
+    date_to = _parse_date(request.GET.get("date_to"), "date_to")
+    if date_from:
+        qs = qs.filter(paid_at__gte=date_from)
+    if date_to:
+        qs = qs.filter(paid_at__lte=date_to)
+    status = choice_param(request, "status", set(PaymentStatus.values))
+    if status:
+        qs = qs.filter(status=status)
+    method = choice_param(request, "method", set(PaymentMethod.values))
+    if method:
+        qs = qs.filter(method=method)
+    source = choice_param(request, "source", set(PaymentSource.values))
+    if source:
+        qs = qs.filter(source=source)
+    q = search_param(request)
+    if q:
+        qs = qs.filter(comment__icontains=q)
+    qs = ordered_rows(request, qs, allowlist={
+        "-date": ("-paid_at", "-id"),
+        "date": ("paid_at", "id"),
+        "-amount": ("-amount_minor", "-id"),
+        "amount": ("amount_minor", "id"),
+        "status": ("status", "-paid_at", "-id"),
+        "-status": ("-status", "-paid_at", "-id"),
+    }, default="-date")
+    return JsonResponse(paginated_payload(
+        request,
+        qs,
+        key="payments",
+        serializer=_client_payment_history_payload,
+        extra=_participant_context(account, student),
+    ))
 
 
 @require_GET
@@ -235,12 +385,14 @@ def client_create_top_up_request(request):
     account = _client_account_from_request(request)
     student_id = request.POST.get("student_id")
     student = _student_owned_by_client(account, student_id) if student_id else _default_billing_student_for_client(account)
+    _require_active_participant(
+        student, "request a balance top-up", field="student_id")
     file = request.FILES.get("file")
     if file is None:
         raise _field_validation_error(
             "file", "Приложите подтверждение банковского перевода.",
             code="required")
-    payment, receipt = create_client_top_up_request(
+    payment, receipt, created = create_client_top_up_request(
         student=student,
         account=account,
         actor=request.user,
@@ -248,19 +400,35 @@ def client_create_top_up_request(request):
         currency=request.POST.get("currency", settings.DEFAULT_CURRENCY),
         paid_at=_parse_date(request.POST.get("paid_at"), "paid_at") or timezone.localdate(),
         file=file,
+        idempotency_key=request.POST.get("idempotency_key"),
         comment=request.POST.get("comment", ""),
     )
+    payment = Payment.objects.select_related(
+        "student", "student__parent__user", "confirmed_by"
+    ).prefetch_related("receipts", "events", "events__actor").get(pk=payment.pk)
     payload = _payment_payload(payment)
+    balance = student_balance(student)
+    payload.update({
+        "balance_minor": balance.amount_minor,
+        "balance_currency": balance.currency,
+        "audit_event": payload["events"][-1] if payload["events"] else None,
+        "idempotent_replay": not created,
+    })
     return JsonResponse({
         "top_up_request": payload,
         "payment": payload,
         "receipt": {"id": receipt.id, "original_name": receipt.original_name},
-    }, status=201)
+    }, status=201 if created else 200)
 
 
-# Compatibility route for already deployed clients. It uses the same safe
-# pending-request workflow and can never create a confirmed payment.
-client_upload_receipt = client_create_top_up_request
+@require_POST
+def client_upload_receipt(request):
+    """Legacy alias: canonical clients must use the idempotent top-up route."""
+    if not request.POST.get("idempotency_key"):
+        request.POST._mutable = True
+        request.POST["idempotency_key"] = f"legacy-{request.user.pk}-{timezone.now().timestamp()}"
+        request.POST._mutable = False
+    return client_create_top_up_request(request)
 
 
 @require_GET

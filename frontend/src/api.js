@@ -6,24 +6,41 @@ function getCookie(name) {
 }
 
 let csrfPromise = null
+let csrfToken = ''
 
 async function ensureCsrfToken(force = false) {
-  if (!force && getCookie('csrftoken')) return
+  if (!force && csrfToken) return csrfToken
+  const cookieToken = getCookie('csrftoken')
+  if (!force && cookieToken) {
+    csrfToken = cookieToken
+    return cookieToken
+  }
   csrfPromise = csrfPromise || fetch('/api/csrf/', {
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
+  }).then(async (response) => {
+    let payload = {}
+    if ((response.headers.get('content-type') || '').includes('application/json')) {
+      try {
+        payload = await response.json()
+      } catch {
+        payload = {}
+      }
+    }
+    csrfToken = payload.csrf_token || getCookie('csrftoken')
+    return csrfToken
   }).finally(() => {
     csrfPromise = null
   })
-  await csrfPromise
+  return csrfPromise
 }
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers || {})
   const method = options.method || 'GET'
   if (method !== 'GET' && !headers.has('X-CSRFToken')) {
-    await ensureCsrfToken()
-    headers.set('X-CSRFToken', getCookie('csrftoken'))
+    const token = await ensureCsrfToken()
+    headers.set('X-CSRFToken', token)
   }
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
@@ -63,7 +80,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  get: (path) => request(path),
+  get: (path, options = {}) => request(path, options),
   post: (path, body = {}) => request(path, { method: 'POST', body: JSON.stringify(body) }),
   patch: (path, body = {}) => request(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: (path, body = {}) => request(path, { method: 'DELETE', body: JSON.stringify(body) }),
@@ -197,21 +214,24 @@ export async function fetchClientPortal({ studentId } = {}) {
     profile: () => api.get('/api/client/profile/'),
     consents: () => api.get('/api/client/consents/'),
     schedule: () => api.get(`/api/client/schedule/${target}`),
-    attendance: () => api.get(`/api/client/attendance/${target}`),
-    payments: () => api.get(`/api/client/payments/${target}`),
     notifications: () => fetchAllPages('/api/client/notifications/', 'notifications'),
   })
-  return { overview, ...values, resourceStates, resolvedStudentId }
+  return {
+    overview,
+    attendance: { attendance: [] },
+    payments: { charges: [], payments: [] },
+    ...values,
+    resourceStates,
+    resolvedStudentId,
+  }
 }
 
 export async function fetchTrainerPortal() {
-  const today = new Date().toISOString().slice(0, 10)
   const result = await fetchResourceMap({
     sessions: () => api.get('/api/trainer/sessions/'),
     groups: () => api.get('/api/trainer/groups/'),
-    history: () => api.get(`/api/trainer/history/?date_to=${today}`),
   })
-  const { sessions, groups, history } = result.values
+  const { sessions, groups } = result.values
   const firstSession = sessions.sessions?.find((session) => !session.is_cancelled) || sessions.sessions?.[0]
   let detail = null
   if (firstSession) {
@@ -221,21 +241,33 @@ export async function fetchTrainerPortal() {
     detail = detailResult.values.detail
     result.resourceStates.detail = detailResult.resourceStates.detail
   }
-  return { sessions, groups, history, detail, resourceStates: result.resourceStates }
+  return {
+    sessions,
+    groups,
+    history: { sessions: [] },
+    detail,
+    resourceStates: result.resourceStates,
+  }
 }
 
 export async function fetchAdminPortal() {
   const result = await fetchResourceMap({
     dashboard: () => api.get('/api/admin/dashboard/'),
     reference: () => api.get('/api/admin/reference/'),
-    clients: () => fetchAllPages('/api/admin/clients/', 'clients'),
-    trainers: () => fetchAllPages('/api/admin/trainers/', 'trainers'),
-    groups: () => fetchAllPages('/api/admin/groups/', 'groups'),
-    subscriptionTypes: () => fetchAllPages('/api/admin/subscription-types/', 'subscription_types'),
     sessionTypeConfigs: () => fetchAllPages('/api/admin/settings/session-types/', 'session_types'),
-    sessions: () => fetchAllPages('/api/admin/schedule/sessions/', 'sessions'),
-    payments: () => fetchAllPages('/api/admin/payments/', 'payments'),
-    debtors: () => api.get('/api/admin/debtors/'),
   })
-  return { ...result.values, resourceStates: result.resourceStates }
+  const reference = result.values.reference || {}
+  return {
+    // The existing reference contract supplies selector data. Growing list
+    // endpoints themselves are requested only by their owning screens.
+    clients: { clients: reference.participants || [] },
+    trainers: { trainers: reference.trainers || [] },
+    groups: { groups: reference.groups || [] },
+    subscriptionTypes: { subscription_types: reference.subscription_types || [] },
+    sessions: { sessions: [] },
+    payments: { payments: [] },
+    debtors: { debtors: [] },
+    ...result.values,
+    resourceStates: result.resourceStates,
+  }
 }

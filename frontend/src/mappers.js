@@ -1,4 +1,5 @@
 import { normalizeScheduleColorKey } from './app/schedulePalette.js'
+import { dateToIso } from './app/scheduleContracts.js'
 
 
 export function asMoneyMajor(minor) {
@@ -231,6 +232,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
     last: client.last_name,
     born: client.birth_date || '-',
     parent: client.is_account_holder ? client.full_name : 'Аккаунт клиента',
+    clientName: client.client_name || (client.is_account_holder ? client.full_name : 'Аккаунт клиента'),
     isAccountHolder: Boolean(client.is_account_holder),
     phone: client.client_phone || '',
     email: client.email || '',
@@ -296,6 +298,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       defaultCapacity: group.default_capacity ?? null,
       colorKey: normalizeScheduleColorKey(group.color_key),
       active: group.is_active,
+      nextSessionAt: group.next_session?.start_at || null,
+      nextSessionLocation: group.next_session?.location || '',
     })),
     subscriptionTypes: (subscriptionTypes?.subscription_types || []).map((type) => ({
       id: `st${type.id}`,
@@ -347,7 +351,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       id: String(payment.id),
       paymentId: payment.id,
       studentId: payment.participant_id,
-      clientId: (clients.clients || []).find((client) => client.id === payment.participant_id)?.client_id,
+      clientId: payment.client_id || (clients.clients || []).find((client) => client.id === payment.participant_id)?.client_id,
+      client: payment.client || payment.participant,
       child: payment.participant,
       parent: '',
       amount: asMoneyMajor(payment.amount_minor),
@@ -357,6 +362,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       sourceLabel: paymentSourceLabel(payment.source),
       affectsBalance: Boolean(payment.affects_balance),
       events: payment.events || [],
+      balanceMinor: payment.balance_minor,
+      auditEvent: payment.audit_event || null,
       date: payment.paid_at,
       status: statusFromPayment(payment.status),
       comment: payment.comment || '',
@@ -365,10 +372,12 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
     })),
     debtors: (debtors.debtors || []).map((row) => ({
       id: `d${row.student.id}`,
+      studentId: row.student.id,
       clientId: row.student.client_id,
       child: row.student.full_name,
       parent: row.student.client_phone || '',
       group: row.student.group?.name || 'Индивидуально',
+      groupId: row.student.group?.id || '',
       trainer: '',
       reason: row.reasons.join(', '),
       balance: asAccountBalance(row.balance_minor),
@@ -378,5 +387,99 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       last: row.last_payment_at || '-',
     })),
   }
+}
+
+function emptyAdminListPayload(overrides = {}) {
+  return {
+    reference: {},
+    clients: {},
+    trainers: {},
+    groups: {},
+    subscriptionTypes: {},
+    sessionTypeConfigs: {},
+    sessions: {},
+    payments: {},
+    debtors: {},
+    ...overrides,
+  }
+}
+
+export function mapAdminClientRows(rows) {
+  const mapped = mapAdminPortalData(emptyAdminListPayload({ clients: { clients: rows } }))
+  return { active: mapped.clients, blacklisted: mapped.blacklistedClients }
+}
+
+export function mapAdminTrainerRows(rows) {
+  return mapAdminPortalData(emptyAdminListPayload({ trainers: { trainers: rows } })).trainers
+}
+
+export function mapAdminGroupRows(rows) {
+  return mapAdminPortalData(emptyAdminListPayload({ groups: { groups: rows } })).groups
+}
+
+export function mapAdminPaymentRows(rows) {
+  return mapAdminPortalData(emptyAdminListPayload({ payments: { payments: rows } })).payments
+}
+
+export function mapAdminDebtorRows(rows) {
+  return mapAdminPortalData(emptyAdminListPayload({ debtors: { debtors: rows } })).debtors
+}
+
+export function mapAdminSessionRows(rows) {
+  return mapAdminPortalData(emptyAdminListPayload({ sessions: { sessions: rows } })).sessions
+}
+
+export function mapTrainerHistoryRows(rows) {
+  return rows.map(mapTrainerSession)
+}
+
+export function mapClientAttendanceRows(rows) {
+  return rows.map((record) => ({
+    id: String(record.id),
+    sessionId: record.session?.id,
+    date: record.session?.start_at?.slice(0, 10),
+    label: `${record.session?.group?.name || 'Индивидуальное'} · ${formatTime(record.session?.start_at)}`,
+    status: record.status,
+    deducts: record.deducts,
+    comment: record.comment || '',
+    group: record.session?.group?.name || 'Индивидуальное',
+    trainer: record.session?.trainer || '',
+  }))
+}
+
+export function mapClientChargeRows(rows) {
+  return rows.map((charge) => ({
+    id: charge.id,
+    child: charge.student,
+    desc: charge.description,
+    due: charge.due_date,
+    amount: asMoneyMajor(charge.outstanding_minor ?? charge.amount_minor),
+    originalAmount: asMoneyMajor(charge.amount_minor),
+    paidAmount: asMoneyMajor(charge.paid_minor),
+    status: charge.status === 'paid' ? 'paid' : charge.status === 'overdue' ? 'overdue' : 'awaiting',
+    studentId: charge.student_id,
+  }))
+}
+
+export function mapClientPaymentRows(rows) {
+  return rows.map((payment) => ({
+    id: payment.id,
+    child: payment.student,
+    date: payment.paid_at,
+    amount: asMoneyMajor(payment.amount_minor),
+    status: statusFromPayment(payment.status),
+    method: paymentMethodLabel(payment.method),
+    methodCode: payment.method,
+    source: payment.source,
+    sourceLabel: paymentSourceLabel(payment.source),
+    affectsBalance: Boolean(payment.affects_balance),
+    events: payment.events || [],
+    balanceMinor: payment.balance_minor,
+    auditEvent: payment.audit_event || null,
+    comment: payment.comment || '',
+    receipt: payment.receipt?.original_name || '',
+    receiptUrl: payment.receipt?.download_url || null,
+    studentId: payment.student_id,
+  }))
 }
 import { participantKey, paymentMethodLabel as contractPaymentMethodLabel } from './contracts.js'

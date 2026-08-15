@@ -21,8 +21,8 @@ from audit.models import audit
 from billing.models import (Charge, Payment, PaymentMethod, PaymentSource, PaymentStatus,
                             ReceiptFile, normalize_payment_method)
 from billing.services import (
-    charge_statuses, confirm_payment, create_client_top_up_request,
-    record_admin_payment_created,
+    charge_statuses, confirm_payment, create_admin_payment,
+    create_client_top_up_request,
     reject_payment, student_balance,
 )
 from catalog.models import Group, SubscriptionType
@@ -555,6 +555,9 @@ def _apply_waitlist_data(entry, data):
 
 def _trainer_payload(trainer):
     user = trainer.user
+    groups_count = getattr(trainer, "active_groups_count", None)
+    if groups_count is None:
+        groups_count = trainer.default_groups.filter(is_active=True).count()
     return {
         "id": trainer.id,
         "username": user.username,
@@ -567,7 +570,7 @@ def _trainer_payload(trainer):
         "user_is_active": user.is_active,
         "access_activated": user.has_usable_password(),
         "portal_access": _portal_access_state(user),
-        "groups_count": trainer.default_groups.count(),
+        "groups_count": groups_count,
     }
 
 
@@ -588,7 +591,7 @@ def _subscription_payload(subscription):
 
 
 def _group_payload(group):
-    return {
+    payload = {
         "id": group.id,
         "name": group.name,
         "description": group.description,
@@ -601,11 +604,19 @@ def _group_payload(group):
         "default_capacity": group.default_capacity,
         "color_key": stored_schedule_color_key(group.color_key),
         "is_active": group.is_active,
-        "participants_count": group.students.filter(
+        "participants_count": getattr(group, "active_participants_count", None),
+    }
+    if payload["participants_count"] is None:
+        payload["participants_count"] = group.students.filter(
             is_active=True,
             parent__user__is_active=True,
-        ).count(),
-    }
+        ).count()
+    if hasattr(group, "next_session_start"):
+        payload["next_session"] = {
+            "start_at": timezone.localtime(group.next_session_start).isoformat(),
+            "location": group.next_session_location or "",
+        } if group.next_session_start else None
+    return payload
 
 
 def _subscription_type_payload(subscription_type):
@@ -639,6 +650,11 @@ def _charge_payload(charge):
 
 
 def _payment_payload(payment):
+    account = getattr(payment.student, "parent", None)
+    account_user = getattr(account, "user", None)
+    client_name = ""
+    if account_user is not None:
+        client_name = account_user.get_full_name() or account_user.username
     receipts = [{
         "id": receipt.id,
         "original_name": receipt.original_name,
@@ -658,6 +674,8 @@ def _payment_payload(payment):
     } for event in payment.events.all()]
     return {
         "id": payment.id,
+        "client_id": getattr(account, "id", None),
+        "client": client_name,
         "participant_id": payment.student_id,
         "participant": payment.student.full_name,
         "amount": payment.amount.format(),
@@ -1282,25 +1300,25 @@ def _create_payment_for_participant(participant, data, *, actor=None):
         raise _field_validation_error(
             "currency", "Укажите поддерживаемую валюту.",
             code="invalid_choice") from exc
-    payment = Payment.objects.create(
+    if desired_status == PaymentStatus.REJECTED:
+        final_status = PaymentStatus.REJECTED
+    elif desired_status == PaymentStatus.PENDING or payment_data.get("confirm") is False:
+        final_status = PaymentStatus.PENDING
+    else:
+        final_status = PaymentStatus.CONFIRMED
+    payment, created = create_admin_payment(
         student=participant,
+        actor=actor,
         amount_minor=amount_minor,
         currency=currency,
         paid_at=_parse_date(payment_data.get("paid_at"), "paid_at") or timezone.localdate(),
         method=method,
+        idempotency_key=payment_data.get("idempotency_key"),
         comment=payment_data.get("comment", "") or "",
-        status=PaymentStatus.PENDING,
-        source=PaymentSource.ADMIN,
-        created_by=actor,
+        desired_status=final_status,
+        reason=payment_data.get("reason", "") or "",
     )
-    record_admin_payment_created(payment, actor)
-    if desired_status == PaymentStatus.REJECTED:
-        payment = reject_payment(payment, actor, payment_data.get("reason", ""))
-    elif desired_status == PaymentStatus.PENDING or payment_data.get("confirm") is False:
-        pass
-    else:
-        payment = confirm_payment(payment, actor)
-    return payment
+    return payment, created
 
 
 def _session_changes_from_data(data, *, current_session=None):

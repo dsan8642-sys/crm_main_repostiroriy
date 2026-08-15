@@ -1,6 +1,13 @@
 ﻿from .support import *
 from .admin_support import _admin_required
-from .pagination import paginated_payload
+from .pagination import (
+    choice_param,
+    ordered_rows,
+    paginated_payload,
+    positive_int_param,
+    search_param,
+)
+from django.db.models import Count, OuterRef, Subquery
 
 @require_http_methods(["GET", "POST"])
 def admin_groups(request):
@@ -10,12 +17,35 @@ def admin_groups(request):
         _apply_group_data(group, _json_body(request))
         audit(user, "group.created", group, {"source": "api"})
         return JsonResponse(_group_payload(group), status=201)
-    qs = Group.objects.select_related("default_trainer__user").order_by("name", "id")
-    if request.GET.get("active") in {"true", "false"}:
-        qs = qs.filter(is_active=request.GET["active"] == "true")
-    q = request.GET.get("q", "").strip()
+    next_sessions = Session.objects.filter(
+        group_id=OuterRef("pk"),
+        is_cancelled=False,
+        start_at__gte=timezone.now(),
+    ).order_by("start_at", "id")
+    qs = Group.objects.select_related("default_trainer__user").annotate(
+        active_participants_count=Count(
+            "students",
+            filter=Q(students__is_active=True, students__parent__user__is_active=True),
+            distinct=True,
+        ),
+        next_session_start=Subquery(next_sessions.values("start_at")[:1]),
+        next_session_location=Subquery(next_sessions.values("location")[:1]),
+    )
+    active = choice_param(request, "active", {"true", "false"})
+    if active:
+        qs = qs.filter(is_active=active == "true")
+    trainer_id = positive_int_param(request, "trainer_id")
+    if trainer_id:
+        qs = qs.filter(default_trainer_id=trainer_id)
+    q = search_param(request)
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
+    qs = ordered_rows(request, qs, allowlist={
+        "name": ("name", "id"),
+        "-name": ("-name", "-id"),
+        "id": ("id",),
+        "-id": ("-id",),
+    }, default="name")
     return JsonResponse(paginated_payload(
         request, qs, key="groups", serializer=_group_payload))
 

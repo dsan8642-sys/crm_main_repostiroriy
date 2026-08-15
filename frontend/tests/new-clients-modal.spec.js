@@ -5,7 +5,7 @@ function adminRoutes(clients, groups = []) {
     '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
     '/api/admin/dashboard/': { metrics: { clients: clients.length, active_subscriptions: 0, debtors: 0 } },
     '/api/admin/reference/': {
-      trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [],
+      trainers: [], groups, subscription_types: [], locations: [], session_types: [], participants: clients,
       choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
     },
     '/api/admin/clients/': { clients },
@@ -95,7 +95,7 @@ test('archived accounts stay only in blacklist and client editing opens in a mod
   await expect(page.getByText('Найдено: 1')).toBeVisible()
 
   await page.getByRole('button', { name: 'Клиенты', exact: true }).click()
-  await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
+  await expect(page.getByText('Найдено: 24')).toBeVisible()
   const editButtons = page.getByRole('button', { name: 'Изменить', exact: true })
   await editButtons.last().scrollIntoViewIfNeeded()
   const before = await page.locator('main').evaluate((node) => node.scrollTop)
@@ -198,12 +198,13 @@ test('mobile client card exposes actions without a status pill', async ({ page }
   }])
 
   await page.goto('/?role=admin&view=clients')
-  const card = page.locator('.ops-client-mobile-card')
+  const card = page.getByTestId('client-compact-card')
   await expect(card).toBeVisible()
   await expect(card.getByText('Активен', { exact: true })).toHaveCount(0)
-  await card.getByRole('button', { name: 'Действия клиента' }).click()
-  await expect(page.getByRole('button', { name: 'Изменить', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'В чёрный список', exact: true })).toBeVisible()
+  await card.getByRole('button', { name: 'Действия: Kowalski Jan' }).click()
+  const menu = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
+  await expect(menu.getByRole('menuitem', { name: 'Изменить', exact: true })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'В чёрный список', exact: true })).toBeVisible()
 })
 
 test('an archived client detail is read-only except for restoration', async ({ page }) => {

@@ -235,6 +235,7 @@ class ClientPortalApiRule(TestCase):
 
         response = self.client.post("/api/client/payments/top-up-requests/", {
             "student_id": self.student.id,
+            "idempotency_key": "portal-topup-status-001",
             "amount_minor": "10000",
             "currency": "PLN",
             "status": "confirmed",
@@ -255,6 +256,7 @@ class ClientPortalApiRule(TestCase):
     def test_client_top_up_request_rejects_non_positive_amount(self):
         response = self.client.post("/api/client/payments/top-up-requests/", {
             "student_id": self.student.id,
+            "idempotency_key": "portal-topup-invalid-001",
             "amount_minor": "-100",
             "currency": "PLN",
             "file": SimpleUploadedFile("transfer.pdf", PDF, content_type="application/pdf"),
@@ -273,6 +275,7 @@ class ClientPortalApiRule(TestCase):
         )
         response = self.client.post("/api/client/payments/top-up-requests/", {
             "student_id": self.student.id,
+            "idempotency_key": "portal-topup-confirm-001",
             "amount_minor": "10000",
             "currency": "PLN",
             "file": SimpleUploadedFile("transfer.pdf", PDF, content_type="application/pdf"),
@@ -2016,6 +2019,7 @@ class AdminPortalApiRule(TestCase):
             "/api/admin/payments/",
             data=json.dumps({
                 "participant_id": self.student.id,
+                "idempotency_key": "portal-admin-payment-001",
                 "amount_minor": 5000,
                 "currency": "PLN",
                 "paid_at": date.today().isoformat(),

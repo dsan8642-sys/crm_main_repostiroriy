@@ -129,6 +129,7 @@ export default function App() {
         .filter(([, state]) => state.state === 'error')
         .map(([resource, state]) => ({ resource, status: state.status }))
       setApiState({ state: failures.length ? 'partial' : 'ok', role, failures })
+      window.dispatchEvent(new CustomEvent('swimcrm:list-invalidate', { detail: { role } }))
     } catch (error) {
       if (error.status === 401 || error.status === 403) {
         setPortalData(EMPTY_PORTAL_DATA)

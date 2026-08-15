@@ -1,6 +1,12 @@
 ﻿from .support import *
 from .admin_support import _admin_required
-from .pagination import paginated_payload
+from .pagination import (
+    choice_param,
+    ordered_rows,
+    paginated_payload,
+    search_param,
+)
+from django.db.models import Count, Q
 
 @require_http_methods(["GET", "POST"])
 def admin_trainers(request):
@@ -10,16 +16,29 @@ def admin_trainers(request):
         data["_actor"] = user
         trainer = _create_trainer(data)
         return JsonResponse(_trainer_payload(trainer), status=201)
-    qs = Trainer.objects.select_related("user").order_by("user__last_name", "user__first_name", "id")
-    if request.GET.get("active") in {"true", "false"}:
-        qs = qs.filter(is_active=request.GET["active"] == "true")
-    q = request.GET.get("q", "").strip()
+    qs = Trainer.objects.select_related("user").annotate(
+        active_groups_count=Count(
+            "default_groups",
+            filter=Q(default_groups__is_active=True),
+            distinct=True,
+        ),
+    )
+    active = choice_param(request, "active", {"true", "false"})
+    if active:
+        qs = qs.filter(is_active=active == "true")
+    q = search_param(request)
     if q:
         qs = qs.filter(
             Q(user__first_name__icontains=q) | Q(user__last_name__icontains=q) |
             Q(user__username__icontains=q) | Q(user__email__icontains=q) |
             Q(phone__icontains=q)
         )
+    qs = ordered_rows(request, qs, allowlist={
+        "name": ("user__last_name", "user__first_name", "id"),
+        "-name": ("-user__last_name", "-user__first_name", "-id"),
+        "id": ("id",),
+        "-id": ("-id",),
+    }, default="name")
     return JsonResponse(paginated_payload(
         request, qs, key="trainers", serializer=_trainer_payload))
 

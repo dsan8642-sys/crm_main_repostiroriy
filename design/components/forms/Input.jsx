@@ -19,6 +19,7 @@ export function Input({
 }) {
   const heights = { sm: 'var(--control-h-sm)', md: 'var(--control-h-md)', lg: 'var(--control-h-lg)' };
   const inputId = id || (label ? `in-${label.replace(/\s+/g, '-').toLowerCase()}` : undefined);
+  const errorId = inputId ? `${inputId}-error` : undefined;
   const hasAffix = prefix || suffix;
 
   const field = (
@@ -55,6 +56,8 @@ export function Input({
           ...style,
         }}
         {...rest}
+        aria-invalid={error ? true : rest['aria-invalid']}
+        aria-describedby={error ? errorId : rest['aria-describedby']}
       />
       {suffix && <span style={{ color: 'var(--text-faint)', display: 'inline-flex', fontSize: 'var(--fs-sm)' }}>{suffix}</span>}
     </div>
@@ -90,10 +93,12 @@ export function Input({
             ...style,
           }}
           {...rest}
+          aria-invalid={error ? true : rest['aria-invalid']}
+          aria-describedby={error ? errorId : rest['aria-describedby']}
         />
       )}
       {error ? (
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--red-600)' }}>{error}</span>
+        <span id={errorId} className="ops-field-error" role="alert" style={{ fontSize: 'var(--fs-xs)', color: 'var(--red-600)' }}>{error}</span>
       ) : hint ? (
         <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{hint}</span>
       ) : null}

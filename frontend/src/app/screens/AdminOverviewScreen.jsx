@@ -1,7 +1,8 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
 import { api, downloadFile } from '../../api.js'
-import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
+import { asMoneyMajor, formatDate, formatShortDate, formatTime, mapAdminSessionRows } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { dateToIso } from '../scheduleContracts.js'
 
 export function createAdminOverviewScreen(components, icons, adminData = {}) {
   const { Money, Button, Banner, Badge } = components
@@ -19,10 +20,57 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
 
   return function ApiAdminOverview({ go }) {
     const data = adminData
-    const sessions = data.sessions || []
-    const pending = (data.payments || []).filter((payment) => payment.status === 'pending')
-    const debtors = data.debtors || []
-    const debtTotal = debtors.reduce((sum, row) => sum + Math.abs(row.balance || 0), 0)
+    const [overviewLists, setOverviewLists] = useState(() => ({
+      sessions: data.sessions || [],
+      pendingCount: (data.payments || []).filter((payment) => payment.status === 'pending').length,
+      debtorCount: (data.debtors || []).length,
+      debtTotal: (data.debtors || []).reduce((sum, row) => sum + Math.abs(row.balance || 0), 0),
+    }))
+
+    useEffect(() => {
+      let alive = true
+      const now = new Date()
+      const dateFrom = dateToIso(now)
+      const dateTo = dateToIso(new Date(now.getTime() + 30 * 86400000))
+      const sessionQuery = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        page: '1',
+        page_size: '200',
+      })
+      Promise.allSettled([
+        api.get(`/api/admin/schedule/sessions/?${sessionQuery}`),
+        api.get('/api/admin/payments/?page=1&page_size=50&status=pending&order=-date'),
+        api.get('/api/admin/debtors/?page=1&page_size=50&order=-balance'),
+      ]).then(([sessionsResult, paymentsResult, debtorsResult]) => {
+        if (!alive) return
+        setOverviewLists((current) => {
+          const sessionPayload = sessionsResult.status === 'fulfilled' ? sessionsResult.value : null
+          const paymentPayload = paymentsResult.status === 'fulfilled' ? paymentsResult.value : null
+          const debtorPayload = debtorsResult.status === 'fulfilled' ? debtorsResult.value : null
+          const debtorRows = debtorPayload?.debtors || []
+          return {
+            sessions: sessionPayload ? mapAdminSessionRows(sessionPayload.sessions || []).slice(0, 5) : current.sessions,
+            pendingCount: paymentPayload
+              ? (paymentPayload.pagination?.total ?? (paymentPayload.payments || []).filter((payment) => payment.status === 'pending').length)
+              : current.pendingCount,
+            debtorCount: debtorPayload
+              ? (debtorPayload.pagination?.total ?? debtorRows.length)
+              : current.debtorCount,
+            debtTotal: debtorPayload
+              ? Math.abs(asMoneyMajor(debtorPayload.summary?.balance_minor
+                ?? debtorRows.reduce((sum, row) => sum + Number(row.balance_minor || 0), 0)))
+              : current.debtTotal,
+          }
+        })
+      })
+      return () => { alive = false }
+    }, [])
+
+    const sessions = overviewLists.sessions
+    const pendingCount = overviewLists.pendingCount
+    const debtorCount = overviewLists.debtorCount
+    const debtTotal = overviewLists.debtTotal
 
     return (
       <div className="page">
@@ -37,8 +85,8 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           </div>
         </div>
 
-        {pending.length > 0 && (
-          <Banner tone="warning" title={`${pending.length} платежей ждут подтверждения`} style={{ marginBottom: 16 }}
+        {pendingCount > 0 && (
+          <Banner tone="warning" title={`${pendingCount} платежей ждут подтверждения`} style={{ marginBottom: 16 }}
             action={<Button size="sm" variant="subtle" onClick={() => go('payments', { tab: 'review' })}>Открыть</Button>}>
             Нажмите, чтобы подтвердить или отклонить платежи.
           </Banner>
@@ -49,12 +97,15 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           <Kpi icon={<I.Calendar size={15} />} label="Занятия" value={sessions.length} sub="Сегодня и ближайшие" onClick={() => go('schedule', { tab: 'day' })} />
           <Kpi icon={<I.ClientFamily size={15} />} label="Клиенты" value={(data.clients || []).length} sub="Открыть базу" onClick={() => go('clients')} />
           <Kpi icon={<I.TrainerWhistle size={15} />} label="Тренеры" value={(data.trainers || []).filter((row) => row.active).length} sub="Открыть команду" onClick={() => go('trainers')} />
-          <Kpi icon={<I.Alert size={15} />} label="Должники" value={debtors.length} sub={`${debtTotal.toLocaleString('pl-PL')} zl`} tone="var(--money-debt)" onClick={() => go('debtors')} />
+          <Kpi icon={<I.Alert size={15} />} label="Должники" value={debtorCount} sub={`${debtTotal.toLocaleString('pl-PL')} zl`} tone="var(--money-debt)" onClick={() => go('debtors')} />
         </div>
 
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Ближайшие занятия</div>
+        <div className="ops-section-head" style={{ marginBottom: 10 }}>
+          <div className="eyebrow">Ближайшие занятия</div>
+          <Button size="sm" variant="secondary" onClick={() => go('schedule')}>Все занятия</Button>
+        </div>
         <div className="card ops-upcoming-sessions">
-          {sessions.slice(0, 8).map((session, index, list) => (
+          {sessions.slice(0, 5).map((session, index, list) => (
             <button
               key={session.id}
               type="button"

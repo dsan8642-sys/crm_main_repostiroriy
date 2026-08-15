@@ -7,6 +7,7 @@ import { createAdminImportExportPanel } from './AdminImportExportScreen.jsx'
 import { createAdminReportsPanel } from './AdminReportsPanel.jsx'
 import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
+import { ContextBackButton } from '../EntityListPrimitives.jsx'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -121,6 +122,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const [credentialBaseline, setCredentialBaseline] = useState(() => credentialValues())
     const [credentialErrors, setCredentialErrors] = useState({})
     const [credentialModalError, setCredentialModalError] = useState(null)
+    const [mobileLevel, setMobileLevel] = useState('categories')
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
     const tabResources = useMemo(() => resources.filter((item) => item.tab === tab), [tab])
@@ -198,6 +200,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
 
     function selectResource(item) {
       setResourceId(item.id)
+      setMobileLevel('detail')
       if (item.id === 'credentials') openCredentials()
     }
 
@@ -309,12 +312,27 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       ? [{ key: 'created_at', header: 'Когда', render: (row) => displayValue(row.created_at) }, { key: 'name', header: 'Запись', render: (row) => <span className="strong">{displayValue(row.full_name || row.source_name || row.action || row.recipient || row.date_from || row.username)}</span> }, { key: 'details', header: 'Детали', muted: true, render: readOnlyDetails }]
       : [{ key: 'name', header: resource.title, render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain)}</span> }, { key: 'details', header: 'Детали', muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from) }, { key: 'active', header: 'Статус', render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>Изменить</Button>{resource.id !== 'sessionTypes' && <Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>Убрать</Button>}</div> }]
 
-    return <div className="page page-wide">
-      <div className="page-head"><div><h1 className="page-title">Настройки и контроль</h1><p className="page-desc">Все служебные функции SwimCRM в одном месте. Django admin больше не нужен для ежедневной работы.</p></div>{!resource.panel && <Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>Обновить</Button>}</div>
+    return <div className={`page page-wide ops-settings-page is-mobile-${mobileLevel}`}>
+      <div className="page-head"><div><h1 className="page-title">Настройки и контроль</h1><p className="page-desc">Все служебные функции SwimCRM в одном месте. Django admin больше не нужен для ежедневной работы.</p></div>{!resource.panel && <span className="ops-settings-page-refresh"><Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>Обновить</Button></span>}</div>
       {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
       <ToastNotice id="admin-settings-result" message={message} tone="success" />
-      <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
-      {tab !== 'reports' && <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => selectResource(item)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>}
+      <div className="ops-settings-desktop-nav">
+        <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label }))} />
+        {tab !== 'reports' && <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => selectResource(item)}><span>{item.title}</span><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></button>)}</div>}
+      </div>
+      <div className="ops-settings-mobile-nav">
+        {mobileLevel === 'categories' && <div className="ops-settings-mobile-list" aria-label="Категории настроек">
+          {tabs.map(([value, label]) => <button key={value} type="button" className="ops-settings-mobile-item" onClick={() => { setTab(value); setResourceId(resources.find((item) => item.tab === value)?.id || 'subscriptionTypes'); setMobileLevel('resources') }}><strong>{label}</strong><span aria-hidden="true">›</span></button>)}
+        </div>}
+        {mobileLevel === 'resources' && <>
+          <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('categories')}>Категории</ContextBackButton>
+          <div className="ops-settings-mobile-list" aria-label={tabs.find(([value]) => value === tab)?.[1]}>
+            {tabResources.map((item) => <button key={item.id} type="button" className="ops-settings-mobile-item" onClick={() => selectResource(item)}><span><strong>{item.title}</strong><small>{item.readOnly ? 'Просмотр и контроль' : 'Создание и редактирование'}</small></span><span aria-hidden="true">›</span></button>)}
+          </div>
+        </>}
+        {mobileLevel === 'detail' && <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('resources')}>{tabs.find(([value]) => value === tab)?.[1]}</ContextBackButton>}
+      </div>
+      <div className={`ops-settings-detail${mobileLevel === 'detail' ? ' is-mobile-visible' : ''}`}>
       {tab !== 'reports' && <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{tabs.find(([value]) => value === tab)?.[1]}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{resource.title}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{resourceHelp[resource.id]}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>Добавить</Button>}</div>}
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">Изменяются данные текущего администратора. Для подтверждения обязательно введите действующий пароль. Пароль хранится только как Django hash и не выводится в журнал.</p>
@@ -325,6 +343,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         : resource.panel && resource.id === 'reports'
           ? <ReportsPanel />
           : !resource.panel && <Table rows={rows} emptyLabel={loading ? 'Загрузка...' : 'Записей пока нет'} columns={columns} />}
+      </div>
       <FormModal
         open={Boolean(editing)}
         title={`${editing?.id ? 'Редактирование' : 'Новая запись'} · ${resource.title}`}

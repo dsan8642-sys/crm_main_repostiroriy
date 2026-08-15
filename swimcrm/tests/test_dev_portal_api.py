@@ -11,7 +11,8 @@ class DevPortalApiRule(TestCase):
         response = self.client.get("/api/csrf/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"ok": True})
+        self.assertTrue(response.json()["ok"])
+        self.assertIn(len(response.json()["csrf_token"]), {32, 64})
         self.assertIn("csrftoken", response.cookies)
 
     def test_dev_login_admin_opens_admin_api(self):

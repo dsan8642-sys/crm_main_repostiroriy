@@ -1,6 +1,12 @@
 ﻿from .support import *
 from .admin_support import _admin_required
-from .pagination import paginated_payload
+from .pagination import (
+    choice_param,
+    ordered_rows,
+    paginated_payload,
+    positive_int_param,
+    search_param,
+)
 from datetime import timedelta
 
 from django.db.models import Max
@@ -78,8 +84,13 @@ def _client_list_payload(
         activity_cutoff):
     last_present_at = recent_attendance.get(student.id)
     current_subscription = current_subscriptions.get(student.id)
+    account_user = student.parent.user if student.parent_id else None
     return {
         **_student_payload(student),
+        "client_name": (
+            account_user.get_full_name() or account_user.username
+            if account_user is not None else ""
+        ),
         "balance_minor": balances.get(student.id, 0),
         "currency": settings.DEFAULT_CURRENCY,
         "has_current_subscription": current_subscription is not None,
@@ -126,7 +137,7 @@ def admin_clients(request):
         return JsonResponse(_client_detail_payload(account), status=201)
 
     qs = Student.objects.select_related("parent", "parent__user", "group", "group__default_trainer__user").all()
-    q = request.GET.get("q", "").strip()
+    q = search_param(request)
     if q:
         qs = qs.filter(
             Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q) |
@@ -135,18 +146,30 @@ def admin_clients(request):
             Q(group__default_trainer__user__first_name__icontains=q) |
             Q(group__default_trainer__user__last_name__icontains=q)
         )
-    if request.GET.get("active") == "true":
+    active = choice_param(request, "active", {"true", "false"})
+    if active == "true":
         qs = qs.filter(is_active=True, parent__user__is_active=True)
-    elif request.GET.get("active") == "false":
+    elif active == "false":
         qs = qs.filter(Q(is_active=False) | Q(parent__user__is_active=False))
-    if request.GET.get("group_id"):
-        qs = qs.filter(group_id=request.GET["group_id"])
-    if request.GET.get("trainer_id"):
-        qs = qs.filter(group__default_trainer_id=request.GET["trainer_id"])
-    debt = request.GET.get("debt")
+    group_id = positive_int_param(request, "group_id")
+    if group_id:
+        qs = qs.filter(group_id=group_id)
+    trainer_id = positive_int_param(request, "trainer_id")
+    if trainer_id:
+        qs = qs.filter(group__default_trainer_id=trainer_id)
+    debt = choice_param(request, "debt", {"yes", "no"})
+    subscription = choice_param(request, "subscription", {"with", "without"})
+    balance = choice_param(request, "balance", {"positive", "negative", "zero"})
+    activity = choice_param(request, "activity", {"active", "inactive"})
     # distinct(): the `q` filter joins group__default_trainer__user, which can
     # emit one row per join match and eat slots inside the cap.
-    students = list(qs.distinct().order_by("last_name", "first_name", "id"))
+    qs = ordered_rows(request, qs.distinct(), allowlist={
+        "name": ("last_name", "first_name", "id"),
+        "-name": ("-last_name", "-first_name", "-id"),
+        "id": ("id",),
+        "-id": ("-id",),
+    }, default="name")
+    students = list(qs)
     if debt in {"yes", "no"}:
         filtered = []
         for student in students:
@@ -157,6 +180,29 @@ def admin_clients(request):
     balances = _client_list_balances(students)
     current_subscriptions = _client_current_subscriptions(students)
     recent_attendance, activity_cutoff = _client_recent_attendance(students)
+    if subscription:
+        students = [
+            student for student in students
+            if (current_subscriptions.get(student.id) is not None)
+            == (subscription == "with")
+        ]
+    if balance:
+        def matches_balance(student):
+            account_balance_minor = -balances.get(student.id, 0)
+            if balance == "positive":
+                return account_balance_minor > 0
+            if balance == "negative":
+                return account_balance_minor < 0
+            return account_balance_minor == 0
+        students = [student for student in students if matches_balance(student)]
+    if activity:
+        students = [
+            student for student in students
+            if bool(
+                recent_attendance.get(student.id)
+                and recent_attendance[student.id] >= activity_cutoff
+            ) == (activity == "active")
+        ]
     return JsonResponse(paginated_payload(
         request,
         students,

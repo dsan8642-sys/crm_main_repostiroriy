@@ -1,4 +1,4 @@
-/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"3ea60936d1f0","components/data/Avatar.jsx":"671d0dab0cb2","components/data/Badge.jsx":"ed0aa3033c94","components/data/Money.jsx":"84dd3f8c6313","components/data/StatusPill.jsx":"5e04e2f701b3","components/data/Table.jsx":"0739116ccae8","components/forms/Button.jsx":"d515b677698e","components/forms/Checkbox.jsx":"f0f71a933776","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"2af56f30580a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"cba3835ef4c9","components/forms/Switch.jsx":"e466da9072ab","components/forms/Textarea.jsx":"ae0b3a42e4c3","components/feedback/Banner.jsx":"7f02f7a1fefb","components/feedback/Dialog.jsx":"e47f2cea38e8","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"bbbcc232ebaa","ui_kits/admin/data.jsx":"81a279dcff77","ui_kits/admin/Attendance.jsx":"959f58642ae7","ui_kits/admin/Clients.jsx":"549143b37085","ui_kits/admin/Debtors.jsx":"7de5a19d6d4e","ui_kits/admin/Overview.jsx":"93b4d593d07b","ui_kits/admin/Payments.jsx":"56c9f1dcde72","ui_kits/admin/Schedule.jsx":"f1ce6f1511a5","ui_kits/parent/data.jsx":"10378a012779","ui_kits/parent/screens.jsx":"a1fccc3ea3c0","ui_kits/trainer/data.jsx":"30584aa96676","ui_kits/trainer/screens.jsx":"81076f9febea"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
+/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"3ea60936d1f0","components/data/Avatar.jsx":"671d0dab0cb2","components/data/Badge.jsx":"ed0aa3033c94","components/data/Money.jsx":"84dd3f8c6313","components/data/StatusPill.jsx":"5e04e2f701b3","components/data/Table.jsx":"0739116ccae8","components/forms/Button.jsx":"d515b677698e","components/forms/Checkbox.jsx":"e8519173e668","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"f9aababef51a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"63fc8b0831ed","components/forms/Switch.jsx":"3fbe898249dc","components/forms/Textarea.jsx":"0870c4205f77","components/feedback/Banner.jsx":"7f02f7a1fefb","components/feedback/Dialog.jsx":"9af8054495cc","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"bbbcc232ebaa","ui_kits/admin/data.jsx":"81a279dcff77","ui_kits/admin/Attendance.jsx":"959f58642ae7","ui_kits/admin/Clients.jsx":"549143b37085","ui_kits/admin/Debtors.jsx":"7de5a19d6d4e","ui_kits/admin/Overview.jsx":"93b4d593d07b","ui_kits/admin/Payments.jsx":"56c9f1dcde72","ui_kits/admin/Schedule.jsx":"f1ce6f1511a5","ui_kits/parent/data.jsx":"10378a012779","ui_kits/parent/screens.jsx":"a1fccc3ea3c0","ui_kits/trainer/data.jsx":"30584aa96676","ui_kits/trainer/screens.jsx":"81076f9febea"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
 
 (() => {
 const __ds_ns = (window.SwimCRMDesignSystem_546643 = window.SwimCRMDesignSystem_546643 || {});
@@ -504,13 +504,15 @@ __ds_scope.Button = Button;
 
 // components/forms/Checkbox.jsx
 try { (() => {
-function Checkbox({ label, checked = false, indeterminate = false, disabled = false, onChange, id, style, ...rest }) {
+function Checkbox({ label, checked = false, indeterminate = false, disabled = false, onChange, id, error, style, ...rest }) {
   const ref = React.useRef(null);
   React.useEffect(() => {
     if (ref.current) ref.current.indeterminate = indeterminate && !checked;
   }, [indeterminate, checked]);
   const on = checked || indeterminate;
-  return /* @__PURE__ */ React.createElement(
+  const inputId = id || (label ? `check-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, /* @__PURE__ */ React.createElement(
     "label",
     {
       style: {
@@ -534,7 +536,7 @@ function Checkbox({ label, checked = false, indeterminate = false, disabled = fa
           height: 17,
           flexShrink: 0,
           borderRadius: "var(--radius-xs)",
-          border: `1.5px solid ${on ? "var(--primary)" : "var(--border-strong)"}`,
+          border: `1.5px solid ${error ? "var(--red-500)" : on ? "var(--primary)" : "var(--border-strong)"}`,
           background: on ? "var(--primary)" : "var(--surface-card)",
           transition: "var(--transition-control)",
           display: "inline-flex",
@@ -552,14 +554,16 @@ function Checkbox({ label, checked = false, indeterminate = false, disabled = fa
           checked,
           disabled,
           onChange,
-          id,
+          id: inputId,
+          "aria-invalid": error ? true : rest["aria-invalid"],
+          "aria-describedby": error ? errorId : rest["aria-describedby"],
           style: { position: "absolute", opacity: 0, width: "100%", height: "100%", margin: 0, cursor: "inherit" },
           ...rest
         }
       )
     ),
     label && /* @__PURE__ */ React.createElement("span", null, label)
-  );
+  ), error && /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error));
 }
 __ds_scope.Checkbox = Checkbox;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Checkbox.jsx", error: String((e && e.message) || e) }); }
@@ -628,6 +632,7 @@ function Input({
 }) {
   const heights = { sm: "var(--control-h-sm)", md: "var(--control-h-md)", lg: "var(--control-h-lg)" };
   const inputId = id || (label ? `in-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
   const hasAffix = prefix || suffix;
   const field = /* @__PURE__ */ React.createElement(
     "div",
@@ -665,7 +670,9 @@ function Input({
           color: "var(--text-strong)",
           ...style
         },
-        ...rest
+        ...rest,
+        "aria-invalid": error ? true : rest["aria-invalid"],
+        "aria-describedby": error ? errorId : rest["aria-describedby"]
       }
     ),
     suffix && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--text-faint)", display: "inline-flex", fontSize: "var(--fs-sm)" } }, suffix)
@@ -691,9 +698,11 @@ function Input({
         boxShadow: error ? "0 0 0 3px rgba(214,63,54,0.14)" : "none",
         ...style
       },
-      ...rest
+      ...rest,
+      "aria-invalid": error ? true : rest["aria-invalid"],
+      "aria-describedby": error ? errorId : rest["aria-describedby"]
     }
-  ), error ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
+  ), error ? /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
 }
 const labelStyle = {
   font: "var(--text-label)",
@@ -766,6 +775,7 @@ const { labelStyle } = __ds_scope;
 function Select({ label, hint, error, required = false, size = "md", children, id, style, containerStyle, ...rest }) {
   const heights = { sm: "var(--control-h-sm)", md: "var(--control-h-md)", lg: "var(--control-h-lg)" };
   const inputId = id || (label ? `sel-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5, ...containerStyle } }, label && /* @__PURE__ */ React.createElement("label", { htmlFor: inputId, style: labelStyle }, label, required && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red-500)", marginLeft: 3 } }, "*")), /* @__PURE__ */ React.createElement("div", { style: { position: "relative", display: "flex" } }, /* @__PURE__ */ React.createElement(
     "select",
     {
@@ -789,7 +799,9 @@ function Select({ label, hint, error, required = false, size = "md", children, i
         transition: "var(--transition-control)",
         ...style
       },
-      ...rest
+      ...rest,
+      "aria-invalid": error ? true : rest["aria-invalid"],
+      "aria-describedby": error ? errorId : rest["aria-describedby"]
     },
     children
   ), /* @__PURE__ */ React.createElement(
@@ -802,15 +814,17 @@ function Select({ label, hint, error, required = false, size = "md", children, i
       style: { position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-muted)" }
     },
     /* @__PURE__ */ React.createElement("path", { d: "M6 9l6 6 6-6", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })
-  )), error ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
+  )), error ? /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
 }
 __ds_scope.Select = Select;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Select.jsx", error: String((e && e.message) || e) }); }
 
 // components/forms/Switch.jsx
 try { (() => {
-function Switch({ checked = false, disabled = false, onChange, label, id, style, ...rest }) {
-  return /* @__PURE__ */ React.createElement(
+function Switch({ checked = false, disabled = false, onChange, label, id, error, style, ...rest }) {
+  const inputId = id || (label ? `switch-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
+  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, /* @__PURE__ */ React.createElement(
     "label",
     {
       style: {
@@ -861,14 +875,16 @@ function Switch({ checked = false, disabled = false, onChange, label, id, style,
           checked,
           disabled,
           onChange,
-          id,
+          id: inputId,
+          "aria-invalid": error ? true : rest["aria-invalid"],
+          "aria-describedby": error ? errorId : rest["aria-describedby"],
           style: { position: "absolute", opacity: 0, width: "100%", height: "100%", margin: 0, cursor: "inherit" },
           ...rest
         }
       )
     ),
     label && /* @__PURE__ */ React.createElement("span", null, label)
-  );
+  ), error && /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error));
 }
 __ds_scope.Switch = Switch;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Switch.jsx", error: String((e && e.message) || e) }); }
@@ -878,6 +894,7 @@ try { (() => {
 const { labelStyle } = __ds_scope;
 function Textarea({ label, hint, error, required = false, rows = 3, id, style, containerStyle, ...rest }) {
   const inputId = id || (label ? `ta-${label.replace(/\s+/g, "-").toLowerCase()}` : void 0);
+  const errorId = inputId ? `${inputId}-error` : void 0;
   return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5, ...containerStyle } }, label && /* @__PURE__ */ React.createElement("label", { htmlFor: inputId, style: labelStyle }, label, required && /* @__PURE__ */ React.createElement("span", { style: { color: "var(--red-500)", marginLeft: 3 } }, "*")), /* @__PURE__ */ React.createElement(
     "textarea",
     {
@@ -900,9 +917,11 @@ function Textarea({ label, hint, error, required = false, rows = 3, id, style, c
         transition: "var(--transition-control)",
         ...style
       },
-      ...rest
+      ...rest,
+      "aria-invalid": error ? true : rest["aria-invalid"],
+      "aria-describedby": error ? errorId : rest["aria-describedby"]
     }
-  ), error ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
+  ), error ? /* @__PURE__ */ React.createElement("span", { id: errorId, className: "ops-field-error", role: "alert", style: { fontSize: "var(--fs-xs)", color: "var(--red-600)" } }, error) : hint ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: "var(--fs-xs)", color: "var(--text-muted)" } }, hint) : null);
 }
 __ds_scope.Textarea = Textarea;
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/forms/Textarea.jsx", error: String((e && e.message) || e) }); }
@@ -972,12 +991,30 @@ function Dialog({
   tone = "primary",
   width = 460,
   hideFooter = false,
-  irreversible = false
+  irreversible = false,
+  dismissOnBackdrop = true
 }) {
   const titleId = React.useId();
+  const descriptionId = React.useId();
+  const dialogId = `design-dialog-${React.useId()}`;
   const dialogRef = React.useRef(null);
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
   React.useEffect(() => {
     if (!open) return void 0;
+    const lifecycle = window.SwimCRMUiLifecycle;
+    if (lifecycle) {
+      return lifecycle.registerOverlay({
+        id: dialogId,
+        getElement: () => dialogRef.current,
+        requestClose: () => {
+          if (!onCloseRef.current) return false;
+          onCloseRef.current();
+          return true;
+        },
+        initialFocus: "[data-dialog-cancel]"
+      });
+    }
     const previousFocus = document.activeElement;
     const focusCancel = window.requestAnimationFrame(() => {
       var _a, _b;
@@ -987,12 +1024,20 @@ function Dialog({
       window.cancelAnimationFrame(focusCancel);
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
     };
-  }, [open]);
+  }, [dialogId, open]);
+  function requestClose(reason) {
+    if (!onClose) return false;
+    const lifecycle = window.SwimCRMUiLifecycle;
+    if (lifecycle) return lifecycle.requestOverlayClose(dialogId, reason);
+    onClose();
+    return true;
+  }
   function handleDialogKeyDown(event) {
     var _a;
+    if (window.SwimCRMUiLifecycle) return;
     if (event.key === "Escape" && onClose) {
       event.preventDefault();
-      onClose();
+      requestClose("escape");
       return;
     }
     if (event.key !== "Tab") return;
@@ -1016,6 +1061,8 @@ function Dialog({
       role: "dialog",
       "aria-modal": "true",
       "aria-labelledby": title ? titleId : void 0,
+      "aria-describedby": description ? descriptionId : void 0,
+      tabIndex: -1,
       onKeyDown: handleDialogKeyDown,
       style: {
         position: "fixed",
@@ -1030,7 +1077,7 @@ function Dialog({
         animation: "swim-fade var(--dur-normal) var(--ease-standard)"
       },
       onMouseDown: (e) => {
-        if (e.target === e.currentTarget && onClose) onClose();
+        if (dismissOnBackdrop && e.target === e.currentTarget) requestClose("backdrop");
       }
     },
     /* @__PURE__ */ React.createElement(
@@ -1047,9 +1094,9 @@ function Dialog({
           animation: "swim-pop var(--dur-normal) var(--ease-out)"
         }
       },
-      /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 0" } }, irreversible && /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--red-600)", fontSize: "var(--fs-2xs)", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" } }, /* @__PURE__ */ React.createElement(WarnIcon, null), " Działanie nieodwracalne"), title && /* @__PURE__ */ React.createElement("h2", { id: titleId, style: { margin: 0, font: "var(--text-card-title)", color: "var(--text-strong)" } }, title), description && /* @__PURE__ */ React.createElement("p", { style: { margin: "7px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-muted)", lineHeight: "var(--lh-normal)" } }, description)),
+      /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 0" } }, irreversible && /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--red-600)", fontSize: "var(--fs-2xs)", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" } }, /* @__PURE__ */ React.createElement(WarnIcon, null), " Działanie nieodwracalne"), title && /* @__PURE__ */ React.createElement("h2", { id: titleId, style: { margin: 0, font: "var(--text-card-title)", color: "var(--text-strong)" } }, title), description && /* @__PURE__ */ React.createElement("p", { id: descriptionId, style: { margin: "7px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-muted)", lineHeight: "var(--lh-normal)" } }, description)),
       /* @__PURE__ */ React.createElement("div", { style: { padding: children ? "16px 20px" : "10px 20px" } }, children),
-      !hideFooter && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 20px", background: "var(--surface-sunken)", borderTop: "1px solid var(--border-subtle)" } }, /* @__PURE__ */ React.createElement(Button, { variant: "secondary", "data-dialog-cancel": true, onClick: onClose }, cancelLabel), /* @__PURE__ */ React.createElement(Button, { variant: tone === "danger" ? "danger" : "primary", onClick: onConfirm }, confirmLabel))
+      !hideFooter && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 20px", background: "var(--surface-sunken)", borderTop: "1px solid var(--border-subtle)" } }, /* @__PURE__ */ React.createElement(Button, { variant: "secondary", "data-dialog-cancel": true, onClick: () => requestClose("cancel") }, cancelLabel), /* @__PURE__ */ React.createElement(Button, { variant: tone === "danger" ? "danger" : "primary", onClick: onConfirm }, confirmLabel))
     )
   );
 }

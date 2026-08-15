@@ -374,7 +374,29 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         setError('Тип split не настроен. Восстановите системный тип в Настройки → Типы занятий.')
         return
       }
-      updateSessionType(sessionType)
+      const groupId = sessionForm.groupId || groups[0]?.groupId || ''
+      const group = groups.find((item) => String(item.groupId) === String(groupId))
+      const defaults = sessionTypeConfigs.find((item) => item.code === sessionType)
+      setSessionForm((current) => ({
+        ...current,
+        groupId,
+        trainerId: current.trainerId || activeTrainers[0]?.trainerId || '',
+        location: current.location || configuredLocations[0]?.name || '',
+        sessionType,
+        secondParticipantId: sessionType === 'split' ? current.secondParticipantId : '',
+        rosterCount: sessionType === 'split'
+          ? Math.max(current.secondParticipantId ? 2 : 1, Number(current.rosterCount || 0))
+          : 0,
+        durationMinutes: String(defaults?.default_duration_minutes || current.durationMinutes || 60),
+        maxParticipants: newSessionCapacity({
+          groupCapacity: sessionType === 'group' ? group?.defaultCapacity : null,
+          typeCapacity: defaults?.default_capacity || (sessionType === 'split' ? 2 : null),
+          currentCapacity: current.maxParticipants,
+        }),
+        price: (sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor) == null
+          ? ''
+          : String((sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor) / 100),
+      }))
       setActionPanel('session')
     }
 

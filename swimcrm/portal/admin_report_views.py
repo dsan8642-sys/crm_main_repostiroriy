@@ -7,7 +7,13 @@ from analytics.reports import (
     session_counts_for_period,
 )
 from common.money import CURRENCY_CHOICES
-from .pagination import paginated_payload
+from .pagination import (
+    list_contract_requested,
+    ordered_rows,
+    paginated_payload,
+    positive_int_param,
+    search_param,
+)
 
 
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -92,7 +98,65 @@ def _debtor_payload(row):
 @require_GET
 def admin_debtors(request):
     _admin_required(request)
-    return JsonResponse({"debtors": [_debtor_payload(row) for row in debtors()]})
+    rows = debtors()
+    if not list_contract_requested(
+            request,
+            extra_params={"group_id", "min_amount_minor", "days_overdue_max"}):
+        return JsonResponse({
+            "debtors": [_debtor_payload(row) for row in rows],
+        })
+
+    group_id = positive_int_param(request, "group_id")
+    min_amount_minor = positive_int_param(request, "min_amount_minor")
+    days_overdue_max = positive_int_param(request, "days_overdue_max")
+    q = search_param(request).casefold()
+    payload_rows = [_debtor_payload(row) for row in rows]
+    if group_id:
+        payload_rows = [
+            row for row in payload_rows
+            if (row["student"].get("group") or {}).get("id") == group_id
+        ]
+    if min_amount_minor:
+        payload_rows = [
+            row for row in payload_rows
+            if abs(row["balance_minor"]) >= min_amount_minor
+        ]
+    if days_overdue_max:
+        payload_rows = [
+            row for row in payload_rows
+            if row["days_overdue"] <= days_overdue_max
+        ]
+    if q:
+        payload_rows = [
+            row for row in payload_rows
+            if q in " ".join((
+                row["student"].get("full_name", ""),
+                row["student"].get("client_phone", ""),
+                row["student"].get("email", ""),
+                (row["student"].get("group") or {}).get("name", ""),
+                " ".join(row["reasons"]),
+            )).casefold()
+        ]
+    payload_rows = ordered_rows(request, payload_rows, allowlist={
+        "-balance": lambda row: (-row["balance_minor"], -row["student"]["id"]),
+        "balance": lambda row: (row["balance_minor"], row["student"]["id"]),
+        "name": lambda row: (row["student"]["full_name"].casefold(), row["student"]["id"]),
+        "-due": lambda row: (-row["days_overdue"], -row["student"]["id"]),
+        "due": lambda row: (row["days_overdue"], row["student"]["id"]),
+    }, default="-balance")
+    return JsonResponse(paginated_payload(
+        request,
+        payload_rows,
+        key="debtors",
+        serializer=lambda row: row,
+        extra={
+            "summary": {
+                "balance_minor": sum(
+                    row["balance_minor"] for row in payload_rows),
+                "currency": settings.DEFAULT_CURRENCY,
+            },
+        },
+    ))
 
 
 @require_GET

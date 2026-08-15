@@ -8,6 +8,9 @@ import { ToastNotice } from '../ToastProvider.jsx'
 import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
 import { validIsoDate } from '../scheduleContracts.js'
+import { mapAdminTrainerRows } from '../../mappers.js'
+import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
+import { ActionPopover, ContextBackButton, EntityMobileCard } from '../EntityListPrimitives.jsx'
 
 const TRAINER_FIELD_IDS = {
   firstName: 'admin-trainer-firstName', lastName: 'admin-trainer-lastName',
@@ -29,10 +32,20 @@ const monthStart = () => `${today().slice(0, 8)}01`
 const money = (minor = 0, currency = 'PLN') => `${(Number(minor) / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${currency}`
 
 export function createAdminTrainersScreen(components, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Avatar, Button, Banner, Input, Badge, Select, Checkbox } = components
+  const { Table, StatusPill, Avatar, Button, Banner, Input, Badge, Select, Checkbox, Dialog } = components
 
-  return function ApiAdminTrainers({ go }) {
-    const rows = adminData.trainers || []
+  return function ApiAdminTrainers({ go, currentUser }) {
+    const trainerList = useScreenList({
+      path: '/api/admin/trainers/',
+      itemKey: 'trainers',
+      mapRows: mapAdminTrainerRows,
+      role: 'admin',
+      route: 'trainers',
+      userKey: currentUser?.id || currentUser?.username,
+      initialFilters: { active: '' },
+      defaultOrder: 'name',
+    })
+    const rows = trainerList.rows
     const groups = adminData.groups || []
     const sessions = adminData.sessions || []
     const [selected, setSelected] = useState(null)
@@ -53,6 +66,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
     const [ruleErrors, setRuleErrors] = useState({})
     const [payrollAction, setPayrollAction] = useState(null)
     const [payrollBaseline, setPayrollBaseline] = useState(null)
+    const [deactivateConfirm, setDeactivateConfirm] = useState(false)
 
     const trainerGroups = useMemo(() => groups.filter((group) => String(group.defaultTrainerId) === String(selected?.trainerId)), [groups, selected])
     const trainerSessions = useMemo(() => sessions.filter((session) => String(session.trainerId) === String(selected?.trainerId)), [sessions, selected])
@@ -222,6 +236,23 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       } catch (err) { setError(apiErrorMessage(err, 'Не удалось изменить доступ тренера.')) } finally { setBusy(false) }
     }
 
+    async function deactivateTrainer() {
+      if (!selected?.trainerId) return
+      setBusy(true); setError(null)
+      try {
+        await api.delete(`/api/admin/trainers/${selected.trainerId}/`)
+        setSelected((current) => ({ ...current, active: false, portalAccess: 'revoked' }))
+        setForm((current) => ({ ...current, isActive: false }))
+        setMessage(`Тренер ${selected.name} деактивирован.`)
+        setDeactivateConfirm(false)
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(apiErrorMessage(err, 'Не удалось деактивировать тренера.'))
+      } finally {
+        setBusy(false)
+      }
+    }
+
     const editor = (
       <>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
@@ -231,7 +262,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           <Input id={TRAINER_FIELD_IDS.username} label="Логин" value={form.username} error={fieldErrors.username} onChange={(event) => updateTrainerForm('username', event.target.value)} />
           <Input id={TRAINER_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => updateTrainerForm('email', event.target.value)} />
           <Input id={TRAINER_FIELD_IDS.phone} label="Телефон" value={form.phone} error={fieldErrors.phone} onChange={(event) => updateTrainerForm('phone', event.target.value)} />
-          <Checkbox id={TRAINER_FIELD_IDS.isActive} label="Активен" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateTrainerForm('isActive', event.target.checked)} />
+          {creating && <Checkbox id={TRAINER_FIELD_IDS.isActive} label="Активен" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateTrainerForm('isActive', event.target.checked)} />}
         </div>
       </>
     )
@@ -242,13 +273,17 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
         <ToastNotice id="admin-trainer-result" message={message} />
         {error && !creating && !editing && !payrollAction && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Выполняю операцию...</BusyBanner>
+        <ListToolbar list={trainerList} searchLabel="Поиск тренеров" searchPlaceholder="Имя, логин, email или телефон">
+          <label>Статус<select value={trainerList.draftFilters.active} onChange={(event) => trainerList.setDraftFilter('active', event.target.value)}><option value="">Все</option><option value="true">Активные</option><option value="false">Неактивные</option></select></label>
+        </ListToolbar>
         <FormModal open={creating || editing} title={creating ? 'Новый тренер' : 'Редактирование профиля'} size="lg" busy={busy} dirty={Boolean(formBaseline) && JSON.stringify(form) !== JSON.stringify(formBaseline)} onRequestClose={() => { if (formBaseline) setForm(formBaseline); setCreating(false); setEditing(false); setFormBaseline(null); setFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={busy} onClick={() => saveTrainer(creating)}>Сохранить</Button></>}>
           {editor}
         </FormModal>
 
         {selected && !creating && (
           <section className="card ops-entity-card" aria-label={`Профиль тренера ${selected.name}`}>
-            <div className="ops-entity-head"><div className="ops-entity-person"><Avatar name={selected.name} size={44} /><div><h3>{selected.name}</h3><div className="muted">{selected.email || 'Email не указан'} · {selected.phone || 'Телефон не указан'}</div></div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active && <AccessButtons Button={Button} portalAccess={selected.portalAccess} accessActivated={selected.accessActivated} busy={busy} onAction={accessAction} />}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>Редактировать</Button><Button variant="subtle" onClick={() => setSelected(null)}>Закрыть</Button></div></div>
+            <ContextBackButton onClick={() => setSelected(null)}>К списку тренеров</ContextBackButton>
+            <div className="ops-entity-head"><div className="ops-entity-person"><Avatar name={selected.name} size={44} /><div><h3>{selected.name}</h3><div className="muted">{selected.email || 'Email не указан'} · {selected.phone || 'Телефон не указан'}</div></div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active && <AccessButtons Button={Button} portalAccess={selected.portalAccess} accessActivated={selected.accessActivated} busy={busy} onAction={accessAction} />}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>Редактировать</Button>{selected.active && <Button variant="danger" disabled={busy} onClick={() => setDeactivateConfirm(true)}>Деактивировать</Button>}</div></div>
             <AccessCodeCard info={accessInfo} Button={Button} />
             <div className="ops-tabs" role="tablist">{[['profile', 'Обзор'], ['schedule', `Расписание ${trainerSessions.length}`], ['payroll', 'Зарплата и ставки']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{label}</button>)}</div>
             {tab === 'profile' && <div className="ops-detail-grid"><div><div className="eyebrow">Группы</div>{trainerGroups.map((group) => <button key={group.id} className="ops-detail-row" type="button" onClick={() => go?.('groups', { groupId: group.groupId })}><strong>{group.name}</strong><span>{group.students} участников</span></button>)}{!trainerGroups.length && <div className="empty">Назначенных групп нет</div>}</div><div><div className="eyebrow">Ближайшие занятия</div>{trainerSessions.slice(0, 5).map((session) => <button key={session.id} type="button" className="ops-detail-row" onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}</strong><span>{session.group} · {session.location}</span></button>)}{!trainerSessions.length && <div className="empty">Занятий нет</div>}</div></div>}
@@ -279,14 +314,32 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           </div>
         </FormModal>
 
-        <Table rows={rows} emptyLabel="Тренеров пока нет" columns={[
+        <ListFeedback list={trainerList} emptyLabel="Тренеров пока нет" />
+        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel="Тренеров пока нет" columns={[
           { key: 'name', header: 'Тренер', render: (row) => <button type="button" className="ops-link-button" onClick={() => openTrainer(row)}><Avatar name={row.name} size={28} /><span className="strong">{row.name}</span></button> },
           { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
           { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
           { key: 'groups', header: 'Группы', align: 'right', width: 90, render: (row) => <button type="button" className="ops-count-button" onClick={() => openTrainer(row)}>{row.groups}</button> },
           { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
           { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openTrainer(row)}>Профиль</Button> },
-        ]} />
+        ]} /></div>
+        <div className="ops-entity-mobile-list">
+          {rows.map((row) => (
+            <EntityMobileCard key={row.id} className="ops-trainer-compact-card" labelledBy={`trainer-card-${row.id}`}>
+              <div className="ops-compact-card-head">
+                <button type="button" className="ops-compact-card-title with-avatar" onClick={() => openTrainer(row)}><Avatar name={row.name} size={34} /><strong id={`trainer-card-${row.id}`} title={row.name}>{row.name}</strong></button>
+                <ActionPopover label={`Действия: ${row.name}`} actions={[
+                  { key: 'profile', label: 'Профиль', onSelect: () => openTrainer(row) },
+                  { key: 'edit', label: 'Изменить', onSelect: () => { openTrainer(row); setEditing(true) } },
+                ]} />
+              </div>
+              <div className="ops-compact-card-line"><span>Телефон</span><strong className="mono" title={row.phone || ''}>{row.phone || '—'}</strong></div>
+              <div className="ops-compact-card-footer"><span>Активных групп: {row.groups ?? 0}</span><StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /></div>
+            </EntityMobileCard>
+          ))}
+        </div>
+        <ListPagination list={trainerList} />
+        {deactivateConfirm && <Dialog title={`Деактивировать ${selected?.name}?`} description="Вход в портал будет закрыт, а профиль и история останутся в системе." tone="danger" confirmLabel="Деактивировать" onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>}
       </div>
     )
   }

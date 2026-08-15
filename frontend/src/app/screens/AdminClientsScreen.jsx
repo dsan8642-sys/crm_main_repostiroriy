@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { api, apiErrorMessage, downloadFile } from '../../api.js'
-import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
+import { api, apiErrorMessage } from '../../api.js'
+import { mapAdminClientRows } from '../../mappers.js'
 import { updateClientIdentity } from '../clientContracts.js'
 import {
   clearFieldError,
@@ -13,6 +13,9 @@ import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { DateField } from '../DateTimeField.jsx'
 import { FormModal } from '../FormModal.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
+import { ListFeedback, ListPagination, useScreenList } from '../listFoundation.jsx'
+import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
+import { clientActivity, formatEntityMoney } from '../entityListContracts.js'
 
 const CLIENT_FIELD_MAP = {
   'account.first_name': 'firstName',
@@ -59,14 +62,28 @@ const PARTICIPANT_FIELD_MAP = {
   group_id: 'groupId',
 }
 
+const mapActiveClientRows = (rows) => mapAdminClientRows(rows).active
+const mapBlacklistedClientRows = (rows) => mapAdminClientRows(rows).blacklisted
+
 export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
-  return function ApiAdminClients({ go }) {
-    const rows = adminData.clients || []
-    const blacklistedRows = adminData.blacklistedClients || []
+  return function ApiAdminClients({ go, currentUser }) {
     const groups = adminData.groups || []
+    const [scope, setScope] = useState('active')
+    const clientList = useScreenList({
+      path: '/api/admin/clients/',
+      itemKey: 'clients',
+      mapRows: scope === 'blacklist' ? mapBlacklistedClientRows : mapActiveClientRows,
+      role: 'admin',
+      route: `clients-${scope}`,
+      userKey: currentUser?.id || currentUser?.username,
+      initialFilters: { subscription: '', balance: '', activity: '' },
+      fixedParams: { active: scope === 'blacklist' ? 'false' : 'true' },
+      defaultOrder: 'name',
+    })
+    const rows = clientList.rows
     const clientOptions = Array.from(
-      new Map(rows.filter((row) => row.clientId).map((row) => [row.clientId, row])).values(),
+      new Map([...(adminData.clients || []), ...rows].filter((row) => row.clientId).map((row) => [row.clientId, row])).values(),
     )
     const [clientForm, setClientForm] = useState({
       firstName: '',
@@ -108,29 +125,10 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     const [clientEditFieldErrors, setClientEditFieldErrors] = useState({})
     const [busy, setBusy] = useState(false)
     const [quickAction, setQuickAction] = useState(null)
-    const [query, setQuery] = useState('')
-    const [scope, setScope] = useState('active')
-    const [subscriptionFilter, setSubscriptionFilter] = useState('all')
-    const [balanceFilter, setBalanceFilter] = useState('all')
-    const [activityFilter, setActivityFilter] = useState('all')
     const [clientAction, setClientAction] = useState(null)
-    const [mobileActionsFor, setMobileActionsFor] = useState(null)
-    const scopedRows = scope === 'blacklist'
-      ? blacklistedRows
-      : rows
-    const filteredRows = scopedRows.filter((row) => {
-      const needle = query.trim().toLocaleLowerCase('ru-RU')
-      if (needle && ![row.first, row.last, row.phone, row.email, row.group, row.blacklistSearchText].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))) return false
-      if (subscriptionFilter === 'with' && !row.hasCurrentSubscription) return false
-      if (subscriptionFilter === 'without' && row.hasCurrentSubscription) return false
-      if (balanceFilter === 'positive' && row.balance <= 0) return false
-      if (balanceFilter === 'negative' && row.balance >= 0) return false
-      if (activityFilter === 'active' && !row.isRecentlyActive) return false
-      if (activityFilter === 'inactive' && row.isRecentlyActive) return false
-      return true
-    })
-    const hasActiveFilter = Boolean(query.trim()) || subscriptionFilter !== 'all' || balanceFilter !== 'all' || activityFilter !== 'all'
-    const emptyLabel = hasActiveFilter && scopedRows.length
+    const filteredRows = rows
+    const hasActiveFilter = Boolean(clientList.search.trim()) || clientList.filterCount > 0
+    const emptyLabel = hasActiveFilter
       ? 'По заданным фильтрам ничего не найдено.'
       : scope === 'blacklist'
         ? 'Чёрный список пуст'
@@ -138,13 +136,6 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     const clientFormDirty = Object.entries(clientForm).some(([key, value]) => key !== 'usernameManual' && Boolean(value))
     const participantFormDirty = Object.values(participantForm).some(Boolean)
     const clientEditDirty = Boolean(clientEditBaseline) && JSON.stringify(clientEditForm) !== JSON.stringify(clientEditBaseline)
-
-    function resetFilters() {
-      setQuery('')
-      setSubscriptionFilter('all')
-      setBalanceFilter('all')
-      setActivityFilter('all')
-    }
 
     function closeQuickAction() {
       if (quickAction === 'client') {
@@ -159,10 +150,12 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     }
 
     const subscriptionUsage = (row) => {
-      if (!row.hasCurrentSubscription) return 'Нет'
-      if (row.currentSubscriptionIsUnlimited) return 'Безлимит'
+      if (!row.hasCurrentSubscription) return 'Нет абонемента'
+      if (row.currentSubscriptionIsUnlimited) return 'Безлимитный'
       return `${row.currentSubscriptionRemaining} из ${row.currentSubscriptionTotal}`
     }
+
+    const activity = (row) => clientActivity(row.lastPresentAt)
 
     const updateClientForm = (field, value) => {
       setClientFieldErrors((current) => {
@@ -544,29 +537,29 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             </div>
             <div className="ops-search">
               <span aria-hidden="true">⌕</span>
-              <input aria-label="Поиск клиентов" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, телефон, email или группа" />
+              <input aria-label="Поиск клиентов" value={clientList.search} onChange={(event) => clientList.setSearch(event.target.value)} placeholder="Имя, телефон, email или группа" />
             </div>
             <div className="ops-client-filter-selects">
               <label className="ops-client-filter-field">
                 <span>Абонемент</span>
-                <select aria-label="Абонемент" value={subscriptionFilter} onChange={(event) => setSubscriptionFilter(event.target.value)}>
-                  <option value="all">Все</option>
+                <select aria-label="Абонемент" value={clientList.draftFilters.subscription} onChange={(event) => clientList.setDraftFilter('subscription', event.target.value)}>
+                  <option value="">Все</option>
                   <option value="with">Есть</option>
                   <option value="without">Нет</option>
                 </select>
               </label>
               <label className="ops-client-filter-field">
                 <span>Баланс</span>
-                <select aria-label="Баланс" value={balanceFilter} onChange={(event) => setBalanceFilter(event.target.value)}>
-                  <option value="all">Любой</option>
+                <select aria-label="Баланс" value={clientList.draftFilters.balance} onChange={(event) => clientList.setDraftFilter('balance', event.target.value)}>
+                  <option value="">Любой</option>
                   <option value="positive">Положительный — переплата</option>
                   <option value="negative">Отрицательный — долг</option>
                 </select>
               </label>
               <label className="ops-client-filter-field">
                 <span>Активность</span>
-                <select aria-label="Активность" value={activityFilter} onChange={(event) => setActivityFilter(event.target.value)}>
-                  <option value="all">Все</option>
+                <select aria-label="Активность" value={clientList.draftFilters.activity} onChange={(event) => clientList.setDraftFilter('activity', event.target.value)}>
+                  <option value="">Все</option>
                   <option value="active">Активные за 60 дней</option>
                   <option value="inactive">Неактивные</option>
                 </select>
@@ -574,41 +567,42 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="muted">Найдено: {filteredRows.length}</span>
+            <span className="muted">Найдено: {clientList.pagination.total}</span>
+            <Button size="sm" variant="secondary" onClick={clientList.applyFilters}>Применить · Фильтры ({clientList.filterCount})</Button>
             {hasActiveFilter && (
-              <Button size="sm" variant="subtle" onClick={resetFilters}>Сбросить фильтры</Button>
+              <Button size="sm" variant="subtle" onClick={clientList.resetFilters}>Сбросить фильтры</Button>
             )}
           </div>
         </div>
+        <ListFeedback list={clientList} emptyLabel={scope === 'blacklist' ? 'Чёрный список пуст' : 'Активных клиентов пока нет'} />
         <div className="ops-client-desktop-table">
           <Table
             rows={filteredRows}
             emptyLabel={emptyLabel}
             columns={[
               { key: 'name', header: 'Участник', render: (row) => (
-                <button type="button" className="ops-link-button" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
+                <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={`${row.last} ${row.first}`} title={`${row.last} ${row.first}`} disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
                   <Avatar name={`${row.first} ${row.last}`} size={28} />
-                  <span className="strong">{row.last} {row.first}</span>
+                  <span className="strong ops-ellipsis-text">{row.last} {row.first}</span>
                 </button>
               ) },
-              { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
-              { key: 'email', header: 'Email', muted: true },
-              { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button" onClick={() => go?.('groups', { groupId: row.groupId })}>{row.group}</button> : row.group },
+              { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono ops-ellipsis-value" data-full-value={row.phone || '-'} title={row.phone || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.phone || '-'}</span></span> },
+              { key: 'email', header: 'Email', muted: true, render: (row) => <span className="ops-ellipsis-value" data-full-value={row.email || '-'} title={row.email || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.email || '-'}</span></span> },
+              { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} onClick={() => go?.('groups', { groupId: row.groupId })}><span className="ops-ellipsis-text">{row.group}</span></button> : <span className="ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.group || '-'}</span></span> },
               { key: 'subscription', header: 'Абонемент', width: 105, render: (row) => <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge> },
               { key: 'balance', header: 'Баланс', align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
               { key: 'activity', header: 'Активность', width: 150, render: (row) => (
                 <span className="ops-client-activity">
-                  <StatusPill status={row.isRecentlyActive ? 'active' : 'inactive'} size="sm" />
-                  <small>{row.lastPresentAt ? formatDate(row.lastPresentAt) : 'Не посещал'}</small>
+                  <StatusPill status={activity(row).state} size="sm" />
+                  <small className="ops-ellipsis-value" data-full-value={activity(row).label} title={activity(row).label} tabIndex={0}><span className="ops-ellipsis-text">{activity(row).label}</span></small>
                 </span>
               ) },
               {
                 key: 'act',
                 header: '',
-                width: 260,
+                width: 240,
                 render: (row) => (
                   <div className="ops-client-row-actions">
-                    <Button size="sm" variant="subtle" disabled={busy || !row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>Карточка</Button>
                     {scope === 'active' ? (
                       <>
                         <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>Изменить</Button>
@@ -625,55 +619,49 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         </div>
         <div className="ops-client-mobile-list">
           {filteredRows.map((row) => (
-            <article key={row.id} className={`ops-client-mobile-card${row.clientId ? ' is-linked' : ''}`}>
-              <button
-                type="button"
-                className="ops-client-mobile-link"
-                disabled={!row.clientId}
-                aria-label={row.clientId ? `Открыть профиль клиента ${row.last} ${row.first}` : undefined}
-                onClick={row.clientId ? () => go?.('clientDetail', { clientId: row.clientId }) : undefined}
-              >
-                <span className="ops-client-mobile-person">
-                  <Avatar name={`${row.first} ${row.last}`} size={32} />
-                  <strong>{row.last} {row.first}</strong>
-                </span>
-                <span className="ops-client-mobile-details">
-                  <span><small>Телефон</small><span className="mono">{row.phone || '-'}</span></span>
-                  <span><small>Email</small><span>{row.email || '-'}</span></span>
-                  <span><small>Группа</small><span>{row.group || 'Индивидуально'}</span></span>
-                  <span><small>Абонемент</small><span>{subscriptionUsage(row)}</span></span>
-                  <span><small>Баланс</small><Money amount={row.balance} signed currency="zł" /></span>
-                  <span><small>Активность</small><span>{row.isRecentlyActive ? 'Активен' : 'Неактивен'} · {row.lastPresentAt ? formatDate(row.lastPresentAt) : 'Не посещал'}</span></span>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="ops-client-mobile-actions-trigger"
-                aria-label="Действия клиента"
-                aria-expanded={mobileActionsFor === row.id}
-                onClick={() => setMobileActionsFor((current) => current === row.id ? null : row.id)}
-              >
-                ⋮
-              </button>
-              {mobileActionsFor === row.id && (
-                <div className="ops-client-mobile-actions" role="group" aria-label={`Действия: ${row.last} ${row.first}`}>
-                  {scope === 'active' ? (
-                    <>
-                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => { setMobileActionsFor(null); openClientEdit(row) }}>Изменить</Button>
-                      <Button size="sm" variant="subtle" disabled={busy} onClick={() => { setMobileActionsFor(null); setClientAction({ type: 'archive', row }) }}>В чёрный список</Button>
-                    </>
-                  ) : (
-                    <Button size="sm" variant="primary" disabled={busy} onClick={() => { setMobileActionsFor(null); setClientAction({ type: 'restore', row }) }}>Восстановить</Button>
-                  )}
-                </div>
-              )}
-            </article>
+            <EntityMobileCard key={row.id} className="ops-client-compact-card" labelledBy={`client-card-${row.id}`} testId="client-compact-card">
+              <div className="ops-client-compact-primary">
+                <button
+                  type="button"
+                  className="ops-client-compact-profile"
+                  disabled={!row.clientId}
+                  aria-label={row.clientId ? `Открыть профиль клиента ${row.last} ${row.first}` : undefined}
+                  onClick={row.clientId ? () => go?.('clientDetail', { clientId: row.clientId }) : undefined}
+                >
+                  <Avatar name={`${row.first} ${row.last}`} size={36} />
+                  <strong id={`client-card-${row.id}`} title={`${row.last} ${row.first}`}>{row.last} {row.first}</strong>
+                </button>
+                <span className={`ops-client-compact-balance${row.balance < 0 ? ' is-debt' : ''}`}>{formatEntityMoney(row.balance)}</span>
+                <ActionPopover
+                  label={`Действия: ${row.last} ${row.first}`}
+                  disabled={busy}
+                  actions={[
+                    { key: 'profile', label: 'Профиль', disabled: !row.clientId, onSelect: () => go?.('clientDetail', { clientId: row.clientId }) },
+                    scope === 'active' && { key: 'edit', label: 'Изменить', onSelect: () => openClientEdit(row) },
+                    scope === 'active'
+                      ? { key: 'archive', label: 'В чёрный список', danger: true, onSelect: () => setClientAction({ type: 'archive', row }) }
+                      : { key: 'restore', label: 'Восстановить', onSelect: () => setClientAction({ type: 'restore', row }) },
+                  ]}
+                />
+              </div>
+              <div className="ops-client-compact-context">
+                <span title={row.group || 'Индивидуально'}>{row.group || 'Индивидуально'}</span>
+                <span aria-hidden="true">·</span>
+                <span title={subscriptionUsage(row)}>{subscriptionUsage(row)}</span>
+              </div>
+              <div className={`ops-client-compact-activity is-${activity(row).state}`} title={activity(row).label}>
+                <span aria-hidden="true" />{activity(row).label}
+              </div>
+            </EntityMobileCard>
           ))}
           {!filteredRows.length && <div className="empty">{emptyLabel}</div>}
         </div>
+        <ListPagination list={clientList} />
         {clientAction && (
           <Dialog
-            title={clientAction.type === 'archive' ? 'Переместить клиента в чёрный список?' : 'Восстановить клиента?'}
+            title={clientAction.type === 'archive'
+              ? `Переместить ${clientAction.row.last} ${clientAction.row.first} в чёрный список?`
+              : `Восстановить ${clientAction.row.last} ${clientAction.row.first}?`}
             description={clientAction.type === 'archive'
               ? 'Клиент исчезнет из рабочего списка, но платежи, посещения, абонементы и журнал действий останутся в системе.'
               : 'Аккаунт и его участники снова станут активными и появятся в рабочем списке.'}

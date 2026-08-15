@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import login, logout
 from django.http import Http404, JsonResponse
+from django.middleware.csrf import get_token
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
@@ -84,7 +85,7 @@ def _demo_client():
 @require_GET
 @ensure_csrf_cookie
 def csrf(request):
-    return JsonResponse({"ok": True})
+    return JsonResponse({"ok": True, "csrf_token": get_token(request)})
 
 
 @csrf_exempt

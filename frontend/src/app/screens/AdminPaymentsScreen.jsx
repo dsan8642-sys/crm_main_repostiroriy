@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
-import { asMoneyMajor, formatDate, formatShortDate, formatTime } from '../../mappers.js'
+import { asAccountBalance, asMoneyMajor, formatDate, formatShortDate, formatTime, mapAdminPaymentRows, paymentMethodLabel } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
@@ -12,6 +12,9 @@ import {
 } from '../formErrors.js'
 import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
+import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
+import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
+import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor } from '../financialContracts.js'
 
 const TYPE_FIELD_MAP = {
   name: 'name', price_minor: 'price', currency: 'currency',
@@ -38,6 +41,7 @@ const FINANCE_FIELD_IDS = {
   paymentAmount: 'admin-finance-payment-amount',
   paymentDate: 'admin-finance-payment-date',
   paymentMethod: 'admin-finance-payment-method',
+  paymentComment: 'admin-finance-payment-comment',
   freezeStart: 'admin-finance-freeze-start', freezeEnd: 'admin-finance-freeze-end',
   freezeReason: 'admin-finance-freeze-reason',
   adjustDelta: 'admin-finance-adjust-delta', adjustNote: 'admin-finance-adjust-note',
@@ -45,6 +49,7 @@ const FINANCE_FIELD_IDS = {
 const PAYMENT_EDIT_FIELD_IDS = {
   method: 'admin-payment-edit-method', comment: 'admin-payment-edit-comment',
 }
+const REJECT_FIELD_IDS = { reason: 'admin-payment-reject-reason' }
 
 function validPositiveMoney(value) {
   const parsed = Number(String(value ?? '').replace(',', '.'))
@@ -62,21 +67,32 @@ function positiveInteger(value) {
 }
 
 export function createAdminPaymentsScreen(components, icons, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Dialog, Avatar, Input, Select, Checkbox } = components
+  const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Avatar, Input, Select, Checkbox } = components
   const I = icons
 
-  return function ApiAdminPayments({ go, initialTab }) {
+  return function ApiAdminPayments({ go, initialTab, currentUser }) {
     const participants = adminData.clients || []
     const subscriptionTypes = adminData.subscriptionTypes || []
     const [tab, setTab] = useState('review')
-    const [methodFilter, setMethodFilter] = useState('')
+    const paymentList = useScreenList({
+      path: '/api/admin/payments/',
+      itemKey: 'payments',
+      mapRows: mapAdminPaymentRows,
+      role: 'admin',
+      route: `payments-${tab}`,
+      userKey: currentUser?.id || currentUser?.username,
+      initialFilters: { method: '', source: '' },
+      fixedParams: { status: ({ review: 'pending', confirmed: 'confirmed', rejected: 'rejected' })[tab] || '' },
+      defaultOrder: '-date',
+    })
     const [reject, setReject] = useState(null)
-    const [confirm, setConfirm] = useState(null)
+    const [rejectReason, setRejectReason] = useState('')
+    const [rejectErrors, setRejectErrors] = useState({})
     const [editingPayment, setEditingPayment] = useState(null)
     const [paymentEditForm, setPaymentEditForm] = useState({ method: 'cash', comment: '' })
     const [paymentEditBaseline, setPaymentEditBaseline] = useState(null)
     const [paymentEditErrors, setPaymentEditErrors] = useState({})
-    const [rows, setRows] = useState(() => [...(adminData.payments || [])])
+    const [rows, setRows] = useState([])
     const [subscriptions, setSubscriptions] = useState([])
     const [subscriptionsLoading, setSubscriptionsLoading] = useState(false)
     const [financeForm, setFinanceForm] = useState({
@@ -90,6 +106,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       paymentAmount: '',
       paymentDate: new Date().toISOString().slice(0, 10),
       paymentMethod: 'cash',
+      paymentComment: '',
+      paymentIdempotencyKey: createPaymentAttemptKey('admin-payment'),
       freezeStart: new Date().toISOString().slice(0, 10),
       freezeEnd: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       freezeReason: '',
@@ -131,6 +149,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     const [busyId, setBusyId] = useState(null)
     const [toolPanel, setToolPanel] = useState(null)
     const selectedType = subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))
+    const selectedParticipant = participants.find((participant) => String(participant.studentId) === String(financeForm.participantId))
 
     const updateFinanceForm = (field, value) => {
       setFinanceErrors((current) => clearFieldError(current, field))
@@ -195,6 +214,13 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     }, [initialTab])
 
     useEffect(() => {
+      setRows(paymentList.rows.map((payment) => ({
+        ...payment,
+        clientId: participants.find((client) => client.studentId === payment.studentId)?.clientId,
+      })))
+    }, [paymentList.rows, participants])
+
+    useEffect(() => {
       if (!financeForm.participantId) {
         setSubscriptions([])
         setSubscriptionsLoading(false)
@@ -233,27 +259,36 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       confirmed: rows.filter((payment) => payment.status === 'paid').length,
       rejected: rows.filter((payment) => payment.status === 'rejected').length,
     }
-    const visibleRows = rows.filter((payment) => {
-      if (tab === 'review') return payment.status === 'pending'
-      if (tab === 'confirmed') return payment.status === 'paid'
-      if (tab === 'rejected') return payment.status === 'rejected'
-      return true
-    }).filter((payment) => !methodFilter || payment.methodCode === methodFilter)
+    const visibleRows = rows
 
-    async function updatePayment(payment, action) {
+    async function updatePayment(payment, action, reason = '') {
+      if (action === 'reject' && !reason.trim()) {
+        const nextErrors = { reason: 'Укажите причину отклонения.' }
+        setRejectErrors(nextErrors)
+        focusFirstFieldError(nextErrors, REJECT_FIELD_IDS)
+        return
+      }
       setBusyId(payment.id)
       setError(null)
       try {
         const path = action === 'confirm'
           ? `/api/admin/payments/${payment.paymentId || payment.id}/confirm/`
           : `/api/admin/payments/${payment.paymentId || payment.id}/reject/`
-        await api.post(path, action === 'reject' ? { reason: 'Отклонено администратором в CRM' } : {})
-        setRows((current) => current.map((item) => item.id === payment.id
-          ? { ...item, status: action === 'confirm' ? 'paid' : 'rejected' }
-          : item))
+        const mutation = await api.post(path, action === 'reject' ? { reason: reason.trim() } : {})
+        const readback = await api.get(`/api/admin/payments/${payment.paymentId || payment.id}/`)
+        const expectedStatus = action === 'confirm' ? 'confirmed' : 'rejected'
+        assertPaymentReadback(mutation, readback, expectedStatus)
+        let checkedBalance = Number.isInteger(mutation.balance_minor) ? asAccountBalance(mutation.balance_minor) : null
+        if (payment.clientId) {
+          const clientReadback = await api.get(`/api/admin/clients/${payment.clientId}/`)
+          checkedBalance = asAccountBalance(clientReadback?.summary?.balance_minor)
+        }
+        await paymentList.retry()
         setReject(null)
-        setConfirm(null)
-        setMessage(action === 'confirm' ? 'Платёж подтверждён.' : 'Платёж отклонён.')
+        setRejectReason('')
+        setRejectErrors({})
+        const balanceSuffix = checkedBalance == null ? '' : ` Проверенный баланс: ${checkedBalance.toFixed(2).replace('.', ',')} zł.`
+        setMessage(`${action === 'confirm' ? 'Платёж подтверждён.' : 'Платёж отклонён.'}${balanceSuffix}`)
         reloadRoleData?.('admin')
       } catch (err) {
         setError(apiErrorMessage(err, 'Не удалось изменить статус платежа.'))
@@ -474,28 +509,50 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     async function createPayment() {
       const nextErrors = {}
       if (!financeForm.participantId) nextErrors.participantId = 'Выберите участника.'
-      if (!validPositiveMoney(financeForm.paymentAmount)) nextErrors.paymentAmount = 'Введите сумму больше нуля.'
+      let amountMinor = null
+      amountMinor = moneyMajorToMinor(financeForm.paymentAmount)
+      if (!amountMinor) {
+        nextErrors.paymentAmount = 'Введите положительную сумму, не более двух знаков после запятой.'
+      }
       if (!validIsoDate(financeForm.paymentDate)) nextErrors.paymentDate = 'Введите дату платежа в формате ГГГГ-ММ-ДД.'
       if (!financeForm.paymentMethod) nextErrors.paymentMethod = 'Выберите способ оплаты.'
       if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('payment')
       setError(null); setFinanceErrors({})
       try {
-        await api.post('/api/admin/payments/', {
+        const created = await api.post('/api/admin/payments/', {
           participant_id: financeForm.participantId,
-          amount_minor: minorFromMajor(financeForm.paymentAmount),
+          amount_minor: amountMinor,
           currency: 'PLN',
           paid_at: financeForm.paymentDate,
           method: financeForm.paymentMethod,
+          comment: financeForm.paymentComment,
+          confirm: true,
+          idempotency_key: financeForm.paymentIdempotencyKey,
         })
-        setMessage('Платёж добавлен.')
+        const paymentReadback = await api.get(`/api/admin/payments/${created.id}/`)
+        assertPaymentReadback(created, paymentReadback, 'confirmed')
+        let checkedBalance = Number.isInteger(created.balance_minor) ? asAccountBalance(created.balance_minor) : null
+        if (selectedParticipant?.clientId) {
+          const clientReadback = await api.get(`/api/admin/clients/${selectedParticipant.clientId}/`)
+          checkedBalance = asAccountBalance(clientReadback?.summary?.balance_minor)
+        }
+        const balanceSuffix = checkedBalance == null ? '' : ` Проверенный баланс: ${checkedBalance.toFixed(2).replace('.', ',')} zł.`
+        setMessage(`Платёж подтверждён.${balanceSuffix}`)
         setFinanceAction(null)
         setFinanceBaseline(null)
+        setFinanceForm((current) => ({
+          ...current,
+          paymentAmount: '',
+          paymentComment: '',
+          paymentIdempotencyKey: createPaymentAttemptKey('admin-payment'),
+        }))
+        await paymentList.retry()
         await reloadRoleData?.('admin')
       } catch (err) {
         showApiFieldErrors(err, {
           participant_id: 'participantId', amount_minor: 'paymentAmount',
-          paid_at: 'paymentDate', method: 'paymentMethod', currency: 'paymentAmount',
+          paid_at: 'paymentDate', method: 'paymentMethod', comment: 'paymentComment', currency: 'paymentAmount',
         }, setFinanceErrors, FINANCE_FIELD_IDS, 'Не удалось добавить платёж.')
       } finally {
         setBusyId(null)
@@ -599,8 +656,12 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     }
 
     function openFinanceAction(action) {
+      const next = action === 'payment'
+        ? { ...financeForm, paymentIdempotencyKey: createPaymentAttemptKey('admin-payment') }
+        : financeForm
+      if (action === 'payment') setFinanceForm(next)
       setFinanceAction(action)
-      setFinanceBaseline(financeForm)
+      setFinanceBaseline(next)
       setFinanceErrors({})
       setError(null)
     }
@@ -690,15 +751,20 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             { value: 'confirmed', label: 'Подтверждённые', count: counts.confirmed },
             { value: 'rejected', label: 'Отклонённые', count: counts.rejected },
           ]} />
-          <span className="spacer" />
-          <label>Способ оплаты <select aria-label="Способ оплаты" value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label>
         </div>
 
-        <Table
+        <ListToolbar list={paymentList} searchLabel="Поиск платежей" searchPlaceholder="Участник или комментарий">
+          <label>Способ оплаты<select aria-label="Способ оплаты" value={paymentList.draftFilters.method} onChange={(event) => paymentList.setDraftFilter('method', event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></select></label>
+          <label>Источник<select value={paymentList.draftFilters.source} onChange={(event) => paymentList.setDraftFilter('source', event.target.value)}><option value="">Все</option><option value="admin">Администратор</option><option value="client_top_up">Запрос клиента</option></select></label>
+        </ListToolbar>
+
+        <ListFeedback list={paymentList} emptyLabel="Платежей пока нет" />
+        <div className="ops-entity-desktop-table"><Table
           rows={visibleRows}
           emptyLabel="В этой категории платежей нет"
           columns={[
             { key: 'sourceLabel', header: 'Тип', muted: true },
+            { key: 'client', header: 'Клиент', render: (payment) => <span className="strong">{payment.client || '—'}</span> },
             { key: 'child', header: 'Участник', render: (payment) => <button type="button" className="ops-link-button" disabled={!payment.clientId} onClick={() => go?.('clientDetail', { clientId: payment.clientId, tab: 'payments' })}><Avatar name={payment.child} size={26} /><span className="strong">{payment.child}</span></button> },
             { key: 'method', header: 'Способ', muted: true },
             { key: 'date', header: 'Дата', muted: true, render: (payment) => <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{payment.date}</span> },
@@ -713,14 +779,40 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
                 <div className="row-actions" onClick={(event) => event.stopPropagation()}>
                   <Button size="sm" variant="subtle" disabled={busyId != null} onClick={() => openPaymentEdit(payment)}>Изменить</Button>
                   {payment.status === 'pending' && <>
-                  <IconButton label="Подтвердить" size="sm" disabled={busyId === payment.id} onClick={() => setConfirm(payment)}><I.Check size={16} /></IconButton>
-                  <IconButton label="Отклонить" size="sm" variant="danger" disabled={busyId === payment.id} onClick={() => setReject(payment)}><I.X size={16} /></IconButton>
+                  <IconButton label="Подтвердить" size="sm" disabled={busyId != null} onClick={() => updatePayment(payment, 'confirm')}><I.Check size={16} /></IconButton>
+                  <IconButton label="Отклонить" size="sm" variant="danger" disabled={busyId != null} onClick={() => { setReject(payment); setRejectReason(''); setRejectErrors({}); setError(null) }}><I.X size={16} /></IconButton>
                   </>}
                 </div>
               ),
             },
           ]}
-        />
+        /></div>
+        <div className="ops-entity-mobile-list">
+          {visibleRows.map((payment) => (
+            <EntityMobileCard key={payment.id} className="ops-payment-compact-card" labelledBy={`payment-card-${payment.id}`}>
+              <div className="ops-payment-compact-head">
+                <button type="button" className="ops-compact-card-title with-avatar" disabled={!payment.clientId} onClick={() => go?.('clientDetail', { clientId: payment.clientId, tab: 'payments' })}>
+                  <Avatar name={payment.client || payment.child} size={34} /><strong id={`payment-card-${payment.id}`} title={payment.client || payment.child}>{payment.client || payment.child}</strong>
+                </button>
+                <strong className="ops-payment-amount">{payment.amount.toLocaleString('ru-RU')} zł</strong>
+                <ActionPopover label={`Действия: ${payment.client || payment.child}`} actions={[
+                  { key: 'profile', label: 'Профиль', disabled: !payment.clientId, onSelect: () => go?.('clientDetail', { clientId: payment.clientId, tab: 'payments' }) },
+                  { key: 'edit', label: 'Изменить', onSelect: () => openPaymentEdit(payment) },
+                ]} />
+              </div>
+              <div className="ops-compact-card-line"><span>Участник</span><strong>{payment.child || '—'}</strong></div>
+              <div className="ops-compact-card-line"><span>Дата</span><strong>{payment.date || '—'} · {payment.method || 'Способ не указан'}</strong></div>
+              <div className="ops-payment-compact-footer">
+                <StatusPill status={payment.status} size="sm" />
+                {payment.status === 'pending' && <div className="ops-payment-pending-actions">
+                  <Button size="sm" variant="primary" disabled={busyId != null} onClick={() => updatePayment(payment, 'confirm')}>Подтвердить</Button>
+                  <Button size="sm" variant="danger" disabled={busyId != null} onClick={() => { setReject(payment); setRejectReason(''); setRejectErrors({}); setError(null) }}>Отклонить</Button>
+                </div>}
+              </div>
+            </EntityMobileCard>
+          ))}
+        </div>
+        <ListPagination list={paymentList} />
 
         <FormModal open={creatingSubscriptionType} title="Новый тип абонемента" size="lg" busy={busyId != null} dirty={Boolean(subscriptionTypeBaseline) && JSON.stringify(subscriptionTypeForm) !== JSON.stringify(subscriptionTypeBaseline)} onRequestClose={() => { if (subscriptionTypeBaseline) setSubscriptionTypeForm(subscriptionTypeBaseline); setCreatingSubscriptionType(false); setSubscriptionTypeBaseline(null); setSubscriptionTypeErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId != null} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" loading={busyId === 'subscription-type'} disabled={busyId != null} onClick={createSubscriptionType}>Создать тип</Button></>}>
           {error && <Banner tone="danger">{error}</Banner>}
@@ -750,15 +842,21 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           </div>
         </FormModal>
 
-        <FormModal open={Boolean(financeAction)} title={financeActionMeta?.title || 'Финансовая операция'} size="lg" busy={busyId != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId != null} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" loading={busyId === financeActionMeta?.busy} disabled={busyId != null || (['renew', 'freeze', 'adjust'].includes(financeAction) && (subscriptionsLoading || !financeForm.subscriptionId))} onClick={financeActionMeta?.submit}>{financeActionMeta?.label || 'Сохранить'}</Button></>}>
+        <FormModal open={Boolean(financeAction)} title={financeActionMeta?.title || 'Финансовая операция'} description={financeAction === 'payment' ? 'Платёж подтверждается сразу; результат и баланс проверяются повторным чтением с сервера.' : undefined} size="lg" busy={busyId != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId != null} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" loading={busyId === financeActionMeta?.busy} disabled={busyId != null || (['renew', 'freeze', 'adjust'].includes(financeAction) && (subscriptionsLoading || !financeForm.subscriptionId))} onClick={financeActionMeta?.submit}>{financeActionMeta?.label || 'Сохранить'}</Button></>}>
           {error && <Banner tone="danger">{error}</Banner>}
+          {financeAction === 'payment' && <div className="ops-financial-context" aria-label="Контекст оплаты">
+            <div><span>Клиент</span><strong>{selectedParticipant?.clientName || selectedParticipant?.parent || 'Выберите клиента'}</strong></div>
+            <div><span>Участник</span><strong>{selectedParticipant ? `${selectedParticipant.first || ''} ${selectedParticipant.last || ''}`.trim() : 'Выберите участника'}</strong></div>
+            <div><span>Текущий баланс</span><strong><Money amount={Number(selectedParticipant?.balance || 0)} signed currency="zł" /></strong></div>
+            <div><span>Способ</span><strong>{paymentMethodLabel(financeForm.paymentMethod)}</strong></div>
+          </div>}
           <div className="ops-form-grid">
             <SearchableSelect inputId={FINANCE_FIELD_IDS.participantId} label="Участник" value={financeForm.participantId} error={financeErrors.participantId} onChange={(value) => updateFinanceForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant, { description: (row) => row.phone || row.email || row.group }))} />
             {(financeAction === 'issue' || financeAction === 'renew') && <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label="Тип абонемента" value={financeForm.subscriptionTypeId} error={financeErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}><option value="">Выберите тип</option>{subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price.toLocaleString('ru-RU')} {type.currency}</option>)}</Select>}
             {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && <Select id={FINANCE_FIELD_IDS.subscriptionId} label="Абонемент участника" value={financeForm.subscriptionId} error={financeErrors.subscriptionId} disabled={subscriptionsLoading} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}><option value="">{subscriptionsLoading ? 'Загрузка абонементов…' : 'Выберите абонемент'}</option>{subscriptions.map((subscription) => <option key={subscription.id} value={subscription.id}>#{subscription.id} · {subscription.type} · {subscription.status} · {subscription.remaining_sessions ?? 'безлимитный'}</option>)}</Select>}
             {(financeAction === 'issue' || financeAction === 'renew') && <><Input id={FINANCE_FIELD_IDS.startDate} label="Начало абонемента" value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Input id={FINANCE_FIELD_IDS.dueDate} label="Срок оплаты" value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Checkbox id={FINANCE_FIELD_IDS.createCharge} label="Создать начисление" checked={financeForm.createCharge} error={financeErrors.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} /></>}
             {financeAction === 'charge' && <><Input id={FINANCE_FIELD_IDS.chargeDescription} label="Описание начисления" value={financeForm.chargeDescription} error={financeErrors.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} /><Input id={FINANCE_FIELD_IDS.chargeAmount} label="Сумма начисления" value={financeForm.chargeAmount} error={financeErrors.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} /><Input id={FINANCE_FIELD_IDS.dueDate} label="Срок оплаты" value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /></>}
-            {financeAction === 'payment' && <><Input id={FINANCE_FIELD_IDS.paymentAmount} label="Сумма платежа" value={financeForm.paymentAmount} error={financeErrors.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} /><Input id={FINANCE_FIELD_IDS.paymentDate} label="Дата платежа" value={financeForm.paymentDate} error={financeErrors.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Select id={FINANCE_FIELD_IDS.paymentMethod} label="Способ оплаты" value={financeForm.paymentMethod} error={financeErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></Select></>}
+            {financeAction === 'payment' && <><Input id={FINANCE_FIELD_IDS.paymentAmount} label="Сумма платежа, zł" value={financeForm.paymentAmount} error={financeErrors.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240,00'} inputMode="decimal" /><Input id={FINANCE_FIELD_IDS.paymentDate} label="Дата платежа" value={financeForm.paymentDate} error={financeErrors.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Select id={FINANCE_FIELD_IDS.paymentMethod} label="Способ оплаты" value={financeForm.paymentMethod} error={financeErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}><option value="cash">Наличные</option><option value="bank_transfer">Bank transfer / IBAN</option><option value="card">Карта</option><option value="other">Другое</option></Select><Input id={FINANCE_FIELD_IDS.paymentComment} label="Комментарий" value={financeForm.paymentComment} error={financeErrors.paymentComment} onChange={(event) => updateFinanceForm('paymentComment', event.target.value)} placeholder="Опционально" /></>}
             {financeAction === 'freeze' && <><Input id={FINANCE_FIELD_IDS.freezeStart} label="Заморозить с" value={financeForm.freezeStart} error={financeErrors.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Input id={FINANCE_FIELD_IDS.freezeEnd} label="Заморозить до" value={financeForm.freezeEnd} error={financeErrors.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Input id={FINANCE_FIELD_IDS.freezeReason} label="Причина заморозки" value={financeForm.freezeReason} error={financeErrors.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} /></>}
             {financeAction === 'adjust' && <><Input id={FINANCE_FIELD_IDS.adjustDelta} label="Корректировка занятий" value={financeForm.adjustDelta} error={financeErrors.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} /><Input id={FINANCE_FIELD_IDS.adjustNote} label="Комментарий к корректировке" value={financeForm.adjustNote} error={financeErrors.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} /></>}
           </div>
@@ -772,30 +870,16 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           </div>
         </FormModal>
 
-        {confirm && (
-          <Dialog
-            open
-            title="Подтвердить платёж?"
-            confirmLabel="Подтвердить"
-            cancelLabel="Отмена"
-            onClose={() => setConfirm(null)}
-            onConfirm={() => updatePayment(confirm, 'confirm')}
-            description={`${confirm.source === 'client_top_up' ? 'Запрос на пополнение' : 'Платёж'} · участник ${confirm.child} · сумма ${confirm.amount}. После подтверждения платёж повлияет на баланс.`}
-          />
-        )}
-
-        {reject && (
-          <Dialog
-            open
-            tone="danger"
-            title="Отклонить платёж?"
-            confirmLabel="Отклонить"
-            cancelLabel="Отмена"
-            onClose={() => setReject(null)}
-            onConfirm={() => updatePayment(reject, 'reject')}
-            description={`${reject.source === 'client_top_up' ? 'Запрос на пополнение' : 'Платёж'} ${reject.child} на сумму ${reject.amount} будет отклонён.`}
-          />
-        )}
+        <FormModal open={Boolean(reject)} title="Отклонить платёж" description="Причина обязательна и будет сохранена в журнале финансовых действий." size="md" busy={busyId != null} dirty={Boolean(rejectReason.trim())} onRequestClose={() => { setReject(null); setRejectReason(''); setRejectErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId != null} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="danger" loading={busyId === reject?.id} disabled={busyId != null} onClick={() => updatePayment(reject, 'reject', rejectReason)}>Отклонить</Button></>}>
+          {error && <Banner tone="danger">{error}</Banner>}
+          {reject && <div className="ops-financial-context" aria-label="Контекст отклонения платежа">
+            <div><span>Клиент</span><strong>{reject.client || '—'}</strong></div>
+            <div><span>Участник</span><strong>{reject.child || '—'}</strong></div>
+            <div><span>Сумма</span><strong>{reject.amount.toLocaleString('ru-RU')} zł</strong></div>
+            <div><span>Способ</span><strong>{reject.method || '—'}</strong></div>
+          </div>}
+          <Input id={REJECT_FIELD_IDS.reason} label="Причина отклонения" value={rejectReason} error={rejectErrors.reason} onChange={(event) => { setRejectReason(event.target.value); setRejectErrors((current) => clearFieldError(current, 'reason')) }} autoComplete="off" />
+        </FormModal>
       </div>
     )
   }
