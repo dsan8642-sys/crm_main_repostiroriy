@@ -1,6 +1,6 @@
 # SwimCRM API contract
 
-Last updated: 2026-07-26
+Last updated: 2026-08-14
 
 This document is the human-readable companion to:
 
