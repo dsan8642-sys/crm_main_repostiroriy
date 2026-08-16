@@ -229,7 +229,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       const controller = new AbortController()
       requestController = controller
       Promise.allSettled([
-        api.get('/api/admin/clients/?page=1&page_size=1', { signal: controller.signal }),
+        api.get('/api/admin/clients/?page=1&page_size=1&active=true', { signal: controller.signal }),
         api.get('/api/admin/payments/?page=1&page_size=1&status=pending&order=-date', { signal: controller.signal }),
         api.get('/api/admin/debtors/?page=1&page_size=1&order=-balance', { signal: controller.signal }),
       ]).then(([clientsResult, paymentsResult, debtorsResult]) => {

@@ -2621,6 +2621,7 @@ button.ops-schedule-detail-row:focus-visible {
 
 .ops-schedule-event {
   display: grid;
+  overflow: hidden;
   gap: 4px;
   width: 100%;
   padding: 10px;
@@ -3719,6 +3720,14 @@ textarea[aria-invalid="true"] {
   box-shadow: var(--shadow-lg);
   pointer-events: auto;
   animation: ops-toast-in var(--dur-normal) var(--ease-out);
+}
+
+.ops-toast:not(.is-loading) {
+  grid-template-columns: minmax(0, 1fr) 44px;
+}
+
+.ops-toast.is-loading {
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .ops-toast.is-success {
