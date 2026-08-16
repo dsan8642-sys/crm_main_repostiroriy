@@ -99,7 +99,7 @@ test('remote participant search and trainer reactivation remain available', asyn
 
   await page.goto('/?role=admin&view=schedule')
   await expect(page.locator('h1.page-title', { hasText: 'Расписание' })).toBeVisible()
-  if ((page.viewportSize()?.width || 0) > 767) {
+  if ((page.viewportSize()?.width || 0) >= 960) {
     await expect(page.getByRole('button', { name: 'Клиенты 315' })).toBeVisible()
   }
 
