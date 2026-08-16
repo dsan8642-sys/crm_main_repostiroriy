@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
+import { mapAdminClientRows } from '../mappers.js'
 import { ROLE_META, roleNav, screenFor } from './runtime.jsx'
 import { useLocale } from '../i18n.jsx'
 import {
@@ -103,6 +104,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const [selectedParticipantId, setSelectedParticipantId] = useState(initialRoute.participantId)
   const [selectedBalanceAmount, setSelectedBalanceAmount] = useState(initialRoute.balanceAmount)
   const [searchQuery, setSearchQuery] = useState('')
+  const [remoteClientSearch, setRemoteClientSearch] = useState({ query: '', rows: [] })
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (
     readSessionBoolean(sidebarStateKey(initialRole || 'admin', currentUser)) ?? defaultSidebarCollapsed()
@@ -175,13 +177,48 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const activeKid = role === 'client' && !clientItems.some((item) => item.id === kid)
     ? clientItems[0]?.id || kid
     : kid
+  useEffect(() => {
+    const query = searchQuery.trim()
+    if (role !== 'admin' || !query) {
+      setRemoteClientSearch({ query: '', rows: [] })
+      return undefined
+    }
+    let alive = true
+    const controller = new AbortController()
+    const handle = setTimeout(async () => {
+      try {
+        const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        })
+        if (alive) {
+          setRemoteClientSearch({
+            query: query.toLocaleLowerCase('ru-RU'),
+            rows: mapAdminClientRows(payload.participants || []).active,
+          })
+        }
+      } catch {
+        if (alive && !controller.signal.aborted) {
+          setRemoteClientSearch({ query: query.toLocaleLowerCase('ru-RU'), rows: [] })
+        }
+      }
+    }, 250)
+    return () => {
+      alive = false
+      clearTimeout(handle)
+      controller.abort()
+    }
+  }, [searchQuery, role])
+
   const searchResults = useMemo(() => {
     const needle = searchQuery.trim().toLocaleLowerCase('ru-RU')
     if (!needle || role !== 'admin') return []
-    const clients = (data.AdminData?.clients || []).filter((row) => [row.first, row.last, `${row.first} ${row.last}`, `${row.last} ${row.first}`, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))).slice(0, 6).map((row) => ({ key: `client-${row.studentId}`, label: `${row.first} ${row.last}`, hint: row.phone || row.email || row.group, view: 'clientDetail', params: { clientId: row.clientId } }))
+    const clientSource = remoteClientSearch.query === needle
+      ? remoteClientSearch.rows
+      : (data.AdminData?.clients || [])
+    const clients = clientSource.filter((row) => [row.first, row.last, `${row.first} ${row.last}`, `${row.last} ${row.first}`, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))).slice(0, 6).map((row) => ({ key: `client-${row.studentId}`, label: `${row.first} ${row.last}`, hint: row.phone || row.email || row.group, view: 'clientDetail', params: { clientId: row.clientId } }))
     const groups = (data.AdminData?.groups || []).filter((row) => row.name.toLocaleLowerCase('ru-RU').includes(needle)).slice(0, 3).map((row) => ({ key: `group-${row.groupId}`, label: row.name, hint: 'Группа', view: 'groups', params: { groupId: row.groupId } }))
     return [...clients, ...groups].slice(0, 10)
-  }, [searchQuery, role, data])
+  }, [searchQuery, role, data, remoteClientSearch])
 
   useEffect(() => {
     if (role !== 'admin') return undefined
@@ -192,11 +229,15 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       const controller = new AbortController()
       requestController = controller
       Promise.allSettled([
+        api.get('/api/admin/clients/?page=1&page_size=1', { signal: controller.signal }),
         api.get('/api/admin/payments/?page=1&page_size=1&status=pending&order=-date', { signal: controller.signal }),
         api.get('/api/admin/debtors/?page=1&page_size=1&order=-balance', { signal: controller.signal }),
-      ]).then(([paymentsResult, debtorsResult]) => {
+      ]).then(([clientsResult, paymentsResult, debtorsResult]) => {
         if (!alive || controller.signal.aborted || requestController !== controller) return
         setAdminListCounts((current) => ({
+          clients: clientsResult.status === 'fulfilled'
+            ? (clientsResult.value.pagination?.total ?? current.clients)
+            : current.clients,
           pendingPayments: paymentsResult.status === 'fulfilled'
             ? (paymentsResult.value.pagination?.total
               ?? (paymentsResult.value.payments || []).filter((payment) => payment.status === 'pending').length)

@@ -105,9 +105,11 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       setBusy(true); setError(null)
       setFieldErrors({})
       try {
-        const payload = { trainer: { first_name: form.firstName, last_name: form.lastName, email: form.email, phone: form.phone, username: form.username || form.email, is_active: form.isActive } }
-        if (isNew) await api.post('/api/admin/trainers/', payload)
-        else await api.post(`/api/admin/trainers/${selected.trainerId}/`, payload)
+        const payload = { trainer: { first_name: form.firstName, last_name: form.lastName, email: form.email, phone: form.phone, username: form.username || form.email, is_active: form.isActive, user_is_active: form.isActive } }
+        const saved = isNew
+          ? await api.post('/api/admin/trainers/', payload)
+          : await api.post(`/api/admin/trainers/${selected.trainerId}/`, payload)
+        if (!isNew) setSelected(mapAdminTrainerRows([saved])[0])
         setMessage(isNew ? 'Тренер создан.' : 'Профиль тренера обновлён.')
         setCreating(false); setEditing(false)
         setFormBaseline(null)
@@ -262,7 +264,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           <Input id={TRAINER_FIELD_IDS.username} label="Логин" value={form.username} error={fieldErrors.username} onChange={(event) => updateTrainerForm('username', event.target.value)} />
           <Input id={TRAINER_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => updateTrainerForm('email', event.target.value)} />
           <Input id={TRAINER_FIELD_IDS.phone} label="Телефон" value={form.phone} error={fieldErrors.phone} onChange={(event) => updateTrainerForm('phone', event.target.value)} />
-          {creating && <Checkbox id={TRAINER_FIELD_IDS.isActive} label="Активен" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateTrainerForm('isActive', event.target.checked)} />}
+          <Checkbox id={TRAINER_FIELD_IDS.isActive} label="Активен" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateTrainerForm('isActive', event.target.checked)} />
         </div>
       </>
     )

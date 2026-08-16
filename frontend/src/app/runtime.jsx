@@ -56,7 +56,7 @@ export function roleNav(role, icons, data, counts = {}) {
   if (role === 'admin') {
     return [
       { key: 'overview', label: 'Главная', icon: <icons.Home size={17} /> },
-      { key: 'clients', label: 'Клиенты', icon: <icons.ClientFamily size={17} />, count: data.AdminData?.clients?.length },
+      { key: 'clients', label: 'Клиенты', icon: <icons.ClientFamily size={17} />, count: counts.clients ?? data.AdminData?.clients?.length },
       { key: 'trainers', label: 'Тренеры', icon: <icons.TrainerWhistle size={17} />, count: data.AdminData?.trainers?.length, section: 'Операции' },
       { key: 'groups', label: 'Группы', icon: <icons.GroupMembers size={17} />, count: data.AdminData?.groups?.length, section: 'Операции' },
       { key: 'schedule', label: 'Расписание', icon: <icons.Calendar size={17} />, section: 'Операции' },

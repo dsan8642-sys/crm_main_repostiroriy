@@ -31,11 +31,12 @@ def admin_reference(request):
         "parent", "parent__user", "group"
     ).filter(is_active=True, parent__user__is_active=True)
     if q:
-        participants = participants.filter(
-            Q(first_name__icontains=q) | Q(last_name__icontains=q) |
-            Q(parent__phone__icontains=q) | Q(parent__email__icontains=q) |
-            Q(email__icontains=q)
-        )
+        for token in q.split():
+            participants = participants.filter(
+                Q(first_name__icontains=token) | Q(last_name__icontains=token) |
+                Q(parent__phone__icontains=token) | Q(parent__email__icontains=token) |
+                Q(email__icontains=token)
+            )
     session_type_configs = list(SessionTypeConfig.objects.filter(is_active=True).order_by("code", "id"))
     session_type_choices = (
         [{"value": row.code, "label": row.label, "default_capacity": row.default_capacity}

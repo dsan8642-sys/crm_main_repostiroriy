@@ -1128,6 +1128,8 @@ def _apply_trainer_data(trainer, data):
             setattr(user, field, trainer_data.get(field, "") or "")
     if "user_is_active" in trainer_data:
         user.is_active = _bool_value(trainer_data.get("user_is_active"), True)
+    elif "is_active" in trainer_data:
+        user.is_active = _bool_value(trainer_data.get("is_active"), True)
     if "username" in trainer_data and trainer_data["username"] != user.username:
         user.username = trainer_data["username"]
     user.role = Role.TRAINER

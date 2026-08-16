@@ -1562,6 +1562,15 @@ class AdminPortalApiRule(TestCase):
         self.assertFalse(archived.json()["is_active"])
         self.assertFalse(archived.json()["user_is_active"])
 
+        reactivated = self.client.patch(
+            f"/api/admin/trainers/{trainer_id}/",
+            data=json.dumps({"trainer": {"is_active": True}}),
+            content_type="application/json",
+        )
+        self.assertEqual(reactivated.status_code, 200)
+        self.assertTrue(reactivated.json()["is_active"])
+        self.assertTrue(reactivated.json()["user_is_active"])
+
     def test_admin_reference_endpoint_for_forms(self):
         trainer = f.make_trainer(username="ref_coach")
         self.group.default_trainer = trainer
@@ -1589,6 +1598,22 @@ class AdminPortalApiRule(TestCase):
         self.assertNotIn("transfer", payment_method_values)
         self.assertEqual(payload["choices"]["session_types"][0]["value"], SessionType.SPLIT)
         self.assertEqual(payload["choices"]["session_types"][0]["default_capacity"], 2)
+
+    def test_admin_reference_search_matches_full_name_in_either_order(self):
+        target = f.make_student(
+            group=self.group,
+            first="Remote",
+            last="Participant",
+        )
+
+        for query in ("Remote Participant", "Participant Remote"):
+            with self.subTest(query=query):
+                response = self.client.get("/api/admin/reference/", {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    [row["id"] for row in response.json()["participants"]],
+                    [target.id],
+                )
 
     def test_admin_dashboard_endpoint_exposes_metrics(self):
         trainer = f.make_trainer(username="dashboard_coach")

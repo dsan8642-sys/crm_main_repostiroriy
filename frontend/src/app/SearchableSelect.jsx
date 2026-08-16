@@ -33,6 +33,7 @@ export function SearchableSelect({
   value,
   onChange,
   options,
+  loadOptions,
   placeholder = 'Начните вводить имя или фамилию',
   emptyLabel = 'Клиенты не найдены',
   disabled = false,
@@ -48,6 +49,9 @@ export function SearchableSelect({
   const [query, setQuery] = useState(selected?.label || '')
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [remoteOptions, setRemoteOptions] = useState(null)
+  const [remoteQuery, setRemoteQuery] = useState('')
+  const [remoteLoading, setRemoteLoading] = useState(false)
 
   useEffect(() => {
     if (!open) setQuery(selected?.label || '')
@@ -61,14 +65,47 @@ export function SearchableSelect({
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
   }, [])
 
+  useEffect(() => {
+    const normalized = normalizeSearch(query)
+    if (!loadOptions || !open || !normalized || query === selected?.label) {
+      setRemoteOptions(null)
+      setRemoteQuery('')
+      setRemoteLoading(false)
+      return undefined
+    }
+    let alive = true
+    setRemoteLoading(true)
+    const handle = setTimeout(async () => {
+      try {
+        const nextOptions = await loadOptions(query.trim())
+        if (!alive) return
+        setRemoteOptions(Array.isArray(nextOptions) ? nextOptions : [])
+        setRemoteQuery(normalized)
+      } catch {
+        if (!alive) return
+        setRemoteOptions(null)
+        setRemoteQuery('')
+      } finally {
+        if (alive) setRemoteLoading(false)
+      }
+    }, 250)
+    return () => {
+      alive = false
+      clearTimeout(handle)
+    }
+  }, [loadOptions, open, query, selected?.label])
+
   const filteredOptions = useMemo(() => {
     const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean)
-    if (!tokens.length || query === selected?.label) return options
-    return options.filter((option) => {
+    const source = remoteQuery === normalizeSearch(query) && remoteOptions != null
+      ? remoteOptions
+      : options
+    if (!tokens.length || query === selected?.label) return source
+    return source.filter((option) => {
       const haystack = normalizeSearch(`${option.label} ${option.searchText || ''}`)
       return tokens.every((token) => haystack.includes(token))
     })
-  }, [options, query, selected?.label])
+  }, [options, query, remoteOptions, remoteQuery, selected?.label])
 
   function openList() {
     if (disabled) return
@@ -181,7 +218,7 @@ export function SearchableSelect({
               {option.description && <small>{option.description}</small>}
             </li>
           ))}
-          {!filteredOptions.length && <li className="is-empty" role="presentation">{emptyLabel}</li>}
+          {!filteredOptions.length && <li className="is-empty" role="presentation">{remoteLoading ? 'Ищу клиентов...' : emptyLabel}</li>}
         </ul>
       )}
     </label>
