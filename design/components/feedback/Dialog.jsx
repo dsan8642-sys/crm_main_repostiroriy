@@ -94,7 +94,9 @@ export function Dialog({
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 1000,
+        // Confirmations can be opened from FormModal (1000) and its discard guard (1010).
+        // Keep the active confirmation above both so it remains visible and clickable.
+        zIndex: 1100,
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',

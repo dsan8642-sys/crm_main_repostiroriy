@@ -222,9 +222,8 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
   }
 }
 
-export function mapAdminPortalData({ reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, sessions, payments, debtors }) {
-  const groupRows = groups.groups || []
-  const clientRows = (clients.clients || []).map((client) => ({
+function mapAdminParticipantRow(client) {
+  return {
     id: participantKey(client.client_id, client.id),
     clientId: client.client_id,
     studentId: client.id,
@@ -255,7 +254,12 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
     subEnds: '-',
     med: '',
     emergency: [client.emergency_contact_name, client.emergency_contact_phone].filter(Boolean).join(' · '),
-  }))
+  }
+}
+
+export function mapAdminPortalData({ reference, clients, trainers, groups, subscriptionTypes, sessionTypeConfigs, sessions, payments, debtors }) {
+  const groupRows = groups.groups || []
+  const clientRows = (clients.clients || []).map(mapAdminParticipantRow)
   const blacklistedByAccount = new Map()
   clientRows.filter((row) => !row.accountActive).forEach((row) => {
     const current = blacklistedByAccount.get(row.clientId)
@@ -407,6 +411,10 @@ function emptyAdminListPayload(overrides = {}) {
 export function mapAdminClientRows(rows) {
   const mapped = mapAdminPortalData(emptyAdminListPayload({ clients: { clients: rows } }))
   return { active: mapped.clients, blacklisted: mapped.blacklistedClients }
+}
+
+export function mapAdminParticipantRows(rows) {
+  return rows.map(mapAdminParticipantRow)
 }
 
 export function mapAdminTrainerRows(rows) {

@@ -475,6 +475,42 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["full_name"], "Тестова Ада")
 
+    def test_group_roster_counts_lists_and_can_remove_inactive_participant(self):
+        inactive = f.make_student(
+            group=self.group, first="Inactive", last="Reserved")
+        inactive.is_active = False
+        inactive.save(update_fields=["is_active"])
+
+        groups_response = self.client.get("/api/admin/groups/")
+        roster_response = self.client.get(
+            "/api/admin/clients/", {"group_id": self.group.id, "page_size": 200})
+        removed = self.client.post(
+            f"/api/admin/participants/{inactive.id}/",
+            data=json.dumps({"participant": {"group_id": None}}),
+            content_type="application/json",
+        )
+
+        group_row = next(
+            row for row in groups_response.json()["groups"]
+            if row["id"] == self.group.id)
+        self.assertEqual(groups_response.status_code, 200)
+        self.assertEqual(group_row["participants_count"], 2)
+        self.assertEqual(
+            {row["id"] for row in roster_response.json()["clients"]},
+            {self.student.id, inactive.id},
+        )
+        self.assertEqual(removed.status_code, 200)
+        inactive.refresh_from_db()
+        self.assertIsNone(inactive.group_id)
+        self.assertFalse(inactive.is_active)
+
+        blocked_profile_edit = self.client.post(
+            f"/api/admin/participants/{inactive.id}/",
+            data=json.dumps({"participant": {"first_name": "Changed"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(blocked_profile_edit.status_code, 400)
+
     def test_admin_client_list_exposes_each_participants_confirmed_money_balance(self):
         overpaid = f.make_student(group=self.group, first="Over", last="Paid")
         family_sibling = f.make_student(
@@ -1077,7 +1113,7 @@ class AdminPortalApiRule(TestCase):
             entity_id=str(account.id),
         ).exists())
 
-    def test_archived_account_is_excluded_from_working_projections(self):
+    def test_archived_account_is_excluded_except_from_reserved_group_roster(self):
         account = self.student.parent
         subscription_type = f.make_sub_type(
             name="Archived projection pack",
@@ -1199,7 +1235,9 @@ class AdminPortalApiRule(TestCase):
         )
         self.assertEqual(dashboard.json()["subscriptions"]["active"], 0)
         self.assertEqual(dashboard.json()["subscriptions"]["frozen"], 0)
-        self.assertEqual(groups.json()["groups"][0]["participants_count"], 0)
+        # Archived members still reserve their places until an admin removes
+        # them from the group explicitly.
+        self.assertEqual(groups.json()["groups"][0]["participants_count"], 2)
         self.assertEqual(income_history.json()["total_minor"], 2000)
         self.assertEqual(create_participant.status_code, 400)
 

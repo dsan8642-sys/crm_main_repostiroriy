@@ -285,8 +285,13 @@ def admin_participant_detail(request, participant_id):
         audit(user, "participant.archived", participant, {"source": "api"})
         return JsonResponse(_student_payload(participant))
     if request.method != "GET":
-        _require_active_participant(participant, "be edited")
         data = _json_body(request)
+        participant_data = _participant_data(data)
+        # Group membership reserves a place independently of portal/archive
+        # status. Admins must therefore be able to remove an inactive record
+        # from a group without reopening every other profile field for edits.
+        if set(participant_data) != {"group_id"}:
+            _require_active_participant(participant, "be edited")
         with transaction.atomic():
             _apply_participant_data(participant, data)
             audit(user, "participant.updated", participant, {"fields": sorted(_participant_data(data).keys())})

@@ -23,11 +23,7 @@ def admin_groups(request):
         start_at__gte=timezone.now(),
     ).order_by("start_at", "id")
     qs = Group.objects.select_related("default_trainer__user").annotate(
-        active_participants_count=Count(
-            "students",
-            filter=Q(students__is_active=True, students__parent__user__is_active=True),
-            distinct=True,
-        ),
+        participants_count=Count("students", distinct=True),
         next_session_start=Subquery(next_sessions.values("start_at")[:1]),
         next_session_location=Subquery(next_sessions.values("location")[:1]),
     )

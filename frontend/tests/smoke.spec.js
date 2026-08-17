@@ -3,6 +3,20 @@ import { expect, test } from '@playwright/test'
 async function mockPortal(page, routes) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
+    const participantMatch = url.pathname.match(/^\/api\/admin\/participants\/(\d+)\/$/)
+    if (participantMatch && route.request().method() === 'POST') {
+      const row = routes['/api/admin/clients/']?.clients?.find(
+        (client) => String(client.id) === participantMatch[1],
+      )
+      const groupId = route.request().postDataJSON()?.participant?.group_id
+      if (row && groupId == null) row.group = null
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(row || { error: 'Participant not found' }),
+        status: row ? 200 : 404,
+      })
+      return
+    }
     const legacyClientPayments = routes['/api/client/payments/']
     const compatibilityPayload = url.pathname === '/api/client/charges/' && legacyClientPayments
       ? { charges: legacyClientPayments.charges || [] }
@@ -18,6 +32,7 @@ async function mockPortal(page, routes) {
       const subscription = url.searchParams.get('subscription')
       const balance = url.searchParams.get('balance')
       const activity = url.searchParams.get('activity')
+      const groupId = url.searchParams.get('group_id')
       const search = (url.searchParams.get('search') || url.searchParams.get('q') || '').toLocaleLowerCase('ru-RU')
       if (active === 'true') rows = rows.filter((row) => row.client_is_active !== false && row.is_active !== false)
       if (active === 'false') rows = rows.filter((row) => row.client_is_active === false || row.is_active === false)
@@ -26,6 +41,7 @@ async function mockPortal(page, routes) {
       if (balance === 'negative') rows = rows.filter((row) => Number(row.balance_minor || 0) > 0)
       if (balance === 'zero') rows = rows.filter((row) => Number(row.balance_minor || 0) === 0)
       if (activity) rows = rows.filter((row) => Boolean(row.is_recently_active) === (activity === 'active'))
+      if (groupId) rows = rows.filter((row) => String(row.group?.id) === groupId)
       if (search) rows = rows.filter((row) => [
         row.first_name, row.last_name, row.full_name, row.client_phone, row.email, row.group?.name,
       ].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(search)))
@@ -293,6 +309,49 @@ test('client and schedule forms show field errors and focus the first invalid fi
     message.includes('status of 400')
       && message.includes('/api/admin/clients/')
   ))).toEqual([])
+})
+
+test('admin group roster includes inactive assigned participants', async ({ page }) => {
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 2, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': {
+      trainers: [{ id: 1, name: 'Marek Zielinski' }],
+      groups: [{ id: 1, name: 'Delfiny', default_capacity: 12, participants_count: 2, is_active: true }],
+      subscription_types: [], locations: [], session_types: [],
+      participants: [{
+        id: 10, client_id: 20, first_name: 'Anna', last_name: 'Active', full_name: 'Anna Active',
+        group: { id: 1, name: 'Delfiny' }, is_active: true, client_is_active: true,
+      }],
+      choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/clients/': {
+      clients: [
+        {
+          id: 10, client_id: 20, first_name: 'Anna', last_name: 'Active', full_name: 'Anna Active',
+          group: { id: 1, name: 'Delfiny' }, is_active: true, client_is_active: true,
+        },
+        {
+          id: 11, client_id: 21, first_name: 'Inna', last_name: 'Inactive', full_name: 'Inna Inactive',
+          group: { id: 1, name: 'Delfiny' }, is_active: false, client_is_active: false,
+        },
+      ],
+    },
+    '/api/admin/groups/': {
+      groups: [{ id: 1, name: 'Delfiny', default_capacity: 12, participants_count: 2, is_active: true }],
+    },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/schedule/sessions/': { sessions: [] },
+  })
+
+  await page.goto('/?role=admin&view=groups&group=1')
+  const groupCard = page.getByRole('region', { name: 'Карточка группы Delfiny' })
+  await expect(groupCard).toContainText('Active Anna')
+  await expect(groupCard).toContainText('Inactive Inna')
+  await expect(groupCard.getByRole('button', { name: 'Убрать' })).toHaveCount(2)
+  await groupCard.getByRole('button', { name: 'Убрать' }).nth(1).click()
+  await expect(groupCard).not.toContainText('Inactive Inna')
+  await expect(groupCard.getByRole('button', { name: 'Убрать' })).toHaveCount(1)
 })
 
 test('shared shell and calendar keep mobile controls compact and accessible', async ({ page }) => {
@@ -735,6 +794,25 @@ test('admin split schedule filters, shows roster summary and submits an optional
   await expect(editForm.getByRole('combobox', { name: 'Клиент 1' })).toHaveValue('First Anna')
   await expect(editForm.getByRole('combobox', { name: /Клиент 2/ })).toHaveValue('Second Berta')
   await expect(editForm.getByLabel('Полный состав Split')).toContainText('First Anna · Second Berta · Third Celina')
+  const openDeleteDialog = editForm.getByRole('button', { name: 'Удалить занятие' })
+  await openDeleteDialog.click()
+  const deleteDialog = page.getByRole('dialog', { name: 'Удалить занятие?' })
+  await expect(deleteDialog).toBeVisible()
+  expect(await deleteDialog.evaluate((dialog) => {
+    const box = dialog.getBoundingClientRect()
+    const topmost = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+    return dialog.contains(topmost)
+  })).toBe(true)
+  await deleteDialog.getByRole('button', { name: 'Отмена' }).click()
+  await expect(deleteDialog).toHaveCount(0)
+  await expect(editForm).toBeVisible()
+  await expect(openDeleteDialog).toBeFocused()
+  await openDeleteDialog.click()
+  await expect(deleteDialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(deleteDialog).toHaveCount(0)
+  await expect(editForm).toBeVisible()
+  await expect(openDeleteDialog).toBeFocused()
   await editForm.getByRole('combobox', { name: /Клиент 2/ }).fill('')
   await editForm.getByRole('button', { name: 'Сохранить занятие' }).click()
   await expect.poll(() => patchedSessions.length).toBe(1)

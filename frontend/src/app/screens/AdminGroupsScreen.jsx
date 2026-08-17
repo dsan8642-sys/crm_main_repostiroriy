@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api, apiErrorMessage } from '../../api.js'
+import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
 import { FormModal } from '../FormModal.jsx'
@@ -7,7 +7,7 @@ import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
-import { mapAdminGroupRows, mapAdminSessionRows } from '../../mappers.js'
+import { mapAdminGroupRows, mapAdminParticipantRows, mapAdminSessionRows } from '../../mappers.js'
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, ContextBackButton, EntityMobileCard } from '../EntityListPrimitives.jsx'
 import { formatEntityDate } from '../entityListContracts.js'
@@ -45,8 +45,10 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
     const [groupSessions, setGroupSessions] = useState([])
+    const [members, setMembers] = useState([])
+    const [membersLoading, setMembersLoading] = useState(false)
+    const [memberRefresh, setMemberRefresh] = useState(0)
 
-    const members = useMemo(() => clients.filter((client) => String(client.groupId) === String(selected?.groupId)), [clients, selected])
     const candidates = useMemo(() => clients.filter((client) => String(client.groupId) !== String(selected?.groupId) && client.isActive), [clients, selected])
     const capacity = selected?.defaultCapacity ?? null
 
@@ -71,6 +73,31 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         })
       return () => controller.abort()
     }, [selected?.groupId])
+
+    useEffect(() => {
+      if (!selected?.groupId) {
+        setMembers([])
+        setMembersLoading(false)
+        return undefined
+      }
+      let alive = true
+      setMembers([])
+      setMembersLoading(true)
+      fetchAllPages(`/api/admin/clients/?group_id=${encodeURIComponent(selected.groupId)}`, 'clients', 200)
+        .then((payload) => {
+          if (alive) setMembers(mapAdminParticipantRows(payload.clients || []))
+        })
+        .catch((next) => {
+          if (alive) {
+            setMembers([])
+            setError(apiErrorMessage(next, 'Не удалось загрузить полный состав группы.'))
+          }
+        })
+        .finally(() => {
+          if (alive) setMembersLoading(false)
+        })
+      return () => { alive = false }
+    }, [selected?.groupId, memberRefresh])
 
     const nextSessionLabel = (row) => row.nextSessionAt
       ? `${formatEntityDate(row.nextSessionAt)} · ${new Date(row.nextSessionAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`
@@ -153,6 +180,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         setCandidateId('')
         setAddingMember(false)
         await reloadRoleData?.('admin')
+        setMemberRefresh((current) => current + 1)
       } catch (err) { setError(apiErrorMessage(err, 'Не удалось изменить состав группы.')) } finally { setBusy(false) }
     }
 
@@ -197,7 +225,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           <div className="ops-entity-head"><div><div className="eyebrow">Карточка группы</div><h3>{selected.name}</h3><div className="muted">{selected.description || 'Описание не добавлено'}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>Редактировать</Button><Button variant="subtle" onClick={() => setSelected(null)}>Закрыть</Button></div></div>
           <div className="ops-summary-grid"><div><span>Тренер</span><strong>{selected.trainer || 'Не назначен'}</strong></div><div><span>Участники</span><strong>{members.length}</strong></div><div><span>Вместимость</span><strong>{capacity ?? 'Не задана'}</strong></div><div><span>Ближайшее занятие</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
           <div className="ops-detail-grid">
-            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{members.length} / {capacity ?? 'Не задана'}</Badge><Button size="sm" variant="primary" disabled={busy} onClick={() => { setCandidateId(''); setAddingMember(true) }}>Добавить</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => moveParticipant(client.studentId, null)}>Убрать</Button></div>)}{!members.length && <div className="empty">В группе пока нет участников.</div>}</div>
+            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? 'Загрузка…' : `${members.length} / ${capacity ?? 'Не задана'}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading} onClick={() => { setCandidateId(''); setAddingMember(true) }}>Добавить</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => moveParticipant(client.studentId, null)}>Убрать</Button></div>)}{membersLoading && <div className="empty">Загружаю полный состав группы…</div>}{!membersLoading && !members.length && <div className="empty">В группе пока нет участников.</div>}</div>
             <div><div className="eyebrow">Расписание группы</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>Занятий нет. Открыть расписание</button>}</div>
           </div>
         </section>}

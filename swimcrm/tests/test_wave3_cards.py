@@ -12,7 +12,7 @@ class Wave3AdminCardContractTest(TestCase):
     def setUp(self):
         self.client.force_login(f.make_admin("wave3_admin"))
 
-    def test_group_card_contract_has_active_count_and_nearest_valid_session(self):
+    def test_group_card_contract_has_reserved_count_and_nearest_valid_session(self):
         trainer = f.make_trainer("wave3_group_trainer")
         group = f.make_group("Wave Three Group")
         group.default_trainer = trainer
@@ -48,7 +48,7 @@ class Wave3AdminCardContractTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         row = response.json()["groups"][0]
-        self.assertEqual(row["participants_count"], 1)
+        self.assertEqual(row["participants_count"], 2)
         self.assertEqual(row["next_session"]["location"], "Wave Pool")
         self.assertEqual(
             row["next_session"]["start_at"],

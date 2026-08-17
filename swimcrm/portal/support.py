@@ -604,13 +604,10 @@ def _group_payload(group):
         "default_capacity": group.default_capacity,
         "color_key": stored_schedule_color_key(group.color_key),
         "is_active": group.is_active,
-        "participants_count": getattr(group, "active_participants_count", None),
+        "participants_count": getattr(group, "participants_count", None),
     }
     if payload["participants_count"] is None:
-        payload["participants_count"] = group.students.filter(
-            is_active=True,
-            parent__user__is_active=True,
-        ).count()
+        payload["participants_count"] = group.students.count()
     if hasattr(group, "next_session_start"):
         payload["next_session"] = {
             "start_at": timezone.localtime(group.next_session_start).isoformat(),
