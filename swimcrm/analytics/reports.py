@@ -7,7 +7,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from accounts.models import Trainer
-from attendance.models import AttendanceRecord, AttendanceStatus
+from attendance.models import AttendanceRecord, AttendanceStatus, DEDUCTING_STATUSES
 from billing.models import Charge, Payment, PaymentMethod, PaymentStatus
 from common.money import Money
 from scheduling.models import Session, SessionType
@@ -111,26 +111,44 @@ def income_for_period(date_from, date_to, currency="PLN"):
 
 
 def income_by_group(date_from, date_to, currency="PLN"):
-    qs = (Payment.objects.filter(status=PaymentStatus.CONFIRMED, currency=currency,
-                                 paid_at__gte=date_from, paid_at__lte=date_to)
-          .values("student__group__name")
-          .annotate(total=Sum("amount_minor")).order_by("-total"))
-    return [(r["student__group__name"] or "— без группы —", Money(r["total"], currency)) for r in qs]
+    """Accrued lesson value by the concrete session group/type, never by payment."""
+    totals = {}
+    for record in _valued_attendance(date_from, date_to, currency):
+        session = record.session
+        if session.session_type == SessionType.GROUP and session.group_id:
+            label = session.group.name
+        elif session.session_type == SessionType.SPLIT:
+            label = "Split"
+        else:
+            label = "Индивидуальные"
+        totals[label] = totals.get(label, 0) + session.price_minor
+    return [(name, Money(amount, currency))
+            for name, amount in sorted(totals.items(), key=lambda row: (-row[1], row[0]))]
 
 
 def income_by_trainer(date_from, date_to, currency="PLN"):
-    """Attributes confirmed payments to the trainer of the student's group."""
-    qs = (Payment.objects.filter(status=PaymentStatus.CONFIRMED, currency=currency,
-                                 paid_at__gte=date_from, paid_at__lte=date_to)
-          .values("student__group__default_trainer__user__first_name",
-                  "student__group__default_trainer__user__last_name")
-          .annotate(total=Sum("amount_minor")).order_by("-total"))
-    out = []
-    for r in qs:
-        name = (f'{r["student__group__default_trainer__user__first_name"] or ""} '
-                f'{r["student__group__default_trainer__user__last_name"] or ""}').strip() or "— не назначен —"
-        out.append((name, Money(r["total"], currency)))
-    return out
+    """Accrued lesson value by the effective trainer of each concrete session."""
+    totals = {}
+    for record in _valued_attendance(date_from, date_to, currency):
+        name = str(record.session.effective_trainer)
+        totals[name] = totals.get(name, 0) + record.session.price_minor
+    return [(name, Money(amount, currency))
+            for name, amount in sorted(totals.items(), key=lambda row: (-row[1], row[0]))]
+
+
+def _valued_attendance(date_from, date_to, currency):
+    start_at, end_at = _session_period_bounds(date_from, date_to)
+    return AttendanceRecord.objects.select_related(
+        "session__group", "session__trainer__user", "session__substitute_trainer__user",
+    ).filter(
+        financial_effects_enabled=True,
+        status__in=DEDUCTING_STATUSES,
+        session__is_cancelled=False,
+        session__start_at__gte=start_at,
+        session__start_at__lt=end_at,
+        session__currency=currency,
+        session__price_minor__isnull=False,
+    )
 
 
 def unpaid_charges(currency="PLN"):

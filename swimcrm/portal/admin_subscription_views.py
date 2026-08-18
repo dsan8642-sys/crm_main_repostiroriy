@@ -4,7 +4,9 @@ from .admin_support import _admin_required
 @require_http_methods(["GET", "POST"])
 def admin_participant_subscriptions(request, participant_id):
     user = _admin_required(request)
-    participant = get_object_or_404(Student.objects.select_related("parent", "group"), pk=participant_id)
+    participant = get_object_or_404(
+        Student.objects.select_related("parent").prefetch_related("groups"),
+        pk=participant_id)
     if request.method == "POST":
         _require_active_participant(
             participant, "receive new subscriptions", field="participant_id")

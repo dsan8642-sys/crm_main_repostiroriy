@@ -114,7 +114,7 @@ def admin_debtors(request):
     if group_id:
         payload_rows = [
             row for row in payload_rows
-            if (row["student"].get("group") or {}).get("id") == group_id
+            if any(group.get("id") == group_id for group in row["student"].get("groups", []))
         ]
     if min_amount_minor:
         payload_rows = [
@@ -133,7 +133,7 @@ def admin_debtors(request):
                 row["student"].get("full_name", ""),
                 row["student"].get("client_phone", ""),
                 row["student"].get("email", ""),
-                (row["student"].get("group") or {}).get("name", ""),
+                " ".join(group.get("name", "") for group in row["student"].get("groups", [])),
                 " ".join(row["reasons"]),
             )).casefold()
         ]
@@ -191,6 +191,8 @@ def admin_income_report(request):
     currency, available_currencies = _report_currency(request)
     breakdown = income_breakdown_for_period(date_from, date_to, currency)
     payments = confirmed_payments_for_period(date_from, date_to, currency)
+    lesson_value_by_group = income_by_group(date_from, date_to, currency)
+    lesson_value_by_trainer = income_by_trainer(date_from, date_to, currency)
     details = paginated_payload(
         request, payments, key="payments", serializer=_payment_report_payload)
     return JsonResponse({
@@ -204,10 +206,12 @@ def admin_income_report(request):
         "non_cash_minor": breakdown["non_cash"].amount_minor,
         "currency": currency,
         "available_currencies": available_currencies,
-        "by_group": [{"group": name, "amount": amount.format(), "amount_minor": amount.amount_minor}
-                     for name, amount in income_by_group(date_from, date_to, currency)],
-        "by_trainer": [{"trainer": name, "amount": amount.format(), "amount_minor": amount.amount_minor}
-                       for name, amount in income_by_trainer(date_from, date_to, currency)],
+        "lesson_value_by_group": [
+            {"group": name, "amount": amount.format(), "amount_minor": amount.amount_minor}
+            for name, amount in lesson_value_by_group],
+        "lesson_value_by_trainer": [
+            {"trainer": name, "amount": amount.format(), "amount_minor": amount.amount_minor}
+            for name, amount in lesson_value_by_trainer],
         **details,
     })
 
@@ -262,6 +266,8 @@ def admin_income_report_xlsx(request):
     currency, _available_currencies = _report_currency(request)
     breakdown = income_breakdown_for_period(date_from, date_to, currency)
     payments = confirmed_payments_for_period(date_from, date_to, currency)
+    lesson_value_by_group = income_by_group(date_from, date_to, currency)
+    lesson_value_by_trainer = income_by_trainer(date_from, date_to, currency)
     workbook = sheets_to_xlsx([
         (
             "Сводка",
@@ -280,6 +286,18 @@ def admin_income_report_xlsx(request):
                 payment.get_method_display(), payment.amount.format(),
                 payment.amount_minor, payment.currency,
             ] for payment in payments],
+        ),
+        (
+            "Стоимость по группам",
+            ["Группа / тип", "Стоимость", "Сумма, гроши", "Валюта"],
+            [[name, amount.format(), amount.amount_minor, currency]
+             for name, amount in lesson_value_by_group],
+        ),
+        (
+            "Стоимость по тренерам",
+            ["Тренер", "Стоимость", "Сумма, гроши", "Валюта"],
+            [[name, amount.format(), amount.amount_minor, currency]
+             for name, amount in lesson_value_by_trainer],
         ),
     ])
     return _xlsx_response(

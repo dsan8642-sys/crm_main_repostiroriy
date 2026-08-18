@@ -28,7 +28,7 @@ def debtors(currency=None):
     out = []
     for st in Student.objects.filter(
             is_active=True, parent__user__is_active=True,
-    ).select_related("parent", "parent__user", "group"):
+    ).select_related("parent", "parent__user").prefetch_related("groups"):
         reasons = []
         bal = student_balance(st, currency)
         if any(cs.is_overdue for cs in charge_statuses(st, currency)):

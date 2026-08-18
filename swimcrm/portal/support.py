@@ -13,6 +13,7 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 
 from accounts.models import AccountActivation, Consent, ConsentType, ParentAccount, Role, Trainer, User
 from accounts.privacy import anonymize_parent_account
+from accounts.social import normalize_instagram_username
 from analytics.debtors import debtors, upcoming
 from analytics.reports import income_by_group, income_by_trainer, income_for_period
 from attendance.models import AttendanceRecord, AttendanceStatus
@@ -47,7 +48,7 @@ from scheduling.services import (ScheduleConflict, check_trainer_conflict,
                                  split_roster_students)
 from scheduling.services import sync_split_second_student
 from students.models import Student
-from students.services import ensure_account_holder_participant
+from students.services import ensure_account_holder_participant, set_student_groups
 from subscriptions.models import Subscription, SubscriptionStatus
 from subscriptions.services import create_subscription, freeze_subscription, manual_adjust, renew_subscription
 
@@ -335,7 +336,21 @@ def _invalidate_access_codes(user):
     ).update(used_at=timezone.now())
 
 
+def _student_group_payloads(student):
+    # ``all()`` reuses Django's prefetch cache. Ordering the related manager
+    # here would issue one extra query per participant and defeat the list
+    # endpoint's bounded-query contract.
+    groups = sorted(student.groups.all(), key=lambda group: (group.name, group.id))
+    return [{"id": group.id, "name": group.name} for group in groups]
+
+
+def _legacy_group_payload(groups):
+    return groups[0] if len(groups) == 1 else None
+
+
 def _student_payload(student):
+    groups = _student_group_payloads(student)
+    legacy_group = _legacy_group_payload(groups)
     return {
         "id": student.id,
         "client_id": student.parent_id,
@@ -350,7 +365,9 @@ def _student_payload(student):
         "admin_comments": student.admin_comments,
         "is_active": student.is_active,
         "is_account_holder": student.is_account_holder,
-        "group": {"id": student.group_id, "name": student.group.name} if student.group else None,
+        "groups": groups,
+        "group": legacy_group,
+        "group_id": legacy_group["id"] if legacy_group else None,
         "client_phone": student.parent.phone,
         "emergency_contact_name": student.emergency_contact_name,
         "emergency_contact_phone": student.emergency_contact_phone,
@@ -360,6 +377,8 @@ def _student_payload(student):
 
 def _client_student_payload(student):
     """Explicit allowlist for a participant viewing their own client account."""
+    groups = _student_group_payloads(student)
+    legacy_group = _legacy_group_payload(groups)
     return {
         "id": student.id,
         "first_name": student.first_name,
@@ -371,7 +390,9 @@ def _client_student_payload(student):
         "contraindications": student.contraindications,
         "is_active": student.is_active,
         "is_account_holder": student.is_account_holder,
-        "group": {"id": student.group_id, "name": student.group.name} if student.group else None,
+        "groups": groups,
+        "group": legacy_group,
+        "group_id": legacy_group["id"] if legacy_group else None,
         "emergency_contact_name": student.emergency_contact_name,
         "emergency_contact_phone": student.emergency_contact_phone,
     }
@@ -764,10 +785,12 @@ def _client_account_payload(account):
         "email": account.email or user.email,
         "phone": account.phone,
         "telegram_chat_id": account.telegram_chat_id,
+        "instagram_username": account.instagram_username,
         "preferred_language": account.preferred_language,
         "is_active": user.is_active,
         "access_activated": user.has_usable_password(),
         "portal_access": _portal_access_state(user),
+        "is_anonymized": user.username.startswith("deleted_parent_"),
         "created_at": timezone.localtime(account.created_at).isoformat(),
     }
 
@@ -801,7 +824,8 @@ def _client_detail_payload(account):
     participants = list(_student_queryset_for_parent(account).order_by("id"))
     participant_ids = [student.id for student in participants]
     subscriptions = Subscription.objects.filter(student_id__in=participant_ids).select_related(
-        "student", "student__parent", "student__group", "subscription_type").prefetch_related(
+        "student", "student__parent", "subscription_type").prefetch_related(
+        "student__groups",
         "ledger_entries", "charges", "freeze_periods").order_by("-start_date", "-id")
     charges = Charge.objects.filter(student_id__in=participant_ids).select_related(
         "student", "subscription").order_by("-due_date", "-id")
@@ -869,6 +893,13 @@ def _apply_account_data(account, data):
         account.email = account_data.get("email", "") or ""
     if "telegram_chat_id" in account_data:
         account.telegram_chat_id = account_data.get("telegram_chat_id", "") or ""
+    if "instagram_username" in account_data:
+        try:
+            account.instagram_username = normalize_instagram_username(
+                account_data.get("instagram_username"))
+        except ValidationError as exc:
+            raise _field_validation_error(
+                "account.instagram_username", exc.messages[0], code="invalid") from exc
     if "preferred_language" in account_data:
         language = (account_data.get("preferred_language", "") or "").lower()
         if language not in {"ru", "pl", "en"}:
@@ -947,11 +978,18 @@ def _create_account(data):
         last_name=account_data.get("last_name", "") or "",
         email=email,
     )
+    try:
+        instagram_username = normalize_instagram_username(
+            account_data.get("instagram_username"))
+    except ValidationError as exc:
+        raise _field_validation_error(
+            "account.instagram_username", exc.messages[0], code="invalid") from exc
     account = ParentAccount.objects.create(
         user=user,
         phone=phone,
         email=email,
         telegram_chat_id=account_data.get("telegram_chat_id", "") or "",
+        instagram_username=instagram_username,
         preferred_language=(account_data.get("preferred_language", "") or settings.SWIMCRM_DEFAULT_LANGUAGE).lower(),
     )
     audit(data.get("_actor"), "client_account.created", account, {"source": "api"})
@@ -971,12 +1009,25 @@ def _apply_participant_data(participant, data):
     if "birth_date" in participant_data:
         participant.birth_date = _parse_date(
             participant_data.get("birth_date"), "participant.birth_date")
-    if "group_id" in participant_data:
+    group_values = None
+    if "group_ids" in participant_data and "group_id" in participant_data:
+        raise _field_validation_error(
+            "participant.group_ids",
+            "Передайте group_ids или устаревший group_id, но не оба поля.",
+            code="conflict")
+    if "group_ids" in participant_data:
+        group_values = participant_data.get("group_ids") or []
+        if not isinstance(group_values, list):
+            raise _field_validation_error(
+                "participant.group_ids", "Передайте список групп.", code="invalid")
+    elif "group_id" in participant_data:
+        if participant.pk and participant.groups.count() > 1:
+            raise _field_validation_error(
+                "participant.group_id",
+                "У участника несколько групп. Используйте group_ids, чтобы не потерять назначения.",
+                code="legacy_conflict")
         group_id = participant_data.get("group_id")
-        participant.group = (
-            _object_for_field(
-                Group.objects.all(), group_id, "participant.group_id", "группу")
-            if group_id else None)
+        group_values = [group_id] if group_id else []
     if "is_active" in participant_data:
         participant.is_active = _bool_value(participant_data.get("is_active"), True)
     if "is_account_holder" in participant_data:
@@ -997,6 +1048,8 @@ def _apply_participant_data(participant, data):
         })
     participant.full_clean(exclude=["parent"])
     participant.save()
+    if group_values is not None:
+        set_student_groups(participant, group_values)
     return participant
 
 
@@ -1565,7 +1618,8 @@ def _create_session_from_data(data, *, actor=None):
 
 
 def _student_queryset_for_parent(parent):
-    return parent.students.select_related("group", "parent", "group__default_trainer__user")
+    return parent.students.select_related("parent", "parent__user").prefetch_related(
+        "groups", "groups__default_trainer__user")
 
 
 def _student_queryset_for_client(account):
@@ -1608,7 +1662,9 @@ def _trainer_from_request(request):
 
 
 def _student_owned_by_parent(parent, student_id):
-    return get_object_or_404(Student.objects.select_related("parent", "group"), pk=student_id, parent=parent)
+    return get_object_or_404(
+        Student.objects.select_related("parent").prefetch_related("groups"),
+        pk=student_id, parent=parent)
 
 
 def _student_owned_by_client(account, student_id):
@@ -1635,7 +1691,7 @@ def _session_roster(session):
 
 
 def _visible_parent_sessions(students, date_from=None, date_to=None):
-    group_ids = [s.group_id for s in students if s.group_id]
+    group_ids = list(Group.objects.filter(students__in=students).values_list("id", flat=True))
     student_ids = [s.id for s in students]
     qs = Session.objects.select_related(
         "group", "trainer__user", "substitute_trainer__user", "individual_student"

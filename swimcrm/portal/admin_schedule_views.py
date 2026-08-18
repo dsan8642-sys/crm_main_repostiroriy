@@ -427,7 +427,7 @@ def admin_schedule_session_participants(request, session_id):
         raise _field_validation_error(
             "student_id", "Выберите участника.", code="required") from exc
     student = _object_for_field(
-        Student.objects.select_related("parent__user", "group"),
+        Student.objects.select_related("parent__user").prefetch_related("groups"),
         student_id, "student_id", "участника")
     _require_active_participant(
         student, "be added to sessions", field="student_id")
@@ -504,7 +504,7 @@ def admin_schedule_session_waitlist(request, session_id):
             raise _field_validation_error(
                 "student_id", "Выберите участника.", code="required") from exc
         student = _object_for_field(
-            Student.objects.select_related("parent__user", "group"),
+            Student.objects.select_related("parent__user").prefetch_related("groups"),
             student_id, "student_id", "участника")
         _require_active_participant(
             student, "be added to the waitlist", field="student_id")
@@ -520,7 +520,7 @@ def admin_schedule_session_waitlist(request, session_id):
             "status": entry.status,
         })
         return JsonResponse(_waitlist_payload(entry), status=201)
-    qs = session.waitlist_entries.select_related("student", "student__parent", "student__group")
+    qs = session.waitlist_entries.select_related("student", "student__parent").prefetch_related("student__groups")
     if request.GET.get("status"):
         qs = qs.filter(status=request.GET["status"])
     return JsonResponse({
@@ -532,7 +532,7 @@ def admin_schedule_session_waitlist(request, session_id):
 def admin_schedule_waitlist_entry_detail(request, entry_id):
     user = _admin_required(request)
     entry = get_object_or_404(
-        WaitlistEntry.objects.select_related("session", "student", "student__parent", "student__group"),
+        WaitlistEntry.objects.select_related("session", "student", "student__parent").prefetch_related("student__groups"),
         pk=entry_id,
     )
     if request.method == "GET":
@@ -558,7 +558,7 @@ def admin_schedule_waitlist_entry_detail(request, entry_id):
 def admin_schedule_waitlist_entry_promote(request, entry_id):
     user = _admin_required(request)
     entry = get_object_or_404(
-        WaitlistEntry.objects.select_related("session", "student", "student__parent", "student__group"),
+        WaitlistEntry.objects.select_related("session", "student", "student__parent").prefetch_related("student__groups"),
         pk=entry_id,
     )
     entry, participant = promote_waitlist_entry(entry, actor=user)

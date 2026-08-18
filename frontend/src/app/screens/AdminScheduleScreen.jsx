@@ -121,8 +121,8 @@ function fieldLabelStyle() {
   return { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }
 }
 
-async function loadParticipantOptions(query) {
-  const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`)
+async function loadParticipantOptions(query, requestOptions = {}) {
+  const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, requestOptions)
   return mapAdminClientRows(payload.participants || []).active
     .map((participant) => clientSelectOption(participant))
 }
@@ -130,7 +130,7 @@ async function loadParticipantOptions(query) {
 export function createAdminScheduleScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Button, Badge, Banner, Dialog, Input, Checkbox } = components
   const I = icons
-  return function ApiAdminSchedule({ go, initialTab }) {
+  return function ApiAdminSchedule({ go, initialTab, initialParticipantId, createSession: createSessionMode }) {
     const groups = adminData.groups || []
     const trainers = adminData.trainers || []
     const activeTrainers = trainers.filter((trainer) => trainer.active !== false)
@@ -157,6 +157,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       sessionType: 'group',
       participantId: '',
       secondParticipantId: '',
+      requireSecondParticipant: false,
       rosterCount: 0,
       extraParticipantCount: 0,
     })
@@ -207,6 +208,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const [draftFilters, setDraftFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
     const filterPopoverRef = useRef(null)
     const [rangeRefresh, setRangeRefresh] = useState(0)
+    const createRouteHandledRef = useRef(null)
 
     useEffect(() => {
       if (actionPanel === 'session') setSessionFormBaseline({ ...sessionForm })
@@ -239,6 +241,14 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       if (['day', 'week', 'month'].includes(initialTab)) setViewMode(initialTab)
       if (['calendar', 'list'].includes(initialTab)) setDisplayMode(initialTab)
     }, [initialTab])
+
+    useEffect(() => {
+      if (!['individual', 'split'].includes(createSessionMode) || !initialParticipantId) return
+      const routeKey = `${createSessionMode}:${initialParticipantId}`
+      if (createRouteHandledRef.current === routeKey) return
+      createRouteHandledRef.current = routeKey
+      openSessionShortcut(createSessionMode, initialParticipantId, true)
+    }, [createSessionMode, initialParticipantId])
 
     const range = useMemo(
       () => calendarRange(focusDate, viewMode),
@@ -374,7 +384,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       })
     }
 
-    function openSessionShortcut(sessionType) {
+    function openSessionShortcut(sessionType, participantId = '', requireSecondParticipant = false) {
       setError(null)
       if (sessionType === 'split' && !splitReady) {
         setError('Тип split не настроен. Восстановите системный тип в Настройки → Типы занятий.')
@@ -389,7 +399,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         trainerId: current.trainerId || activeTrainers[0]?.trainerId || '',
         location: current.location || configuredLocations[0]?.name || '',
         sessionType,
+        participantId: participantId || current.participantId,
         secondParticipantId: sessionType === 'split' ? current.secondParticipantId : '',
+        requireSecondParticipant: sessionType === 'split' && requireSecondParticipant,
         rosterCount: sessionType === 'split'
           ? Math.max(current.secondParticipantId ? 2 : 1, Number(current.rosterCount || 0))
           : 0,
@@ -852,7 +864,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             <div className="ops-form-grid ops-schedule-form-grid">
               <label>Тип занятия<select id="admin-session-sessionType" value={sessionForm.sessionType} aria-invalid={Boolean(fieldErrors.sessionType)} aria-describedby={fieldErrors.sessionType ? 'admin-session-sessionType-error' : undefined} onChange={(event) => updateSessionType(event.target.value)}>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code} disabled={type.configured === false}>{type.label || type.code}</option>)}</select>{fieldErrors.sessionType && <small id="admin-session-sessionType-error" className="ops-field-error" role="alert">{fieldErrors.sessionType}</small>}</label>
               {sessionForm.sessionType !== 'group' && <SearchableSelect inputId="admin-session-participantId" label={sessionForm.sessionType === 'split' ? 'Клиент 1' : 'Участник'} value={sessionForm.participantId} onChange={(value) => { updateSessionForm('participantId', value); if (String(value) === String(sessionForm.secondParticipantId)) updateSessionForm('secondParticipantId', '') }} options={participants.map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.participantId} />}
-              {sessionForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-secondParticipantId" label="Клиент 2 (необязательно)" value={sessionForm.secondParticipantId} onChange={(value) => updateSessionForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionForm.participantId)).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.secondParticipantId} />}
+              {sessionForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-secondParticipantId" label={sessionForm.requireSecondParticipant ? 'Клиент 2' : 'Клиент 2 (необязательно)'} value={sessionForm.secondParticipantId} onChange={(value) => updateSessionForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionForm.participantId)).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.secondParticipantId} />}
               {sessionForm.sessionType === 'group' && <label>Группа<select id="admin-session-groupId" value={sessionForm.groupId} aria-invalid={Boolean(fieldErrors.groupId)} aria-describedby={fieldErrors.groupId ? 'admin-session-groupId-error' : undefined} onChange={(event) => updateNewSessionGroup(event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{fieldErrors.groupId && <small id="admin-session-groupId-error" className="ops-field-error" role="alert">{fieldErrors.groupId}</small>}</label>}
               <label>Тренер<select id="admin-session-trainerId" value={sessionForm.trainerId} aria-invalid={Boolean(fieldErrors.trainerId)} aria-describedby={fieldErrors.trainerId ? 'admin-session-trainerId-error' : undefined} onChange={(event) => updateSessionForm('trainerId', event.target.value)}><option value="">Выберите тренера</option>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{fieldErrors.trainerId && <small id="admin-session-trainerId-error" className="ops-field-error" role="alert">{fieldErrors.trainerId}</small>}</label>
               <DateField id="admin-session-date" label="Дата" value={sessionForm.date} onChange={(value) => updateSessionForm('date', value)} required error={fieldErrors.date} />

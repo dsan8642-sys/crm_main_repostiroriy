@@ -18,11 +18,15 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(ParentAccount)
 class ParentAccountAdmin(admin.ModelAdmin):
-    list_display = ("__str__", "phone", "email", "preferred_language", "created_at")
+    list_display = (
+        "__str__", "phone", "email", "instagram_username",
+        "preferred_language", "created_at",
+    )
     list_filter = ("preferred_language", "created_at")
     search_fields = (
         "user__username", "user__first_name", "user__last_name",
-        "phone", "email", "preferred_language", "students__first_name", "students__last_name",
+        "phone", "email", "instagram_username", "preferred_language",
+        "students__first_name", "students__last_name",
     )
     autocomplete_fields = ("user",)
 

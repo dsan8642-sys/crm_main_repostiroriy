@@ -27,12 +27,32 @@ def _payment_mutation_payload(payment, *, idempotent_replay=False):
     })
     return payload
 
+
+def _require_client_context(participant, data):
+    """Fail closed when a client-card mutation targets another account."""
+    raw_client_id = data.get("client_id")
+    if raw_client_id in (None, ""):
+        return participant
+    client_id = _positive_int(raw_client_id, "client_id")
+    if participant.parent_id != client_id:
+        raise _field_validation_error(
+            "client_id",
+            "Выбранный участник не принадлежит открытой карточке клиента.",
+            code="mismatch",
+        )
+    return participant
+
+
 @require_http_methods(["GET", "POST"])
 def admin_participant_charges(request, participant_id):
     user = _admin_required(request)
-    participant = get_object_or_404(Student.objects.select_related("parent", "group"), pk=participant_id)
+    participant = get_object_or_404(
+        Student.objects.select_related("parent").prefetch_related("groups"),
+        pk=participant_id)
     if request.method == "POST":
-        charge = _create_charge_for_participant(participant, _json_body(request), actor=user)
+        data = _json_body(request)
+        _require_client_context(participant, _charge_data(data))
+        charge = _create_charge_for_participant(participant, data, actor=user)
         return JsonResponse(_charge_payload(charge), status=201)
     qs = participant.charges.select_related("student", "subscription").order_by("-due_date", "-id")
     return JsonResponse({"charges": [_charge_payload(charge) for charge in qs]})
@@ -52,6 +72,7 @@ def admin_payments(request):
         )
         _require_active_participant(
             participant, "receive new payments", field="participant_id")
+        _require_client_context(participant, payment_data)
         payment, created = _create_payment_for_participant(participant, data, actor=user)
         return JsonResponse(
             _payment_mutation_payload(payment, idempotent_replay=not created),

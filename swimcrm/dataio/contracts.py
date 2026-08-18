@@ -7,7 +7,7 @@ import re
 from django.core.exceptions import ValidationError
 
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 SOURCE_SYSTEM = "swimcrm"
 METADATA_KEYS = ("schema_version", "exported_at", "source_system", "entity_type")
 
@@ -78,9 +78,10 @@ CONTRACTS = {
         F("parent_last_name", "Фамилия владельца аккаунта", "Родитель"),
         F("parent_phone", "Телефон", "phone", value_type="phone"),
         F("parent_email", "Email семьи", value_type="email"),
+        F("parent_instagram_username", "Instagram семьи"),
         F("preferred_language", "Язык", default="pl"),
-        F("first_name", "Имя", required=True),
-        F("last_name", "Фамилия", required=True),
+        F("first_name", "Имя"),
+        F("last_name", "Фамилия"),
         F("name", "ФИО", "name"),
         F("birth_date", "Дата рождения", value_type="date", value_format="ISO 8601 date"),
         F("email", "Email", "Почта", value_type="email"),
@@ -88,6 +89,10 @@ CONTRACTS = {
         F("group_id", "Group internal ID", value_type="integer", editable=False,
           relation="groups", matching="record_id then name"),
         F("group_name", "Группа", "group", relation="groups", matching="exact name"),
+        F("group_ids", "Group internal IDs", relation="groups",
+          matching="semicolon-separated record IDs"),
+        F("group_names", "Группы", relation="groups",
+          matching="semicolon-separated exact names"),
         F("medical_info", "Медицинская информация"),
         F("contraindications", "Противопоказания"),
         F("emergency_contact_name", "Экстренный контакт"),
@@ -258,7 +263,7 @@ def prepare_rows(entity, headers, rows, mapping=None):
                 f"Файл содержит entity_type={metadata.get('entity_type') or 'пусто'}, ожидался {entity}")
         if metadata.get("source_system") != SOURCE_SYSTEM:
             raise ValidationError("Неизвестный source_system собственного export")
-        if metadata.get("schema_version") != SCHEMA_VERSION:
+        if metadata.get("schema_version") not in {"1", SCHEMA_VERSION}:
             raise ValidationError(
                 f"Неподдерживаемая schema_version: {metadata.get('schema_version') or 'пусто'}")
 

@@ -133,7 +133,8 @@ def trainer_session_detail(request, session_id):
         "students": [{
             "id": student.id,
             "full_name": student.full_name,
-            "group": {"id": student.group_id, "name": student.group.name} if student.group_id else None,
+            "groups": _student_group_payloads(student),
+            "group": _legacy_group_payload(_student_group_payloads(student)),
             "attendance": {
                 "status": attendance[student.id].status,
                 "comment": attendance[student.id].comment,

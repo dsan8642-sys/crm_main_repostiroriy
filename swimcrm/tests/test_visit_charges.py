@@ -53,11 +53,11 @@ class VisitChargeRule(TestCase):
 
         self.assertEqual(self._charged(), 0)
 
-    def test_absent_without_subscription_is_not_charged(self):
+    def test_absent_without_subscription_is_charged_group_price(self):
         set_attendance(session_id=self.session.id, student=self.student,
                        status=AttendanceStatus.ABSENT, actor=self.admin)
 
-        self.assertEqual(self._charged(), 0)
+        self.assertEqual(self._charged(), 5000)
 
     def test_group_without_price_is_never_charged(self):
         self.group.price_minor = None

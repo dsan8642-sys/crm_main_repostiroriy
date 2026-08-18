@@ -43,7 +43,7 @@ def _reconcile_visit_charge(record, session, *, covered_by_subscription, actor):
     """Bill an attended session using its immutable price snapshot.
 
     Charges are append-only (Charge.delete() raises), so a status change away
-    from PRESENT cannot remove the original row — it posts a negative reversal
+    from a deducting status cannot remove the original row — it posts a negative reversal
     instead, mirroring how the ledger compensates with CORRECTION entries.
     """
     foreign_currency_charge = record.charges.exclude(currency=session.currency).exists()
@@ -53,7 +53,7 @@ def _reconcile_visit_charge(record, session, *, covered_by_subscription, actor):
     charged = record.charges.filter(currency=session.currency).aggregate(
         total=Sum("amount_minor"))["total"] or 0
     should_bill = (
-        record.status == AttendanceStatus.PRESENT
+        record.status in DEDUCTING_STATUSES
         and not covered_by_subscription
         and session.price_minor is not None
         and session.price_minor > 0

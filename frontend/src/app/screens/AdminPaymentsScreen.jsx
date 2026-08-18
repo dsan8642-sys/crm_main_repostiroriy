@@ -4,6 +4,7 @@ import { asAccountBalance, asMoneyMajor, formatDate, formatShortDate, formatTime
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { loadAdminParticipantOptions } from '../participantSearch.js'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -851,7 +852,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             <div><span>Способ</span><strong>{paymentMethodLabel(financeForm.paymentMethod)}</strong></div>
           </div>}
           <div className="ops-form-grid">
-            <SearchableSelect inputId={FINANCE_FIELD_IDS.participantId} label="Участник" value={financeForm.participantId} error={financeErrors.participantId} onChange={(value) => updateFinanceForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant, { description: (row) => row.phone || row.email || row.group }))} />
+            <SearchableSelect inputId={FINANCE_FIELD_IDS.participantId} label="Участник" value={financeForm.participantId} error={financeErrors.participantId} onChange={(value) => updateFinanceForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant, { description: (row) => row.phone || row.email || row.group }))} loadOptions={loadAdminParticipantOptions} />
             {(financeAction === 'issue' || financeAction === 'renew') && <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label="Тип абонемента" value={financeForm.subscriptionTypeId} error={financeErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}><option value="">Выберите тип</option>{subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price.toLocaleString('ru-RU')} {type.currency}</option>)}</Select>}
             {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && <Select id={FINANCE_FIELD_IDS.subscriptionId} label="Абонемент участника" value={financeForm.subscriptionId} error={financeErrors.subscriptionId} disabled={subscriptionsLoading} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}><option value="">{subscriptionsLoading ? 'Загрузка абонементов…' : 'Выберите абонемент'}</option>{subscriptions.map((subscription) => <option key={subscription.id} value={subscription.id}>#{subscription.id} · {subscription.type} · {subscription.status} · {subscription.remaining_sessions ?? 'безлимитный'}</option>)}</Select>}
             {(financeAction === 'issue' || financeAction === 'renew') && <><Input id={FINANCE_FIELD_IDS.startDate} label="Начало абонемента" value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Input id={FINANCE_FIELD_IDS.dueDate} label="Срок оплаты" value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" /><Checkbox id={FINANCE_FIELD_IDS.createCharge} label="Создать начисление" checked={financeForm.createCharge} error={financeErrors.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} /></>}

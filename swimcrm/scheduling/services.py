@@ -52,14 +52,14 @@ def session_roster_students(session):
     if session.individual_student_id:
         condition = Q(pk=session.individual_student_id) | Q(pk__in=participant_ids)
     elif session.group_id:
-        condition = Q(group_id=session.group_id, is_active=True) | Q(pk__in=participant_ids)
+        condition = Q(groups__id=session.group_id, is_active=True) | Q(pk__in=participant_ids)
     else:
         condition = Q(pk__in=participant_ids)
     return Student.objects.filter(
         condition,
         is_active=True,
         parent__user__is_active=True,
-    ).select_related("parent", "parent__user", "group").distinct()
+    ).select_related("parent", "parent__user").prefetch_related("groups").distinct()
 
 
 def split_roster_student_ids(session):
@@ -79,7 +79,7 @@ def split_roster_students(session):
     """Ordered enrolled Split students, including participants archived later."""
     student_ids = split_roster_student_ids(session)
     students = Student.objects.filter(pk__in=student_ids).select_related(
-        "parent", "parent__user", "group")
+        "parent", "parent__user").prefetch_related("groups")
     by_id = {student.id: student for student in students}
     return [by_id[student_id] for student_id in student_ids if student_id in by_id]
 

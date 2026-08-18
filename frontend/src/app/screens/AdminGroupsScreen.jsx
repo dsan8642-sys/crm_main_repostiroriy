@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
@@ -49,8 +49,15 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const [membersLoading, setMembersLoading] = useState(false)
     const [memberRefresh, setMemberRefresh] = useState(0)
 
-    const candidates = useMemo(() => clients.filter((client) => String(client.groupId) !== String(selected?.groupId) && client.isActive), [clients, selected])
+    const candidates = useMemo(() => clients.filter((client) => !(client.groupIds || []).map(String).includes(String(selected?.groupId)) && (client.groupIds || []).length < 3 && client.isActive), [clients, selected])
     const capacity = selected?.defaultCapacity ?? null
+
+    const loadCandidateOptions = useCallback(async (query, requestOptions = {}) => {
+      const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, requestOptions)
+      return mapAdminParticipantRows(payload.participants || [])
+        .filter((client) => !(client.groupIds || []).map(String).includes(String(selected?.groupId)) && (client.groupIds || []).length < 3 && client.isActive)
+        .map((client) => clientSelectOption(client, { description: (row) => row.group || 'Без группы' }))
+    }, [selected?.groupId])
 
     useEffect(() => {
       if (!selected?.groupId) {
@@ -172,11 +179,17 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       } finally { setBusy(false) }
     }
 
-    async function moveParticipant(studentId, nextGroupId) {
+    async function changeParticipantMembership(studentId, action) {
       setBusy(true); setError(null)
       try {
-        await api.post(`/api/admin/participants/${studentId}/`, { participant: { group_id: nextGroupId || null } })
-        setMessage(nextGroupId ? 'Участник добавлен в группу.' : 'Участник убран из группы.')
+        const participant = await api.get(`/api/admin/participants/${studentId}/`)
+        const currentIds = (participant.groups || []).map((group) => String(group.id))
+        const selectedId = String(selected?.groupId || '')
+        const groupIds = action === 'add'
+          ? [...new Set([...currentIds, selectedId])]
+          : currentIds.filter((groupId) => groupId !== selectedId)
+        await api.post(`/api/admin/participants/${studentId}/`, { participant: { group_ids: groupIds } })
+        setMessage(action === 'add' ? 'Участник добавлен в группу.' : 'Участник убран из группы.')
         setCandidateId('')
         setAddingMember(false)
         await reloadRoleData?.('admin')
@@ -225,14 +238,14 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           <div className="ops-entity-head"><div><div className="eyebrow">Карточка группы</div><h3>{selected.name}</h3><div className="muted">{selected.description || 'Описание не добавлено'}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>Редактировать</Button><Button variant="subtle" onClick={() => setSelected(null)}>Закрыть</Button></div></div>
           <div className="ops-summary-grid"><div><span>Тренер</span><strong>{selected.trainer || 'Не назначен'}</strong></div><div><span>Участники</span><strong>{members.length}</strong></div><div><span>Вместимость</span><strong>{capacity ?? 'Не задана'}</strong></div><div><span>Ближайшее занятие</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
           <div className="ops-detail-grid">
-            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? 'Загрузка…' : `${members.length} / ${capacity ?? 'Не задана'}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading} onClick={() => { setCandidateId(''); setAddingMember(true) }}>Добавить</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => moveParticipant(client.studentId, null)}>Убрать</Button></div>)}{membersLoading && <div className="empty">Загружаю полный состав группы…</div>}{!membersLoading && !members.length && <div className="empty">В группе пока нет участников.</div>}</div>
+            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? 'Загрузка…' : `${members.length} / ${capacity ?? 'Не задана'}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading} onClick={() => { setCandidateId(''); setAddingMember(true) }}>Добавить</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => changeParticipantMembership(client.studentId, 'remove')}>Убрать</Button></div>)}{membersLoading && <div className="empty">Загружаю полный состав группы…</div>}{!membersLoading && !members.length && <div className="empty">В группе пока нет участников.</div>}</div>
             <div><div className="eyebrow">Расписание группы</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>Занятий нет. Открыть расписание</button>}</div>
           </div>
         </section>}
 
-        <FormModal open={addingMember} title="Добавить участника в группу" size="sm" busy={busy} dirty={Boolean(candidateId)} onRequestClose={() => { setAddingMember(false); setCandidateId(''); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={!candidateId || busy} onClick={() => moveParticipant(candidateId, selected?.groupId)}>Добавить</Button></>}>
+        <FormModal open={addingMember} title="Добавить участника в группу" size="sm" busy={busy} dirty={Boolean(candidateId)} onRequestClose={() => { setAddingMember(false); setCandidateId(''); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={!candidateId || busy} onClick={() => changeParticipantMembership(candidateId, 'add')}>Добавить</Button></>}>
           {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-          <SearchableSelect inputAriaLabel="Добавить участника" value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || 'Без группы' }))} />
+          <SearchableSelect inputAriaLabel="Добавить участника" value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || 'Без группы' }))} loadOptions={loadCandidateOptions} />
         </FormModal>
 
         <ListFeedback list={groupList} emptyLabel="Групп пока нет" />

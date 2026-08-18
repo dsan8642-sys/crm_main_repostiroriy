@@ -118,16 +118,26 @@ def admin_clients(request):
     if request.method != "GET":
         data = _json_body(request)
         data["_actor"] = user
+        participant_data = _participant_data(data)
+        if "is_adult" in data:
+            is_adult = _bool_value(data.get("is_adult"), True)
+        elif "is_account_holder" in participant_data:
+            is_adult = _bool_value(
+                participant_data.get("is_account_holder"), True)
+        else:
+            is_adult = True
+        account_data = _account_data(data)
+        if is_adult and not (
+                str(account_data.get("first_name") or "").strip()
+                or str(account_data.get("last_name") or "").strip()):
+            raise ValidationError({
+                "account.first_name": ValidationError(
+                    "Укажите имя или фамилию участника.", code="required"),
+                "account.last_name": ValidationError(
+                    "Укажите имя или фамилию участника.", code="required"),
+            })
         with transaction.atomic():
             account = _create_account(data)
-            participant_data = _participant_data(data)
-            if "is_adult" in data:
-                is_adult = _bool_value(data.get("is_adult"), True)
-            elif "is_account_holder" in participant_data:
-                is_adult = _bool_value(
-                    participant_data.get("is_account_holder"), True)
-            else:
-                is_adult = True
             if is_adult:
                 participant = _create_participant(account, data, is_account_holder=True)
                 audit(user, "participant.created", participant, {"client_id": account.id, "is_account_holder": True})
@@ -136,16 +146,18 @@ def admin_clients(request):
                 audit(user, "participant.created", participant, {"client_id": account.id, "is_account_holder": False})
         return JsonResponse(_client_detail_payload(account), status=201)
 
-    qs = Student.objects.select_related("parent", "parent__user", "group", "group__default_trainer__user").all()
+    qs = Student.objects.select_related("parent", "parent__user").prefetch_related(
+        "groups", "groups__default_trainer__user").all()
     q = search_param(request)
     if q:
-        qs = qs.filter(
-            Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q) |
-            Q(parent__phone__icontains=q) | Q(parent__email__icontains=q) |
-            Q(group__name__icontains=q) |
-            Q(group__default_trainer__user__first_name__icontains=q) |
-            Q(group__default_trainer__user__last_name__icontains=q)
-        )
+        for token in q.split():
+            qs = qs.filter(
+                Q(first_name__icontains=token) | Q(last_name__icontains=token) |
+                Q(email__icontains=token) | Q(parent__phone__icontains=token) |
+                Q(parent__email__icontains=token) | Q(groups__name__icontains=token) |
+                Q(groups__default_trainer__user__first_name__icontains=token) |
+                Q(groups__default_trainer__user__last_name__icontains=token)
+            )
     active = choice_param(request, "active", {"true", "false"})
     if active == "true":
         qs = qs.filter(is_active=True, parent__user__is_active=True)
@@ -153,10 +165,10 @@ def admin_clients(request):
         qs = qs.filter(Q(is_active=False) | Q(parent__user__is_active=False))
     group_id = positive_int_param(request, "group_id")
     if group_id:
-        qs = qs.filter(group_id=group_id)
+        qs = qs.filter(groups__id=group_id)
     trainer_id = positive_int_param(request, "trainer_id")
     if trainer_id:
-        qs = qs.filter(group__default_trainer_id=trainer_id)
+        qs = qs.filter(groups__default_trainer_id=trainer_id)
     debt = choice_param(request, "debt", {"yes", "no"})
     subscription = choice_param(request, "subscription", {"with", "without"})
     balance = choice_param(request, "balance", {"positive", "negative", "zero"})
@@ -278,7 +290,9 @@ def admin_client_participants(request, client_id):
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
 def admin_participant_detail(request, participant_id):
     user = _admin_required(request)
-    participant = get_object_or_404(Student.objects.select_related("parent", "group"), pk=participant_id)
+    participant = get_object_or_404(
+        Student.objects.select_related("parent").prefetch_related("groups"),
+        pk=participant_id)
     if request.method == "DELETE":
         participant.is_active = False
         participant.save(update_fields=["is_active"])
@@ -290,7 +304,7 @@ def admin_participant_detail(request, participant_id):
         # Group membership reserves a place independently of portal/archive
         # status. Admins must therefore be able to remove an inactive record
         # from a group without reopening every other profile field for edits.
-        if set(participant_data) != {"group_id"}:
+        if not participant_data or not set(participant_data).issubset({"group_id", "group_ids"}):
             _require_active_participant(participant, "be edited")
         with transaction.atomic():
             _apply_participant_data(participant, data)

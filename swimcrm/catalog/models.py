@@ -5,7 +5,7 @@ from common.money import CURRENCY_CHOICES, Money
 
 
 class Group(models.Model):
-    """Rule 7: a student is attached to a group statically."""
+    """A recurring training group with its own schedule defaults."""
     name = models.CharField(max_length=120, unique=True)
     description = models.TextField(blank=True)
     default_trainer = models.ForeignKey(

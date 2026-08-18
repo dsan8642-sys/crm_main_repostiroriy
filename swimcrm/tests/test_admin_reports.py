@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 from django.test import Client, TestCase
 from openpyxl import load_workbook
 
+from attendance.models import AttendanceStatus
+from attendance.services import set_attendance
 from billing.models import Payment, PaymentMethod, PaymentStatus
 from scheduling.models import SessionType
 from scheduling.services import create_session
@@ -188,8 +190,8 @@ class AdminReportsHttpRule(AdminReportsWorld, TestCase):
         self.assertEqual(payload["total_minor"], 3500)
         self.assertEqual(payload["cash_minor"], 1000)
         self.assertEqual(payload["non_cash_minor"], 2500)
-        self.assertIn("by_group", payload)
-        self.assertIn("by_trainer", payload)
+        self.assertIn("lesson_value_by_group", payload)
+        self.assertIn("lesson_value_by_trainer", payload)
         self.assertEqual(payload["pagination"]["total"], 2)
         self.assertEqual(payload["pagination"]["pages"], 2)
         self.assertEqual([row["id"] for row in payload["payments"]], [card.id])
@@ -197,6 +199,54 @@ class AdminReportsHttpRule(AdminReportsWorld, TestCase):
         self.assertEqual(payload["payments"][0]["method_label"], "Карта")
         self.assertEqual(payload["available_currencies"], ["PLN", "EUR", "USD"])
         self.assertNotEqual(cash.id, card.id)
+
+    def test_lesson_value_uses_session_snapshot_group_and_effective_trainer(self):
+        scheduled = self.make_trainer("value_scheduled", "Scheduled", "Coach")
+        actual = self.make_trainer("value_actual", "Actual", "Coach")
+        self.group.price_minor = 5100
+        self.group.save(update_fields=["price_minor"])
+        group_session = self.make_session(
+            scheduled,
+            datetime(2026, 8, 11, 10, 0, tzinfo=WARSAW),
+            SessionType.GROUP,
+        )
+        group_session.substitute_trainer = actual
+        group_session.save(update_fields=["substitute_trainer"])
+        individual_session = create_session(
+            trainer=scheduled,
+            start_at=datetime(2026, 8, 12, 10, 0, tzinfo=WARSAW),
+            duration_minutes=45,
+            location="Reports pool",
+            max_participants=1,
+            session_type=SessionType.INDIVIDUAL,
+            individual_student=self.student,
+            price_minor=7300,
+        )
+        set_attendance(
+            session_id=group_session.id,
+            student=self.student,
+            status=AttendanceStatus.ABSENT,
+        )
+        set_attendance(
+            session_id=individual_session.id,
+            student=self.student,
+            status=AttendanceStatus.PRESENT,
+        )
+
+        response = self.client.get(
+            "/api/admin/reports/income/",
+            {"date_from": "2026-08-01", "date_to": "2026-08-31", "currency": "PLN"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            {row["group"]: row["amount_minor"] for row in payload["lesson_value_by_group"]},
+            {self.group.name: 5100, "Индивидуальные": 7300},
+        )
+        self.assertEqual(
+            {row["trainer"]: row["amount_minor"] for row in payload["lesson_value_by_trainer"]},
+            {str(actual): 5100, str(scheduled): 7300},
+        )
 
     def test_report_validation_and_permissions_are_public_http_behavior(self):
         anonymous = Client()
@@ -278,7 +328,9 @@ class AdminReportsXlsxRule(AdminReportsWorld, TestCase):
         self.assertEqual(sessions_book["Итоги"]["F2"].value, 1)
 
         income_book = load_workbook(BytesIO(income_response.content), read_only=True)
-        self.assertEqual(income_book.sheetnames, ["Сводка", "Платежи"])
+        self.assertEqual(income_book.sheetnames, [
+            "Сводка", "Платежи", "Стоимость по группам", "Стоимость по тренерам",
+        ])
         payment_rows = list(income_book["Платежи"].iter_rows(values_only=True))
         self.assertEqual(len(payment_rows), 3)
         participant_column = payment_rows[0].index("Клиент")

@@ -110,6 +110,37 @@ class ClientPortalApiRule(TestCase):
         self.assertIn("Ковальский Ян", names)
         self.assertNotIn("Новак Ева", names)
 
+    def test_client_schedule_contains_sessions_from_every_membership_group(self):
+        second_group = f.make_group("Вторая группа")
+        self.student.groups.add(second_group)
+        first_session = create_session(
+            trainer=self.trainer,
+            group=self.group,
+            start_at=f.dt(2026, 9, 2, 17),
+            duration_minutes=60,
+            location="Pool A",
+            max_participants=10,
+        )
+        second_session = create_session(
+            trainer=self.trainer,
+            group=second_group,
+            start_at=f.dt(2026, 9, 3, 17),
+            duration_minutes=60,
+            location="Pool B",
+            max_participants=10,
+        )
+
+        response = self.client.get(
+            "/api/client/schedule/",
+            {"date_from": "2026-09-02", "date_to": "2026-09-03"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in response.json()["sessions"]},
+            {first_session.id, second_session.id},
+        )
+
     def test_cancelled_split_participation_does_not_keep_session_visible(self):
         session = create_session(
             trainer=self.trainer,
@@ -1653,6 +1684,161 @@ class AdminPortalApiRule(TestCase):
                     [target.id],
                 )
 
+    def test_participant_group_contract_supports_three_groups_atomically(self):
+        second = f.make_group("Касатки 2")
+        third = f.make_group("Касатки 3")
+        fourth = f.make_group("Касатки 4")
+
+        initial = self.client.get(f"/api/admin/participants/{self.student.id}/")
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.json()["group_id"], self.group.id)
+        self.assertEqual(initial.json()["group"]["id"], self.group.id)
+
+        assigned = self.client.post(
+            f"/api/admin/participants/{self.student.id}/",
+            data=json.dumps({
+                "participant": {
+                    "group_ids": [self.group.id, second.id, third.id],
+                },
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(assigned.status_code, 200, assigned.content)
+        self.assertEqual(
+            {row["id"] for row in assigned.json()["groups"]},
+            {self.group.id, second.id, third.id},
+        )
+        self.assertIsNone(assigned.json()["group"])
+        self.assertIsNone(assigned.json()["group_id"])
+
+        before_rejected = set(self.student.groups.values_list("id", flat=True))
+        rejected = self.client.post(
+            f"/api/admin/participants/{self.student.id}/",
+            data=json.dumps({
+                "participant": {
+                    "group_ids": [self.group.id, second.id, third.id, fourth.id],
+                },
+            }),
+            content_type="application/json",
+        )
+        legacy_rejected = self.client.post(
+            f"/api/admin/participants/{self.student.id}/",
+            data=json.dumps({"participant": {"group_id": fourth.id}}),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(legacy_rejected.status_code, 400)
+        self.assertEqual(
+            set(self.student.groups.values_list("id", flat=True)),
+            before_rejected,
+        )
+
+        removed_one = self.client.post(
+            f"/api/admin/participants/{self.student.id}/",
+            data=json.dumps({
+                "participant": {"group_ids": [second.id, third.id]},
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(removed_one.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in removed_one.json()["groups"]},
+            {second.id, third.id},
+        )
+        old_group_roster = self.client.get(
+            "/api/admin/clients/", {"group_id": self.group.id, "page_size": 200})
+        second_group_roster = self.client.get(
+            "/api/admin/clients/", {"group_id": second.id, "page_size": 200})
+        self.assertNotIn(
+            self.student.id,
+            {row["id"] for row in old_group_roster.json()["clients"]},
+        )
+        self.assertIn(
+            self.student.id,
+            {row["id"] for row in second_group_roster.json()["clients"]},
+        )
+
+    def test_remote_reference_search_filters_before_the_first_hundred_rows(self):
+        Student.objects.bulk_create([
+            Student(
+                parent=self.student.parent,
+                first_name=f"Filler{index:03d}",
+                last_name="Pinned",
+            )
+            for index in range(120)
+        ])
+        target_parent = f.make_parent(
+            username="remote_unicode_parent", phone="+48555987654")
+        target = f.make_student(
+            parent=target_parent,
+            first="Кирилл",
+            last="Żółw",
+            email="unicode.remote@example.test",
+        )
+
+        for query in (
+            "Кирилл", "Żółw", "Кирилл Żółw", "Żółw Кирилл",
+            "+48555987654", "UNICODE.REMOTE@EXAMPLE.TEST",
+        ):
+            with self.subTest(query=query):
+                response = self.client.get("/api/admin/reference/", {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    [row["id"] for row in response.json()["participants"]],
+                    [target.id],
+                )
+
+    def test_phone_is_optional_and_instagram_is_admin_only(self):
+        created = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({
+                "is_adult": True,
+                "account": {
+                    "first_name": "",
+                    "last_name": "Безтелефона",
+                    "phone": "",
+                    "email": "",
+                    "username": "",
+                    "instagram_username": " https://www.instagram.com/H2O_Client/ ",
+                },
+                "participant": {"is_account_holder": True},
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        account = created.json()["account"]
+        self.assertEqual(account["phone"], "")
+        self.assertEqual(account["instagram_username"], "h2o_client")
+        self.assertTrue(account["username"].startswith("безтелефона"))
+
+        invalid = self.client.post(
+            f"/api/admin/clients/{account['id']}/",
+            data=json.dumps({"account": {"instagram_username": "bad profile!"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("account.instagram_username", invalid.json()["errors"])
+
+        created_account = ParentAccount.objects.get(pk=account["id"])
+        self.client.force_login(created_account.user)
+        client_payload = self.client.get("/api/client/profile/").json()
+        self.assertNotIn("instagram_username", client_payload["account"])
+        self.assertNotIn("telegram_chat_id", client_payload["account"])
+
+    def test_adult_client_rejects_an_empty_name(self):
+        response = self.client.post(
+            "/api/admin/clients/",
+            data=json.dumps({
+                "is_adult": True,
+                "account": {"phone": "", "email": "", "username": ""},
+                "participant": {"is_account_holder": True},
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("account.first_name", response.json()["errors"])
+        self.assertIn("account.last_name", response.json()["errors"])
+
     def test_admin_dashboard_endpoint_exposes_metrics(self):
         trainer = f.make_trainer(username="dashboard_coach")
         session_start = timezone.localtime().replace(hour=12, minute=0, second=0, microsecond=0)
@@ -2112,6 +2298,43 @@ class AdminPortalApiRule(TestCase):
         )
         self.assertEqual(rejected.status_code, 200)
         self.assertEqual(rejected.json()["status"], PaymentStatus.REJECTED)
+
+    def test_client_card_finance_rejects_a_participant_from_another_client(self):
+        other_parent = f.make_parent()
+        charge_count = Charge.objects.count()
+        payment_count = Payment.objects.count()
+
+        charge = self.client.post(
+            f"/api/admin/participants/{self.student.id}/charges/",
+            data=json.dumps({
+                "client_id": other_parent.id,
+                "description": "Wrong client charge",
+                "amount_minor": 5000,
+                "currency": "PLN",
+                "due_date": date.today().isoformat(),
+            }),
+            content_type="application/json",
+        )
+        payment = self.client.post(
+            "/api/admin/payments/",
+            data=json.dumps({
+                "client_id": other_parent.id,
+                "participant_id": self.student.id,
+                "idempotency_key": "wrong-client-payment-001",
+                "amount_minor": 5000,
+                "currency": "PLN",
+                "paid_at": date.today().isoformat(),
+                "method": "cash",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(charge.status_code, 400)
+        self.assertEqual(payment.status_code, 400)
+        self.assertEqual(charge.json()["errors"]["client_id"][0]["code"], "mismatch")
+        self.assertEqual(payment.json()["errors"]["client_id"][0]["code"], "mismatch")
+        self.assertEqual(Charge.objects.count(), charge_count)
+        self.assertEqual(Payment.objects.count(), payment_count)
 
     def test_schedule_template_routes_are_removed(self):
         self.assertEqual(self.client.get("/api/admin/schedule/templates/").status_code, 404)
@@ -3716,12 +3939,14 @@ class AdminPortalApiRule(TestCase):
         parent = self.student.parent
         parent.email = "family@example.com"
         parent.telegram_chat_id = "123"
+        parent.instagram_username = "family_profile"
         parent.save()
 
         export = self.client.get(f"/api/admin/privacy/clients/{parent.id}/export/")
         self.assertEqual(export.status_code, 200)
         self.assertEqual(export["Content-Type"], "application/json; charset=utf-8")
-        self.assertIn("account", json.loads(export.content.decode("utf-8")))
+        exported = json.loads(export.content.decode("utf-8"))
+        self.assertEqual(exported["account"]["instagram_username"], "family_profile")
 
         response = self.client.post(f"/api/admin/privacy/clients/{parent.id}/anonymize/")
         self.assertEqual(response.status_code, 200)
@@ -3731,6 +3956,8 @@ class AdminPortalApiRule(TestCase):
         parent.user.refresh_from_db()
         self.assertEqual(parent.phone, "")
         self.assertEqual(parent.email, "")
+        self.assertEqual(parent.telegram_chat_id, "")
+        self.assertEqual(parent.instagram_username, "")
         self.assertFalse(parent.user.is_active)
         self.assertFalse(self.student.is_active)
         self.assertEqual(self.student.email, "")

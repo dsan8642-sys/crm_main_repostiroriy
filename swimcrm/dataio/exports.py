@@ -23,6 +23,8 @@ def _bool(value):
 def _client_row(student):
     parent = student.parent
     user = parent.user
+    groups = sorted(student.groups.all(), key=lambda group: (group.name, group.id))
+    legacy_group = groups[0] if len(groups) == 1 else None
     subscription = student.subscriptions.select_related("subscription_type").order_by("-created_at", "-id").first()
     return {
         "record_id": student.id,
@@ -32,6 +34,7 @@ def _client_row(student):
         "parent_last_name": user.last_name,
         "parent_phone": parent.phone,
         "parent_email": parent.email,
+        "parent_instagram_username": parent.instagram_username,
         "preferred_language": parent.preferred_language,
         "first_name": student.first_name,
         "last_name": student.last_name,
@@ -39,8 +42,10 @@ def _client_row(student):
         "birth_date": _iso(student.birth_date),
         "email": student.email,
         "is_account_holder": _bool(student.is_account_holder),
-        "group_id": student.group_id or "",
-        "group_name": student.group.name if student.group else "",
+        "group_id": legacy_group.id if legacy_group else "",
+        "group_name": legacy_group.name if legacy_group else "",
+        "group_ids": ";".join(str(group.id) for group in groups),
+        "group_names": ";".join(group.name for group in groups),
         "medical_info": student.medical_info,
         "contraindications": student.contraindications,
         "emergency_contact_name": student.emergency_contact_name,
@@ -139,7 +144,8 @@ def _trainer_row(trainer):
 
 
 DATASETS = {
-    "clients": lambda: (Student.objects.select_related("group", "parent__user").prefetch_related("subscriptions__subscription_type"), _client_row),
+    "clients": lambda: (Student.objects.select_related("parent__user").prefetch_related(
+        "groups", "subscriptions__subscription_type"), _client_row),
     "payments": lambda: (Payment.objects.select_related("student__parent"), _payment_row),
     "attendance": lambda: (AttendanceRecord.objects.select_related(
         "session__group", "session__trainer__user", "student__parent"), _attendance_row),

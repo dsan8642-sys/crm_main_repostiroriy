@@ -1272,7 +1272,10 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/clients/10/': {
       account: { id: 10, username: 'jan-parent', full_name: 'Anna Kowalska', email: 'anna@example.com', phone: '+48111222333', is_active: true, access_activated: true, portal_access: 'active' },
       participants: [{ id: 1, client_id: 10, first_name: 'Jan', last_name: 'Kowalski', full_name: 'Jan Kowalski', birth_date: '2016-05-10', is_active: true, group: { id: 1, name: 'Delfiny' }, balance_minor: 0 }],
-      subscriptions: [{ id: 1, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, type: '8 wejsc', status: 'active', remaining_sessions: 7, start_date: '2026-07-01', effective_end_date: '2026-07-31', created_at: '2026-07-01T10:00:00+02:00' }],
+      subscriptions: [
+        { id: 1, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, subscription_type_id: 1, type: '8 wejsc', status: 'active', remaining_sessions: 7, start_date: '2026-07-01', effective_end_date: '2026-07-31', created_at: '2026-07-01T10:00:00+02:00' },
+        { id: 2, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, subscription_type_id: 1, type: '4 wejsc', status: 'expired', remaining_sessions: 0, start_date: '2026-05-01', effective_end_date: '2026-05-31', created_at: '2026-05-01T10:00:00+02:00' },
+      ],
       charges: [],
       payments: [],
       attendance: [],
@@ -1679,6 +1682,16 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByRole('columnheader', { name: 'Телефон' })).toHaveCount(0)
   await page.getByRole('button', { name: /Профиль/ }).click()
   await expect(page.getByText('Anna Kowalska').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /Продлить абонемент/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Заморозить/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Скорректировать/ })).toHaveCount(0)
+  await page.getByRole('tab', { name: /Абонементы/ }).click()
+  await page.getByRole('row', { name: /4 wejsc.*Jan Kowalski/ }).click()
+  const rowSubscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
+  await expect(rowSubscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('2')
+  await expect(rowSubscriptionEditor.getByLabel('Действие')).toHaveValue('renew')
+  await rowSubscriptionEditor.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
+
   await page.getByRole('tab', { name: /Платежи/ }).click()
   await page.getByRole('button', { name: /Пополнить баланс/ }).click()
   const paymentDialog = page.getByRole('dialog', { name: 'Пополнить баланс' })
@@ -1697,20 +1710,26 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент и начисление созданы.')).toBeVisible()
 
-  await page.getByRole('button', { name: /Продлить абонемент/ }).click()
-  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
+  let subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
+  await expect(subscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('1')
+  await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент продлён с начислением.')).toBeVisible()
 
-  await page.getByRole('button', { name: /Заморозить/ }).click()
-  await page.getByRole('textbox', { name: 'С даты', exact: true }).fill('2026-07-17')
-  await page.getByRole('textbox', { name: 'По дату', exact: true }).fill('2026-07-23')
-  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
+  subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
+  await subscriptionEditor.getByLabel('Действие').selectOption('freeze')
+  await subscriptionEditor.getByRole('textbox', { name: 'С даты', exact: true }).fill('2026-07-17')
+  await subscriptionEditor.getByRole('textbox', { name: 'По дату', exact: true }).fill('2026-07-23')
+  await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент заморожен на 7 дней.')).toBeVisible()
 
-  await page.getByRole('button', { name: /Скорректировать/ }).click()
-  await page.getByLabel('Изменение занятий').fill('1')
-  await page.getByLabel('Комментарий').fill('Ручная корректировка')
-  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
+  subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
+  await subscriptionEditor.getByLabel('Действие').selectOption('adjust')
+  await subscriptionEditor.getByLabel('Изменение занятий').fill('1')
+  await subscriptionEditor.getByLabel('Комментарий').fill('Ручная корректировка')
+  await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Остаток занятий скорректирован.')).toBeVisible()
 
   for (const endpoint of [

@@ -16,6 +16,7 @@ import { ToastNotice } from '../ToastProvider.jsx'
 import { ListFeedback, ListPagination, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
 import { clientActivity, formatEntityMoney } from '../entityListContracts.js'
+import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
 
 const CLIENT_FIELD_MAP = {
   'account.first_name': 'firstName',
@@ -24,9 +25,9 @@ const CLIENT_FIELD_MAP = {
   'account.username': 'username',
   'account.phone': 'phone',
   'participant.birth_date': 'birthDate',
-  'participant.group_id': 'groupId',
+  'participant.group_ids': 'groupIds',
   birth_date: 'birthDate',
-  group_id: 'groupId',
+  group_ids: 'groupIds',
 }
 
 const CLIENT_FIELD_IDS = {
@@ -36,7 +37,7 @@ const CLIENT_FIELD_IDS = {
   username: 'admin-client-username',
   phone: 'admin-client-phone',
   birthDate: 'admin-client-birthDate',
-  groupId: 'admin-client-groupId',
+  groupIds: 'admin-client-groupIds',
 }
 
 const CLIENT_EDIT_FIELD_MAP = {
@@ -46,7 +47,7 @@ const CLIENT_EDIT_FIELD_MAP = {
   'account.username': 'accountUsername',
   'account.phone': 'accountPhone',
   birth_date: 'birthDate',
-  group_id: 'groupId',
+  group_ids: 'groupIds',
 }
 
 const PARTICIPANT_FIELD_MAP = {
@@ -54,16 +55,26 @@ const PARTICIPANT_FIELD_MAP = {
   'participant.last_name': 'lastName',
   'participant.birth_date': 'birthDate',
   'participant.email': 'email',
-  'participant.group_id': 'groupId',
+  'participant.group_ids': 'groupIds',
   first_name: 'firstName',
   last_name: 'lastName',
   birth_date: 'birthDate',
   email: 'email',
-  group_id: 'groupId',
+  group_ids: 'groupIds',
 }
 
 const mapActiveClientRows = (rows) => mapAdminClientRows(rows).active
 const mapBlacklistedClientRows = (rows) => mapAdminClientRows(rows).blacklisted
+
+async function loadClientAccountOptions(query, requestOptions = {}) {
+  const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, requestOptions)
+  const rows = mapAdminClientRows(payload.participants || []).active
+  const accounts = Array.from(new Map(rows.map((row) => [row.clientId, row])).values())
+  return accounts.map((row) => clientSelectOption(row, {
+    valueKey: 'clientId',
+    description: (client) => client.phone || client.email || `ID ${client.clientId}`,
+  }))
+}
 
 export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
@@ -93,7 +104,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       usernameManual: false,
       phone: '',
       birthDate: '',
-      groupId: '',
+      groupIds: [],
     })
     const [participantForm, setParticipantForm] = useState({
       clientId: '',
@@ -101,7 +112,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       lastName: '',
       birthDate: '',
       email: '',
-      groupId: '',
+      groupIds: [],
     })
     const [editingClient, setEditingClient] = useState(null)
     const [clientEditBaseline, setClientEditBaseline] = useState(null)
@@ -115,7 +126,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       lastName: '',
       birthDate: '',
       email: '',
-      groupId: '',
+      groupIds: [],
       isActive: true,
     })
     const [message, setMessage] = useState(null)
@@ -139,10 +150,10 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
     function closeQuickAction() {
       if (quickAction === 'client') {
-        setClientForm({ firstName: '', lastName: '', email: '', username: '', usernameManual: false, phone: '', birthDate: '', groupId: '' })
+        setClientForm({ firstName: '', lastName: '', email: '', username: '', usernameManual: false, phone: '', birthDate: '', groupIds: [] })
         setClientFieldErrors({})
       } else if (quickAction === 'participant') {
-        setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
+        setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupIds: [] })
         setParticipantFieldErrors({})
       }
       setError(null)
@@ -195,7 +206,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         lastName: row.last || '',
         birthDate: row.born === '-' ? '' : row.born || '',
         email: row.email || '',
-        groupId: row.groupId || '',
+        groupIds: (row.groupIds || []).map(String),
         isActive: row.isActive,
       }
       setClientEditForm(initialForm)
@@ -227,6 +238,16 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     }
 
     async function createClient() {
+      if (!clientForm.firstName.trim() && !clientForm.lastName.trim()) {
+        const nextErrors = {
+          firstName: 'Укажите имя или фамилию участника.',
+          lastName: 'Укажите имя или фамилию участника.',
+        }
+        setClientFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, CLIENT_FIELD_IDS)
+        return
+      }
       setBusy(true)
       setError(null)
       setClientFieldErrors({})
@@ -245,7 +266,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             first_name: clientForm.firstName,
             last_name: clientForm.lastName,
             birth_date: clientForm.birthDate || null,
-            group_id: clientForm.groupId || null,
+            group_ids: clientForm.groupIds,
             is_account_holder: true,
           },
         })
@@ -259,7 +280,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           usernameManual: false,
           phone: '',
           birthDate: '',
-          groupId: '',
+          groupIds: [],
         })
         await reloadRoleData?.('admin')
       } catch (err) {
@@ -279,6 +300,19 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           { clientId: true }, { clientId: 'admin-participant-clientId' }), 0)
         return
       }
+      if (!participantForm.firstName.trim() && !participantForm.lastName.trim()) {
+        const nextErrors = {
+          firstName: 'Укажите имя или фамилию участника.',
+          lastName: 'Укажите имя или фамилию участника.',
+        }
+        setParticipantFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, {
+          firstName: 'admin-participant-firstName',
+          lastName: 'admin-participant-lastName',
+        })
+        return
+      }
       setBusy(true)
       setError(null)
       setParticipantFieldErrors({})
@@ -289,12 +323,12 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             last_name: participantForm.lastName,
             birth_date: participantForm.birthDate || null,
             email: participantForm.email,
-            group_id: participantForm.groupId || null,
+            group_ids: participantForm.groupIds,
           },
         })
         setMessage('Участник добавлен к аккаунту клиента.')
         setQuickAction(null)
-        setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupId: '' })
+        setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupIds: [] })
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, PARTICIPANT_FIELD_MAP)
@@ -306,7 +340,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           lastName: 'admin-participant-lastName',
           birthDate: 'admin-participant-birthDate',
           email: 'admin-participant-email',
-          groupId: 'admin-participant-groupId',
+          groupIds: 'admin-participant-groupIds',
         }), 0)
       } finally {
         setBusy(false)
@@ -336,7 +370,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             last_name: clientEditForm.lastName,
             birth_date: clientEditForm.birthDate || null,
             email: clientEditForm.email,
-            group_id: clientEditForm.groupId || null,
+            group_ids: clientEditForm.groupIds,
             is_active: clientEditForm.isActive,
           },
         })
@@ -361,7 +395,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           lastName: 'admin-client-edit-lastName',
           birthDate: 'admin-client-edit-birthDate',
           email: 'admin-client-edit-email',
-          groupId: 'admin-client-edit-groupId',
+          groupIds: 'admin-client-edit-groupIds',
         }), 0)
       } finally {
         setBusy(false)
@@ -434,14 +468,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               <Input id="admin-client-username" label="Логин" value={clientForm.username} error={clientFieldErrors.username} hint="Автоматически из email, телефона или имени; можно изменить." onChange={(event) => updateClientForm('username', event.target.value)} />
               <Input id="admin-client-phone" label="Телефон" value={clientForm.phone} error={clientFieldErrors.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
               <DateField id="admin-client-birthDate" label="Дата рождения" value={clientForm.birthDate} error={clientFieldErrors.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                Группа
-                <select id="admin-client-groupId" value={clientForm.groupId} aria-invalid={Boolean(clientFieldErrors.groupId)} aria-describedby={clientFieldErrors.groupId ? 'admin-client-groupId-error' : undefined} onChange={(event) => updateClientForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Индивидуально</option>
-                  {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
-                </select>
-                {clientFieldErrors.groupId && <small id="admin-client-groupId-error" className="ops-field-error" role="alert">{clientFieldErrors.groupId}</small>}
-              </label>
+              <GroupMultiSelect id="admin-client-groupIds" groups={groups} value={clientForm.groupIds} error={clientFieldErrors.groupIds} onChange={(value) => updateClientForm('groupIds', value)} />
             </div>
             <p className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>Владелец аккаунта будет создан как участник. Другого участника можно добавить отдельным действием.</p>
         </FormModal>
@@ -473,20 +500,14 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   valueKey: 'clientId',
                   description: (client) => client.phone || client.email || `ID ${client.clientId}`,
                 }))}
+                loadOptions={loadClientAccountOptions}
                 placeholder="Найдите аккаунт по имени или фамилии"
               />
               <Input id="admin-participant-firstName" label="Имя" value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
               <Input id="admin-participant-lastName" label="Фамилия" value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
               <DateField id="admin-participant-birthDate" label="Дата рождения" value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
               <Input id="admin-participant-email" label="Email" value={participantForm.email} error={participantFieldErrors.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)', gridColumn: '1 / -1' }}>
-                Группа
-                <select id="admin-participant-groupId" value={participantForm.groupId} aria-invalid={Boolean(participantFieldErrors.groupId)} aria-describedby={participantFieldErrors.groupId ? 'admin-participant-groupId-error' : undefined} onChange={(event) => updateParticipantForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Индивидуально</option>
-                  {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
-                </select>
-                {participantFieldErrors.groupId && <small id="admin-participant-groupId-error" className="ops-field-error" role="alert">{participantFieldErrors.groupId}</small>}
-              </label>
+              <GroupMultiSelect id="admin-participant-groupIds" groups={groups} value={participantForm.groupIds} error={participantFieldErrors.groupIds} onChange={(value) => updateParticipantForm('groupIds', value)} />
             </div>
         </FormModal>
 
@@ -515,14 +536,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               <Input id="admin-client-edit-lastName" label="Фамилия участника" value={clientEditForm.lastName} error={clientEditFieldErrors.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
               <DateField id="admin-client-edit-birthDate" label="Дата рождения" value={clientEditForm.birthDate} error={clientEditFieldErrors.birthDate} onChange={(value) => updateClientEditForm('birthDate', value)} />
               <Input id="admin-client-edit-email" label="Email участника" value={clientEditForm.email} error={clientEditFieldErrors.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                Группа
-                <select id="admin-client-edit-groupId" value={clientEditForm.groupId} aria-invalid={Boolean(clientEditFieldErrors.groupId)} aria-describedby={clientEditFieldErrors.groupId ? 'admin-client-edit-groupId-error' : undefined} onChange={(event) => updateClientEditForm('groupId', event.target.value)} style={{ minHeight: 36 }}>
-                  <option value="">Индивидуально</option>
-                  {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
-                </select>
-                {clientEditFieldErrors.groupId && <small id="admin-client-edit-groupId-error" className="ops-field-error" role="alert">{clientEditFieldErrors.groupId}</small>}
-              </label>
+              <GroupMultiSelect id="admin-client-edit-groupIds" groups={groups} value={clientEditForm.groupIds} error={clientEditFieldErrors.groupIds} onChange={(value) => updateClientEditForm('groupIds', value)} />
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                 <input type="checkbox" checked={clientEditForm.isActive} onChange={(event) => updateClientEditForm('isActive', event.target.checked)} />
                 Активен

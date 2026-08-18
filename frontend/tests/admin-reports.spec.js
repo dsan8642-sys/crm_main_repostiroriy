@@ -75,8 +75,8 @@ test('admin reports share the current-month period, filter trainers, show income
       available_currencies: ['PLN', 'EUR', 'USD'],
       payments: [{ id: 11, paid_at: '2026-08-12', participant: 'Client One', method_label: 'Карта', amount: '250,00 PLN' }],
       pagination: { page: 1, pages: 1, total: 1, has_previous: false, has_next: false },
-      by_group: [],
-      by_trainer: [],
+      lesson_value_by_group: [],
+      lesson_value_by_trainer: [],
     }
     if (!payload) {
       status = 404

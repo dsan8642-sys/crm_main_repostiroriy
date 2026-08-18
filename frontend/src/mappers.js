@@ -223,6 +223,7 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
 }
 
 function mapAdminParticipantRow(client) {
+  const groups = client.groups || (client.group ? [client.group] : [])
   return {
     id: participantKey(client.client_id, client.id),
     clientId: client.client_id,
@@ -235,8 +236,10 @@ function mapAdminParticipantRow(client) {
     isAccountHolder: Boolean(client.is_account_holder),
     phone: client.client_phone || '',
     email: client.email || '',
-    groupId: client.group?.id || '',
-    group: client.group?.name || 'Индивидуально',
+    groups,
+    groupIds: groups.map((group) => group.id),
+    groupId: groups.length === 1 ? groups[0].id : '',
+    group: groups.map((group) => group.name).join(', ') || 'Индивидуально',
     trainer: '',
     isActive: client.is_active,
     accountActive: client.client_is_active !== false,

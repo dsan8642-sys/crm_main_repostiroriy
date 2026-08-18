@@ -127,10 +127,25 @@ class ReportsRule(TestCase):
         self.assertEqual(inc.amount_minor, 24000)
 
     def test_income_by_group(self):
+        trainer = f.make_trainer()
+        session = create_session(
+            trainer=trainer,
+            start_at=timezone.now(),
+            end_at=timezone.now() + timedelta(hours=1),
+            location="A",
+            max_participants=10,
+            group=self.g,
+            price_minor=5300,
+        )
+        set_attendance(
+            session_id=session.id,
+            student=self.st,
+            status=AttendanceStatus.PRESENT,
+        )
         rows = reports.income_by_group(date.today() - timedelta(days=1),
                                        date.today() + timedelta(days=1))
         self.assertEqual(rows[0][0], "Акулы")
-        self.assertEqual(rows[0][1].amount_minor, 24000)
+        self.assertEqual(rows[0][1].amount_minor, 5300)
 
     def test_attendance_summary(self):
         tr = f.make_trainer()
@@ -155,6 +170,7 @@ CSV = ("Фамилия;Имя;Телефон;Email;Группа;Абонемен
 class ImportRule(TestCase):
     def setUp(self):
         f.make_sub_type(name="Абонемент 8", sessions=8)
+        Group.objects.create(name="Дельфины")
         self.mapping = {"Фамилия": "last_name", "Имя": "first_name", "Телефон": "phone",
                         "Email": "email", "Группа": "group", "Абонемент": "subscription"}
 

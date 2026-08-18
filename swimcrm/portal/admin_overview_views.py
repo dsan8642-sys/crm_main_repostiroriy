@@ -28,8 +28,8 @@ def admin_reference(request):
     _admin_required(request)
     q = request.GET.get("q", "").strip()
     participants = Student.objects.select_related(
-        "parent", "parent__user", "group"
-    ).filter(is_active=True, parent__user__is_active=True)
+        "parent", "parent__user"
+    ).prefetch_related("groups").filter(is_active=True, parent__user__is_active=True)
     if q:
         for token in q.split():
             participants = participants.filter(

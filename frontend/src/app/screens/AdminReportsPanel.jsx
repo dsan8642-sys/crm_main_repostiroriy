@@ -181,6 +181,14 @@ export function createAdminReportsPanel(components) {
       { key: 'method_label', header: 'Способ' },
       { key: 'amount', header: 'Сумма', render: (row) => <strong>{row.amount}</strong> },
     ]
+    const lessonGroupColumns = [
+      { key: 'group', header: 'Группа / тип занятия' },
+      { key: 'amount', header: 'Стоимость занятий', render: (row) => <strong>{row.amount}</strong> },
+    ]
+    const lessonTrainerColumns = [
+      { key: 'trainer', header: 'Фактический тренер' },
+      { key: 'amount', header: 'Стоимость занятий', render: (row) => <strong>{row.amount}</strong> },
+    ]
 
     return <div className="ops-reports-panel">
       <div className="ops-section-head">
@@ -246,6 +254,15 @@ export function createAdminReportsPanel(components) {
           <span>Страница {incomeReport.pagination.page} из {incomeReport.pagination.pages}</span>
           <Button variant="secondary" size="sm" disabled={incomeLoading || !incomeReport.pagination.has_next} onClick={() => setIncomePage((page) => page + 1)}>Далее</Button>
         </div>}
+        <div className="ops-report-table">
+          <h4>Стоимость занятий по группам</h4>
+          <p className="muted">Рассчитывается по отмеченным посещениям и цене конкретной тренировки, независимо от поступивших платежей.</p>
+          <Table rowKey={(row) => row.group} rows={incomeReport?.lesson_value_by_group || []} columns={lessonGroupColumns} emptyLabel={incomeLoading ? 'Загрузка...' : 'Занятий со списанием за период нет'} />
+        </div>
+        <div className="ops-report-table">
+          <h4>Стоимость занятий по тренерам</h4>
+          <Table rowKey={(row) => row.trainer} rows={incomeReport?.lesson_value_by_trainer || []} columns={lessonTrainerColumns} emptyLabel={incomeLoading ? 'Загрузка...' : 'Занятий со списанием за период нет'} />
+        </div>
       </section>}
     </div>
   }

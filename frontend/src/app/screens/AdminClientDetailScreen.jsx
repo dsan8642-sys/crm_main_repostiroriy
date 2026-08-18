@@ -20,13 +20,14 @@ import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
 import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
+import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
 
 const PARTICIPANT_FIELD_IDS = {
   firstName: 'admin-client-participant-first-name',
   lastName: 'admin-client-participant-last-name',
   birthDate: 'admin-client-participant-birth-date',
   email: 'admin-client-participant-email',
-  groupId: 'admin-client-participant-group',
+  groupIds: 'admin-client-participant-groups',
   isActive: 'admin-client-participant-active',
 }
 const PAYMENT_FIELD_IDS = {
@@ -37,6 +38,7 @@ const PAYMENT_FIELD_IDS = {
 const FINANCE_FIELD_IDS = {
   participantId: 'admin-client-finance-participant',
   subscriptionId: 'admin-client-finance-subscription',
+  subscriptionAction: 'admin-client-finance-subscription-action',
   subscriptionTypeId: 'admin-client-finance-subscription-type',
   amount: 'admin-client-finance-amount', description: 'admin-client-finance-description',
   startDate: 'admin-client-finance-start-date', dueDate: 'admin-client-finance-due-date',
@@ -46,6 +48,19 @@ const FINANCE_FIELD_IDS = {
   freezeReason: 'admin-client-finance-freeze-reason',
   adjustDelta: 'admin-client-finance-adjust-delta',
   adjustNote: 'admin-client-finance-adjust-note',
+}
+
+const SUBSCRIPTION_EDIT_ACTIONS = ['renew', 'freeze', 'adjust']
+
+function internationalPhoneDigits(value) {
+  const compact = String(value || '').replace(/[\s().-]/g, '')
+  if (!/^\+[1-9]\d{7,14}$/.test(compact)) return null
+  return compact.slice(1)
+}
+
+function ContactLink({ href, label, disabledHint }) {
+  if (!href) return <span className="ops-contact-link is-disabled" aria-disabled="true" title={disabledHint}>{label}</span>
+  return <a className="ops-contact-link" href={href} target="_blank" rel="noopener noreferrer">{label}</a>
 }
 
 export function createAdminClientDetailScreen(components, icons, reloadRoleData, adminData = {}) {
@@ -68,11 +83,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const [paymentPanelOpen, setPaymentPanelOpen] = useState(false)
     const [financeAction, setFinanceAction] = useState(null)
     const [editingAccount, setEditingAccount] = useState(false)
-    const [accountForm, setAccountForm] = useState({ firstName: '', lastName: '', email: '', username: '', phone: '', telegramChatId: '', preferredLanguage: 'ru' })
+    const [accountForm, setAccountForm] = useState({ firstName: '', lastName: '', email: '', username: '', phone: '', telegramChatId: '', instagramUsername: '', preferredLanguage: 'ru' })
     const [accountBaseline, setAccountBaseline] = useState(null)
     const [accountFieldErrors, setAccountFieldErrors] = useState({})
     const [editingParticipant, setEditingParticipant] = useState(null)
-    const [participantForm, setParticipantForm] = useState({ firstName: '', lastName: '', birthDate: '', email: '', groupId: '', isActive: true })
+    const [participantForm, setParticipantForm] = useState({ firstName: '', lastName: '', birthDate: '', email: '', groupIds: [], isActive: true })
     const [participantBaseline, setParticipantBaseline] = useState(null)
     const [participantFieldErrors, setParticipantFieldErrors] = useState({})
     const [paymentForm, setPaymentForm] = useState({
@@ -135,6 +150,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const accountArchived = account.is_active === false || (participants.length > 0 && participants.every((item) => item.is_active === false))
     const subscriptionTypes = adminData.subscriptionTypes || []
     const groups = adminData.groups || []
+    const contactPhoneDigits = internationalPhoneDigits(account.phone)
+    const contactsHidden = Boolean(account.is_anonymized)
+    const phoneContactHint = 'Добавьте номер телефона в международном формате'
 
     useEffect(() => {
       if (initialTab) setTab(initialTab)
@@ -168,6 +186,17 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setFinanceForm((current) => ({ ...current, [field]: value }))
       setFinanceFieldErrors((current) => clearFieldError(current, field))
     }
+    const updateFinanceSubscription = (subscriptionId) => {
+      const subscription = subscriptions.find((item) => String(item.id) === String(subscriptionId))
+      setFinanceForm((current) => ({
+        ...current,
+        subscriptionId,
+        subscriptionTypeId: subscription?.subscription_type_id
+          ? String(subscription.subscription_type_id)
+          : current.subscriptionTypeId,
+      }))
+      setFinanceFieldErrors((current) => clearFieldError(current, 'subscriptionId'))
+    }
     const updateParticipantForm = (field, value) => {
       setParticipantForm((current) => ({ ...current, [field]: value }))
       setParticipantFieldErrors((current) => clearFieldError(current, field))
@@ -194,13 +223,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
     useEffect(() => {
       if (!participants.length) return
+      const participantIdForClient = (currentId) => (
+        participants.some((participant) => String(participant.id) === String(currentId))
+          ? String(currentId)
+          : String(participants[0].id)
+      )
       setPaymentForm((current) => ({
         ...current,
-        participantId: current.participantId || String(participants[0].id),
+        participantId: participantIdForClient(current.participantId),
       }))
       setFinanceForm((current) => ({
         ...current,
-        participantId: current.participantId || String(participants[0].id),
+        participantId: participantIdForClient(current.participantId),
         subscriptionId: subscriptions.some((item) => String(item.id) === String(current.subscriptionId))
           ? current.subscriptionId
           : String(subscriptions[0]?.id || ''),
@@ -252,6 +286,29 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setPaymentPanelOpen(true)
     }
 
+    function openSubscriptionEditor(subscription = null) {
+      const selectedSubscription = subscription
+        || subscriptions.find((item) => item.status === 'active')
+        || subscriptions[0]
+      const next = {
+        ...financeForm,
+        subscriptionId: String(selectedSubscription?.id || ''),
+        subscriptionTypeId: String(
+          selectedSubscription?.subscription_type_id
+          || financeForm.subscriptionTypeId
+          || subscriptionTypes[0]?.typeId
+          || '',
+        ),
+      }
+      setFinanceForm(next)
+      setFinanceBaseline(next)
+      setFinanceFieldErrors({})
+      setFinanceAction('renew')
+      setPaymentPanelOpen(false)
+      setPaymentBaseline(null)
+      setError(null)
+    }
+
     async function createManualPayment() {
       const nextErrors = {}
       if (!paymentForm.participantId) nextErrors.participantId = 'Выберите участника для оплаты.'
@@ -274,6 +331,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setActionBusy('manual-payment')
       try {
         const created = await api.post('/api/admin/payments/', {
+          client_id: fallbackClientId,
           participant_id: paymentForm.participantId,
           amount_minor: amountMinor,
           currency: 'PLN',
@@ -300,7 +358,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         reloadRoleData?.('admin')
       } catch (err) {
         const nextFieldErrors = fieldErrorsFromApi(err, {
-          participant_id: 'participantId', amount_minor: 'amount',
+          client_id: 'participantId', participant_id: 'participantId', amount_minor: 'amount',
           paid_at: 'paidAt', method: 'method', comment: 'comment', currency: 'amount',
         })
         setPaymentFieldErrors(nextFieldErrors)
@@ -314,7 +372,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     function openParticipantEdit(participant) {
       setEditingParticipant(participant)
       setParticipantFieldErrors({})
-      const next = { firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupId: participant.group?.id || '', isActive: participant.is_active }
+      const next = { firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupIds: (participant.groups || []).map((group) => String(group.id)), isActive: participant.is_active }
       setParticipantForm(next)
       setParticipantBaseline(next)
     }
@@ -328,6 +386,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         username: account.username || '',
         phone: account.phone || '',
         telegramChatId: account.telegram_chat_id || '',
+        instagramUsername: account.instagram_username || '',
         preferredLanguage: account.preferred_language || 'ru',
       }
       setAccountForm(next)
@@ -352,6 +411,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           username: accountForm.username,
           phone: accountForm.phone,
           telegram_chat_id: accountForm.telegramChatId,
+          instagram_username: accountForm.instagramUsername,
           preferred_language: accountForm.preferredLanguage,
         } })
         setMessage('Данные владельца аккаунта обновлены.')
@@ -366,6 +426,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           'account.username': 'username',
           'account.phone': 'phone',
           'account.telegram_chat_id': 'telegramChatId',
+          'account.instagram_username': 'instagramUsername',
           'account.preferred_language': 'preferredLanguage',
         })
         setAccountFieldErrors(nextErrors)
@@ -377,6 +438,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           username: 'admin-client-detail-username',
           phone: 'admin-client-detail-phone',
           telegramChatId: 'admin-client-detail-telegram',
+          instagramUsername: 'admin-client-detail-instagram',
           preferredLanguage: 'admin-client-detail-language',
         }), 0)
       } finally {
@@ -386,8 +448,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
     async function saveParticipant() {
       const nextErrors = {}
-      if (!participantForm.firstName.trim()) nextErrors.firstName = 'Укажите имя участника.'
-      if (!participantForm.lastName.trim()) nextErrors.lastName = 'Укажите фамилию участника.'
+      if (!participantForm.firstName.trim() && !participantForm.lastName.trim()) {
+        nextErrors.firstName = 'Укажите имя или фамилию участника.'
+        nextErrors.lastName = 'Укажите имя или фамилию участника.'
+      }
       if (participantForm.birthDate && !validIsoDate(participantForm.birthDate)) nextErrors.birthDate = 'Введите дату рождения в формате ГГГГ-ММ-ДД.'
       if (Object.keys(nextErrors).length) {
         setParticipantFieldErrors(nextErrors)
@@ -397,7 +461,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       }
       setActionBusy('participant'); setError(null); setParticipantFieldErrors({})
       try {
-        await api.post(`/api/admin/participants/${editingParticipant.id}/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_id: participantForm.groupId || null, is_active: participantForm.isActive } })
+        await api.post(`/api/admin/participants/${editingParticipant.id}/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_ids: participantForm.groupIds, is_active: participantForm.isActive } })
         setMessage('Данные участника обновлены.'); setEditingParticipant(null); setParticipantBaseline(null); refreshDetail()
       } catch (err) {
         const nextFieldErrors = fieldErrorsFromApi(err, {
@@ -405,7 +469,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           'participant.last_name': 'lastName', last_name: 'lastName',
           'participant.birth_date': 'birthDate', birth_date: 'birthDate',
           'participant.email': 'email', email: 'email',
-          'participant.group_id': 'groupId', group_id: 'groupId',
+          'participant.group_ids': 'groupIds', group_ids: 'groupIds',
           'participant.is_active': 'isActive', is_active: 'isActive',
         })
         setParticipantFieldErrors(nextFieldErrors)
@@ -463,6 +527,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       try {
         if (financeAction === 'charge') {
           await api.post(`/api/admin/participants/${financeForm.participantId}/charges/`, {
+            client_id: fallbackClientId,
             description: financeForm.description,
             amount_minor: minorFromMajor(financeForm.amount),
             currency: 'PLN',
@@ -583,6 +648,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       )
     }
 
+    const subscriptionEditorOpen = SUBSCRIPTION_EDIT_ACTIONS.includes(financeAction)
+
     return (
       <div className="page page-wide">
         <div className="page-head">
@@ -590,6 +657,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('clients') : go?.('clients')}>Клиенты</ContextBackButton>
             <h1 className="page-title">{account.full_name || account.username || 'Клиент'}</h1>
             <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
+            {!contactsHidden && <div className="ops-contact-links" aria-label="Связаться с клиентом">
+              <ContactLink href={contactPhoneDigits ? `https://t.me/+${contactPhoneDigits}` : null} label="Telegram" disabledHint={phoneContactHint} />
+              <ContactLink href={contactPhoneDigits ? `https://wa.me/${contactPhoneDigits}` : null} label="WhatsApp" disabledHint={phoneContactHint} />
+              <ContactLink href={account.instagram_username ? `https://instagram.com/${account.instagram_username}` : null} label="Instagram" disabledHint="Добавьте имя Instagram" />
+            </div>}
           </div>
           <div className="ops-button-row ops-page-actions">
             {!accountArchived && !loading && <AccessButtons Button={Button} portalAccess={account.portal_access} accessActivated={account.access_activated} busy={Boolean(actionBusy)} onAction={accessAction} />}
@@ -613,7 +685,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <Input id="admin-client-detail-email" label="Email" value={accountForm.email} error={accountFieldErrors.email} onChange={(event) => updateAccountForm('email', event.target.value)} />
               <Input id="admin-client-detail-username" label="Логин" value={accountForm.username} error={accountFieldErrors.username} onChange={(event) => updateAccountForm('username', event.target.value)} />
               <Input id="admin-client-detail-phone" label="Телефон" value={accountForm.phone} error={accountFieldErrors.phone} onChange={(event) => updateAccountForm('phone', event.target.value)} />
-              <Input id="admin-client-detail-telegram" label="Telegram / соцсеть" value={accountForm.telegramChatId} error={accountFieldErrors.telegramChatId} onChange={(event) => updateAccountForm('telegramChatId', event.target.value)} />
+              <Input id="admin-client-detail-instagram" label="Instagram" value={accountForm.instagramUsername} error={accountFieldErrors.instagramUsername} hint="Имя профиля без @; @имя и ссылка очистятся автоматически." onChange={(event) => updateAccountForm('instagramUsername', event.target.value)} />
+              <Input id="admin-client-detail-telegram" label="Telegram Chat ID для бота" value={accountForm.telegramChatId} error={accountFieldErrors.telegramChatId} onChange={(event) => updateAccountForm('telegramChatId', event.target.value)} />
               <Select id="admin-client-detail-language" label="Язык интерфейса" value={accountForm.preferredLanguage} error={accountFieldErrors.preferredLanguage} onChange={(event) => updateAccountForm('preferredLanguage', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></Select>
             </div>
         </FormModal>
@@ -651,9 +724,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           {[
             ['charge', 'Добавить списание', 'Сумма к оплате'],
             ['issue', 'Продать абонемент', 'Новый абонемент участнику'],
-            ['renew', 'Продлить абонемент', 'Новый период и остаток'],
-            ['freeze', 'Заморозить', 'Приостановить срок действия'],
-            ['adjust', 'Скорректировать', 'Изменить остаток занятий'],
           ].map(([value, label, hint]) => (
             <button
               key={value}
@@ -666,13 +736,22 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <small>{hint}</small>
             </button>
           ))}
+          <button
+            type="button"
+            className={`ops-action-card${subscriptionEditorOpen ? ' is-active' : ''}`}
+            disabled={accountArchived || subscriptions.length === 0}
+            onClick={() => openSubscriptionEditor()}
+          >
+            <span>Редактировать абонемент</span>
+            <small>Продление, заморозка и остаток</small>
+          </button>
           <button type="button" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
             <span>Напомнить</span>
             <small>Отправить финансовое уведомление</small>
           </button>
         </div>
 
-        <FormModal open={Boolean(financeAction)} title={{ charge: 'Новое списание', issue: 'Продажа абонемента', renew: 'Продление абонемента', freeze: 'Заморозка абонемента', adjust: 'Корректировка остатка' }[financeAction] || 'Финансовая операция'} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>Сохранить</Button></>}>
+        <FormModal open={Boolean(financeAction)} title={subscriptionEditorOpen ? 'Редактирование абонемента' : ({ charge: 'Новое списание', issue: 'Продажа абонемента' }[financeAction] || 'Финансовая операция')} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>Сохранить</Button></>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               {(financeAction === 'charge' || financeAction === 'issue') && (
@@ -685,8 +764,15 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   options={participants.map((participant) => clientSelectOption(participant))}
                 />
               )}
-              {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && (
-                <Select id={FINANCE_FIELD_IDS.subscriptionId} label="Абонемент" value={financeForm.subscriptionId} error={financeFieldErrors.subscriptionId} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}>
+              {subscriptionEditorOpen && (
+                <Select id={FINANCE_FIELD_IDS.subscriptionAction} label="Действие" value={financeAction} onChange={(event) => { setFinanceAction(event.target.value); setFinanceFieldErrors({}); setError(null) }}>
+                    <option value="renew">Продлить абонемент</option>
+                    <option value="freeze">Заморозить абонемент</option>
+                    <option value="adjust">Скорректировать остаток</option>
+                </Select>
+              )}
+              {subscriptionEditorOpen && (
+                <Select id={FINANCE_FIELD_IDS.subscriptionId} label="Абонемент" value={financeForm.subscriptionId} error={financeFieldErrors.subscriptionId} onChange={(event) => updateFinanceSubscription(event.target.value)}>
                     <option value="">Выберите абонемент</option>
                     {subscriptions.map((subscription) => (
                       <option key={subscription.id} value={subscription.id}>
@@ -749,7 +835,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <Input id={PARTICIPANT_FIELD_IDS.lastName} label="Фамилия" value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
               <DateField id={PARTICIPANT_FIELD_IDS.birthDate} label="Дата рождения" value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
               <Input id={PARTICIPANT_FIELD_IDS.email} label="Email" value={participantForm.email} error={participantFieldErrors.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
-              <Select id={PARTICIPANT_FIELD_IDS.groupId} label="Группа" value={participantForm.groupId} error={participantFieldErrors.groupId} onChange={(event) => updateParticipantForm('groupId', event.target.value)}><option value="">Индивидуально</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</Select>
+              <GroupMultiSelect id={PARTICIPANT_FIELD_IDS.groupIds} groups={groups} value={participantForm.groupIds} error={participantFieldErrors.groupIds} onChange={(value) => updateParticipantForm('groupIds', value)} />
               <Checkbox id={PARTICIPANT_FIELD_IDS.isActive} label="Активен" checked={participantForm.isActive} error={participantFieldErrors.isActive} onChange={(event) => updateParticipantForm('isActive', event.target.checked)} />
             </div>
           </FormModal>
@@ -760,9 +846,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               { key: 'full_name', header: 'Участник', render: (row) => <button type="button" className="ops-link-button" disabled={accountArchived} onClick={() => openParticipantEdit(row)}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
               { key: 'birth_date', header: 'Дата рождения', muted: true, render: (row) => row.birth_date || '-' },
               { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
-              { key: 'group', header: 'Группа', render: (row) => row.group?.name || 'Индивидуально' },
+              { key: 'groups', header: 'Группы', render: (row) => (row.groups || []).map((group) => group.name).join(', ') || 'Индивидуально' },
               { key: 'balance', header: 'Баланс', align: 'right', width: 110, render: (row) => <Money amount={asAccountBalance(row.balance_minor)} signed /> },
               { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
+              { key: 'training', header: 'Создать тренировку', render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'individual', participantId: row.id })}>Индивидуальная</Button><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'split', participantId: row.id })}>Сплит</Button></div> },
             ]}
           />
           </div>
@@ -772,6 +859,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           <Table
             rows={subscriptions}
             emptyLabel="Абонементов нет"
+            onRowClick={accountArchived ? undefined : openSubscriptionEditor}
             columns={[
               { key: 'type', header: 'Тип', render: (row) => <span className="strong">{row.type}</span> },
               { key: 'participant', header: 'Участник', render: (row) => row.participant?.full_name || participantName(row.participant_id) },

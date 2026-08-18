@@ -74,10 +74,11 @@ export function SearchableSelect({
       return undefined
     }
     let alive = true
+    const controller = new AbortController()
     setRemoteLoading(true)
     const handle = setTimeout(async () => {
       try {
-        const nextOptions = await loadOptions(query.trim())
+        const nextOptions = await loadOptions(query.trim(), { signal: controller.signal })
         if (!alive) return
         setRemoteOptions(Array.isArray(nextOptions) ? nextOptions : [])
         setRemoteQuery(normalized)
@@ -91,6 +92,7 @@ export function SearchableSelect({
     }, 250)
     return () => {
       alive = false
+      controller.abort()
       clearTimeout(handle)
     }
   }, [loadOptions, open, query, selected?.label])

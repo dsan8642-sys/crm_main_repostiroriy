@@ -12,14 +12,14 @@ from openpyxl import Workbook, load_workbook
 from attendance.models import AttendanceRecord, AttendanceStatus
 from billing.models import Payment, PaymentMethod, PaymentSource, PaymentStatus
 from catalog.models import Group
-from dataio import exports
+from dataio import exports, importer
 from dataio.contracts import CONTRACTS
 from dataio.importer import MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, parse_source
 from dataio.matching import match_student, normalize_email, normalize_phone
 from dataio.models import ImportBatch, ImportKind
 from scheduling.models import Session
 from scheduling.services import create_session
-from students.models import Student
+from students.models import GroupMembership, Student
 
 from . import factories as f
 
@@ -98,12 +98,15 @@ class StandardDatasetRoundTripTest(TestCase):
                     default_capacity=9,
                     color_key="ocean",
                 )
+                second_group = Group.objects.create(name="Round-trip группа B")
+                third_group = Group.objects.create(name="Round-trip группа C")
                 parent = f.make_parent(username="roundtrip_family", phone="+48555202020")
                 parent.user.first_name = "Анна"
                 parent.user.last_name = "Родитель"
                 parent.user.save(update_fields=["first_name", "last_name"])
                 parent.email = "roundtrip.family@example.test"
-                parent.save(update_fields=["email"])
+                parent.instagram_username = "roundtrip_family"
+                parent.save(update_fields=["email", "instagram_username"])
                 student = Student.objects.create(
                     parent=parent,
                     group=group,
@@ -116,6 +119,10 @@ class StandardDatasetRoundTripTest(TestCase):
                     emergency_contact_phone="+48555303030",
                     admin_comments="Round-trip comment",
                 )
+                GroupMembership.objects.bulk_create([
+                    GroupMembership(student=student, group=second_group),
+                    GroupMembership(student=student, group=third_group),
+                ])
                 payment = Payment.objects.create(
                     student=student,
                     amount_minor=12345,
@@ -185,7 +192,12 @@ class StandardDatasetRoundTripTest(TestCase):
         session = attendance.session
         self.assertEqual(group.default_trainer.user.username, "roundtrip_coach")
         self.assertEqual(group.price_minor, 7650)
-        self.assertEqual(student.group, group)
+        self.assertEqual(
+            set(student.groups.values_list("name", flat=True)),
+            {"Round-trip группа", "Round-trip группа B", "Round-trip группа C"},
+        )
+        self.assertIsNone(student.group)
+        self.assertEqual(student.parent.instagram_username, "roundtrip_family")
         self.assertEqual(student.birth_date, date(2014, 5, 6))
         self.assertEqual(student.medical_info, "Синтетические данные")
         self.assertEqual(payment.student, student)
@@ -205,6 +217,74 @@ class StandardDatasetRoundTripTest(TestCase):
 
     def test_xlsx_round_trip_all_standard_datasets(self):
         self._restore("xlsx")
+
+
+class ClientV2ImportValidationTest(TestCase):
+    def setUp(self):
+        self.groups = [Group.objects.create(name=f"Import group {index}") for index in range(1, 5)]
+
+    def _preview(self, row):
+        headers = list(row)
+        return importer.preview(headers, [row], {})[0]
+
+    def test_legacy_single_group_and_single_name_remain_supported(self):
+        row = self._preview({
+            "first_name": "ТолькоИмя",
+            "group_name": self.groups[0].name,
+        })
+        self.assertEqual(row.status, "new")
+        self.assertEqual(row.resolved["group_ids"], [self.groups[0].id])
+
+    def test_unknown_duplicate_too_many_and_conflicting_groups_are_rejected(self):
+        cases = {
+            "unknown": {
+                "first_name": "Unknown",
+                "group_names": "Missing group",
+            },
+            "duplicate": {
+                "first_name": "Duplicate",
+                "group_names": f"{self.groups[0].name};{self.groups[0].name}",
+            },
+            "too_many": {
+                "first_name": "TooMany",
+                "group_names": ";".join(group.name for group in self.groups),
+            },
+            "conflict": {
+                "first_name": "Conflict",
+                "group_id": str(self.groups[0].id),
+                "group_name": self.groups[0].name,
+                "group_ids": str(self.groups[1].id),
+                "group_names": self.groups[1].name,
+            },
+        }
+        for name, data in cases.items():
+            with self.subTest(name=name):
+                preview = self._preview(data)
+                self.assertEqual(preview.status, "error")
+                self.assertTrue(preview.errors)
+
+    def test_conflicting_instagram_values_for_one_account_roll_back_atomically(self):
+        rows = [
+            {
+                "first_name": "First",
+                "last_name": "Child",
+                "parent_phone": "+48555123456",
+                "parent_instagram_username": "family_one",
+            },
+            {
+                "first_name": "Second",
+                "last_name": "Child",
+                "parent_phone": "+48555123456",
+                "parent_instagram_username": "family_two",
+            },
+        ]
+        preview = importer.preview(list(rows[0]), rows, {})
+        self.assertTrue(all(row.status == "new" for row in preview))
+
+        with self.assertRaisesMessage(ValidationError, "разные Instagram"):
+            importer.commit(preview)
+
+        self.assertFalse(Student.objects.filter(first_name__in=["First", "Second"]).exists())
 
 
 class StagingWorkflowIntegrationTest(TestCase):

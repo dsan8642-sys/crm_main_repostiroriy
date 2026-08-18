@@ -11,9 +11,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import ParentAccount, User
+from accounts.social import normalize_instagram_username
 from audit.models import audit
 from catalog.models import Group, SubscriptionType
 from students.models import Student
+from students.services import set_student_groups
 from subscriptions.models import allow_subscription_history_delete
 from subscriptions.services import create_subscription
 
@@ -26,6 +28,63 @@ MAX_IMPORT_ROWS = 5000
 MAX_IMPORT_COLUMNS = 50
 
 NEW, DUPLICATE, ERROR = "new", "duplicate", "error"
+
+
+def _split_group_cell(value):
+    return [part.strip() for part in str(value or "").split(";") if part.strip()]
+
+
+def _resolve_groups(data, *, create_missing=False, allow_missing_names=False):
+    plural_present = bool(str(data.get("group_ids") or "").strip() or
+                          str(data.get("group_names") or "").strip())
+    ids = _split_group_cell(data.get("group_ids"))
+    names = _split_group_cell(data.get("group_names"))
+    legacy_id = str(data.get("group_id") or "").strip()
+    legacy_name = str(data.get("group_name") or data.get("group") or "").strip()
+
+    if plural_present and (legacy_id or legacy_name):
+        if len(ids or names) != 1:
+            raise ValidationError("Одиночная и множественная группы противоречат друг другу")
+        if legacy_id and ids and legacy_id != ids[0]:
+            raise ValidationError("group_id не совпадает с group_ids")
+        if legacy_name and names and legacy_name.casefold() != names[0].casefold():
+            raise ValidationError("group_name не совпадает с group_names")
+    if not plural_present:
+        ids = [legacy_id] if legacy_id else []
+        names = [legacy_name] if legacy_name else []
+    if ids and names and len(ids) != len(names):
+        raise ValidationError("Количество group_ids и group_names должно совпадать")
+    if len(ids or names) > 3:
+        raise ValidationError("Участник может состоять максимум в трёх группах")
+    if len(set(ids)) != len(ids) or len({name.casefold() for name in names}) != len(names):
+        raise ValidationError("Одна группа указана несколько раз")
+
+    groups = []
+    created_ids = []
+    length = max(len(ids), len(names))
+    for index in range(length):
+        group = None
+        if index < len(ids):
+            try:
+                group = Group.objects.filter(pk=int(ids[index])).first()
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("Некорректный Group internal ID") from exc
+            if group is None:
+                raise ValidationError(f"Группа с ID {ids[index]} не найдена")
+        if index < len(names):
+            name = names[index]
+            if group is not None and group.name.casefold() != name.casefold():
+                raise ValidationError(f"ID и название группы не совпадают: {ids[index]} / {name}")
+            if group is None:
+                group = Group.objects.filter(name__iexact=name).first()
+                if group is None and create_missing:
+                    group = Group.objects.create(name=name)
+                    created_ids.append(group.id)
+                elif group is None and not allow_missing_names:
+                    raise ValidationError(f"Группа не найдена: {name}")
+        if group is not None and group.id not in {item.id for item in groups}:
+            groups.append(group)
+    return groups, created_ids
 
 
 @dataclass
@@ -162,28 +221,19 @@ def preview(headers, rows, mapping):
         if pr.status != ERROR and is_dup:
             pr.status = DUPLICATE
             pr.errors.append("Дубликат (email/ФИО+телефон уже есть)")
-        group = None
-        raw_group_id = data.get("group_id")
-        if raw_group_id not in (None, ""):
-            try:
-                group = Group.objects.filter(pk=int(raw_group_id)).first()
-            except (TypeError, ValueError):
-                pr.status = ERROR
-                pr.errors.append("Некорректный Group internal ID")
-        if group is None and data.get("group_name"):
-            group = Group.objects.filter(name__iexact=str(data["group_name"]).strip()).first()
-        if group:
-            pr.resolved["group_id"] = group.id
-            pr.resolved["group_reason"] = (
-                "Совпал стабильный internal ID" if str(group.id) == str(raw_group_id)
-                else "Совпало название группы")
+        try:
+            resolved_groups, _created = _resolve_groups(data)
+            pr.resolved["group_ids"] = [group.id for group in resolved_groups]
+        except ValidationError as exc:
+            pr.status = ERROR
+            pr.errors.extend(exc.messages)
         seen.add(key)
         result.append(pr)
     return result
 
 
 @transaction.atomic
-def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=True,
+def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=False,
            create_subscriptions=True, batch=None):
     """Apply NEW rows atomically. ERROR/DUPLICATE rows are skipped.
     Records an ImportBatch so the whole import can be rolled back later."""
@@ -200,33 +250,13 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Tr
         batch.created_by = actor
         batch.source_name = source_name or batch.source_name
     created_students, created_groups, created_parents, created_subscriptions = [], [], [], []
-    group_cache = {}
-
     for pr in preview_rows:
         if pr.status != NEW:
             continue
         d = pr.data
-        group = None
-        raw_group_id = d.get("group_id")
-        if raw_group_id not in (None, ""):
-            try:
-                group = Group.objects.filter(pk=int(raw_group_id)).first()
-            except (TypeError, ValueError):
-                group = None
-        gname = str(d.get("group_name") or d.get("group") or "").strip()
-        if gname:
-            if group is not None:
-                group_cache[gname] = group
-            elif gname in group_cache:
-                group = group_cache[gname]
-            else:
-                group = Group.objects.filter(name=gname).first()
-                if group is None:
-                    if not create_missing_groups:
-                        raise ValidationError(f"Группа не найдена: {gname}")
-                    group = Group.objects.create(name=gname)
-                    created_groups.append(group.id)
-                group_cache[gname] = group
+        resolved_groups, next_created_groups = _resolve_groups(
+            d, create_missing=create_missing_groups)
+        created_groups.extend(next_created_groups)
 
         # Family = ParentAccount keyed by phone (DECISIONS.md #3): siblings sharing
         # one phone join the same family instead of spawning duplicate accounts.
@@ -263,12 +293,22 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Tr
                 "phone": phone,
                 "email": str(d.get("parent_email") or d.get("email") or "").strip(),
                 "preferred_language": str(d.get("preferred_language") or "pl").strip(),
+                "instagram_username": normalize_instagram_username(
+                    d.get("parent_instagram_username")),
             }
             if (raw_parent_id not in (None, "") and
                     not ParentAccount.objects.filter(pk=raw_parent_id).exists()):
                 parent_kwargs["id"] = int(raw_parent_id)
             parent = ParentAccount.objects.create(**parent_kwargs)
             created_parents.append(parent.id)
+        else:
+            instagram_username = normalize_instagram_username(
+                d.get("parent_instagram_username"))
+            if instagram_username and parent.instagram_username and parent.instagram_username != instagram_username:
+                raise ValidationError("У участников одного аккаунта указаны разные Instagram-профили")
+            if instagram_username and not parent.instagram_username:
+                parent.instagram_username = instagram_username
+                parent.save(update_fields=["instagram_username"])
 
         birth_date = None
         if d.get("birth_date"):
@@ -287,7 +327,6 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Tr
             raise ValidationError(f"Некорректное boolean-значение: {value}")
         student_kwargs = {
             "parent": parent,
-            "group": group,
             "first_name": str(d.get("first_name") or "").strip(),
             "last_name": str(d.get("last_name") or "").strip(),
             "birth_date": birth_date,
@@ -305,6 +344,7 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Tr
                 not Student.objects.filter(pk=raw_student_id).exists()):
             student_kwargs["id"] = int(raw_student_id)
         student = Student.objects.create(**student_kwargs)
+        set_student_groups(student, [group.id for group in resolved_groups])
         created_students.append(student.id)
         audit(actor, "client.created", student, {"source": "import"})
 

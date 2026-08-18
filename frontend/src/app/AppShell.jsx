@@ -40,6 +40,7 @@ function routeState() {
     sessionId: params.get('session'), trainerSessionId: params.get('trainerSession'),
     groupId: params.get('group'), tab: params.get('tab'), kid: params.get('kid'),
     participantId: params.get('participant'), balanceAmount: params.get('amount'),
+    createSession: params.get('createSession'),
   }
 }
 
@@ -61,6 +62,7 @@ function routeForRole(role, route = routeState()) {
     kid: sameRole ? route.kid : null,
     participantId: sameRole ? route.participantId : null,
     balanceAmount: sameRole ? route.balanceAmount : null,
+    createSession: sameRole ? route.createSession : null,
   }
 }
 
@@ -83,6 +85,7 @@ function routeUrl(role, view, params = {}) {
     kid: role === 'client' ? params.kid : null,
     participant: role === 'admin' ? params.participantId : null,
     amount: role === 'admin' ? params.balanceAmount : null,
+    createSession: role === 'admin' ? params.createSession : null,
   }
   Object.entries(values).forEach(([key, value]) => {
     if (value) query.set(key, value)
@@ -103,6 +106,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const [selectedTab, setSelectedTab] = useState(initialRoute.tab)
   const [selectedParticipantId, setSelectedParticipantId] = useState(initialRoute.participantId)
   const [selectedBalanceAmount, setSelectedBalanceAmount] = useState(initialRoute.balanceAmount)
+  const [selectedCreateSession, setSelectedCreateSession] = useState(initialRoute.createSession)
   const [searchQuery, setSearchQuery] = useState('')
   const [remoteClientSearch, setRemoteClientSearch] = useState({ query: '', rows: [] })
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
@@ -327,6 +331,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     setSelectedTab(route.tab)
     setSelectedParticipantId(route.participantId)
     setSelectedBalanceAmount(route.balanceAmount)
+    setSelectedCreateSession(route.createSession)
     if (route.kid) setKid(route.kid)
     const canonicalUrl = routeUrl(initialRole, route.view, route)
     const historyState = { ...currentHistoryStateRef.current, swimcrm: true }
@@ -393,6 +398,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       setSelectedTab(route.tab || null)
       setSelectedParticipantId(route.participantId || null)
       setSelectedBalanceAmount(route.balanceAmount || null)
+      setSelectedCreateSession(route.createSession || null)
       if (route.kid) setKid(route.kid)
       setSearchQuery('')
       if (scrollToTop) window.requestAnimationFrame(() => window.scrollTo(0, 0))
@@ -731,7 +737,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               </div>
             </div>
           ) : Screen ? (
-            <Screen go={navigate} back={contextBack} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} initialParticipantId={selectedParticipantId} prefillAmount={selectedBalanceAmount} currentUser={currentUser} />
+            <Screen key={role === 'admin' && view === 'clientDetail' ? `admin-client-${selectedClientId || 'none'}` : `${role}-${view}`} go={navigate} back={contextBack} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} initialParticipantId={selectedParticipantId} createSession={selectedCreateSession} prefillAmount={selectedBalanceAmount} currentUser={currentUser} />
           ) : (
             <div className="page">
               <div className="card card-pad">Экран пока не подключен.</div>

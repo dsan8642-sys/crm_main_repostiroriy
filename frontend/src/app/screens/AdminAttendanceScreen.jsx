@@ -5,6 +5,7 @@ import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { dateToIso } from '../scheduleContracts.js'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { loadAdminParticipantOptions } from '../participantSearch.js'
 import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
 import { FormModal } from '../FormModal.jsx'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
@@ -309,7 +310,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
 
         <FormModal open={formAction === 'add'} title="Добавить участника" description="Добавление создаёт разовое участие только в этом занятии. Основной состав группы не меняется." size="sm" busy={busyId === 'add'} dirty={Boolean(selectedStudentId)} onRequestClose={() => { setFormAction(null); setSelectedStudentId(''); setStudentError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId === 'add'} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button></>}>
           {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-          <SearchableSelect inputId="admin-attendance-add-student" label="Клиент / ученик" value={selectedStudentId} error={studentError} onChange={(value) => { setSelectedStudentId(value); setStudentError(null) }} options={availableStudents.map((client) => clientSelectOption(client, { description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}` }))} />
+          <SearchableSelect inputId="admin-attendance-add-student" label="Клиент / ученик" value={selectedStudentId} error={studentError} onChange={(value) => { setSelectedStudentId(value); setStudentError(null) }} options={availableStudents.map((client) => clientSelectOption(client, { description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}` }))} loadOptions={loadAdminParticipantOptions} />
         </FormModal>
 
         <FormModal open={formAction === 'cancel'} title="Отменить занятие" description="Причина сохранится в истории занятия." size="sm" busy={busyId === 'cancel-session'} dirty={Boolean(cancelReason)} onRequestClose={() => { setFormAction(null); setCancelReason(''); setCancelReasonError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId === 'cancel-session'} onClick={() => requestClose('cancel')}>Назад</Button><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></>}>

@@ -17,7 +17,7 @@ from attendance.models import AttendanceRecord
 from audit.models import AuditLogEntry, audit
 from billing.models import Charge, Payment, PaymentEvent, ReceiptFile
 from catalog.models import Group, SubscriptionType
-from students.models import Student
+from students.models import GroupMembership, Student
 from subscriptions.models import SessionLedgerEntry, Subscription, SubscriptionStatus
 from subscriptions.services import manual_adjust
 
@@ -69,7 +69,7 @@ def production_snapshot(manifest):
         "students": _rows(
             Student.objects.filter(id__in=target_ids),
             "id", "parent_id", "first_name", "last_name", "birth_date", "email",
-            "is_account_holder", "group_id", "is_active",
+            "is_account_holder", "is_active",
         ),
         "parents": _rows(
             ParentAccount.objects.filter(students__id__in=target_ids).distinct(),
@@ -90,7 +90,8 @@ def production_snapshot(manifest):
             "charges": _all_rows(Charge),
             "attendance": _all_rows(AttendanceRecord),
             "groups": _all_rows(Group),
-            "student_groups": _rows(Student.objects.exclude(group_id=None), "id", "group_id"),
+            "student_groups": _rows(
+                GroupMembership.objects.all(), "student_id", "group_id"),
         },
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
@@ -235,7 +236,6 @@ def _apply_client(row, run_id, actor):
             birth_date=fields.get("birth_date") or None,
             email=fields.get("email", ""),
             is_account_holder=bool(fields.get("is_account_holder", False)),
-            group=None,
             is_active=True,
         )
         student.full_clean()

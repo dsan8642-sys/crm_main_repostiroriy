@@ -104,6 +104,9 @@ export function validateAdminSessionForm(form) {
   if (!Number.isInteger(capacity) || capacity < 1) errors.maxParticipants = 'Укажите число больше нуля.'
   if (form.sessionType === 'group' && !form.groupId) errors.groupId = 'Выберите группу.'
   if (form.sessionType !== 'group' && !form.participantId) errors.participantId = 'Выберите участника.'
+  if (form.sessionType === 'split' && form.requireSecondParticipant && !form.secondParticipantId) {
+    errors.secondParticipantId = 'Выберите второго клиента для сплит-тренировки.'
+  }
   if (
     form.sessionType === 'split'
     && form.secondParticipantId

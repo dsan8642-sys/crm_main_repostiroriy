@@ -42,7 +42,9 @@ def anonymize_parent_account(parent, *, actor=None):
     parent.phone = ""
     parent.email = ""
     parent.telegram_chat_id = ""
-    parent.save(update_fields=["phone", "email", "telegram_chat_id"])
+    parent.instagram_username = ""
+    parent.save(update_fields=[
+        "phone", "email", "telegram_chat_id", "instagram_username"])
 
     parent.consents.update(granted=False, revoked_at=now)
 
