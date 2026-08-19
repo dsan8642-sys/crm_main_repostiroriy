@@ -10,7 +10,7 @@ export function GroupMultiSelect({ id, groups, value, onChange, error, label = '
     else if (!limitReached) onChange([...selected, key])
   }
 
-  return <fieldset id={id} className="ops-group-multiselect" aria-invalid={Boolean(error)}>
+  return <fieldset id={id} className="ops-group-multiselect" aria-invalid={Boolean(error)} tabIndex={-1}>
     <legend>{label} <span className="muted">({selected.length}/3)</span></legend>
     <div className="ops-group-multiselect-options">
       {groups.map((group) => {

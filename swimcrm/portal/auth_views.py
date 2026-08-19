@@ -3,11 +3,11 @@ import re
 import secrets
 from datetime import timedelta
 
+from axes.utils import reset as reset_axes_attempts
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -33,8 +33,18 @@ def _user_payload(user):
 
 
 def _username_for_login(login_value):
-    user_ids = set(User.objects.filter(
-        Q(username__iexact=login_value) | Q(email__iexact=login_value)
+    username_matches = list(User.objects.filter(
+        username__iexact=login_value
+    ).values_list("id", "username"))
+    exact_username_matches = [
+        username for _, username in username_matches if username == login_value
+    ]
+    if len(exact_username_matches) == 1:
+        return exact_username_matches[0]
+
+    user_ids = {user_id for user_id, _ in username_matches}
+    user_ids.update(User.objects.filter(
+        email__iexact=login_value
     ).values_list("id", flat=True))
     user_ids.update(ParentAccount.objects.filter(
         email__iexact=login_value).values_list("user_id", flat=True))
@@ -124,7 +134,7 @@ def _issue_access_code(user, actor, *, parent=None, purpose=None):
         "expires_at": activation.expires_at.isoformat(),
     })
     return {
-        "login": user.email or user.username,
+        "login": user.get_username(),
         "activation_code": raw_code,
         # Compatibility for the pre-Prompt-05 client activation consumer.
         "activation_token": raw_code,
@@ -273,13 +283,14 @@ def auth_activate(request):
             raise ValidationError({"password": exc}) from exc
         user.set_password(password)
         user.save(update_fields=["password"])
+        reset_axes_attempts(username=user.get_username())
         activation.used_at = timezone.now()
         activation.save(update_fields=["used_at"])
         audit(None, "portal_access.code_used", user, {
             "purpose": activation.purpose,
             "role": user.role,
         })
-    return JsonResponse({"ok": True, "login": user.email or user.username})
+    return JsonResponse({"ok": True, "login": user.get_username()})
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

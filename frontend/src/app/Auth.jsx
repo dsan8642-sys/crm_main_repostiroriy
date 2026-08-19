@@ -7,7 +7,7 @@ import {
   formErrorMessage,
 } from './formErrors.js'
 
-const AUTH_FIELD_MAP = { activation_token: 'activationToken' }
+const AUTH_FIELD_MAP = { activation_token: 'activationToken', password: 'password' }
 const AUTH_FIELD_IDS = {
   login: 'auth-login', activationToken: 'auth-activation-token', password: 'auth-password',
 }
@@ -66,10 +66,11 @@ export function LoginScreen({ design, apiState, onLogin }) {
     setBusy(true)
     try {
       if (activationMode) {
-        await api.post('/api/auth/activate/', {
+        const activation = await api.post('/api/auth/activate/', {
           activation_token: activationToken,
           password,
         })
+        setLoginValue(activation.username || activation.login || '')
         setActivationMode(false)
         setActivationToken('')
         setMessage('Доступ активирован. Теперь войдите с новым паролем.')

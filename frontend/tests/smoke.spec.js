@@ -4,15 +4,45 @@ async function mockPortal(page, routes) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const participantMatch = url.pathname.match(/^\/api\/admin\/participants\/(\d+)\/$/)
-    if (participantMatch && route.request().method() === 'POST') {
+    const participantMethod = route.request().method()
+    if (participantMatch && ['GET', 'POST', 'PATCH', 'DELETE'].includes(participantMethod)) {
       const row = routes['/api/admin/clients/']?.clients?.find(
         (client) => String(client.id) === participantMatch[1],
       )
-      const groupId = route.request().postDataJSON()?.participant?.group_id
-      if (row && groupId == null) row.group = null
+      const currentGroups = Array.isArray(row?.groups) ? row.groups : row?.group ? [row.group] : []
+      if (row && participantMethod !== 'GET') {
+        const submitted = route.request().postData()
+          ? route.request().postDataJSON()
+          : {}
+        const participant = submitted.participant || submitted
+        let groupIds = participant.group_ids
+        if (!Array.isArray(groupIds) && participantMethod === 'DELETE') {
+          const removedId = participant.group_id
+          groupIds = currentGroups
+            .map((group) => group.id)
+            .filter((groupId) => String(groupId) !== String(removedId))
+        }
+        if (Array.isArray(groupIds)) {
+          const knownGroups = [
+            ...(routes['/api/admin/reference/']?.groups || []),
+            ...(routes['/api/admin/groups/']?.groups || []),
+            ...currentGroups,
+          ]
+          const groupsById = new Map(knownGroups.map((group) => [String(group.id), group]))
+          row.groups = groupIds.map((groupId) => groupsById.get(String(groupId))).filter(Boolean)
+          row.group = row.groups.length === 1 ? row.groups[0] : null
+        } else if (participant.group_id == null) {
+          row.groups = []
+          row.group = null
+        }
+      }
+      const responseRow = row ? {
+        ...row,
+        groups: Array.isArray(row.groups) ? row.groups : currentGroups,
+      } : null
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify(row || { error: 'Participant not found' }),
+        body: JSON.stringify(responseRow || { error: 'Participant not found' }),
         status: row ? 200 : 404,
       })
       return
@@ -41,7 +71,9 @@ async function mockPortal(page, routes) {
       if (balance === 'negative') rows = rows.filter((row) => Number(row.balance_minor || 0) > 0)
       if (balance === 'zero') rows = rows.filter((row) => Number(row.balance_minor || 0) === 0)
       if (activity) rows = rows.filter((row) => Boolean(row.is_recently_active) === (activity === 'active'))
-      if (groupId) rows = rows.filter((row) => String(row.group?.id) === groupId)
+      if (groupId) rows = rows.filter((row) => (
+        Array.isArray(row.groups) ? row.groups : row.group ? [row.group] : []
+      ).some((group) => String(group.id) === groupId))
       if (search) rows = rows.filter((row) => [
         row.first_name, row.last_name, row.full_name, row.client_phone, row.email, row.group?.name,
       ].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(search)))
@@ -1197,7 +1229,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/dashboard/': { metrics: { clients: 1, active_subscriptions: 1, debtors: 1 } },
     '/api/admin/reference/': {
       trainers: [{ id: 1, full_name: 'Marek Zielinski' }],
-      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_capacity: 12, participants_count: 1, is_active: true }],
+      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_location: { id: 1, name: 'Basen A', is_active: true }, default_capacity: 12, participants_count: 1, is_active: true }],
       subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN', duration_days: 30, sessions_count: 8, is_unlimited: false, is_individual: false, is_active: true }],
       locations: [{ id: 1, code: 'pool-a', name: 'Basen A' }],
       session_types: [
@@ -1286,7 +1318,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       trainers: [{ id: 1, username: 'marek', full_name: 'Marek Zielinski', email: 'm@example.com', phone: '+48000111222', is_active: true, user_is_active: true, access_activated: true, portal_access: 'active', groups_count: 1 }],
     },
     '/api/admin/groups/': {
-      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_capacity: 12, participants_count: 1, is_active: true }],
+      groups: [{ id: 1, name: 'Delfiny', description: 'Grupa testowa', default_trainer: { id: 1, name: 'Marek Zielinski' }, default_location: { id: 1, name: 'Basen A', is_active: true }, default_capacity: 12, participants_count: 1, is_active: true }],
     },
     '/api/admin/subscription-types/': {
       subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN', duration_days: 30, sessions_count: 8, is_unlimited: false, is_individual: false, is_active: true }],

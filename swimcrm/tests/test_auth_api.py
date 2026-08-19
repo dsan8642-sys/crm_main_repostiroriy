@@ -48,6 +48,53 @@ class ProductionAuthApiTest(TestCase):
         self.assertEqual(response.json()["user"]["role"], "client")
         self.assertEqual(self.client.get("/api/client/overview/").status_code, 200)
 
+    def test_exact_username_takes_priority_over_another_users_email(self):
+        account = f.make_parent(username="shared_login", phone="+48500111223")
+        alias_user = f.make_admin(username="different_user")
+        alias_user.email = account.user.username
+        alias_user.set_password("Different!Pass2026")
+        alias_user.save(update_fields=["email", "password"])
+
+        response = self.client.post(
+            "/api/auth/login/",
+            {"login": "shared_login", "password": "Str0ngPass!123"},
+            content_type="application/json",
+            **self._csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["user"]["username"], "shared_login")
+
+    def test_non_exact_username_casing_does_not_override_ambiguous_email(self):
+        account = f.make_parent(username="CaseSensitiveLogin", phone="+48500111224")
+        alias_user = f.make_admin(username="case_alias_user")
+        alias_user.email = "casesensitivelogin"
+        alias_user.save(update_fields=["email"])
+
+        response = self.client.post(
+            "/api/auth/login/",
+            {"login": "CASESENSITIVELOGIN", "password": "Str0ngPass!123"},
+            content_type="application/json",
+            **self._csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.client.session.get("_auth_user_id"))
+
+    def test_ambiguous_normalized_phone_fails_closed(self):
+        f.make_parent(username="phone_alias_one", phone="+48500111999")
+        f.make_parent(username="phone_alias_two", phone="+48 500 111 999")
+
+        response = self.client.post(
+            "/api/auth/login/",
+            {"login": "48 (500) 111-999", "password": "Str0ngPass!123"},
+            content_type="application/json",
+            **self._csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.client.session.get("_auth_user_id"))
+
     @override_settings(CSRF_FAILURE_VIEW="tests.test_auth_api.csrf_failure")
     def test_login_requires_csrf_when_checks_are_enforced(self):
         f.make_admin(username="csrf_admin")
@@ -250,3 +297,70 @@ class ProductionAuthApiTest(TestCase):
         }, content_type="application/json")
 
         self.assertEqual(response.status_code, 200, response.content)
+
+    @override_settings(AXES_FAILURE_LIMIT=5)
+    def test_activation_clears_login_lockout_for_canonical_username(self):
+        username = "locked_activation_client"
+        token = self._issue_activation(username, "+48500111666")
+        for _ in range(5):
+            failed = self.client.post(
+                "/api/auth/login/",
+                {"login": username, "password": "wrong-password"},
+                content_type="application/json",
+                **self._csrf_headers(),
+            )
+            self.assertNotEqual(failed.status_code, 200)
+
+        activated = self.client.post(
+            "/api/auth/activate/",
+            {"activation_token": token, "password": "plywanie"},
+            content_type="application/json",
+        )
+        self.assertEqual(activated.status_code, 200, activated.content)
+
+        login_response = self.client.post(
+            "/api/auth/login/",
+            {"login": username, "password": "plywanie"},
+            content_type="application/json",
+            **self._csrf_headers(),
+        )
+        self.assertEqual(login_response.status_code, 200, login_response.content)
+
+    @override_settings(AXES_FAILURE_LIMIT=5)
+    def test_recovery_clears_login_lockout_for_canonical_username(self):
+        username = "locked_recovery_client"
+        admin = f.make_admin(username="locked_recovery_admin")
+        account = f.make_parent(username=username, phone="+48500111777")
+        admin_client = Client()
+        admin_client.force_login(admin)
+        issued = admin_client.post(f"/api/admin/clients/{account.id}/access/issue/")
+        self.assertEqual(issued.status_code, 201)
+        self.assertEqual(issued.json()["login"], username)
+
+        for _ in range(5):
+            failed = self.client.post(
+                "/api/auth/login/",
+                {"login": username, "password": "wrong-password"},
+                content_type="application/json",
+                **self._csrf_headers(),
+            )
+            self.assertNotEqual(failed.status_code, 200)
+
+        recovered = self.client.post(
+            "/api/auth/activate/",
+            {
+                "activation_token": issued.json()["activation_token"],
+                "password": "plywanie",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(recovered.status_code, 200, recovered.content)
+        self.assertEqual(recovered.json()["login"], username)
+
+        login_response = self.client.post(
+            "/api/auth/login/",
+            {"login": username, "password": "plywanie"},
+            content_type="application/json",
+            **self._csrf_headers(),
+        )
+        self.assertEqual(login_response.status_code, 200, login_response.content)

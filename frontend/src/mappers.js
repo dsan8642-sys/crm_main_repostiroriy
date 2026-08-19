@@ -297,6 +297,9 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       description: group.description || '',
       defaultTrainerId: group.default_trainer?.id || '',
       trainer: group.default_trainer?.name || '-',
+      defaultLocationId: group.default_location?.id || '',
+      defaultLocation: group.default_location?.name || '',
+      defaultLocationActive: Boolean(group.default_location && group.default_location.is_active !== false),
       students: group.participants_count,
       // null price = the group is never billed per visit
       price: group.price_minor == null ? null : asMoneyMajor(group.price_minor),

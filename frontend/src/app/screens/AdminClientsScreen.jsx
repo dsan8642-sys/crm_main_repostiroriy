@@ -24,10 +24,12 @@ const CLIENT_FIELD_MAP = {
   'account.email': 'email',
   'account.username': 'username',
   'account.phone': 'phone',
+  'account.instagram_username': 'instagramUsername',
   'participant.birth_date': 'birthDate',
   'participant.group_ids': 'groupIds',
   birth_date: 'birthDate',
   group_ids: 'groupIds',
+  instagram_username: 'instagramUsername',
 }
 
 const CLIENT_FIELD_IDS = {
@@ -36,6 +38,7 @@ const CLIENT_FIELD_IDS = {
   email: 'admin-client-email',
   username: 'admin-client-username',
   phone: 'admin-client-phone',
+  instagramUsername: 'admin-client-instagramUsername',
   birthDate: 'admin-client-birthDate',
   groupIds: 'admin-client-groupIds',
 }
@@ -103,6 +106,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       username: '',
       usernameManual: false,
       phone: '',
+      instagramUsername: '',
       birthDate: '',
       groupIds: [],
     })
@@ -150,7 +154,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
     function closeQuickAction() {
       if (quickAction === 'client') {
-        setClientForm({ firstName: '', lastName: '', email: '', username: '', usernameManual: false, phone: '', birthDate: '', groupIds: [] })
+        setClientForm({ firstName: '', lastName: '', email: '', username: '', usernameManual: false, phone: '', instagramUsername: '', birthDate: '', groupIds: [] })
         setClientFieldErrors({})
       } else if (quickAction === 'participant') {
         setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupIds: [] })
@@ -261,6 +265,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             email: clientForm.email,
             username: clientForm.username,
             phone: clientForm.phone,
+            instagram_username: clientForm.instagramUsername,
           },
           participant: {
             first_name: clientForm.firstName,
@@ -279,6 +284,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           username: '',
           usernameManual: false,
           phone: '',
+          instagramUsername: '',
           birthDate: '',
           groupIds: [],
         })
@@ -461,7 +467,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           )}
         >
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="ops-form-grid ops-client-create-grid">
               <Input id="admin-client-firstName" label="Имя владельца аккаунта" value={clientForm.firstName} error={clientFieldErrors.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
               <Input id="admin-client-lastName" label="Фамилия владельца" value={clientForm.lastName} error={clientFieldErrors.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
               <Input id="admin-client-email" label="Email" value={clientForm.email} error={clientFieldErrors.email} onChange={(event) => updateClientForm('email', event.target.value)} />
@@ -469,6 +475,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               <Input id="admin-client-phone" label="Телефон" value={clientForm.phone} error={clientFieldErrors.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
               <DateField id="admin-client-birthDate" label="Дата рождения" value={clientForm.birthDate} error={clientFieldErrors.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
               <GroupMultiSelect id="admin-client-groupIds" groups={groups} value={clientForm.groupIds} error={clientFieldErrors.groupIds} onChange={(value) => updateClientForm('groupIds', value)} />
+              <Input id="admin-client-instagramUsername" label="Instagram" value={clientForm.instagramUsername} error={clientFieldErrors.instagramUsername} hint="Имя профиля, например h2o_client" onChange={(event) => updateClientForm('instagramUsername', event.target.value)} />
             </div>
             <p className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>Владелец аккаунта будет создан как участник. Другого участника можно добавить отдельным действием.</p>
         </FormModal>

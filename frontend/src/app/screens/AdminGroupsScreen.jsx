@@ -29,9 +29,12 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     })
     const rows = groupList.rows
     const trainers = adminData.trainers || []
+    const locations = (adminData.locations || []).filter(
+      (location) => location.is_active !== false && location.active !== false,
+    )
     const clients = adminData.clients || []
     const initial = (adminData.groups || []).find((row) => String(row.groupId) === String(groupId)) || null
-    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }
+    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', defaultLocationId: initial.defaultLocationActive !== false ? initial.defaultLocationId || '' : '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }
     const [selected, setSelected] = useState(initial)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState(false)
@@ -114,7 +117,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
       setCapacityError('')
       setFieldErrors({})
-      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
+      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', defaultLocationId: row.defaultLocationActive !== false ? row.defaultLocationId || '' : '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
       setForm(next)
       setFormBaseline(next)
     }
@@ -141,6 +144,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           name: form.name,
           description: form.description,
           default_trainer_id: form.defaultTrainerId || null,
+          default_location_id: form.defaultLocationId || null,
           price_minor: price === '' ? null : Math.round(Number(price) * 100),
           default_capacity: capacityValue === '' ? null : parsedCapacity,
           color_key: form.colorKey || null,
@@ -162,6 +166,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           name: 'name',
           description: 'description',
           default_trainer_id: 'defaultTrainerId',
+          default_location_id: 'defaultLocationId',
           price_minor: 'price',
           default_capacity: 'defaultCapacity',
           color_key: 'colorKey',
@@ -173,7 +178,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         focusFirstFieldError(nextErrors, {
           name: 'admin-group-name', description: 'admin-group-description',
           defaultCapacity: 'admin-group-defaultCapacity', price: 'admin-group-price',
-          defaultTrainerId: 'admin-group-defaultTrainerId', colorKey: 'admin-group-colorKey',
+          defaultTrainerId: 'admin-group-defaultTrainerId', defaultLocationId: 'admin-group-defaultLocationId', colorKey: 'admin-group-colorKey',
           isActive: 'admin-group-isActive',
         })
       } finally { setBusy(false) }
@@ -206,14 +211,14 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const editor = (
       <>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <div className="ops-form-grid"><Input id="admin-group-name" label="Название" value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label="Описание" value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label="Вместимость" hint="Значение по умолчанию для новых групповых тренировок." inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-price" label="Цена занятия" hint="Списывается за посещение без абонемента. Пусто — не списывать." inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label="Тренер по умолчанию" value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Checkbox id="admin-group-isActive" label="Активна" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
+        <div className="ops-form-grid"><Input id="admin-group-name" label="Название" value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label="Описание" value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label="Вместимость" hint="Значение по умолчанию для новых групповых тренировок." inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-price" label="Цена занятия" hint="Списывается за посещение без абонемента. Пусто — не списывать." inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label="Тренер по умолчанию" value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Select id="admin-group-defaultLocationId" label="Локация по умолчанию" value={form.defaultLocationId} error={fieldErrors.defaultLocationId} onChange={(event) => updateForm('defaultLocationId', event.target.value)}><option value="">Без локации</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select><Checkbox id="admin-group-isActive" label="Активна" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
         <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
       </>
     )
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">Группы</h1><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>Новая группа</Button></div>
+        <div className="page-head"><div><h1 className="page-title">Группы</h1><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>Новая группа</Button></div>
         <ToastNotice id="admin-groups-result" message={message} />
         {error && !creating && !editing && !addingMember && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>Обновляю состав группы...</BusyBanner>

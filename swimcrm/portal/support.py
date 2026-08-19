@@ -37,7 +37,7 @@ from common.schedule_palette import (
 from dataio.exports import export_entity
 from notifications.models import Channel, NotificationLog
 from notifications.services import queue_mass_mailing
-from scheduling.models import (Session, SessionParticipant,
+from scheduling.models import (Location, Session, SessionParticipant,
                                SessionParticipantSource, SessionParticipantStatus,
                                SessionType, WaitlistEntry, WaitlistStatus)
 from scheduling.services import (ScheduleConflict, check_trainer_conflict,
@@ -620,6 +620,11 @@ def _group_payload(group):
             "id": group.default_trainer_id,
             "name": str(group.default_trainer),
         } if group.default_trainer_id else None,
+        "default_location": {
+            "id": group.default_location_id,
+            "name": group.default_location.name,
+            "is_active": group.default_location.is_active,
+        } if group.default_location_id else None,
         "price_minor": group.price_minor,
         "currency": group.currency,
         "default_capacity": group.default_capacity,
@@ -1206,6 +1211,13 @@ def _apply_group_data(group, data):
                 Trainer.objects.filter(is_active=True, user__is_active=True),
                 trainer_id, "default_trainer_id", "тренера")
             if trainer_id else None)
+    if "default_location_id" in group_data:
+        location_id = group_data.get("default_location_id")
+        group.default_location = (
+            _object_for_field(
+                Location.objects.filter(is_active=True),
+                location_id, "default_location_id", "локацию")
+            if location_id not in (None, "") else None)
     if "price_minor" in group_data:
         price_minor = group_data.get("price_minor")
         try:
@@ -1534,12 +1546,6 @@ def _create_session_from_data(data, *, actor=None):
         raise _field_validation_error(
             "template_id", "Создание занятия по шаблону больше не поддерживается.",
             code="unsupported")
-    trainer = _object_for_field(
-        Trainer.objects.filter(is_active=True, user__is_active=True),
-        data.get("trainer_id"),
-        "trainer_id",
-        "тренера",
-    )
     group = None
     individual_student = None
     requested_type = data.get("session_type")
@@ -1562,13 +1568,41 @@ def _create_session_from_data(data, *, actor=None):
             field="individual_student_id")
     else:
         group = _object_for_field(
-            Group.objects.all(), data.get("group_id"), "group_id", "группу")
+            Group.objects.select_related(
+                "default_trainer__user", "default_location"
+            ),
+            data.get("group_id"), "group_id", "группу")
         session_type = SessionType.GROUP
+    if "trainer_id" in data:
+        trainer_id = data.get("trainer_id")
+    else:
+        default_trainer = group.default_trainer if group else None
+        trainer_id = (
+            default_trainer.id
+            if default_trainer
+            and default_trainer.is_active
+            and default_trainer.user.is_active
+            else None
+        )
+    trainer = _object_for_field(
+        Trainer.objects.filter(is_active=True, user__is_active=True),
+        trainer_id,
+        "trainer_id",
+        "тренера",
+    )
     start_at = _parse_datetime(data.get("start_at"), "start_at")
     if start_at is None:
         raise _field_validation_error(
             "start_at", "Укажите дату и время начала.", code="required")
-    location = str(data.get("location", "") or "").strip()
+    if "location" in data:
+        location = str(data.get("location", "") or "").strip()
+    else:
+        default_location = group.default_location if group else None
+        location = (
+            default_location.name.strip()
+            if default_location and default_location.is_active
+            else ""
+        )
     if not location:
         raise _field_validation_error(
             "location", "Выберите локацию.", code="required")

@@ -22,7 +22,9 @@ def admin_groups(request):
         is_cancelled=False,
         start_at__gte=timezone.now(),
     ).order_by("start_at", "id")
-    qs = Group.objects.select_related("default_trainer__user").annotate(
+    qs = Group.objects.select_related(
+        "default_trainer__user", "default_location"
+    ).annotate(
         participants_count=Count("students", distinct=True),
         next_session_start=Subquery(next_sessions.values("start_at")[:1]),
         next_session_location=Subquery(next_sessions.values("location")[:1]),
@@ -49,7 +51,10 @@ def admin_groups(request):
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
 def admin_group_detail(request, group_id):
     user = _admin_required(request)
-    group = get_object_or_404(Group.objects.select_related("default_trainer__user"), pk=group_id)
+    group = get_object_or_404(
+        Group.objects.select_related("default_trainer__user", "default_location"),
+        pk=group_id,
+    )
     if request.method == "DELETE":
         group.is_active = False
         group.save(update_fields=["is_active"])

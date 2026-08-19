@@ -12,6 +12,10 @@ class Group(models.Model):
         "accounts.Trainer", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="default_groups",
     )
+    default_location = models.ForeignKey(
+        "scheduling.Location", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="default_groups",
+    )
     price_minor = models.BigIntegerField(
         null=True, blank=True,
         help_text="Цена одного занятия в минорных единицах; пусто = не начислять")

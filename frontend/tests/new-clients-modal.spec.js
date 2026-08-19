@@ -166,15 +166,15 @@ test('client group API errors stay beside the modal field and disappear when the
     }],
     participantEditError: {
       error: 'Проверьте поля формы.',
-      errors: { group_id: [{ message: 'Группа недоступна.', code: 'invalid' }] },
+      errors: { group_ids: [{ message: 'Группа недоступна.', code: 'invalid' }] },
     },
   })
 
   await page.goto('/?role=admin&view=clients')
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   const modal = page.getByRole('dialog', { name: 'Редактирование клиента и участника' })
-  const group = modal.locator('#admin-client-edit-groupId')
-  await group.selectOption('3')
+  const group = modal.locator('#admin-client-edit-groupIds')
+  await group.getByRole('checkbox', { name: 'Masters' }).check()
   await modal.getByRole('button', { name: 'Сохранить' }).click()
 
   await expect(modal.getByText('Группа недоступна.', { exact: true })).toBeVisible()

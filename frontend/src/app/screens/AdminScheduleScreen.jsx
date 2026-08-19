@@ -121,6 +121,28 @@ function fieldLabelStyle() {
   return { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }
 }
 
+function groupSessionDefaults(group, activeTrainers, configuredLocations, capacityFallback = {}) {
+  const trainerId = group?.defaultTrainerId
+  const trainerIsActive = trainerId && activeTrainers.some(
+    (trainer) => String(trainer.trainerId) === String(trainerId),
+  )
+  const location = group?.defaultLocationActive === false ? null : configuredLocations.find(
+    (item) => (
+      (group?.defaultLocationId && String(item.id) === String(group.defaultLocationId))
+      || (group?.defaultLocation && item.name === group.defaultLocation)
+    ),
+  )
+  return {
+    trainerId: trainerIsActive ? trainerId : '',
+    location: location?.name || '',
+    maxParticipants: newSessionCapacity({
+      groupCapacity: group?.defaultCapacity,
+      typeCapacity: capacityFallback.typeCapacity,
+      currentCapacity: capacityFallback.currentCapacity,
+    }),
+  }
+}
+
 async function loadParticipantOptions(query, requestOptions = {}) {
   const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, requestOptions)
   return mapAdminClientRows(payload.participants || []).active
@@ -137,22 +159,23 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const participants = adminData.clients || []
     const sessionTypeConfigs = adminData.sessionTypeConfigs || []
     const configuredLocations = adminData.locations || []
+    const groupTypeCapacity = sessionTypeConfigs.find((item) => item.code === 'group')?.default_capacity
+    const firstGroupDefaults = groupSessionDefaults(groups[0], activeTrainers, configuredLocations, {
+      typeCapacity: groupTypeCapacity,
+      currentCapacity: 10,
+    })
     const [scheduleSessions, setScheduleSessions] = useState(
       () => (adminData.sessions || []).map(normalizeSession),
     )
     const [sessionForm, setSessionForm] = useState({
       groupId: groups[0]?.groupId || '',
-      trainerId: activeTrainers[0]?.trainerId || '',
+      trainerId: firstGroupDefaults.trainerId,
       date: localToday(),
       start: '17:00',
       durationMinutes: '60',
       price: '',
-      location: configuredLocations[0]?.name || '',
-      maxParticipants: newSessionCapacity({
-        groupCapacity: groups[0]?.defaultCapacity,
-        typeCapacity: sessionTypeConfigs.find((item) => item.code === 'group')?.default_capacity,
-        currentCapacity: 10,
-      }),
+      location: firstGroupDefaults.location,
+      maxParticipants: firstGroupDefaults.maxParticipants,
       notes: '',
       sessionType: 'group',
       participantId: '',
@@ -345,17 +368,22 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     function updateSessionType(sessionType) {
       const defaults = sessionTypeConfigs.find((item) => item.code === sessionType)
       const group = groups.find((item) => String(item.groupId) === String(sessionForm.groupId))
+      const groupDefaults = groupSessionDefaults(group, activeTrainers, configuredLocations, {
+        typeCapacity: defaults?.default_capacity,
+        currentCapacity: sessionForm.maxParticipants,
+      })
       const defaultPriceMinor = sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor
       setSessionForm((current) => ({
         ...current,
+        ...(sessionType === 'group' ? groupDefaults : {}),
         sessionType,
         secondParticipantId: sessionType === 'split' ? current.secondParticipantId : '',
         rosterCount: sessionType === 'split'
           ? Math.max(current.secondParticipantId ? 2 : 1, Number(current.rosterCount || 0))
           : 0,
         durationMinutes: String(defaults?.default_duration_minutes || 60),
-        maxParticipants: newSessionCapacity({
-          groupCapacity: sessionType === 'group' ? group?.defaultCapacity : null,
+        maxParticipants: sessionType === 'group' ? groupDefaults.maxParticipants : newSessionCapacity({
+          groupCapacity: null,
           typeCapacity: defaults?.default_capacity || (sessionType === 'split' ? 2 : null),
           currentCapacity: current.maxParticipants,
         }),
@@ -366,19 +394,21 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     function updateNewSessionGroup(groupId) {
       const group = groups.find((item) => String(item.groupId) === String(groupId))
       const defaults = sessionTypeConfigs.find((item) => item.code === sessionForm.sessionType)
+      const groupDefaults = groupSessionDefaults(group, activeTrainers, configuredLocations, {
+        typeCapacity: defaults?.default_capacity,
+        currentCapacity: sessionForm.maxParticipants,
+      })
       setSessionForm((current) => ({
         ...current,
         groupId,
-        maxParticipants: newSessionCapacity({
-          groupCapacity: group?.defaultCapacity,
-          typeCapacity: defaults?.default_capacity,
-          currentCapacity: current.maxParticipants,
-        }),
+        ...groupDefaults,
       }))
       setFieldErrors((current) => {
-        if (!current.groupId && !current.maxParticipants) return current
+        if (!current.groupId && !current.trainerId && !current.location && !current.maxParticipants) return current
         const next = { ...current }
         delete next.groupId
+        delete next.trainerId
+        delete next.location
         delete next.maxParticipants
         return next
       })
@@ -393,11 +423,15 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       const groupId = sessionForm.groupId || groups[0]?.groupId || ''
       const group = groups.find((item) => String(item.groupId) === String(groupId))
       const defaults = sessionTypeConfigs.find((item) => item.code === sessionType)
+      const groupDefaults = groupSessionDefaults(group, activeTrainers, configuredLocations, {
+        typeCapacity: defaults?.default_capacity,
+        currentCapacity: sessionForm.maxParticipants,
+      })
       setSessionForm((current) => ({
         ...current,
         groupId,
-        trainerId: current.trainerId || activeTrainers[0]?.trainerId || '',
-        location: current.location || configuredLocations[0]?.name || '',
+        trainerId: sessionType === 'group' ? groupDefaults.trainerId : current.trainerId || activeTrainers[0]?.trainerId || '',
+        location: sessionType === 'group' ? groupDefaults.location : current.location || configuredLocations[0]?.name || '',
         sessionType,
         participantId: participantId || current.participantId,
         secondParticipantId: sessionType === 'split' ? current.secondParticipantId : '',
@@ -406,8 +440,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           ? Math.max(current.secondParticipantId ? 2 : 1, Number(current.rosterCount || 0))
           : 0,
         durationMinutes: String(defaults?.default_duration_minutes || current.durationMinutes || 60),
-        maxParticipants: newSessionCapacity({
-          groupCapacity: sessionType === 'group' ? group?.defaultCapacity : null,
+        maxParticipants: sessionType === 'group' ? groupDefaults.maxParticipants : newSessionCapacity({
+          groupCapacity: null,
           typeCapacity: defaults?.default_capacity || (sessionType === 'split' ? 2 : null),
           currentCapacity: current.maxParticipants,
         }),

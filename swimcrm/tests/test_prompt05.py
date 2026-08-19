@@ -29,7 +29,9 @@ class Prompt05SchedulePrivacyTest(TestCase):
             first="Ewa",
             last="Kowalska",
         )
-        self.start = timezone.now() + timedelta(days=8)
+        self.start = timezone.localtime(timezone.now()).replace(
+            hour=10, minute=0, second=0, microsecond=0
+        ) + timedelta(days=8)
         self.individual = create_session(
             trainer=self.trainer,
             start_at=self.start,
@@ -176,7 +178,7 @@ class Prompt05AccessLifecycleTest(TestCase):
         self.assertEqual(first.status_code, 201)
         self.assertEqual(second.status_code, 201)
         self.assertEqual(second.json()["purpose"], AccessPurpose.ACTIVATION)
-        self.assertEqual(second.json()["login"], account.email)
+        self.assertEqual(second.json()["login"], account.user.username)
         self.assertNotIn("password", second.json())
         activation = AccountActivation.objects.get(
             token_hash=hashlib.sha256(second.json()["activation_code"].encode()).hexdigest())
@@ -195,6 +197,7 @@ class Prompt05AccessLifecycleTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(activated.status_code, 200)
+        self.assertEqual(activated.json()["login"], account.user.username)
         self.assertEqual(
             Client().post(
                 "/api/auth/activate/",
@@ -233,12 +236,22 @@ class Prompt05AccessLifecycleTest(TestCase):
 
         issued = self.admin_client.post(f"/api/admin/trainers/{trainer.id}/access/issue/")
         self.assertEqual(issued.status_code, 201)
+        self.assertEqual(issued.json()["login"], trainer.user.username)
         activated = Client().post(
             "/api/auth/activate/",
             {"activation_token": issued.json()["activation_code"], "password": self.password},
             content_type="application/json",
         )
         self.assertEqual(activated.status_code, 200)
+        self.assertEqual(activated.json()["login"], trainer.user.username)
+
+        trainer_client = Client()
+        login = trainer_client.post(
+            "/api/auth/login/",
+            {"login": activated.json()["login"], "password": self.password},
+            content_type="application/json",
+        )
+        self.assertEqual(login.status_code, 200)
 
         self.admin_client.post(f"/api/admin/trainers/{trainer.id}/access/revoke/")
         trainer.refresh_from_db()
