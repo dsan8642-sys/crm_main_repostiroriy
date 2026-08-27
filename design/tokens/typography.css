@@ -7,10 +7,10 @@
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   /* Weights */
-  --fw-regular:  400; /* @kind other */
+  --fw-regular:  450; /* @kind other */
   --fw-medium:   500; /* @kind other */
   --fw-semibold: 600; /* @kind other */
-  --fw-bold:     700; /* @kind other */
+  --fw-bold:     600; /* @kind other */
 
   /* Font sizes — compact CRM scale */
   --fs-2xs:  11px;   /* micro labels, table meta */

@@ -5,7 +5,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -49,9 +49,20 @@ class Subscription(models.Model):
     base_end_date = models.DateField(help_text="Дата окончания без учёта заморозок")
     status = models.CharField(max_length=16, choices=SubscriptionStatus.choices,
                               default=SubscriptionStatus.ACTIVE)
+    idempotency_key = models.CharField(max_length=128, null=True, blank=True)
+    idempotency_fingerprint = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     objects = SubscriptionQuerySet.as_manager()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["idempotency_key"],
+                condition=Q(idempotency_key__isnull=False),
+                name="subscriptions_unique_operation_key",
+            ),
+        ]
 
     @property
     def total_frozen_days(self):

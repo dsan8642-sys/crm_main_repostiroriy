@@ -22,10 +22,10 @@ class LedgerInline(admin.TabularInline):
 class SubscriptionAdmin(admin.ModelAdmin):
     list_display = ("student", "subscription_type", "start_date", "effective_end_date",
                     "remaining_sessions", "status")
-    list_filter = ("status", "subscription_type", "student__group", "start_date")
+    list_filter = ("status", "subscription_type", "student__groups", "start_date")
     search_fields = (
         "student__first_name", "student__last_name", "student__email",
-        "student__parent__phone", "student__group__name",
+        "student__parent__phone", "student__groups__name",
         "subscription_type__name",
     )
     autocomplete_fields = ("student", "subscription_type")

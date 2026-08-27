@@ -1,6 +1,12 @@
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Student
+from catalog.models import Group
+
+from .models import GroupMembership, Student
+
+
+MAX_STUDENT_GROUPS = 3
 
 
 def _account_holder_names(account):
@@ -34,3 +40,65 @@ def ensure_account_holder_participant(account):
         email=email,
         is_account_holder=True,
     )
+
+
+def _group_ids(values):
+    result = []
+    for raw in values or []:
+        try:
+            group_id = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"participant.group_ids": "Укажите корректные ID групп."}) from exc
+        if group_id <= 0:
+            raise ValidationError({"participant.group_ids": "Укажите корректные ID групп."})
+        if group_id in result:
+            raise ValidationError({"participant.group_ids": "Одна группа указана несколько раз."})
+        result.append(group_id)
+    if len(result) > MAX_STUDENT_GROUPS:
+        raise ValidationError({
+            "participant.group_ids": f"Участник может состоять максимум в {MAX_STUDENT_GROUPS} группах.",
+        })
+    return result
+
+
+@transaction.atomic
+def set_student_groups(student, values):
+    """Replace group memberships under a participant row lock."""
+    caller_student = student
+    student = Student.objects.select_for_update().get(pk=student.pk)
+    group_ids = _group_ids(values)
+    groups = list(Group.objects.filter(pk__in=group_ids))
+    if len(groups) != len(group_ids):
+        found = {group.id for group in groups}
+        missing = next(group_id for group_id in group_ids if group_id not in found)
+        raise ValidationError({
+            "participant.group_ids": f"Группа с ID {missing} не найдена.",
+        })
+    existing = set(student.group_memberships.values_list("group_id", flat=True))
+    desired = set(group_ids)
+    student.group_memberships.filter(group_id__in=existing - desired).delete()
+    GroupMembership.objects.bulk_create([
+        GroupMembership(student=student, group_id=group_id)
+        for group_id in group_ids if group_id not in existing
+    ])
+    # Detail endpoints commonly load the participant with ``groups`` already
+    # prefetched. Invalidate that caller-side cache so the response reflects
+    # the membership change committed above.
+    getattr(caller_student, "_prefetched_objects_cache", {}).pop("groups", None)
+    return student
+
+
+@transaction.atomic
+def add_student_group(student, group_id):
+    student = Student.objects.select_for_update().get(pk=student.pk)
+    existing = list(student.group_memberships.values_list("group_id", flat=True))
+    if int(group_id) in existing:
+        return student
+    return set_student_groups(student, [*existing, group_id])
+
+
+@transaction.atomic
+def remove_student_group(student, group_id):
+    student = Student.objects.select_for_update().get(pk=student.pk)
+    student.group_memberships.filter(group_id=group_id).delete()
+    return student

@@ -14,7 +14,7 @@ EVIDENCE_ITEMS = [
         "id": "local_backend_release_gate",
         "command": "scripts\\release-check-backend.cmd",
         "summary": "Run the backend release gate and paste the final pass summary here.",
-        "output_excerpt": "Must include: Backend release checks passed; Production readiness audit verified; NocoBase API build-pack smoke check; Tracked release source manifests.",
+        "output_excerpt": "Must include: Backend release checks passed; Production readiness audit verified; Tracked release source manifests.",
     },
     {
         "id": "local_full_stack_release_gate",
@@ -24,9 +24,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "release_source_archive",
-        "command": "scripts\\build-release-source.cmd",
-        "summary": "Run the release source archive builder from the clean release commit, verify the manifest/checksum, and paste the pass summary plus the release commit SHA here.",
-        "output_excerpt": "Must include: Release source archive written; Release source manifest written; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; release_candidate.commit_sha; sha256.",
+        "command": "scripts\\build-release-artifact.cmd",
+        "summary": "Build and verify the immutable deployment artifact from the clean release commit.",
+        "output_excerpt": "Must include: Immutable release artifact written; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; commit_sha; archive_sha256.",
     },
     {
         "id": "tracked_release_source_guard",
@@ -36,7 +36,7 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "github_full_stack_release_job",
-        "summary": "Paste the GitHub Actions release-check job URL, pass summary, release commit SHA, and artifact name swimcrm-release-source-<commit-sha> here.",
+        "summary": "Paste the GitHub Actions release-check job URL, pass summary, release commit SHA, immutable artifact name swimcrm-release-<commit-sha>, archive SHA-256, file-list SHA-256, and frontend dist file count here.",
         "evidence_url": "",
     },
     {
@@ -46,27 +46,27 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "target_host_release_install",
-        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall",
-        "summary": "Extract the verified release archive on the target host, install backend/root/frontend dependencies, verify the pinned NocoBase CLI package, verify migrations, and prepare NocoBase app/storage roots outside the source tree.",
-        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; NocoBase CLI package installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree.",
+        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -RunInstall",
+        "summary": "Extract the verified release archive on the target host, install backend/frontend dependencies, and verify migrations.",
+        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed.",
     },
     {
         "id": "production_env_preflight",
         "command": "scripts\\check-production-env.cmd",
         "summary": "Run the production preflight on the target host and paste the pass summary here.",
-        "output_excerpt": "Must include: Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; NocoBase production settings passed; HTTPS reverse-proxy settings passed.",
+        "output_excerpt": "Must include: Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; HTTPS reverse-proxy settings passed.",
     },
     {
-        "id": "live_hybrid_health",
-        "command": "scripts\\check-hybrid-health.cmd -RequireHttps -RequireOpsOk",
-        "summary": "Run live hybrid health on the target host and paste the pass summary here, including the real Django and NocoBase https:// production URLs.",
-        "output_excerpt": "Must include: Django health check passed: https://<production-django-host>/api/health/; Django operations status: ok; Operations status ok requirement passed; NocoBase process health check passed: https://<production-nocobase-host>/api/__health_check; Hybrid health check passed; HTTPS live endpoint requirement passed; nocobase_config_health; /api/nocobase/config/languages/",
+        "id": "live_app_health",
+        "command": "scripts\\check-app-health.cmd -RequireHttps -RequireOpsOk",
+        "summary": "Run live app health on the target host and paste the pass summary here, including the real Django https:// production URL.",
+        "output_excerpt": "Must include: Django health check passed: https://<production-django-host>/api/health/; Django operations status: ok; Operations status ok requirement passed; HTTPS live endpoint requirement passed; App health check passed.",
     },
     {
-        "id": "hybrid_backup_restore_drill",
-        "command": "scripts\\backup-hybrid.ps1; scripts\\restore-hybrid.ps1 -PlanOnly; scripts\\verify-hybrid-backup-set.cmd",
-        "summary": "Paste latest backup, hybrid restore plan, hybrid backup-set verification, PostgreSQL restore drill evidence, and the Django/NocoBase dump SHA256 values here.",
-        "output_excerpt": "Must include: Hybrid backup set written; backup_set_dir; nocobase_database; Django dump sha256 OK: <64-hex-sha256>; NocoBase dump sha256 OK: <64-hex-sha256>; Django dump list OK; NocoBase dump list OK; Restore verification OK; Hybrid backup set verification OK.",
+        "id": "backup_restore_drill",
+        "command": "scripts\\backup-pg.cmd; scripts\\verify-pg-restore.cmd",
+        "summary": "Paste the latest backup, PostgreSQL restore drill evidence, and the backup dump SHA256 value here.",
+        "output_excerpt": "Must include: PostgreSQL backup written; Backup dump sha256 OK: <64-hex-sha256>; Backup dump list OK; Restore verification OK; Backup set verification OK.",
     },
     {
         "id": "rollback_plan_acknowledged",
@@ -121,8 +121,9 @@ def _evidence_items(
     manifest_data = _archive_manifest_data(archive_manifest) if release_archive_passed else {}
     if not archive_sha256:
         archive_sha256 = manifest_data.get("archive_sha256", "")
-    tracked_file_count = manifest_data.get("tracked_file_count", "<tracked-file-count>")
-    tracked_file_list_sha256 = manifest_data.get("tracked_file_list_sha256", "<64-hex-sha256>")
+    artifact_file_count = manifest_data.get("artifact_file_count", "<artifact-file-count>")
+    artifact_file_list_sha256 = manifest_data.get("artifact_file_list_sha256", "<64-hex-sha256>")
+    frontend_dist_file_count = manifest_data.get("frontend_dist_file_count", "<frontend-dist-file-count>")
     rows = []
     for template in EVIDENCE_ITEMS:
         item = dict(template)
@@ -132,7 +133,7 @@ def _evidence_items(
             item["status"] = "passed"
             item["captured_at"] = now
             item["summary"] = "Backend release checks passed."
-            item["output_excerpt"] = "Backend release checks passed. Production readiness audit verified. NocoBase API build-pack smoke check. Tracked release source manifests."
+            item["output_excerpt"] = "Backend release checks passed. Production readiness audit verified. Tracked release source manifests."
         if item["id"] == "local_full_stack_release_gate" and local_full_stack_passed:
             item["status"] = "passed"
             item["captured_at"] = now
@@ -141,24 +142,22 @@ def _evidence_items(
         if item["id"] == "release_source_archive" and release_archive_passed:
             item["status"] = "passed"
             item["captured_at"] = now
-            item["summary"] = f"Release source archive was built and verified for commit {release_commit_sha}."
-            manifest_fragment = f" Release source manifest written: {archive_manifest}." if archive_manifest else " Release source manifest written."
+            item["summary"] = f"Immutable deployment artifact was built and verified for commit {release_commit_sha}."
+            manifest_fragment = f" Release artifact manifest written: {archive_manifest}." if archive_manifest else " Release artifact manifest written."
             item["output_excerpt"] = (
-                "Release source archive written."
+                "Immutable release artifact written."
                 f"{manifest_fragment} "
-                f"Release source archive sha256: {archive_sha256}. "
-                "Release source archive manifest verified. "
-                "Release source archive contents verified. "
-                "Release source archive tracked file list verified. "
-                f"tracked_file_count: {tracked_file_count}. "
-                f"tracked_file_list_sha256: {tracked_file_list_sha256}. "
+                "Immutable release artifact verified. "
+                f"artifact_file_count: {artifact_file_count}. "
+                f"artifact_file_list_sha256: {artifact_file_list_sha256}. "
+                f"frontend_dist_file_count: {frontend_dist_file_count}. "
                 f"commit_sha: {release_commit_sha}. "
                 f"archive_sha256: {archive_sha256}."
             )
         if item["id"] == "tracked_release_source_guard" and release_archive_passed:
             item["status"] = "passed"
             item["captured_at"] = now
-            item["summary"] = "Tracked release-source guard passed for required root and frontend manifests."
+            item["summary"] = "Tracked release-source guard passed for required frontend manifests."
             item["output_excerpt"] = "Release source manifests verified. Required release manifests are tracked by Git."
         rows.append(item)
     return rows

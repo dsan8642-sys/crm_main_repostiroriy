@@ -7,8 +7,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $requiredArchiveEntries = @(
-    "package.json",
-    "package-lock.json",
     "frontend/package.json",
     "frontend/package-lock.json"
 )
@@ -16,8 +14,6 @@ $blockedArchivePrefixes = @(
     ".git/",
     ".codebase-memory/",
     ".runtime/",
-    ".nocobase/",
-    ".nocobase-logs/",
     ".npm-cache/",
     ".yarn-cache/",
     "node_modules/",
@@ -26,7 +22,6 @@ $blockedArchivePrefixes = @(
     "frontend/test-results/",
     "frontend/playwright-report/",
     "swimcrm/.venv/",
-    "swimcrm-hybrid/",
     "backups/",
     "releases/",
     "dist/"
@@ -50,7 +45,9 @@ $blockedArchiveExtensions = @(
 function Get-LineListSha256 {
     param([string[]]$Lines)
 
-    $text = (($Lines | Sort-Object) -join "`n") + "`n"
+    [string[]]$sortedLines = @($Lines)
+    [Array]::Sort($sortedLines, [StringComparer]::Ordinal)
+    $text = ($sortedLines -join "`n") + "`n"
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {

@@ -5,15 +5,14 @@ param(
     [string]$InstallRoot = $(if ($env:SWIMCRM_RELEASE_ROOT) { $env:SWIMCRM_RELEASE_ROOT } else { "" }),
     [string]$ReleaseDir = "",
     [string]$Python = $(if ($env:PYTHON) { $env:PYTHON } else { "python.exe" }),
-    [string]$NocoBaseAppRoot = $(if ($env:NOCOBASE_APP_ROOT) { $env:NOCOBASE_APP_ROOT } else { "" }),
-    [string]$NocoBaseStorageDir = $(if ($env:NOCOBASE_STORAGE_DIR) { $env:NOCOBASE_STORAGE_DIR } else { "" }),
     [switch]$RunInstall
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$ArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$SourceArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$DeploymentArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-artifact.ps1"
 $InstallVerifier = Join-Path $RepoRoot "scripts\verify-target-host-release-install.ps1"
 
 function Resolve-RequiredPath {
@@ -79,8 +78,11 @@ function Invoke-Step {
     & $Command
 }
 
-if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
-    throw "Release archive verifier not found at $ArchiveVerifier."
+if (-not (Test-Path -LiteralPath $SourceArchiveVerifier)) {
+    throw "Release source archive verifier not found at $SourceArchiveVerifier."
+}
+if (-not (Test-Path -LiteralPath $DeploymentArchiveVerifier)) {
+    throw "Deployment archive verifier not found at $DeploymentArchiveVerifier."
 }
 if (-not (Test-Path -LiteralPath $InstallVerifier)) {
     throw "Target-host release install verifier not found at $InstallVerifier."
@@ -94,6 +96,13 @@ if (-not (Test-Path -LiteralPath $manifestPath)) {
 $manifestDir = Split-Path -Parent $manifestPath
 $manifestData = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $archivePath = Resolve-ArchivePath -ManifestData $manifestData -ManifestDir $manifestDir
+$isDeploymentBundle = $manifestData.artifact_type -eq "swimcrm_deployment_bundle"
+$archiveVerifier = if ($isDeploymentBundle) {
+    $DeploymentArchiveVerifier
+}
+else {
+    $SourceArchiveVerifier
+}
 
 if ([string]::IsNullOrWhiteSpace($InstallRoot) -and [string]::IsNullOrWhiteSpace($ReleaseDir)) {
     throw "InstallRoot or ReleaseDir is required. Set SWIMCRM_RELEASE_ROOT or pass -InstallRoot/-ReleaseDir."
@@ -106,16 +115,6 @@ else {
     $ReleaseDir = Resolve-RequiredPath -Path $ReleaseDir -Label "ReleaseDir"
 }
 
-$nocoBaseAppRootPath = Resolve-RequiredPath -Path $NocoBaseAppRoot -Label "NocoBaseAppRoot"
-$nocoBaseStorageDirPath = Resolve-RequiredPath -Path $NocoBaseStorageDir -Label "NocoBaseStorageDir"
-
-if (Test-PathInside -Child $nocoBaseAppRootPath -Parent $ReleaseDir) {
-    throw "NOCOBASE_APP_ROOT must be outside the extracted release source tree."
-}
-if (Test-PathInside -Child $nocoBaseStorageDirPath -Parent $ReleaseDir) {
-    throw "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree."
-}
-
 $backendDir = Join-Path $ReleaseDir "swimcrm"
 $backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
 $frontendDir = Join-Path $ReleaseDir "frontend"
@@ -125,24 +124,27 @@ $plan = [ordered]@{
     commit_sha = $manifestData.commit_sha
     short_sha = $manifestData.short_sha
     archive_sha256 = $manifestData.archive_sha256
-    tracked_file_count = $manifestData.tracked_file_count
-    tracked_file_list_sha256 = $manifestData.tracked_file_list_sha256
     release_dir = $ReleaseDir
     backend_dir = $backendDir
     backend_python = $backendPython
     frontend_dir = $frontendDir
-    nocobase_app_root = $nocoBaseAppRootPath
-    nocobase_storage_dir = $nocoBaseStorageDirPath
     run_install = [bool]$RunInstall
     steps = @(
         "verify release source archive manifest and contents",
         "extract archive into an empty release directory",
         "create backend virtualenv and install swimcrm/requirements.txt",
-        "install root Node tooling with npm ci",
         "install frontend dependencies with npm ci",
-        "run Django migrate --check",
-        "prepare NocoBase app/storage roots outside the source tree"
+        "run Django migrate --check"
     )
+}
+if ($isDeploymentBundle) {
+    $plan["artifact_file_count"] = $manifestData.artifact_file_count
+    $plan["artifact_file_list_sha256"] = $manifestData.artifact_file_list_sha256
+    $plan["frontend_dist_file_count"] = $manifestData.frontend_dist_file_count
+}
+else {
+    $plan["tracked_file_count"] = $manifestData.tracked_file_count
+    $plan["tracked_file_list_sha256"] = $manifestData.tracked_file_list_sha256
 }
 
 if (-not $RunInstall) {
@@ -152,7 +154,7 @@ if (-not $RunInstall) {
 }
 
 Invoke-Step "Verify release source archive" {
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArchiveVerifier $manifestPath
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $archiveVerifier $manifestPath
     if ($LASTEXITCODE -ne 0) {
         throw "Release source archive verification failed with exit code $LASTEXITCODE."
     }
@@ -170,6 +172,10 @@ else {
 
 Invoke-Step "Extract release archive" {
     Expand-Archive -LiteralPath $archivePath -DestinationPath $ReleaseDir
+    if ($isDeploymentBundle -and
+        -not (Test-Path -LiteralPath (Join-Path $ReleaseDir "frontend\dist\index.html") -PathType Leaf)) {
+        throw "Verified deployment bundle did not extract frontend/dist/index.html."
+    }
     Write-Host "Release archive extracted on target host."
 }
 
@@ -187,21 +193,6 @@ Invoke-Step "Install backend dependencies" {
         throw "Backend dependency installation failed with exit code $LASTEXITCODE."
     }
     Write-Host "Backend dependencies installed."
-}
-
-Invoke-Step "Install root Node tooling" {
-    Push-Location $ReleaseDir
-    try {
-        npm.cmd ci
-        if ($LASTEXITCODE -ne 0) {
-            throw "Root Node tooling installation failed with exit code $LASTEXITCODE."
-        }
-    }
-    finally {
-        Pop-Location
-    }
-    Write-Host "Root Node tooling installed."
-    Write-Host "NocoBase CLI package installed."
 }
 
 Invoke-Step "Install frontend dependencies" {
@@ -232,19 +223,10 @@ Invoke-Step "Check Django migrations" {
     Write-Host "Django migrations check passed."
 }
 
-Invoke-Step "Prepare NocoBase runtime roots" {
-    New-Item -ItemType Directory -Force -Path $nocoBaseAppRootPath | Out-Null
-    New-Item -ItemType Directory -Force -Path $nocoBaseStorageDirPath | Out-Null
-    Write-Host "NocoBase app root outside source tree."
-    Write-Host "NocoBase storage outside source tree."
-}
-
 Invoke-Step "Verify installed release source tree" {
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallVerifier `
         -Manifest $manifestPath `
         -ReleaseDir $ReleaseDir `
-        -NocoBaseAppRoot $nocoBaseAppRootPath `
-        -NocoBaseStorageDir $nocoBaseStorageDirPath `
         -RequireInstalledDependencies
     if ($LASTEXITCODE -ne 0) {
         throw "Target-host release install verification failed with exit code $LASTEXITCODE."
@@ -255,5 +237,12 @@ Write-Host ""
 Write-Host "Target-host release install completed."
 Write-Host "commit_sha: $($manifestData.commit_sha)"
 Write-Host "archive_sha256: $($manifestData.archive_sha256)"
-Write-Host "tracked_file_count: $($manifestData.tracked_file_count)"
-Write-Host "tracked_file_list_sha256: $($manifestData.tracked_file_list_sha256)"
+if ($isDeploymentBundle) {
+    Write-Host "artifact_file_count: $($manifestData.artifact_file_count)"
+    Write-Host "artifact_file_list_sha256: $($manifestData.artifact_file_list_sha256)"
+    Write-Host "frontend_dist_file_count: $($manifestData.frontend_dist_file_count)"
+}
+else {
+    Write-Host "tracked_file_count: $($manifestData.tracked_file_count)"
+    Write-Host "tracked_file_list_sha256: $($manifestData.tracked_file_list_sha256)"
+}

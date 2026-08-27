@@ -1,0 +1,15 @@
+@media (max-width: 360px) {
+  .ops-trainer-sessions-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ops-trainer-sessions-head .ops-view-switcher {
+    width: 100%;
+  }
+
+  .ops-trainer-sessions-head .ops-view-switcher button {
+    flex: 1 1 0;
+    min-height: 44px;
+  }
+}

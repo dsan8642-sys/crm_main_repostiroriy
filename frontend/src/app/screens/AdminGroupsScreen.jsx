@@ -1,92 +1,290 @@
-import React, { useMemo, useState } from 'react'
-import { api } from '../../api.js'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
+import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
+import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
+import { FormModal } from '../FormModal.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
+import { scheduleColorStyle } from '../schedulePalette.js'
+import { mapAdminGroupRows, mapAdminParticipantRows, mapAdminSessionRows } from '../../mappers.js'
+import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
+import { ActionPopover, ContextBackButton, EntityMobileCard } from '../EntityListPrimitives.jsx'
+import { formatEntityDate } from '../entityListContracts.js'
+import { dateToIso } from '../scheduleContracts.js'
 
-export function createAdminGroupsScreen(components, reloadRoleData) {
-  const { Table, StatusPill, Button, Banner, Input, Avatar, Badge } = components
+export function createAdminGroupsScreen(components, reloadRoleData, adminData = {}) {
+  const { Table, StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money } = components
 
-  return function ApiAdminGroups({ go, groupId }) {
-    const rows = globalThis.AdminData?.groups || []
-    const trainers = globalThis.AdminData?.trainers || []
-    const clients = globalThis.AdminData?.clients || []
-    const sessions = globalThis.AdminData?.sessions || []
-    const initial = rows.find((row) => String(row.groupId) === String(groupId)) || null
+  return function ApiAdminGroups({ go, groupId, currentUser }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
+    const groupList = useScreenList({
+      path: '/api/admin/groups/',
+      itemKey: 'groups',
+      mapRows: mapAdminGroupRows,
+      role: 'admin',
+      route: 'groups',
+      userKey: currentUser?.id || currentUser?.username,
+      initialFilters: { active: '', trainer_id: '' },
+      defaultOrder: 'name',
+    })
+    const rows = groupList.rows
+    const trainers = adminData.trainers || []
+    const locations = (adminData.locations || []).filter(
+      (location) => location.is_active !== false && location.active !== false,
+    )
+    const clients = adminData.clients || []
+    const initial = (adminData.groups || []).find((row) => String(row.groupId) === String(groupId)) || null
+    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', defaultLocationId: initial.defaultLocationActive !== false ? initial.defaultLocationId || '' : '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }
     const [selected, setSelected] = useState(initial)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState(false)
+    const [addingMember, setAddingMember] = useState(false)
     const [candidateId, setCandidateId] = useState('')
-    const [form, setForm] = useState({ name: '', description: '', defaultTrainerId: '', isActive: true })
+    const [form, setForm] = useState(initialForm)
+    const [formBaseline, setFormBaseline] = useState(initial ? initialForm : null)
+    const [capacityError, setCapacityError] = useState('')
+    const [fieldErrors, setFieldErrors] = useState({})
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
+    const [groupSessions, setGroupSessions] = useState([])
+    const [members, setMembers] = useState([])
+    const [membersLoading, setMembersLoading] = useState(false)
+    const [memberRefresh, setMemberRefresh] = useState(0)
 
-    const members = useMemo(() => clients.filter((client) => String(client.groupId) === String(selected?.groupId)), [clients, selected])
-    const candidates = useMemo(() => clients.filter((client) => String(client.groupId) !== String(selected?.groupId) && client.isActive), [clients, selected])
-    const groupSessions = useMemo(() => sessions.filter((session) => String(session.groupId) === String(selected?.groupId)), [sessions, selected])
-    const capacity = Math.max(selected?.students || 0, ...groupSessions.map((session) => session.limit || 0), 0)
+    const candidates = useMemo(() => clients.filter((client) => !(client.groupIds || []).map(String).includes(String(selected?.groupId)) && (client.groupIds || []).length < 3 && client.isActive), [clients, selected])
+    const capacity = selected?.defaultCapacity ?? null
+
+    const loadCandidateOptions = useCallback(async (query, requestOptions = {}) => {
+      const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, requestOptions)
+      return mapAdminParticipantRows(payload.participants || [])
+        .filter((client) => !(client.groupIds || []).map(String).includes(String(selected?.groupId)) && (client.groupIds || []).length < 3 && client.isActive)
+        .map((client) => clientSelectOption(client, { description: (row) => row.group || t('groups.noGroup') }))
+    }, [selected?.groupId, t])
+
+    useEffect(() => {
+      if (!selected?.groupId) {
+        setGroupSessions([])
+        return undefined
+      }
+      const controller = new AbortController()
+      const now = new Date()
+      const query = new URLSearchParams({
+        group_id: String(selected.groupId),
+        date_from: dateToIso(now),
+        date_to: dateToIso(new Date(now.getTime() + 90 * 86400000)),
+        page: '1',
+        page_size: '200',
+      })
+      api.get(`/api/admin/schedule/sessions/?${query}`, { signal: controller.signal })
+        .then((payload) => setGroupSessions(mapAdminSessionRows(payload.sessions || [])))
+        .catch((next) => {
+          if (next.name !== 'AbortError') setError(apiErrorMessage(next, t('groups.scheduleError')))
+        })
+      return () => controller.abort()
+    }, [selected?.groupId, t])
+
+    useEffect(() => {
+      if (!selected?.groupId) {
+        setMembers([])
+        setMembersLoading(false)
+        return undefined
+      }
+      let alive = true
+      setMembers([])
+      setMembersLoading(true)
+      fetchAllPages(`/api/admin/clients/?group_id=${encodeURIComponent(selected.groupId)}`, 'clients', 200)
+        .then((payload) => {
+          if (alive) setMembers(mapAdminParticipantRows(payload.clients || []))
+        })
+        .catch((next) => {
+          if (alive) {
+            setMembers([])
+            setError(apiErrorMessage(next, t('groups.rosterError')))
+          }
+        })
+        .finally(() => {
+          if (alive) setMembersLoading(false)
+        })
+      return () => { alive = false }
+    }, [selected?.groupId, memberRefresh, t])
+
+    const nextSessionLabel = (row) => row.nextSessionAt
+      ? `${formatEntityDate(row.nextSessionAt)} · ${new Date(row.nextSessionAt).toLocaleTimeString(localeTag, { hour: '2-digit', minute: '2-digit' })}`
+      : t('groups.noUpcoming')
 
     function openGroup(row) {
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
-      setForm({ name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', isActive: row.active })
+      setCapacityError('')
+      setFieldErrors({})
+      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', defaultLocationId: row.defaultLocationActive !== false ? row.defaultLocationId || '' : '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
+      setForm(next)
+      setFormBaseline(next)
     }
 
     async function saveGroup(isNew = false) {
+      const capacityValue = String(form.defaultCapacity).trim()
+      const parsedCapacity = Number(capacityValue)
+      if (capacityValue !== '' && (!Number.isInteger(parsedCapacity) || parsedCapacity <= 0)) {
+        setCapacityError(t('groups.capacityInvalid'))
+        document.getElementById('admin-group-defaultCapacity')?.focus()
+        return
+      }
+      if (!form.name.trim()) {
+        setFieldErrors({ name: t('groups.nameRequired') })
+        document.getElementById('admin-group-name')?.focus()
+        return
+      }
+      setCapacityError('')
       setBusy(true); setError(null)
       try {
-        const payload = { name: form.name, description: form.description, default_trainer_id: form.defaultTrainerId || null, is_active: form.isActive }
+        // Blank price means "never bill per visit", which is not the same as 0.
+        const price = String(form.price).trim().replace(',', '.')
+        const payload = {
+          name: form.name,
+          description: form.description,
+          default_trainer_id: form.defaultTrainerId || null,
+          default_location_id: form.defaultLocationId || null,
+          price_minor: price === '' ? null : Math.round(Number(price) * 100),
+          default_capacity: capacityValue === '' ? null : parsedCapacity,
+          color_key: form.colorKey || null,
+          is_active: form.isActive,
+        }
+        if (price !== '' && (!Number.isFinite(Number(price)) || Number(price) < 0)) {
+          setFieldErrors((current) => ({ ...current, price: t('groups.priceInvalid') }))
+          document.getElementById('admin-group-price')?.focus()
+          return
+        }
         if (isNew) await api.post('/api/admin/groups/', payload)
         else await api.post(`/api/admin/groups/${selected.groupId}/`, payload)
-        setMessage(isNew ? 'Группа создана.' : 'Карточка группы обновлена.')
+        setMessage(isNew ? t('groups.created') : t('groups.updated'))
         setCreating(false); setEditing(false)
+        setFormBaseline(null)
         await reloadRoleData?.('admin')
-      } catch (err) { setError(err.message) } finally { setBusy(false) }
+      } catch (err) {
+        const nextErrors = fieldErrorsFromApi(err, {
+          name: 'name',
+          description: 'description',
+          default_trainer_id: 'defaultTrainerId',
+          default_location_id: 'defaultLocationId',
+          price_minor: 'price',
+          default_capacity: 'defaultCapacity',
+          color_key: 'colorKey',
+          is_active: 'isActive',
+        })
+        setFieldErrors(nextErrors)
+        setCapacityError(nextErrors.defaultCapacity || '')
+        setError(formErrorMessage(err, t('groups.saveError')))
+        focusFirstFieldError(nextErrors, {
+          name: 'admin-group-name', description: 'admin-group-description',
+          defaultCapacity: 'admin-group-defaultCapacity', price: 'admin-group-price',
+          defaultTrainerId: 'admin-group-defaultTrainerId', defaultLocationId: 'admin-group-defaultLocationId', colorKey: 'admin-group-colorKey',
+          isActive: 'admin-group-isActive',
+        })
+      } finally { setBusy(false) }
     }
 
-    async function moveParticipant(studentId, nextGroupId) {
+    async function changeParticipantMembership(studentId, action) {
       setBusy(true); setError(null)
       try {
-        await api.post(`/api/admin/participants/${studentId}/`, { participant: { group_id: nextGroupId || null } })
-        setMessage(nextGroupId ? 'Участник добавлен в группу.' : 'Участник убран из группы.')
+        const participant = await api.get(`/api/admin/participants/${studentId}/`)
+        const currentIds = (participant.groups || []).map((group) => String(group.id))
+        const selectedId = String(selected?.groupId || '')
+        const groupIds = action === 'add'
+          ? [...new Set([...currentIds, selectedId])]
+          : currentIds.filter((groupId) => groupId !== selectedId)
+        await api.post(`/api/admin/participants/${studentId}/`, { participant: { group_ids: groupIds } })
+        setMessage(action === 'add' ? t('groups.memberAdded') : t('groups.memberRemoved'))
         setCandidateId('')
+        setAddingMember(false)
         await reloadRoleData?.('admin')
-      } catch (err) { setError(err.message) } finally { setBusy(false) }
+        setMemberRefresh((current) => current + 1)
+      } catch (err) { setError(apiErrorMessage(err, t('groups.membershipError'))) } finally { setBusy(false) }
+    }
+
+    function updateForm(field, value) {
+      setFieldErrors((current) => clearFieldError(current, field))
+      if (field === 'defaultCapacity') setCapacityError('')
+      setForm((current) => ({ ...current, [field]: value }))
     }
 
     const editor = (
-      <div className="card card-pad" style={{ marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>{creating ? 'Новая группа' : 'Редактирование группы'}</div>
-        <div className="ops-form-grid"><Input label="Название" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><Input label="Описание" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /><label>Тренер по умолчанию<select value={form.defaultTrainerId} onChange={(event) => setForm({ ...form, defaultTrainerId: event.target.value })}><option value="">Без тренера</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} />Активна</label></div>
-        <div className="ops-button-row"><Button variant="primary" disabled={busy || !form.name} onClick={() => saveGroup(creating)}>Сохранить</Button><Button variant="secondary" onClick={() => { setCreating(false); setEditing(false) }}>Отмена</Button></div>
-      </div>
+      <>
+        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        <div className="ops-form-grid"><Input id="admin-group-name" label={t('groups.name')} value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label={t('common.description')} value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label={t('groups.capacity')} hint={t('groups.capacityHint')} inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-price" label={t('groups.price')} hint={t('groups.priceHint')} inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label={t('groups.defaultTrainer')} value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">{t('groups.noTrainer')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Select id="admin-group-defaultLocationId" label={t('groups.defaultLocation')} value={form.defaultLocationId} error={fieldErrors.defaultLocationId} onChange={(event) => updateForm('defaultLocationId', event.target.value)}><option value="">{t('groups.noLocation')}</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select><Checkbox id="admin-group-isActive" label={t('groups.isActive')} checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
+        <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
+      </>
     )
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h2 className="page-title">Группы</h2><p className="page-desc">Составы, тренеры, вместимость и расписание групп.</p></div><Button variant="primary" onClick={() => { setCreating(true); setSelected(null); setForm({ name: '', description: '', defaultTrainerId: '', isActive: true }) }}>Новая группа</Button></div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Обновляю состав группы...</BusyBanner>
-        {creating && editor}
+        <div className="page-head"><div><h1 className="page-title">{t('groups.title')}</h1><p className="page-desc">{t('groups.description')}</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('groups.new')}</Button></div>
+        <ToastNotice id="admin-groups-result" message={message} />
+        {error && !creating && !editing && !addingMember && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        <BusyBanner Banner={Banner} show={busy}>{t('groups.updatingRoster')}</BusyBanner>
+        <ListToolbar list={groupList} searchLabel={t('groups.search')} searchPlaceholder={t('groups.searchPlaceholder')}>
+          <label>{t('common.status')}<select value={groupList.draftFilters.active} onChange={(event) => groupList.setDraftFilter('active', event.target.value)}><option value="">{t('common.all')}</option><option value="true">{t('common.active')}</option><option value="false">{t('common.inactive')}</option></select></label>
+          <label>{t('common.trainer')}<select value={groupList.draftFilters.trainer_id} onChange={(event) => groupList.setDraftFilter('trainer_id', event.target.value)}><option value="">{t('common.all')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
+        </ListToolbar>
+        <FormModal
+          open={creating || editing}
+          title={creating ? t('groups.new') : t('groups.edit')}
+          size="lg"
+          busy={busy}
+          dirty={Boolean(formBaseline) && JSON.stringify(form) !== JSON.stringify(formBaseline)}
+          onRequestClose={() => { if (formBaseline) setForm(formBaseline); setCreating(false); setEditing(false); setFormBaseline(null); setFieldErrors({}); setCapacityError(''); setError(null) }}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy || !form.name} onClick={() => saveGroup(creating)}>{t('common.save')}</Button></>}
+        >
+          {editor}
+        </FormModal>
 
-        {selected && !creating && <section className="card ops-entity-card" aria-label={`Карточка группы ${selected.name}`}>
-          <div className="ops-entity-head"><div><div className="eyebrow">Карточка группы</div><h3>{selected.name}</h3><div className="muted">{selected.description || 'Описание не добавлено'}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => setEditing((value) => !value)}>Редактировать</Button><Button variant="subtle" onClick={() => setSelected(null)}>Закрыть</Button></div></div>
-          {editing && editor}
-          <div className="ops-summary-grid"><div><span>Тренер</span><strong>{selected.trainer || 'Не назначен'}</strong></div><div><span>Участники</span><strong>{members.length}</strong></div><div><span>Вместимость</span><strong>{capacity || 'Не задана'}</strong></div><div><span>Ближайшие занятия</span><strong>{groupSessions.length}</strong></div></div>
+        {selected && !creating && <section className="card ops-entity-card" aria-label={t('groups.cardAria', { name: selected.name })}>
+          <ContextBackButton onClick={() => setSelected(null)}>{t('groups.back')}</ContextBackButton>
+          <div className="ops-entity-head"><div><div className="eyebrow">{t('groups.card')}</div><h3>{selected.name}</h3><div className="muted">{selected.description || t('groups.noDescription')}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button><Button variant="subtle" onClick={() => setSelected(null)}>{t('common.close')}</Button></div></div>
+          <div className="ops-summary-grid"><div><span>{t('common.trainer')}</span><strong>{selected.trainer || t('groups.notAssigned')}</strong></div><div><span>{t('groups.participants')}</span><strong>{members.length}</strong></div><div><span>{t('groups.capacity')}</span><strong>{capacity ?? t('groups.notSet')}</strong></div><div><span>{t('groups.nextSession')}</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
           <div className="ops-detail-grid">
-            <div><div className="ops-section-head"><div className="eyebrow">Состав группы</div><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{members.length}{capacity ? ` / ${capacity}` : ''}</Badge></div><div className="ops-inline-add"><SearchableSelect inputAriaLabel="Добавить участника" value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || 'Без группы' }))} /><Button size="sm" variant="primary" disabled={!candidateId || busy} onClick={() => moveParticipant(candidateId, selected.groupId)}>Добавить</Button></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || 'Контакт не указан'}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => moveParticipant(client.studentId, null)}>Убрать</Button></div>)}{!members.length && <div className="empty">В группе пока нет участников.</div>}</div>
-            <div><div className="eyebrow">Расписание группы</div>{groupSessions.map((session) => <button key={session.id} type="button" className="ops-detail-row" onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>Занятий нет. Открыть расписание</button>}</div>
+            <div><div className="ops-section-head"><div className="eyebrow">{t('groups.roster')}</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? t('common.loading') : `${members.length} / ${capacity ?? t('groups.notSet')}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading} onClick={() => { setCandidateId(''); setAddingMember(true) }}>{t('groups.add')}</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || t('groups.contactMissing')}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => changeParticipantMembership(client.studentId, 'remove')}>{t('groups.remove')}</Button></div>)}{membersLoading && <div className="empty">{t('groups.loadingRoster')}</div>}{!membersLoading && !members.length && <div className="empty">{t('groups.emptyRoster')}</div>}</div>
+            <div><div className="eyebrow">{t('groups.schedule')}</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>{t('groups.noSessions')}</button>}</div>
           </div>
         </section>}
 
-        <Table rows={rows} emptyLabel="Групп пока нет" columns={[
-          { key: 'name', header: 'Группа', render: (row) => <button type="button" className="ops-link-button" onClick={() => openGroup(row)}><span className="strong">{row.name}</span></button> },
-          { key: 'description', header: 'Описание', muted: true, render: (row) => row.description || '-' },
-          { key: 'trainer', header: 'Тренер', muted: true },
-          { key: 'students', header: 'Участники', align: 'right', width: 110, render: (row) => <button type="button" className="ops-count-button" onClick={() => openGroup(row)}>{row.students}</button> },
-          { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
-          { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openGroup(row)}>Карточка</Button> },
-        ]} />
+        <FormModal open={addingMember} title={t('groups.addParticipantTitle')} size="sm" busy={busy} dirty={Boolean(candidateId)} onRequestClose={() => { setAddingMember(false); setCandidateId(''); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={!candidateId || busy} onClick={() => changeParticipantMembership(candidateId, 'add')}>{t('groups.add')}</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <SearchableSelect inputAriaLabel={t('groups.addParticipant')} value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || t('groups.noGroup') }))} loadOptions={loadCandidateOptions} />
+        </FormModal>
+
+        <ListFeedback list={groupList} emptyLabel={t('groups.empty')} />
+        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel={t('groups.empty')} columns={[
+          { key: 'name', header: t('common.group'), render: (row) => <button type="button" className="ops-link-button" onClick={() => openGroup(row)}><span className="strong">{row.name}</span></button> },
+          { key: 'description', header: t('common.description'), muted: true, render: (row) => row.description || '-' },
+          { key: 'trainer', header: t('common.trainer'), muted: true },
+          { key: 'price', header: t('groups.session'), align: 'right', width: 110, render: (row) => row.price == null ? <span className="muted">-</span> : <Money amount={row.price} currency={row.currency} /> },
+          { key: 'students', header: t('groups.participants'), align: 'right', width: 110, render: (row) => <button type="button" className="ops-count-button" onClick={() => openGroup(row)}>{row.students}</button> },
+          { key: 'active', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
+          { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openGroup(row)}>{t('groups.profile')}</Button> },
+        ]} /></div>
+        <div className="ops-entity-mobile-list">
+          {rows.map((row) => (
+            <EntityMobileCard key={row.id} className="ops-group-compact-card" labelledBy={`group-card-${row.id}`}>
+              <div className="ops-compact-card-head">
+                <button type="button" className="ops-compact-card-title" onClick={() => openGroup(row)}><strong id={`group-card-${row.id}`} title={row.name}>{row.name}</strong></button>
+                <ActionPopover label={t('common.actionsFor', { name: row.name })} actions={[
+                  { key: 'profile', label: t('debtors.profile'), onSelect: () => openGroup(row) },
+                  { key: 'edit', label: t('common.edit'), onSelect: () => { openGroup(row); setEditing(true) } },
+                ]} />
+              </div>
+              <div className="ops-compact-card-line"><span>{t('common.trainer')}</span><strong title={row.trainer}>{row.trainer || t('groups.notAssigned')}</strong></div>
+              <div className="ops-compact-card-line"><span>{t('groups.nextShort')}</span><strong title={nextSessionLabel(row)}>{nextSessionLabel(row)}</strong></div>
+              <div className="ops-compact-card-footer"><span>{t('groups.participantCount', { current: row.students, capacity: row.defaultCapacity ?? '—' })}</span><StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /></div>
+            </EntityMobileCard>
+          ))}
+        </div>
+        <ListPagination list={groupList} />
       </div>
     )
   }

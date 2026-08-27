@@ -84,29 +84,29 @@ $operatorChecklist = @(
     [ordered]@{
         id = "install_release_archive_on_target_host"
         title = "Install the verified release archive on the target host."
-        command = "scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-$shortSha.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall"
-        expected_evidence = "Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Root Node tooling installed; NocoBase CLI package installed; Frontend dependencies installed; Django migrations check passed; NocoBase app root outside source tree; NocoBase storage outside source tree."
+        command = "scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-$shortSha.manifest.json -InstallRoot <release-root> -RunInstall"
+        expected_evidence = "Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed."
         stop_if_missing = $true
     },
     [ordered]@{
         id = "run_target_host_production_env_preflight"
         title = "Run target-host production environment preflight."
         command = "scripts\check-production-env.cmd"
-        expected_evidence = "Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; NocoBase production settings passed; HTTPS reverse-proxy settings passed."
+        expected_evidence = "Production environment check passed; Runtime path settings passed; PostgreSQL production settings passed; Celery production settings passed; HTTPS reverse-proxy settings passed."
         stop_if_missing = $true
     },
     [ordered]@{
-        id = "run_target_host_live_hybrid_health"
-        title = "Run target-host live hybrid health."
-        command = "scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk"
-        expected_evidence = "Hybrid health check passed; HTTPS live endpoint requirement passed; Operations status ok requirement passed; real https:// Django production URL; real https:// NocoBase production URL; nocobase_config_health; /api/nocobase/config/languages/."
+        id = "run_target_host_live_app_health"
+        title = "Run target-host live app health."
+        command = "scripts\check-app-health.cmd -RequireHttps -RequireOpsOk"
+        expected_evidence = "App health check passed; HTTPS live endpoint requirement passed; Operations status ok requirement passed; real https:// Django production URL."
         stop_if_missing = $true
     },
     [ordered]@{
-        id = "run_target_host_hybrid_backup_restore_drill"
-        title = "Run target-host backup, restore-plan, and backup-set verification drill."
-        command = "scripts\backup-hybrid.ps1; scripts\restore-hybrid.ps1 -PlanOnly; scripts\verify-hybrid-backup-set.cmd"
-        expected_evidence = "Hybrid backup set written; Django dump sha256 OK with 64-character SHA256; NocoBase dump sha256 OK with 64-character SHA256; Django dump list OK; NocoBase dump list OK; Restore verification OK; Hybrid backup set verification OK."
+        id = "run_target_host_backup_restore_drill"
+        title = "Run target-host backup and restore verification drill."
+        command = "scripts\backup-pg.cmd; scripts\verify-pg-restore.cmd"
+        expected_evidence = "PostgreSQL backup written; Backup dump sha256 OK with 64-character SHA256; Backup dump list OK; Restore verification OK; Backup set verification OK."
         stop_if_missing = $true
     },
     [ordered]@{
@@ -161,8 +161,8 @@ $handoff = [ordered]@{
         "capture_github_actions_postgres_backend_check_url",
         "install_release_archive_on_target_host",
         "run_target_host_production_env_preflight",
-        "run_target_host_live_hybrid_health",
-        "run_target_host_hybrid_backup_restore_drill",
+        "run_target_host_live_app_health",
+        "run_target_host_backup_restore_drill",
         "fill_docs_production_cutover_evidence_json",
         "run_scripts_verify_production_cutover_evidence_cmd"
     )

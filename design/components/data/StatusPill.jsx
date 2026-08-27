@@ -44,7 +44,16 @@ const TONE_VARS = {
  * @param status  a key of STATUS, or pass tone+label directly for a custom pill.
  * @param showConsumes  for attendance statuses, append a subtle "−1"/"0" marker.
  */
-export function StatusPill({ status, label, tone, showConsumes = false, size = 'md', style }) {
+export function StatusPill({
+  status,
+  label,
+  tone,
+  showConsumes = false,
+  consumesLabel = 'Zajęcie zostaje spisane',
+  doesNotConsumeLabel = 'Zajęcie nie jest spisane',
+  size = 'md',
+  style,
+}) {
   const def = status ? STATUS[status] : null;
   const t = tone || (def ? def.tone : 'neutral');
   const text = label || (def ? def.label : status) || '—';
@@ -76,7 +85,7 @@ export function StatusPill({ status, label, tone, showConsumes = false, size = '
       {showConsumes && consumes && (
         <span
           className="swim-mono"
-          title={def.consumes ? 'Zajęcie zostaje spisane' : 'Zajęcie nie jest spisane'}
+          title={def.consumes ? consumesLabel : doesNotConsumeLabel}
           style={{
             fontSize: 'var(--fs-2xs)',
             fontWeight: 'var(--fw-semibold)',

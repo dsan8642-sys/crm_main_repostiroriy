@@ -130,8 +130,7 @@ AUTH_USER_MODEL = "accounts.User"
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-     "OPTIONS": {"min_length": 10}},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+     "OPTIONS": {"min_length": 8}},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
@@ -185,6 +184,7 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_FAILURE_VIEW = "portal.csrf_views.csrf_failure"
 _default_csrf_trusted_origins = "http://127.0.0.1:5173,http://localhost:5173" if DEBUG else ""
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", _default_csrf_trusted_origins).split(",")
@@ -266,14 +266,6 @@ SMS_PROVIDER_URL = os.environ.get("SMS_PROVIDER_URL", "")
 SMS_API_KEY = os.environ.get("SMS_API_KEY", "")
 SMS_SENDER = os.environ.get("SMS_SENDER", "SwimCRM")
 SMS_DRY_RUN = os.environ.get("SMS_DRY_RUN", "1" if DEBUG else "0") == "1"
-
-# ---- NocoBase bridge ----
-# Read-only integration token for NocoBase external API/data blocks.
-# Production deployments must set this to a strong secret.
-NOCOBASE_BRIDGE_TOKEN = os.environ.get("NOCOBASE_BRIDGE_TOKEN", "")
-# Separate write token for guarded low-risk configuration edited from NocoBase.
-# Do not reuse the read-only bridge token in production.
-NOCOBASE_CONFIG_TOKEN = os.environ.get("NOCOBASE_CONFIG_TOKEN", "")
 
 # ---- Background jobs (Celery/Redis, with cron-compatible management commands) ----
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")

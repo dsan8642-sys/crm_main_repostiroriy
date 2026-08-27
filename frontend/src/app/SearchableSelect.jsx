@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useLocale } from '../i18n.jsx'
 
 function normalizeSearch(value) {
   return String(value || '')
@@ -33,12 +34,16 @@ export function SearchableSelect({
   value,
   onChange,
   options,
-  placeholder = 'Начните вводить имя или фамилию',
-  emptyLabel = 'Клиенты не найдены',
+  loadOptions,
+  placeholder,
+  emptyLabel,
   disabled = false,
   className = '',
   inputAriaLabel,
+  inputId,
+  error,
 }) {
+  const { t } = useLocale()
   const id = useId().replace(/:/g, '')
   const rootRef = useRef(null)
   const inputRef = useRef(null)
@@ -46,6 +51,9 @@ export function SearchableSelect({
   const [query, setQuery] = useState(selected?.label || '')
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [remoteOptions, setRemoteOptions] = useState(null)
+  const [remoteQuery, setRemoteQuery] = useState('')
+  const [remoteLoading, setRemoteLoading] = useState(false)
 
   useEffect(() => {
     if (!open) setQuery(selected?.label || '')
@@ -59,14 +67,51 @@ export function SearchableSelect({
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
   }, [])
 
+  useEffect(() => {
+    const normalized = normalizeSearch(query)
+    if (!loadOptions || !open || !normalized || query === selected?.label) {
+      setRemoteOptions(null)
+      setRemoteQuery('')
+      setRemoteLoading(false)
+      return undefined
+    }
+    let alive = true
+    const controller = new AbortController()
+    setRemoteLoading(true)
+    const handle = setTimeout(async () => {
+      try {
+        const nextOptions = await loadOptions(query.trim(), { signal: controller.signal })
+        if (!alive) return
+        setRemoteOptions(Array.isArray(nextOptions) ? nextOptions : [])
+        setRemoteQuery(normalized)
+      } catch {
+        if (!alive) return
+        setRemoteOptions(null)
+        setRemoteQuery('')
+      } finally {
+        if (alive) setRemoteLoading(false)
+      }
+    }, 250)
+    return () => {
+      alive = false
+      controller.abort()
+      clearTimeout(handle)
+    }
+  }, [loadOptions, open, query, selected?.label])
+
   const filteredOptions = useMemo(() => {
     const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean)
-    if (!tokens.length || query === selected?.label) return options
-    return options.filter((option) => {
+    const hasCurrentRemoteResults = (
+      remoteQuery === normalizeSearch(query) && remoteOptions != null
+    )
+    if (hasCurrentRemoteResults) return remoteOptions
+    const source = options
+    if (!tokens.length || query === selected?.label) return source
+    return source.filter((option) => {
       const haystack = normalizeSearch(`${option.label} ${option.searchText || ''}`)
       return tokens.every((token) => haystack.includes(token))
     })
-  }, [options, query, selected?.label])
+  }, [options, query, remoteOptions, remoteQuery, selected?.label])
 
   function openList() {
     if (disabled) return
@@ -105,11 +150,16 @@ export function SearchableSelect({
       event.preventDefault()
       choose(filteredOptions[activeIndex])
     } else if (event.key === 'Escape') {
+      if (!open) return
+      event.preventDefault()
+      event.stopPropagation()
       setOpen(false)
       setQuery(selected?.label || '')
     }
   }
 
+  const controlId = inputId || `${id}-input`
+  const errorId = `${controlId}-error`
   const listboxId = `${id}-listbox`
   const activeOption = open && activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined
 
@@ -118,17 +168,20 @@ export function SearchableSelect({
       {label && <span className="ops-search-select-label">{label}</span>}
       <span className="ops-search-select-control">
         <input
+          id={controlId}
           ref={inputRef}
           type="text"
           value={query}
           disabled={disabled}
-          placeholder={placeholder}
+          placeholder={placeholder || t('select.placeholder')}
           role="combobox"
           aria-label={inputAriaLabel || label}
           aria-autocomplete="list"
           aria-controls={listboxId}
           aria-expanded={open}
           aria-activedescendant={activeOption}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
           autoComplete="off"
           onChange={handleInput}
           onFocus={openList}
@@ -138,7 +191,7 @@ export function SearchableSelect({
           type="button"
           className="ops-search-select-toggle"
           tabIndex="-1"
-          aria-label={open ? 'Закрыть список' : 'Открыть список'}
+          aria-label={open ? t('select.close') : t('select.open')}
           aria-controls={listboxId}
           aria-expanded={open}
           disabled={disabled}
@@ -153,6 +206,7 @@ export function SearchableSelect({
           <span aria-hidden="true">⌄</span>
         </button>
       </span>
+      {error && <small id={errorId} className="ops-field-error" role="alert">{error}</small>}
       {open && (
         <ul id={listboxId} className="ops-search-select-list" role="listbox">
           {filteredOptions.map((option, index) => (
@@ -170,7 +224,7 @@ export function SearchableSelect({
               {option.description && <small>{option.description}</small>}
             </li>
           ))}
-          {!filteredOptions.length && <li className="is-empty" role="presentation">{emptyLabel}</li>}
+          {!filteredOptions.length && <li className="is-empty" role="presentation">{remoteLoading ? t('select.searching') : (emptyLabel || t('select.empty'))}</li>}
         </ul>
       )}
     </label>

@@ -139,14 +139,14 @@ developer support.
 
 ### Final Decision
 
-Do not do a full rebuild from scratch on NocoBase.
+Do not introduce a separate low-code administration layer.
 
 Recommended direction:
 
 - keep the current backend as the source of truth;
 - preserve complex business logic in code;
 - modernize and evolve the system through a hybrid rewrite strategy;
-- use NocoBase only where it accelerates CRUD-heavy admin interfaces and
+- use the native administration UI for CRUD-heavy interfaces and
   operational configuration.
 
 ### Why
@@ -170,8 +170,9 @@ domain rules that should stay under direct code control.
 
 - Django backend remains the system of record.
 - PostgreSQL is the primary database.
-- React or a custom admin frontend remains the preferred interaction layer.
-- NocoBase is optional and limited to low-risk admin/configuration surfaces.
+- React admin frontend is the interaction layer; low-risk admin/configuration
+  surfaces are served by Django's own admin settings API, not a separate
+  low-code layer.
 
 ## Target Module Architecture
 
@@ -908,9 +909,13 @@ low-code source of truth:
 - audit and compliance logic;
 - critical import and rollback flows.
 
-## What Can Be Managed in NocoBase
+## What Is Managed in the Admin Settings UI
 
-NocoBase can be used for low-risk configuration/admin surfaces such as:
+A low-code layer was evaluated for configuration/admin surfaces
+during the hybrid rewrite (see Final Decision above) but was fully removed
+from the running product; these surfaces are managed directly in the SwimCRM
+admin UI (`/api/admin/settings/*` and related `/api/admin/notifications/`,
+`/api/admin/payroll/` endpoints) under a normal admin session:
 
 - locations;
 - session types;
@@ -921,7 +926,7 @@ NocoBase can be used for low-risk configuration/admin surfaces such as:
 - operational settings;
 - CRUD-heavy internal admin lists.
 
-NocoBase should not become the source of truth for:
+These surfaces are not the source of truth for:
 
 - ledger;
 - billing core;
@@ -962,7 +967,7 @@ as later scope are not blockers for the Hybrid Rewrite cutover.
 ### Localization and Multi-Location
 
 - First release supports the configured default language plus any active
-  languages added by ops/admin through NocoBase configuration before cutover.
+  languages added by ops/admin through the admin settings UI before cutover.
 - Language preference is stored per parent account in the first release.
   Location-specific language preference is later scope.
 - UI labels, reference dictionary names, and notification templates must be
@@ -996,7 +1001,7 @@ as later scope are not blockers for the Hybrid Rewrite cutover.
   notification rules, quiet-hours policies, localization dictionaries,
   languages, and payroll schemes.
 - Financial, attendance, payroll calculation, and audit history mutations stay
-  in guarded Django backend flows, not direct NocoBase writes.
+  in guarded Django backend flows, not direct admin settings writes.
 
 ### Performance
 

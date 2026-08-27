@@ -1,15 +1,84 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
-import { api, downloadFile } from '../../api.js'
-import { asAccountBalance, asMoneyMajor, formatDate, formatShortDate, formatTime, paymentMethodLabel } from '../../mappers.js'
+import { api, apiErrorMessage, downloadFile } from '../../api.js'
+import { adminLocaleTag } from '../../adminLocales.js'
+import { adminFinanceTranslator } from '../../adminFinanceLocales.js'
+import { paymentMethodLabel } from '../../contracts.js'
+import { useLocale } from '../../i18n.jsx'
+import {
+  assertPaymentReadback,
+  createPaymentAttemptKey,
+  moneyMajorToMinor,
+} from '../financialContracts.js'
+import { asAccountBalance, asMoneyMajor, formatTime } from '../../mappers.js'
+import {
+  clearFieldError,
+  fieldErrorsFromApi,
+  focusFirstFieldError,
+  formErrorMessage,
+} from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { DateField } from '../DateTimeField.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
+import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
+import { validIsoDate } from '../scheduleContracts.js'
+import { FormModal } from '../FormModal.jsx'
+import { ContextBackButton } from '../EntityListPrimitives.jsx'
+import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
 
-export function createAdminClientDetailScreen(components, icons, reloadRoleData) {
-  const { Table, StatusPill, Avatar, Button, Banner, Tabs, Money, Badge, Dialog, Input } = components
+const PARTICIPANT_FIELD_IDS = {
+  firstName: 'admin-client-participant-first-name',
+  lastName: 'admin-client-participant-last-name',
+  birthDate: 'admin-client-participant-birth-date',
+  email: 'admin-client-participant-email',
+  groupIds: 'admin-client-participant-groups',
+  isActive: 'admin-client-participant-active',
+}
+const PAYMENT_FIELD_IDS = {
+  participantId: 'admin-client-payment-participant',
+  amount: 'admin-client-payment-amount', paidAt: 'admin-client-payment-date',
+  method: 'admin-client-payment-method', comment: 'admin-client-payment-comment',
+}
+const FINANCE_FIELD_IDS = {
+  participantId: 'admin-client-finance-participant',
+  subscriptionId: 'admin-client-finance-subscription',
+  subscriptionAction: 'admin-client-finance-subscription-action',
+  subscriptionTypeId: 'admin-client-finance-subscription-type',
+  amount: 'admin-client-finance-amount', description: 'admin-client-finance-description',
+  startDate: 'admin-client-finance-start-date', dueDate: 'admin-client-finance-due-date',
+  freezeStart: 'admin-client-finance-freeze-start',
+  freezeEnd: 'admin-client-finance-freeze-end',
+  freezeReason: 'admin-client-finance-freeze-reason',
+  adjustDelta: 'admin-client-finance-adjust-delta',
+  adjustNote: 'admin-client-finance-adjust-note',
+}
+
+const SUBSCRIPTION_EDIT_ACTIONS = ['renew', 'freeze', 'adjust']
+
+function internationalPhoneDigits(value) {
+  const compact = String(value || '').replace(/[\s().-]/g, '')
+  if (!/^\+[1-9]\d{7,14}$/.test(compact)) return null
+  return compact.slice(1)
+}
+
+function ContactLink({ href, label, disabledHint }) {
+  if (!href) return <span className="ops-contact-link is-disabled" aria-disabled="true" title={disabledHint}>{label}</span>
+  return <a className="ops-contact-link" href={href} target="_blank" rel="noopener noreferrer">{label}</a>
+}
+
+export function createAdminClientDetailScreen(components, icons, reloadRoleData, adminData = {}) {
+  const { Table, StatusPill, Avatar, Button, Banner, Tabs, Money, Badge, Dialog, Input, Select, Checkbox } = components
   const I = icons
 
-  return function ApiAdminClientDetail({ go, clientId, initialTab }) {
-    const fallbackClientId = clientId || globalThis.AdminData?.clients?.find((row) => row.clientId)?.clientId
+  return function ApiAdminClientDetail({
+    go, back, clientId, initialTab, initialParticipantId, prefillAmount,
+  }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminFinanceTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
+    const formatLocalDate = (value) => new Intl.DateTimeFormat(localeTag).format(new Date(value))
+    const formatLocalShortDate = (value) => new Intl.DateTimeFormat(localeTag, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(value))
+    const fallbackClientId = clientId || adminData.clients?.find((row) => row.clientId)?.clientId
     const [tab, setTab] = useState('participants')
     const [detail, setDetail] = useState(null)
     const [error, setError] = useState(null)
@@ -22,16 +91,23 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     const [paymentPanelOpen, setPaymentPanelOpen] = useState(false)
     const [financeAction, setFinanceAction] = useState(null)
     const [editingAccount, setEditingAccount] = useState(false)
-    const [accountForm, setAccountForm] = useState({ firstName: '', lastName: '', email: '', phone: '', telegramChatId: '', preferredLanguage: 'ru' })
+    const [accountForm, setAccountForm] = useState({ firstName: '', lastName: '', email: '', username: '', phone: '', telegramChatId: '', instagramUsername: '', preferredLanguage: 'ru' })
+    const [accountBaseline, setAccountBaseline] = useState(null)
+    const [accountFieldErrors, setAccountFieldErrors] = useState({})
     const [editingParticipant, setEditingParticipant] = useState(null)
-    const [participantForm, setParticipantForm] = useState({ firstName: '', lastName: '', birthDate: '', email: '', groupId: '', isActive: true })
+    const [participantForm, setParticipantForm] = useState({ firstName: '', lastName: '', birthDate: '', email: '', groupIds: [], isActive: true })
+    const [participantBaseline, setParticipantBaseline] = useState(null)
+    const [participantFieldErrors, setParticipantFieldErrors] = useState({})
     const [paymentForm, setPaymentForm] = useState({
       participantId: '',
       amount: '',
       paidAt: new Date().toISOString().slice(0, 10),
       method: 'cash',
       comment: '',
+      idempotencyKey: createPaymentAttemptKey('admin-payment'),
     })
+    const [paymentFieldErrors, setPaymentFieldErrors] = useState({})
+    const [paymentBaseline, setPaymentBaseline] = useState(null)
     const [financeForm, setFinanceForm] = useState({
       participantId: '',
       subscriptionId: '',
@@ -40,13 +116,16 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
       description: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
-      createCharge: true,
+      subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
       freezeStart: new Date().toISOString().slice(0, 10),
       freezeEnd: '',
       freezeReason: '',
       adjustDelta: '',
       adjustNote: '',
     })
+    const [financeFieldErrors, setFinanceFieldErrors] = useState({})
+    const [financeBaseline, setFinanceBaseline] = useState(null)
+    const debtPrefillHandledRef = React.useRef(false)
 
     useEffect(() => {
       if (!fallbackClientId) return
@@ -58,7 +137,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
           if (alive) setDetail(payload)
         })
         .catch((err) => {
-          if (alive) setError(err.message)
+          if (alive) setError(apiErrorMessage(err, t('client.loadError')))
         })
         .finally(() => {
           if (alive) setLoading(false)
@@ -76,9 +155,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     const attendance = detail?.attendance || []
     const consents = detail?.consents || []
     const summary = detail?.summary || {}
-    const accountArchived = account.is_active === false
-    const subscriptionTypes = globalThis.AdminData?.subscriptionTypes || []
-    const groups = globalThis.AdminData?.groups || []
+    const accountArchived = account.is_active === false || (participants.length > 0 && participants.every((item) => item.is_active === false))
+    const subscriptionTypes = adminData.subscriptionTypes || []
+    const groups = adminData.groups || []
+    const contactPhoneDigits = internationalPhoneDigits(account.phone)
+    const contactsHidden = Boolean(account.is_anonymized)
+    const phoneContactHint = t('client.phoneHint')
 
     useEffect(() => {
       if (initialTab) setTab(initialTab)
@@ -88,10 +170,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
     const money = (minor) => asMoneyMajor(minor || 0)
     const accountBalance = asAccountBalance(summary.balance_minor)
     const balanceCaption = accountBalance > 0
-      ? 'Переплата: подтверждённые оплаты выше начислений'
+      ? t('client.overpayment')
       : accountBalance < 0
-        ? 'К оплате: начисления выше подтверждённых оплат'
-        : 'Баланс закрыт'
+        ? t('client.amountDue')
+        : t('client.balanceSettled')
     const status = (value) => {
       if (value === 'active') return 'active'
       if (value === 'confirmed') return 'paid'
@@ -104,18 +186,44 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
       setRefreshKey((value) => value + 1)
       reloadRoleData?.('admin')
     }
-    const updatePaymentForm = (field, value) => setPaymentForm((current) => ({ ...current, [field]: value }))
-    const updateFinanceForm = (field, value) => setFinanceForm((current) => ({ ...current, [field]: value }))
+    const updatePaymentForm = (field, value) => {
+      setPaymentForm((current) => ({ ...current, [field]: value }))
+      setPaymentFieldErrors((current) => clearFieldError(current, field))
+    }
+    const updateFinanceForm = (field, value) => {
+      setFinanceForm((current) => ({ ...current, [field]: value }))
+      setFinanceFieldErrors((current) => clearFieldError(current, field))
+    }
+    const updateFinanceSubscription = (subscriptionId) => {
+      const subscription = subscriptions.find((item) => String(item.id) === String(subscriptionId))
+      setFinanceForm((current) => ({
+        ...current,
+        subscriptionId,
+        subscriptionTypeId: subscription?.subscription_type_id
+          ? String(subscription.subscription_type_id)
+          : current.subscriptionTypeId,
+      }))
+      setFinanceFieldErrors((current) => clearFieldError(current, 'subscriptionId'))
+    }
+    const updateParticipantForm = (field, value) => {
+      setParticipantForm((current) => ({ ...current, [field]: value }))
+      setParticipantFieldErrors((current) => clearFieldError(current, field))
+    }
 
-    async function createActivation() {
+    async function accessAction(action) {
       setError(null)
       setActivationInfo(null)
-      setActionBusy('activation')
+      setActionBusy(`access-${action}`)
       try {
-        const payload = await api.post(`/api/admin/clients/${fallbackClientId}/activation/`)
-        setActivationInfo(payload)
+        const payload = await api.post(`/api/admin/clients/${fallbackClientId}/access/${action}/`)
+        if (action === 'revoke') {
+          setMessage(t('client.accessRevoked'))
+        } else {
+          setActivationInfo(payload)
+        }
+        refreshDetail()
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, t('client.accessError')))
       } finally {
         setActionBusy(null)
       }
@@ -123,13 +231,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
 
     useEffect(() => {
       if (!participants.length) return
+      const participantIdForClient = (currentId) => (
+        participants.some((participant) => String(participant.id) === String(currentId))
+          ? String(currentId)
+          : String(participants[0].id)
+      )
       setPaymentForm((current) => ({
         ...current,
-        participantId: current.participantId || String(participants[0].id),
+        participantId: participantIdForClient(current.participantId),
       }))
       setFinanceForm((current) => ({
         ...current,
-        participantId: current.participantId || String(participants[0].id),
+        participantId: participantIdForClient(current.participantId),
         subscriptionId: subscriptions.some((item) => String(item.id) === String(current.subscriptionId))
           ? current.subscriptionId
           : String(subscriptions[0]?.id || ''),
@@ -137,42 +250,129 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
       }))
     }, [participants, subscriptions, subscriptionTypes])
 
+    useEffect(() => {
+      if (debtPrefillHandledRef.current || !prefillAmount || !participants.length) return
+      const participantId = participants.some((participant) => String(participant.id) === String(initialParticipantId))
+        ? String(initialParticipantId)
+        : String(participants[0].id)
+      const next = {
+        ...paymentForm,
+        participantId,
+        amount: String(prefillAmount),
+        idempotencyKey: createPaymentAttemptKey('admin-payment'),
+      }
+      debtPrefillHandledRef.current = true
+      setTab('payments')
+      setPaymentForm(next)
+      setPaymentBaseline(next)
+      setPaymentFieldErrors({})
+      setFinanceAction(null)
+      setFinanceBaseline(null)
+      setPaymentPanelOpen(true)
+    }, [initialParticipantId, participants, paymentForm, prefillAmount])
+
     function minorFromMajor(value) {
-      return Math.round(Number(value || 0) * 100)
+      return Math.round(Number(String(value || 0).replace(',', '.')) * 100)
+    }
+
+    const selectedPaymentParticipant = participants.find((participant) => String(participant.id) === String(paymentForm.participantId))
+    const selectedPaymentBalance = selectedPaymentParticipant
+      ? asAccountBalance(selectedPaymentParticipant.balance_minor)
+      : accountBalance
+
+    function openPaymentPanel() {
+      const next = {
+        ...paymentForm,
+        idempotencyKey: createPaymentAttemptKey('admin-payment'),
+      }
+      setTab('payments')
+      setPaymentForm(next)
+      setPaymentBaseline(next)
+      setPaymentFieldErrors({})
+      setFinanceAction(null)
+      setFinanceBaseline(null)
+      setPaymentPanelOpen(true)
+    }
+
+    function openSubscriptionEditor(subscription = null) {
+      const selectedSubscription = subscription
+        || subscriptions.find((item) => item.status === 'active')
+        || subscriptions[0]
+      const next = {
+        ...financeForm,
+        subscriptionId: String(selectedSubscription?.id || ''),
+        subscriptionTypeId: String(
+          selectedSubscription?.subscription_type_id
+          || financeForm.subscriptionTypeId
+          || subscriptionTypes[0]?.typeId
+          || '',
+        ),
+        subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
+      }
+      setFinanceForm(next)
+      setFinanceBaseline(next)
+      setFinanceFieldErrors({})
+      setFinanceAction('renew')
+      setPaymentPanelOpen(false)
+      setPaymentBaseline(null)
+      setError(null)
     }
 
     async function createManualPayment() {
-      if (!paymentForm.participantId) {
-        setError('Выберите участника для оплаты.')
-        return
+      const nextErrors = {}
+      if (!paymentForm.participantId) nextErrors.participantId = t('finance.selectPaymentParticipantError')
+      let amountMinor = null
+      amountMinor = moneyMajorToMinor(paymentForm.amount)
+      if (!amountMinor) {
+        nextErrors.amount = t('finance.preciseAmountError')
       }
-      if (!Number(paymentForm.amount)) {
-        setError('Введите сумму оплаты.')
+      if (!validIsoDate(paymentForm.paidAt)) nextErrors.paidAt = t('finance.paidAtError')
+      if (!paymentForm.method) nextErrors.method = t('finance.paymentMethodError')
+      if (Object.keys(nextErrors).length) {
+        setPaymentFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, PAYMENT_FIELD_IDS)
         return
       }
       setError(null)
+      setPaymentFieldErrors({})
       setMessage(null)
       setActionBusy('manual-payment')
       try {
-        await api.post('/api/admin/payments/', {
+        const created = await api.post('/api/admin/payments/', {
+          client_id: fallbackClientId,
           participant_id: paymentForm.participantId,
-          amount_minor: minorFromMajor(paymentForm.amount),
+          amount_minor: amountMinor,
           currency: 'PLN',
           paid_at: paymentForm.paidAt,
           method: paymentForm.method,
           comment: paymentForm.comment,
           confirm: true,
+          idempotency_key: paymentForm.idempotencyKey,
         })
-        setMessage('Оплата добавлена и подтверждена.')
+        const paymentReadback = await api.get(`/api/admin/payments/${created.id}/`)
+        assertPaymentReadback(created, paymentReadback, 'confirmed')
+        const clientReadback = await api.get(`/api/admin/clients/${fallbackClientId}/`)
+        setDetail(clientReadback)
+        const checkedBalance = asAccountBalance(clientReadback?.summary?.balance_minor)
+        setMessage(t('finance.paymentSaved', { balance: checkedBalance.toFixed(2).replace('.', ',') }))
         setPaymentPanelOpen(false)
+        setPaymentBaseline(null)
         setPaymentForm((current) => ({
           ...current,
           amount: '',
           comment: '',
+          idempotencyKey: createPaymentAttemptKey('admin-payment'),
         }))
-        refreshDetail()
+        reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextFieldErrors = fieldErrorsFromApi(err, {
+          client_id: 'participantId', participant_id: 'participantId', amount_minor: 'amount',
+          paid_at: 'paidAt', method: 'method', comment: 'comment', currency: 'amount',
+        })
+        setPaymentFieldErrors(nextFieldErrors)
+        setError(formErrorMessage(err, t('finance.savePaymentError')))
+        focusFirstFieldError(nextFieldErrors, PAYMENT_FIELD_IDS)
       } finally {
         setActionBusy(null)
       }
@@ -180,106 +380,189 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
 
     function openParticipantEdit(participant) {
       setEditingParticipant(participant)
-      setParticipantForm({ firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupId: participant.group?.id || '', isActive: participant.is_active })
+      setParticipantFieldErrors({})
+      const next = { firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupIds: (participant.groups || []).map((group) => String(group.id)), isActive: participant.is_active }
+      setParticipantForm(next)
+      setParticipantBaseline(next)
     }
 
     function openAccountEdit() {
-      setAccountForm({
+      setAccountFieldErrors({})
+      const next = {
         firstName: account.first_name || '',
         lastName: account.last_name || '',
         email: account.email || '',
+        username: account.username || '',
         phone: account.phone || '',
         telegramChatId: account.telegram_chat_id || '',
+        instagramUsername: account.instagram_username || '',
         preferredLanguage: account.preferred_language || 'ru',
-      })
+      }
+      setAccountForm(next)
+      setAccountBaseline(next)
       setEditingAccount(true)
+    }
+
+    function updateAccountForm(field, value) {
+      setAccountFieldErrors((current) => clearFieldError(current, field))
+      setAccountForm((current) => ({ ...current, [field]: value }))
     }
 
     async function saveAccount() {
       setActionBusy('account')
       setError(null)
+      setAccountFieldErrors({})
       try {
         await api.post(`/api/admin/clients/${fallbackClientId}/`, { account: {
           first_name: accountForm.firstName,
           last_name: accountForm.lastName,
           email: accountForm.email,
+          username: accountForm.username,
           phone: accountForm.phone,
           telegram_chat_id: accountForm.telegramChatId,
+          instagram_username: accountForm.instagramUsername,
           preferred_language: accountForm.preferredLanguage,
         } })
-        setMessage('Данные владельца аккаунта обновлены.')
+        setMessage(t('client.ownerUpdated'))
         setEditingAccount(false)
+        setAccountBaseline(null)
         refreshDetail()
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, {
+          'account.first_name': 'firstName',
+          'account.last_name': 'lastName',
+          'account.email': 'email',
+          'account.username': 'username',
+          'account.phone': 'phone',
+          'account.telegram_chat_id': 'telegramChatId',
+          'account.instagram_username': 'instagramUsername',
+          'account.preferred_language': 'preferredLanguage',
+        })
+        setAccountFieldErrors(nextErrors)
+        setError(formErrorMessage(err, t('client.ownerSaveError')))
+        setTimeout(() => focusFirstFieldError(nextErrors, {
+          firstName: 'admin-client-detail-firstName',
+          lastName: 'admin-client-detail-lastName',
+          email: 'admin-client-detail-email',
+          username: 'admin-client-detail-username',
+          phone: 'admin-client-detail-phone',
+          telegramChatId: 'admin-client-detail-telegram',
+          instagramUsername: 'admin-client-detail-instagram',
+          preferredLanguage: 'admin-client-detail-language',
+        }), 0)
       } finally {
         setActionBusy(null)
       }
     }
 
     async function saveParticipant() {
-      setActionBusy('participant'); setError(null)
+      const nextErrors = {}
+      if (!participantForm.firstName.trim() && !participantForm.lastName.trim()) {
+        nextErrors.firstName = t('client.participantNameError')
+        nextErrors.lastName = t('client.participantNameError')
+      }
+      if (participantForm.birthDate && !validIsoDate(participantForm.birthDate)) nextErrors.birthDate = t('client.birthDateError')
+      if (Object.keys(nextErrors).length) {
+        setParticipantFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, PARTICIPANT_FIELD_IDS)
+        return
+      }
+      setActionBusy('participant'); setError(null); setParticipantFieldErrors({})
       try {
-        await api.post(`/api/admin/participants/${editingParticipant.id}/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_id: participantForm.groupId || null, is_active: participantForm.isActive } })
-        setMessage('Данные участника обновлены.'); setEditingParticipant(null); refreshDetail()
-      } catch (err) { setError(err.message) } finally { setActionBusy(null) }
+        await api.post(`/api/admin/participants/${editingParticipant.id}/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_ids: participantForm.groupIds, is_active: participantForm.isActive } })
+        setMessage(t('client.participantUpdated')); setEditingParticipant(null); setParticipantBaseline(null); refreshDetail()
+      } catch (err) {
+        const nextFieldErrors = fieldErrorsFromApi(err, {
+          'participant.first_name': 'firstName', first_name: 'firstName',
+          'participant.last_name': 'lastName', last_name: 'lastName',
+          'participant.birth_date': 'birthDate', birth_date: 'birthDate',
+          'participant.email': 'email', email: 'email',
+          'participant.group_ids': 'groupIds', group_ids: 'groupIds',
+          'participant.is_active': 'isActive', is_active: 'isActive',
+        })
+        setParticipantFieldErrors(nextFieldErrors)
+        setError(formErrorMessage(err, t('client.participantSaveError')))
+        focusFirstFieldError(nextFieldErrors, PARTICIPANT_FIELD_IDS)
+      } finally { setActionBusy(null) }
     }
 
     async function sendReminder() {
       setActionBusy('reminder'); setError(null)
       try {
-        await api.post('/api/admin/notifications/mass-mail/', { audience: 'selected', parent_ids: [account.id], channel: 'email', subject: 'Напоминание об оплате', body: 'Здравствуйте! Напоминаем проверить оплату и состояние абонемента в SwimCRM.' })
-        setMessage('Напоминание поставлено в очередь.')
-      } catch (err) { setError(err.message) } finally { setActionBusy(null) }
+        const notificationLocale = ['ru', 'pl', 'en'].includes(account.preferred_language) ? account.preferred_language : 'ru'
+        const notificationT = adminFinanceTranslator(notificationLocale)
+        await api.post('/api/admin/notifications/mass-mail/', { audience: 'selected', parent_ids: [account.id], channel: 'email', subject: notificationT('client.reminderSubject'), body: notificationT('client.reminderBody') })
+        setMessage(t('client.reminderQueued'))
+      } catch (err) { setError(apiErrorMessage(err, t('client.reminderError'))) } finally { setActionBusy(null) }
     }
 
     async function executeFinanceAction() {
       const participantRequired = financeAction === 'charge' || financeAction === 'issue'
       const subscriptionRequired = financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust'
       const typeRequired = financeAction === 'issue' || financeAction === 'renew'
-      if (participantRequired && !financeForm.participantId) {
-        setError('Выберите участника.')
-        return
+      const nextErrors = {}
+      if (participantRequired && !financeForm.participantId) nextErrors.participantId = t('finance.selectParticipantError')
+      if (subscriptionRequired && !financeForm.subscriptionId) nextErrors.subscriptionId = t('finance.selectSubscriptionError')
+      if (typeRequired && !financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = t('finance.selectTypeError')
+      if (financeAction === 'charge') {
+        const amount = Number(String(financeForm.amount || '').replace(',', '.'))
+        if (!financeForm.description.trim()) nextErrors.description = t('finance.chargeDescriptionError')
+        if (!Number.isFinite(amount) || amount <= 0) nextErrors.amount = t('finance.positiveAmountError')
+        if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
       }
-      if (subscriptionRequired && !financeForm.subscriptionId) {
-        setError('Выберите абонемент.')
-        return
+      if (financeAction === 'issue' || financeAction === 'renew') {
+        if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
+        if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
       }
-      if (typeRequired && !financeForm.subscriptionTypeId) {
-        setError('Выберите тип абонемента.')
+      if (financeAction === 'freeze') {
+        if (!validIsoDate(financeForm.freezeStart)) nextErrors.freezeStart = t('finance.freezeStartShortError')
+        if (!validIsoDate(financeForm.freezeEnd)) nextErrors.freezeEnd = t('finance.freezeEndShortError')
+        if (validIsoDate(financeForm.freezeStart) && validIsoDate(financeForm.freezeEnd) && financeForm.freezeEnd < financeForm.freezeStart) nextErrors.freezeEnd = t('finance.freezeOrderError')
+      }
+      if (financeAction === 'adjust') {
+        const delta = Number(financeForm.adjustDelta)
+        if (!Number.isInteger(delta) || delta === 0) nextErrors.adjustDelta = t('finance.adjustDeltaError')
+      }
+      if (Object.keys(nextErrors).length) {
+        setFinanceFieldErrors(nextErrors)
+        setError(null)
+        focusFirstFieldError(nextErrors, FINANCE_FIELD_IDS)
         return
       }
 
       setError(null)
+      setFinanceFieldErrors({})
       setMessage(null)
       setActionBusy(financeAction)
       try {
         if (financeAction === 'charge') {
           await api.post(`/api/admin/participants/${financeForm.participantId}/charges/`, {
+            client_id: fallbackClientId,
             description: financeForm.description,
             amount_minor: minorFromMajor(financeForm.amount),
             currency: 'PLN',
             due_date: financeForm.dueDate,
           })
-          setMessage('Начисление создано.')
+          setMessage(t('finance.chargeCreated'))
         }
         if (financeAction === 'issue') {
           await api.post(`/api/admin/participants/${financeForm.participantId}/subscriptions/`, {
             subscription_type_id: financeForm.subscriptionTypeId,
             start_date: financeForm.startDate,
             due_date: financeForm.dueDate,
-            create_charge: financeForm.createCharge,
+            idempotency_key: financeForm.subscriptionIdempotencyKey,
           })
-          setMessage(financeForm.createCharge ? 'Абонемент и начисление созданы.' : 'Абонемент выдан.')
+          setMessage(t('finance.subscriptionCreated'))
         }
         if (financeAction === 'renew') {
           await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/renew/`, {
             subscription_type_id: financeForm.subscriptionTypeId,
             start_date: financeForm.startDate,
             due_date: financeForm.dueDate,
-            create_charge: financeForm.createCharge,
+            idempotency_key: financeForm.subscriptionIdempotencyKey,
           })
-          setMessage(financeForm.createCharge ? 'Абонемент продлён с начислением.' : 'Абонемент продлён.')
+          setMessage(t('finance.subscriptionRenewed'))
         }
         if (financeAction === 'freeze') {
           const result = await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/freeze/`, {
@@ -287,19 +570,30 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
             end_date: financeForm.freezeEnd,
             reason: financeForm.freezeReason,
           })
-          setMessage(`Абонемент заморожен на ${result.days} дней.`)
+          setMessage(t('finance.frozenDays', { count: result.days }))
         }
         if (financeAction === 'adjust') {
           await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/adjust/`, {
             delta: Number(financeForm.adjustDelta || 0),
             note: financeForm.adjustNote,
           })
-          setMessage('Остаток занятий скорректирован.')
+          setMessage(t('finance.remainingAdjusted'))
         }
         setFinanceAction(null)
+        setFinanceBaseline(null)
         refreshDetail()
       } catch (err) {
-        setError(err.message)
+        const nextFieldErrors = fieldErrorsFromApi(err, {
+          participant_id: 'participantId', subscription_id: 'subscriptionId',
+          subscription_type_id: 'subscriptionTypeId', amount_minor: 'amount',
+          description: 'description', start_date: financeAction === 'freeze' ? 'freezeStart' : 'startDate',
+          due_date: 'dueDate', end_date: 'freezeEnd', reason: 'freezeReason',
+          delta: 'adjustDelta', note: 'adjustNote', idempotency_key: 'subscriptionTypeId',
+          currency: 'amount',
+        })
+        setFinanceFieldErrors(nextFieldErrors)
+        setError(formErrorMessage(err, t('finance.operationError')))
+        focusFirstFieldError(nextFieldErrors, FINANCE_FIELD_IDS)
       } finally {
         setActionBusy(null)
       }
@@ -311,9 +605,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
       setActionBusy('export')
       try {
         const result = await downloadFile(`/api/admin/privacy/clients/${fallbackClientId}/export/`, `client-${fallbackClientId}-data.json`)
-        setMessage(`Экспорт подготовлен: ${result.name}`)
+        setMessage(t('client.exportReady', { name: result.name }))
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, t('client.exportError')))
       } finally {
         setActionBusy(null)
       }
@@ -328,23 +622,23 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         if (confirmAction.type === 'archive') {
           const payload = await api.delete(`/api/admin/clients/${fallbackClientId}/`)
           setDetail(payload)
-          setMessage('Клиент архивирован. Аккаунт и участники неактивны.')
+          setMessage(t('client.archived'))
           reloadRoleData?.('admin')
         }
         if (confirmAction.type === 'restore') {
           const payload = await api.post(`/api/admin/clients/${fallbackClientId}/restore/`)
           setDetail(payload)
-          setMessage('Клиент восстановлен и возвращён в рабочий список.')
+          setMessage(t('client.restored'))
           reloadRoleData?.('admin')
         }
         if (confirmAction.type === 'anonymize') {
           await api.post(`/api/admin/privacy/clients/${fallbackClientId}/anonymize/`)
-          setMessage('Персональные данные клиента анонимизированы.')
+          setMessage(t('client.anonymized'))
           refreshDetail()
         }
         setConfirmAction(null)
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, t('client.actionError')))
       } finally {
         setActionBusy(null)
       }
@@ -355,214 +649,218 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         <div className="page page-wide">
           <div className="page-head">
             <div>
-              <h2 className="page-title">Клиент</h2>
-              <p className="page-desc">Выберите клиента из списка.</p>
+              <h1 className="page-title">{t('client.title')}</h1>
+              <p className="page-desc">{t('client.chooseFromList')}</p>
             </div>
-            <Button variant="secondary" iconLeft={<I.ArrowLeft size={15} />} onClick={() => go?.('clients')}>Клиенты</Button>
+            <Button variant="secondary" iconLeft={<I.ArrowLeft size={15} />} onClick={() => back ? back('clients') : go?.('clients')}>{t('clients.title')}</Button>
           </div>
-          <Banner tone="warning">Клиент не выбран.</Banner>
+          <Banner tone="warning">{t('client.notSelected')}</Banner>
         </div>
       )
     }
+
+    const subscriptionEditorOpen = SUBSCRIPTION_EDIT_ACTIONS.includes(financeAction)
 
     return (
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <button onClick={() => go?.('clients')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', padding: 0, marginBottom: 6 }}><I.ArrowLeft size={14} /> Клиенты</button>
-            <h2 className="page-title">{account.full_name || account.username || 'Клиент'}</h2>
+            <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('clients') : go?.('clients')}>{t('clients.title')}</ContextBackButton>
+            <h1 className="page-title">{account.full_name || account.username || t('client.title')}</h1>
             <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
+            {!contactsHidden && <div className="ops-contact-links" aria-label={t('client.contactAria')}>
+              <ContactLink href={contactPhoneDigits ? `https://t.me/+${contactPhoneDigits}` : null} label="Telegram" disabledHint={phoneContactHint} />
+              <ContactLink href={contactPhoneDigits ? `https://wa.me/${contactPhoneDigits}` : null} label="WhatsApp" disabledHint={phoneContactHint} />
+              <ContactLink href={account.instagram_username ? `https://instagram.com/${account.instagram_username}` : null} label="Instagram" disabledHint={t('client.instagramMissing')} />
+            </div>}
           </div>
           <div className="ops-button-row ops-page-actions">
-            {!accountArchived && !account.access_activated && <Button variant="secondary" loading={actionBusy === 'activation'} disabled={loading || actionBusy != null} onClick={createActivation}>Выдать доступ</Button>}
-            {!accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>Редактировать клиента</Button>}
-            {accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>Восстановить</Button>}
-            <Button variant="secondary" disabled={loading} onClick={refreshDetail}>Обновить</Button>
+            {!accountArchived && !loading && <AccessButtons Button={Button} portalAccess={account.portal_access} accessActivated={account.access_activated} busy={Boolean(actionBusy)} onAction={accessAction} />}
+            {!accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>{t('client.edit')}</Button>}
+            {accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>{t('clients.restore')}</Button>}
+            <Button variant="secondary" disabled={loading} onClick={refreshDetail}>{t('client.refresh')}</Button>
           </div>
         </div>
 
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
-        {activationInfo && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setActivationInfo(null)}>
-          Передайте клиенту номер <strong>{activationInfo.client_id}</strong> и одноразовый код <strong style={{ wordBreak: 'break-all' }}>{activationInfo.activation_token}</strong>. Код действует 72 часа.
-        </Banner>}
-        {loading && <Banner tone="info" style={{ marginBottom: 12 }}>Загружаю карточку клиента...</Banner>}
-        {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>Клиент находится в чёрном списке.</strong> Данные и история доступны только для просмотра. Восстановите клиента, чтобы снова выполнять действия.</Banner>}
+        {error && !editingAccount && !editingParticipant && !financeAction && !paymentPanelOpen && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        <ToastNotice id="admin-client-detail-result" message={message} />
+        {activationInfo && <div style={{ marginBottom: 12 }}><AccessCodeCard info={activationInfo} Button={Button} onClose={() => setActivationInfo(null)} /></div>}
+        <BusyBanner id="admin-client-detail-busy" show={loading}>{t('client.loading')}</BusyBanner>
+        {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>{t('client.blacklisted')}</strong> {t('client.blacklistedDescription')}</Banner>}
 
-        {editingAccount && (
-          <div className="card card-pad ops-edit-panel">
-            <div className="ops-section-head">
-              <div>
-                <div className="eyebrow">Редактирование клиента</div>
-                <h3 className="section-title">Владелец аккаунта</h3>
-              </div>
-              <Button variant="subtle" disabled={actionBusy != null} onClick={() => setEditingAccount(false)}>Закрыть</Button>
-            </div>
+        <FormModal open={editingAccount} title={t('client.editTitle')} description={t('client.accountOwner')} size="lg" busy={actionBusy != null} dirty={Boolean(accountBaseline) && JSON.stringify(accountForm) !== JSON.stringify(accountBaseline)} onRequestClose={() => { if (accountBaseline) setAccountForm(accountBaseline); setEditingAccount(false); setAccountBaseline(null); setAccountFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" loading={actionBusy === 'account'} disabled={actionBusy != null} onClick={saveAccount}>{t('client.saveChanges')}</Button></>}>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
-              <Input label="Имя" value={accountForm.firstName} onChange={(event) => setAccountForm({ ...accountForm, firstName: event.target.value })} />
-              <Input label="Фамилия" value={accountForm.lastName} onChange={(event) => setAccountForm({ ...accountForm, lastName: event.target.value })} />
-              <Input label="Email" value={accountForm.email} onChange={(event) => setAccountForm({ ...accountForm, email: event.target.value })} />
-              <Input label="Телефон" value={accountForm.phone} onChange={(event) => setAccountForm({ ...accountForm, phone: event.target.value })} />
-              <Input label="Telegram / соцсеть" value={accountForm.telegramChatId} onChange={(event) => setAccountForm({ ...accountForm, telegramChatId: event.target.value })} />
-              <label>Язык интерфейса<select value={accountForm.preferredLanguage} onChange={(event) => setAccountForm({ ...accountForm, preferredLanguage: event.target.value })}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></select></label>
+              <Input id="admin-client-detail-firstName" label={t('field.firstName')} value={accountForm.firstName} error={accountFieldErrors.firstName} onChange={(event) => updateAccountForm('firstName', event.target.value)} />
+              <Input id="admin-client-detail-lastName" label={t('field.lastName')} value={accountForm.lastName} error={accountFieldErrors.lastName} onChange={(event) => updateAccountForm('lastName', event.target.value)} />
+              <Input id="admin-client-detail-email" label="Email" value={accountForm.email} error={accountFieldErrors.email} onChange={(event) => updateAccountForm('email', event.target.value)} />
+              <Input id="admin-client-detail-username" label={t('field.username')} value={accountForm.username} error={accountFieldErrors.username} onChange={(event) => updateAccountForm('username', event.target.value)} />
+              <Input id="admin-client-detail-phone" label={t('common.phone')} value={accountForm.phone} error={accountFieldErrors.phone} onChange={(event) => updateAccountForm('phone', event.target.value)} />
+              <Input id="admin-client-detail-instagram" label={t('field.instagram')} value={accountForm.instagramUsername} error={accountFieldErrors.instagramUsername} hint={t('field.instagramHint')} onChange={(event) => updateAccountForm('instagramUsername', event.target.value)} />
+              <Input id="admin-client-detail-telegram" label={t('field.telegramBotId')} value={accountForm.telegramChatId} error={accountFieldErrors.telegramChatId} onChange={(event) => updateAccountForm('telegramChatId', event.target.value)} />
+              <Select id="admin-client-detail-language" label={t('field.notificationLanguage')} value={accountForm.preferredLanguage} error={accountFieldErrors.preferredLanguage} onChange={(event) => updateAccountForm('preferredLanguage', event.target.value)}><option value="ru">{t('language.ru')}</option><option value="pl">{t('language.pl')}</option><option value="en">{t('language.en')}</option></Select>
             </div>
-            <div className="ops-button-row">
-              <Button variant="primary" loading={actionBusy === 'account'} disabled={actionBusy != null} onClick={saveAccount}>Сохранить изменения</Button>
-              <Button variant="secondary" disabled={actionBusy != null} onClick={() => setEditingAccount(false)}>Отмена</Button>
-            </div>
-          </div>
-        )}
+        </FormModal>
 
         <div className="kpi-grid" style={{ marginBottom: 16 }}>
           <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Users size={15} /></span>Участники</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Users size={15} /></span>{t('client.participants')}</div>
             <div className="kpi-value">{summary.participants_count ?? participants.length}</div>
-            <div className="kpi-sub">Активны: {summary.active_participants ?? participants.filter((item) => item.is_active).length}</div>
+            <div className="kpi-sub">{t('client.activeCount', { count: summary.active_participants ?? participants.filter((item) => item.is_active).length })}</div>
           </div>
           <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Layers size={15} /></span>Абонементы</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Layers size={15} /></span>{t('client.subscriptions')}</div>
             <div className="kpi-value">{summary.active_subscriptions ?? subscriptions.filter((item) => item.status === 'active').length}</div>
-            <div className="kpi-sub">Активные</div>
+            <div className="kpi-sub">{t('client.active')}</div>
           </div>
           <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>Баланс</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>{t('common.balance')}</div>
             <div className="kpi-value">
               <Money amount={accountBalance} signed currency="zł" size="inherit" />
             </div>
             <div className="kpi-sub">{balanceCaption}</div>
           </div>
           <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Alert size={15} /></span>Платежи</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Alert size={15} /></span>{t('payments.title')}</div>
             <div className="kpi-value">{summary.pending_payments ?? payments.filter((item) => item.status === 'pending').length}</div>
-            <div className="kpi-sub">Ждут проверки</div>
+            <div className="kpi-sub">{t('client.awaitingReview')}</div>
           </div>
         </div>
 
-        <div className="ops-action-strip" aria-label="Финансовые действия клиента">
-          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={() => { setTab('payments'); setPaymentPanelOpen(true); setFinanceAction(null) }}>
-            <span>Добавить оплату</span>
-            <small>Наличные или bank transfer / IBAN</small>
+        <div className="ops-action-strip" aria-label={t('client.financeActionsAria')}>
+          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={openPaymentPanel}>
+            <span>{t('client.topUp')}</span>
+            <small>{t('client.topUpHint')}</small>
           </button>
           {[
-            ['charge', 'Добавить начисление', 'Сумма к оплате'],
-            ['issue', 'Выдать абонемент', 'Новый абонемент участнику'],
-            ['renew', 'Продлить абонемент', 'Новый период и остаток'],
-            ['freeze', 'Заморозить', 'Приостановить срок действия'],
-            ['adjust', 'Скорректировать', 'Изменить остаток занятий'],
+            ['charge', t('client.addCharge'), t('client.amountPayable')],
+            ['issue', t('client.sellPass'), t('client.newPassHint')],
           ].map(([value, label, hint]) => (
             <button
               key={value}
               type="button"
               className={`ops-action-card${financeAction === value ? ' is-active' : ''}`}
               disabled={accountArchived}
-              onClick={() => { setFinanceAction((current) => current === value ? null : value); setPaymentPanelOpen(false) }}
+              onClick={() => { const next = value === 'issue' || value === 'renew' ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription') } : financeForm; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
             >
               <span>{label}</span>
               <small>{hint}</small>
             </button>
           ))}
+          <button
+            type="button"
+            className={`ops-action-card${subscriptionEditorOpen ? ' is-active' : ''}`}
+            disabled={accountArchived || subscriptions.length === 0}
+            onClick={() => openSubscriptionEditor()}
+          >
+            <span>{t('client.editPass')}</span>
+            <small>{t('client.editPassHint')}</small>
+          </button>
           <button type="button" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
-            <span>Напомнить</span>
-            <small>Отправить финансовое уведомление</small>
+            <span>{t('client.remind')}</span>
+            <small>{t('client.remindHint')}</small>
           </button>
         </div>
 
-        {financeAction && (
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>
-              {{ charge: 'Новое начисление', issue: 'Выдача абонемента', renew: 'Продление абонемента', freeze: 'Заморозка абонемента', adjust: 'Корректировка остатка' }[financeAction]}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(160px, 1fr))', gap: 10, alignItems: 'end' }}>
+        <FormModal open={Boolean(financeAction)} title={subscriptionEditorOpen ? t('client.editPassTitle') : ({ charge: t('client.newCharge'), issue: t('client.sellPassTitle') }[financeAction] || t('finance.operation'))} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>{t('common.save')}</Button></>}>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+            <div className="ops-form-grid">
               {(financeAction === 'charge' || financeAction === 'issue') && (
                 <SearchableSelect
-                  label="Участник"
+                  inputId={FINANCE_FIELD_IDS.participantId}
+                  label={t('common.participant')}
                   value={financeForm.participantId}
+                  error={financeFieldErrors.participantId}
                   onChange={(value) => updateFinanceForm('participantId', value)}
                   options={participants.map((participant) => clientSelectOption(participant))}
                 />
               )}
-              {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && (
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                  Абонемент
-                  <select value={financeForm.subscriptionId} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)} style={{ minHeight: 36 }}>
-                    <option value="">Выберите абонемент</option>
+              {subscriptionEditorOpen && (
+                <Select id={FINANCE_FIELD_IDS.subscriptionAction} label={t('field.action')} value={financeAction} onChange={(event) => { setFinanceAction(event.target.value); setFinanceFieldErrors({}); setError(null) }}>
+                    <option value="renew">{t('finance.renewPass')}</option>
+                    <option value="freeze">{t('finance.freezePass')}</option>
+                    <option value="adjust">{t('client.adjustRemaining')}</option>
+                </Select>
+              )}
+              {subscriptionEditorOpen && (
+                <Select id={FINANCE_FIELD_IDS.subscriptionId} label={t('clients.subscription')} value={financeForm.subscriptionId} error={financeFieldErrors.subscriptionId} onChange={(event) => updateFinanceSubscription(event.target.value)}>
+                    <option value="">{t('field.selectSubscription')}</option>
                     {subscriptions.map((subscription) => (
                       <option key={subscription.id} value={subscription.id}>
-                        {subscription.participant?.full_name || participantName(subscription.participant_id)} · {subscription.type} · остаток {subscription.remaining_sessions ?? 'без лимита'}
+                        {subscription.participant?.full_name || participantName(subscription.participant_id)} · {subscription.type} · {t('field.remainingPrefix', { count: subscription.remaining_sessions ?? t('field.noLimit') })}
                       </option>
                     ))}
-                  </select>
-                </label>
+                </Select>
               )}
               {(financeAction === 'issue' || financeAction === 'renew') && (
                 <>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                    Тип абонемента
-                    <select value={financeForm.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)} style={{ minHeight: 36 }}>
-                      <option value="">Выберите тип</option>
+                  <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label={t('field.subscriptionType')} value={financeForm.subscriptionTypeId} error={financeFieldErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}>
+                      <option value="">{t('field.selectType')}</option>
                       {subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price} {type.currency}</option>)}
-                    </select>
-                  </label>
-                  <Input label="Дата начала" value={financeForm.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                  <Input label="Срок оплаты" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, fontSize: 'var(--fs-sm)' }}>
-                    <input type="checkbox" checked={financeForm.createCharge} onChange={(event) => updateFinanceForm('createCharge', event.target.checked)} />
-                    Создать начисление
-                  </label>
+                  </Select>
+                  <DateField id={FINANCE_FIELD_IDS.startDate} label={t('field.startDate')} value={financeForm.startDate} error={financeFieldErrors.startDate} onChange={(value) => updateFinanceForm('startDate', value)} />
+                  <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
+                  <p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p>
                 </>
               )}
               {financeAction === 'charge' && (
                 <>
-                  <Input label="Описание" value={financeForm.description} onChange={(event) => updateFinanceForm('description', event.target.value)} />
-                  <Input label="Сумма" value={financeForm.amount} onChange={(event) => updateFinanceForm('amount', event.target.value)} placeholder="240.00" />
-                  <Input label="Срок оплаты" value={financeForm.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                  <Input id={FINANCE_FIELD_IDS.description} label={t('common.description')} value={financeForm.description} error={financeFieldErrors.description} onChange={(event) => updateFinanceForm('description', event.target.value)} />
+                  <Input id={FINANCE_FIELD_IDS.amount} label={t('common.amount')} value={financeForm.amount} error={financeFieldErrors.amount} onChange={(event) => updateFinanceForm('amount', event.target.value)} placeholder="240.00" />
+                  <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                 </>
               )}
               {financeAction === 'freeze' && (
                 <>
-                  <Input label="С даты" value={financeForm.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                  <Input label="По дату" value={financeForm.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                  <Input label="Причина" value={financeForm.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
+                  <DateField id={FINANCE_FIELD_IDS.freezeStart} label={t('field.freezeStart')} value={financeForm.freezeStart} error={financeFieldErrors.freezeStart} onChange={(value) => updateFinanceForm('freezeStart', value)} />
+                  <DateField id={FINANCE_FIELD_IDS.freezeEnd} label={t('field.freezeEnd')} value={financeForm.freezeEnd} error={financeFieldErrors.freezeEnd} onChange={(value) => updateFinanceForm('freezeEnd', value)} />
+                  <Input id={FINANCE_FIELD_IDS.freezeReason} label={t('field.reason')} value={financeForm.freezeReason} error={financeFieldErrors.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
                 </>
               )}
               {financeAction === 'adjust' && (
                 <>
-                  <Input label="Изменение занятий" value={financeForm.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} placeholder="Например, +1 или -1" />
-                  <Input label="Комментарий" value={financeForm.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
+                  <Input id={FINANCE_FIELD_IDS.adjustDelta} label={t('field.remainingChange')} value={financeForm.adjustDelta} error={financeFieldErrors.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} placeholder={t('field.exampleDelta')} />
+                  <Input id={FINANCE_FIELD_IDS.adjustNote} label={t('field.comment')} value={financeForm.adjustNote} error={financeFieldErrors.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
                 </>
               )}
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>Сохранить</Button>
-              <Button variant="secondary" disabled={actionBusy != null} onClick={() => setFinanceAction(null)}>Закрыть</Button>
-            </div>
-          </div>
-        )}
+        </FormModal>
 
         <div className="toolbar">
           <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
-            { value: 'participants', label: 'Участники', count: participants.length },
-            { value: 'subscriptions', label: 'Абонементы', count: subscriptions.length },
-            { value: 'payments', label: 'Платежи', count: payments.length + charges.length },
-            { value: 'attendance', label: 'Посещения', count: attendance.length },
-            { value: 'consents', label: 'Согласия', count: consents.length },
-            { value: 'privacy', label: 'Данные и приватность' },
+            { value: 'participants', label: t('client.participants'), count: participants.length },
+            { value: 'subscriptions', label: t('client.subscriptions'), count: subscriptions.length },
+            { value: 'payments', label: t('payments.title'), count: payments.length + charges.length },
+            { value: 'attendance', label: t('client.attendance'), count: attendance.length },
+            { value: 'consents', label: t('client.consents'), count: consents.length },
+            { value: 'privacy', label: t('client.privacy') },
           ]} />
         </div>
 
         {tab === 'participants' && (
           <div>
-          {editingParticipant && <div className="card card-pad" style={{ marginBottom: 12 }}><div className="eyebrow">Редактирование участника</div><div className="ops-form-grid"><Input label="Имя" value={participantForm.firstName} onChange={(event) => setParticipantForm({ ...participantForm, firstName: event.target.value })} /><Input label="Фамилия" value={participantForm.lastName} onChange={(event) => setParticipantForm({ ...participantForm, lastName: event.target.value })} /><Input label="Дата рождения" value={participantForm.birthDate} onChange={(event) => setParticipantForm({ ...participantForm, birthDate: event.target.value })} /><Input label="Email" value={participantForm.email} onChange={(event) => setParticipantForm({ ...participantForm, email: event.target.value })} /><label>Группа<select value={participantForm.groupId} onChange={(event) => setParticipantForm({ ...participantForm, groupId: event.target.value })}><option value="">Индивидуально</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={participantForm.isActive} onChange={(event) => setParticipantForm({ ...participantForm, isActive: event.target.checked })} />Активен</label></div><div className="ops-button-row"><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>Сохранить</Button><Button variant="secondary" onClick={() => setEditingParticipant(null)}>Отмена</Button></div></div>}
+          <FormModal open={Boolean(editingParticipant)} title={t('client.editParticipant')} size="lg" busy={actionBusy != null} dirty={Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline)} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>{t('common.save')}</Button></>}>
+            {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+            <div className="ops-form-grid">
+              <Input id={PARTICIPANT_FIELD_IDS.firstName} label={t('field.firstName')} value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
+              <Input id={PARTICIPANT_FIELD_IDS.lastName} label={t('field.lastName')} value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
+              <DateField id={PARTICIPANT_FIELD_IDS.birthDate} label={t('field.birthDate')} value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
+              <Input id={PARTICIPANT_FIELD_IDS.email} label="Email" value={participantForm.email} error={participantFieldErrors.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
+              <GroupMultiSelect id={PARTICIPANT_FIELD_IDS.groupIds} groups={groups} value={participantForm.groupIds} error={participantFieldErrors.groupIds} onChange={(value) => updateParticipantForm('groupIds', value)} />
+              <Checkbox id={PARTICIPANT_FIELD_IDS.isActive} label={t('field.accountActive')} checked={participantForm.isActive} error={participantFieldErrors.isActive} onChange={(event) => updateParticipantForm('isActive', event.target.checked)} />
+            </div>
+          </FormModal>
           <Table
             rows={participants}
-            emptyLabel="Участников нет"
+            emptyLabel={t('client.noParticipants')}
             columns={[
-              { key: 'full_name', header: 'Участник', render: (row) => <button type="button" className="ops-link-button" disabled={accountArchived} onClick={() => openParticipantEdit(row)}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
-              { key: 'birth_date', header: 'Дата рождения', muted: true, render: (row) => row.birth_date || '-' },
+              { key: 'full_name', header: t('common.participant'), render: (row) => <button type="button" className="ops-link-button" disabled={accountArchived} onClick={() => openParticipantEdit(row)}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
+              { key: 'birth_date', header: t('field.birthDate'), muted: true, render: (row) => row.birth_date || '-' },
               { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
-              { key: 'group', header: 'Группа', render: (row) => row.group?.name || 'Индивидуально' },
-              { key: 'balance', header: 'Баланс', align: 'right', width: 110, render: (row) => <Money amount={asAccountBalance(row.balance_minor)} signed /> },
-              { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
+              { key: 'groups', header: t('common.groups'), render: (row) => (row.groups || []).map((group) => group.name).join(', ') || t('clients.individual') },
+              { key: 'balance', header: t('common.balance'), align: 'right', width: 110, render: (row) => <Money amount={asAccountBalance(row.balance_minor)} signed /> },
+              { key: 'status', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
+              { key: 'training', header: t('field.training'), render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'individual', participantId: row.id })}>{t('field.individualSession')}</Button><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'split', participantId: row.id })}>{t('field.splitSession')}</Button></div> },
             ]}
           />
           </div>
@@ -571,76 +869,76 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         {tab === 'subscriptions' && (
           <Table
             rows={subscriptions}
-            emptyLabel="Абонементов нет"
+            emptyLabel={t('client.noSubscriptions')}
+            onRowClick={accountArchived ? undefined : openSubscriptionEditor}
             columns={[
-              { key: 'type', header: 'Тип', render: (row) => <span className="strong">{row.type}</span> },
-              { key: 'participant', header: 'Участник', render: (row) => row.participant?.full_name || participantName(row.participant_id) },
-              { key: 'start_date', header: 'Начало', muted: true },
-              { key: 'effective_end_date', header: 'Окончание', muted: true },
-              { key: 'created_at', header: 'Оформлен', muted: true, render: (row) => row.created_at ? formatDate(row.created_at) : '-' },
-              { key: 'remaining_sessions', header: 'Остаток', align: 'right', width: 90, render: (row) => row.remaining_sessions ?? 'Без лимита' },
-              { key: 'status', header: 'Статус', width: 120, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
+              { key: 'type', header: t('common.type'), render: (row) => <span className="strong">{row.type}</span> },
+              { key: 'participant', header: t('common.participant'), render: (row) => row.participant?.full_name || participantName(row.participant_id) },
+              { key: 'start_date', header: t('field.start'), muted: true },
+              { key: 'effective_end_date', header: t('field.end'), muted: true },
+              { key: 'created_at', header: t('field.issued'), muted: true, render: (row) => row.created_at ? formatLocalDate(row.created_at) : '-' },
+              { key: 'remaining_sessions', header: t('field.remaining'), align: 'right', width: 90, render: (row) => row.remaining_sessions ?? t('field.noLimit') },
+              { key: 'status', header: t('common.status'), width: 120, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
             ]}
           />
         )}
 
         {tab === 'payments' && (
           <div>
-            {paymentPanelOpen && (
-              <div className="card card-pad" style={{ marginBottom: 16 }}>
-                <div className="eyebrow" style={{ marginBottom: 10 }}>Ручная оплата</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.4fr) repeat(3, minmax(140px, 1fr))', gap: 10, alignItems: 'end' }}>
+            <FormModal open={paymentPanelOpen} title={t('client.topUp')} description={t('client.paymentFormDescription')} size="lg" busy={actionBusy != null} dirty={Boolean(paymentBaseline) && JSON.stringify(paymentForm) !== JSON.stringify(paymentBaseline)} onRequestClose={() => { if (paymentBaseline) setPaymentForm(paymentBaseline); setPaymentPanelOpen(false); setPaymentBaseline(null); setPaymentFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>{t('client.confirmPayment')}</Button></>}>
+                {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+                <div className="ops-financial-context" aria-label={t('finance.contextPayment')}>
+                  <div><span>{t('client.title')}</span><strong>{account.full_name || account.username || '—'}</strong></div>
+                  <div><span>{t('common.participant')}</span><strong>{selectedPaymentParticipant?.full_name || t('field.selectParticipant')}</strong></div>
+                  <div><span>{t('field.currentBalance')}</span><strong><Money amount={selectedPaymentBalance} signed currency="zł" /></strong></div>
+                  <div><span>{t('field.method')}</span><strong>{paymentMethodLabel(paymentForm.method, locale)}</strong></div>
+                </div>
+                <div className="ops-form-grid">
                   <SearchableSelect
-                    label="Участник"
+                    inputId={PAYMENT_FIELD_IDS.participantId}
+                    label={t('common.participant')}
                     value={paymentForm.participantId}
+                    error={paymentFieldErrors.participantId}
                     onChange={(value) => updatePaymentForm('participantId', value)}
                     options={participants.map((participant) => clientSelectOption(participant))}
                   />
-                  <Input label="Сумма" value={paymentForm.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240.00" />
-                  <Input label="Дата оплаты" value={paymentForm.paidAt} onChange={(event) => updatePaymentForm('paidAt', event.target.value)} placeholder="YYYY-MM-DD" />
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-                    Способ
-                    <select value={paymentForm.method} onChange={(event) => updatePaymentForm('method', event.target.value)} style={{ minHeight: 36 }}>
-                      <option value="cash">Наличные</option>
-                      <option value="bank_transfer">Bank transfer / IBAN</option>
-                      <option value="card">Карта</option>
-                      <option value="other">Другое</option>
-                    </select>
-                  </label>
-                  <Input label="Комментарий" value={paymentForm.comment} onChange={(event) => updatePaymentForm('comment', event.target.value)} placeholder="Опционально" />
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
-                    <Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>Сохранить оплату</Button>
-                    <Button variant="secondary" disabled={actionBusy != null} onClick={() => setPaymentPanelOpen(false)}>Закрыть</Button>
-                  </div>
+                  <Input id={PAYMENT_FIELD_IDS.amount} label={t('field.amountCurrency')} value={paymentForm.amount} error={paymentFieldErrors.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240,00" inputMode="decimal" />
+                  <DateField id={PAYMENT_FIELD_IDS.paidAt} label={t('field.paidAt')} value={paymentForm.paidAt} error={paymentFieldErrors.paidAt} onChange={(value) => updatePaymentForm('paidAt', value)} />
+                  <Select id={PAYMENT_FIELD_IDS.method} label={t('field.method')} value={paymentForm.method} error={paymentFieldErrors.method} onChange={(event) => updatePaymentForm('method', event.target.value)}>
+                      <option value="cash">{t('paymentMethod.cash')}</option>
+                      <option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option>
+                      <option value="card">{t('paymentMethod.card')}</option>
+                      <option value="other">{t('paymentMethod.other')}</option>
+                  </Select>
+                  <Input id={PAYMENT_FIELD_IDS.comment} label={t('field.comment')} value={paymentForm.comment} error={paymentFieldErrors.comment} onChange={(event) => updatePaymentForm('comment', event.target.value)} placeholder={t('common.optional')} />
                 </div>
-              </div>
-            )}
+            </FormModal>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(320px, 1fr)', gap: 14 }}>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>Начисления</div>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.charges')}</div>
               <Table
                 rows={charges}
-                emptyLabel="Начислений нет"
+                emptyLabel={t('client.noCharges')}
                 columns={[
-                  { key: 'description', header: 'Описание', render: (row) => <span className="strong">{row.description}</span> },
-                  { key: 'participant', header: 'Участник', muted: true },
-                  { key: 'due_date', header: 'Срок', muted: true },
-                  { key: 'amount', header: 'Сумма', align: 'right', width: 100, render: (row) => <Money amount={money(row.amount_minor)} /> },
+                  { key: 'description', header: t('common.description'), render: (row) => <span className="strong">{row.description}</span> },
+                  { key: 'participant', header: t('common.participant'), muted: true },
+                  { key: 'due_date', header: t('field.dueDate'), muted: true },
+                  { key: 'amount', header: t('common.amount'), align: 'right', width: 100, render: (row) => <Money amount={money(row.amount_minor)} /> },
                 ]}
               />
             </div>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>Платежи</div>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>{t('payments.title')}</div>
               <Table
                 rows={payments}
-                emptyLabel="Платежей нет"
+                emptyLabel={t('client.noPayments')}
                 columns={[
-                  { key: 'participant', header: 'Участник', render: (row) => <span className="strong">{row.participant}</span> },
-                  { key: 'method', header: 'Способ', muted: true, render: (row) => paymentMethodLabel(row.method) },
-                  { key: 'paid_at', header: 'Дата', muted: true },
-                  { key: 'amount', header: 'Сумма', align: 'right', width: 100, render: (row) => <Money amount={money(row.amount_minor)} /> },
-                  { key: 'status', header: 'Статус', width: 110, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
+                  { key: 'participant', header: t('common.participant'), render: (row) => <span className="strong">{row.participant}</span> },
+                  { key: 'method', header: t('field.method'), muted: true, render: (row) => paymentMethodLabel(row.method, locale) },
+                  { key: 'paid_at', header: t('common.date'), muted: true },
+                  { key: 'amount', header: t('common.amount'), align: 'right', width: 100, render: (row) => <Money amount={money(row.amount_minor)} /> },
+                  { key: 'status', header: t('common.status'), width: 110, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
                 ]}
               />
             </div>
@@ -651,14 +949,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         {tab === 'attendance' && (
           <Table
             rows={attendance}
-            emptyLabel="Посещений нет"
+            emptyLabel={t('client.noAttendance')}
             columns={[
-              { key: 'participant', header: 'Участник', render: (row) => <span className="strong">{row.participant}</span> },
-              { key: 'session_start_at', header: 'Занятие', render: (row) => <button type="button" className="ops-link-button" onClick={() => go?.('attendance', { sessionId: row.session_id })}>{formatShortDate(row.session_start_at)} {formatTime(row.session_start_at)}-{formatTime(row.session_end_at)}</button> },
-              { key: 'group', header: 'Группа', muted: true },
-              { key: 'trainer', header: 'Тренер', muted: true },
-              { key: 'status', header: 'Статус', width: 120, render: (row) => <StatusPill status={row.status} size="sm" /> },
-              { key: 'deducts', header: 'Списание', width: 90, render: (row) => row.deducts ? <Badge tone="warning">-1</Badge> : <Badge tone="neutral">0</Badge> },
+              { key: 'participant', header: t('common.participant'), render: (row) => <span className="strong">{row.participant}</span> },
+              { key: 'session_start_at', header: t('field.session'), render: (row) => <button type="button" className="ops-link-button" onClick={() => go?.('attendance', { sessionId: row.session_id })}>{formatLocalShortDate(row.session_start_at)} {formatTime(row.session_start_at)}-{formatTime(row.session_end_at)}</button> },
+              { key: 'group', header: t('common.group'), muted: true },
+              { key: 'trainer', header: t('common.trainer'), muted: true },
+              { key: 'status', header: t('common.status'), width: 120, render: (row) => <StatusPill status={row.status} size="sm" /> },
+              { key: 'deducts', header: t('field.deduction'), width: 90, render: (row) => row.deducts ? <Badge tone="warning">-1</Badge> : <Badge tone="neutral">0</Badge> },
             ]}
           />
         )}
@@ -666,13 +964,13 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
         {tab === 'consents' && (
           <Table
             rows={consents}
-            emptyLabel="Согласий нет"
+            emptyLabel={t('client.noConsents')}
             columns={[
-              { key: 'type_label', header: 'Согласие', render: (row) => <span className="strong">{row.type_label || row.type}</span> },
-              { key: 'policy_version', header: 'Версия', muted: true, render: (row) => row.policy_version || '-' },
-              { key: 'granted_at', header: 'Выдано', muted: true, render: (row) => row.granted_at ? formatDate(row.granted_at) : '-' },
-              { key: 'revoked_at', header: 'Отозвано', muted: true, render: (row) => row.revoked_at ? formatDate(row.revoked_at) : '-' },
-              { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
+              { key: 'type_label', header: t('field.consent'), render: (row) => <span className="strong">{row.type_label || row.type}</span> },
+              { key: 'policy_version', header: t('field.version'), muted: true, render: (row) => row.policy_version || '-' },
+              { key: 'granted_at', header: t('field.granted'), muted: true, render: (row) => row.granted_at ? formatLocalDate(row.granted_at) : '-' },
+              { key: 'revoked_at', header: t('field.revoked'), muted: true, render: (row) => row.revoked_at ? formatLocalDate(row.revoked_at) : '-' },
+              { key: 'active', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
             ]}
           />
         )}
@@ -681,38 +979,38 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
           <div className="card card-pad" style={{ maxWidth: 860 }}>
             <div className="page-head" style={{ marginBottom: 14 }}>
               <div>
-                <h3 className="section-title" style={{ margin: 0 }}>Данные клиента</h3>
-                <p className="page-desc" style={{ marginTop: 4 }}>Экспорт, архивирование и анонимизация аккаунта.</p>
+                <h3 className="section-title" style={{ margin: 0 }}>{t('client.dataTitle')}</h3>
+                <p className="page-desc" style={{ marginTop: 4 }}>{t('client.dataDescription')}</p>
               </div>
             </div>
             <div style={{ display: 'grid', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <div>
-                  <div className="strong">Экспорт данных клиента</div>
-                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Скачивает данные аккаунта, участников, абонементов, платежей, посещений и согласий.</div>
+                  <div className="strong">{t('client.exportTitle')}</div>
+                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.exportDescription')}</div>
                 </div>
-                <Button variant="secondary" loading={actionBusy === 'export'} disabled={actionBusy != null || loading} onClick={exportClientData}>Скачать данные</Button>
+                <Button variant="secondary" loading={actionBusy === 'export'} disabled={actionBusy != null || loading} onClick={exportClientData}>{t('client.downloadData')}</Button>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <div>
-                  <div className="strong">Архивировать аккаунт</div>
-                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Аккаунт и участники станут неактивными, история сохранится.</div>
+                  <div className="strong">{t('client.archiveTitle')}</div>
+                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.archiveDescription')}</div>
                 </div>
-                <Button variant="secondary" loading={actionBusy === 'archive'} disabled={actionBusy != null || loading || account.is_active === false} onClick={() => setConfirmAction({ type: 'archive' })}>Архивировать</Button>
+                <Button variant="secondary" loading={actionBusy === 'archive'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'archive' })}>{t('client.archive')}</Button>
               </div>
               {accountArchived && <div className="ops-privacy-row">
                 <div>
-                  <div className="strong">Восстановить аккаунт</div>
-                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Вернёт аккаунт и участников из чёрного списка в рабочий список.</div>
+                  <div className="strong">{t('client.restoreTitle')}</div>
+                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.restoreDescription')}</div>
                 </div>
-                <Button variant="primary" loading={actionBusy === 'restore'} disabled={actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'restore' })}>Восстановить</Button>
+                <Button variant="primary" loading={actionBusy === 'restore'} disabled={actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'restore' })}>{t('clients.restore')}</Button>
               </div>}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', padding: '12px 0' }}>
                 <div>
-                  <div className="strong">Анонимизировать персональные данные</div>
-                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>Удаляет контакты, чувствительные данные, согласия и файлы; финансовая история остаётся без персональных данных.</div>
+                  <div className="strong">{t('client.anonymizeTitle')}</div>
+                  <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.anonymizeDescription')}</div>
                 </div>
-                <Button variant="danger" loading={actionBusy === 'anonymize'} disabled={actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'anonymize' })}>Анонимизировать</Button>
+                <Button variant="danger" loading={actionBusy === 'anonymize'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'anonymize' })}>{t('client.anonymize')}</Button>
               </div>
             </div>
           </div>
@@ -720,20 +1018,20 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData)
 
         {confirmAction && (
           <Dialog
-            title={confirmAction.type === 'archive' ? 'Переместить клиента в чёрный список?' : confirmAction.type === 'restore' ? 'Восстановить клиента?' : 'Анонимизировать данные клиента?'}
+            title={confirmAction.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction.type === 'restore' ? t('client.restoreConfirmTitle') : t('client.anonymizeConfirmTitle')}
             description={confirmAction.type === 'archive'
-              ? 'Аккаунт и участники станут неактивными. Исторические данные останутся в системе.'
+              ? t('client.archiveConfirmDescription')
               : confirmAction.type === 'restore'
-                ? 'Аккаунт и участники снова станут активными и появятся в рабочем списке.'
-              : 'Персональные данные будут безвозвратно удалены или заменены техническими значениями. Операцию нельзя отменить.'}
+                ? t('client.restoreConfirmDescription')
+              : t('client.anonymizeConfirmDescription')}
             tone={confirmAction.type === 'restore' ? 'default' : 'danger'}
             irreversible={confirmAction.type === 'anonymize'}
-            confirmLabel={confirmAction.type === 'archive' ? 'В чёрный список' : confirmAction.type === 'restore' ? 'Восстановить' : 'Анонимизировать'}
+            confirmLabel={confirmAction.type === 'archive' ? t('client.blacklistAction') : confirmAction.type === 'restore' ? t('clients.restore') : t('client.anonymize')}
             onClose={() => actionBusy ? null : setConfirmAction(null)}
             onConfirm={runDangerAction}
           >
             <div className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
-              Клиент: <span className="strong">{account.full_name || account.username || fallbackClientId}</span>
+              {t('client.contextPrefix')} <span className="strong">{account.full_name || account.username || fallbackClientId}</span>
             </div>
           </Dialog>
         )}

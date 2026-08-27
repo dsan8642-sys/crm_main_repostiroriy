@@ -25,38 +25,13 @@ jobs:
       - name: Verify release source manifests
         run: python scripts/verify_release_source_manifests.py --require-tracked
 
-      - name: Build release source archive
-        shell: pwsh
-        run: .\scripts\build-release-source.ps1
-
-      - name: Verify release source archive
-        shell: pwsh
-        run: |
-          $shortSha = (git rev-parse --short=12 HEAD).Trim()
-          .\scripts\verify-release-source-archive.ps1 "releases\swimcrm-release-$shortSha.manifest.json"
-
-      - name: Upload verified release source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: swimcrm-release-source-${{ github.sha }}
-          path: |
-            releases/swimcrm-release-*.zip
-            releases/swimcrm-release-*.manifest.json
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
-            package-lock.json
             frontend/package-lock.json
-
-      - name: Install root Node tooling
-        shell: pwsh
-        run: npm ci --cache .npm-cache
 
       - name: Install backend dependencies
         shell: pwsh
@@ -67,7 +42,29 @@ jobs:
 
       - name: Full-stack release check
         shell: pwsh
-        run: .\scripts\release-check-full.ps1 -AllowMissingLocalNocoBaseRuntime
+        run: .\scripts\release-check-full.ps1
+
+      - name: Build immutable release artifact
+        shell: pwsh
+        run: .\scripts\build-release-artifact.ps1
+
+      - name: Verify immutable release artifact
+        shell: pwsh
+        run: |
+          $shortSha = (git rev-parse --short=12 HEAD).Trim()
+          .\scripts\verify-release-artifact.ps1 "releases\swimcrm-release-$shortSha.manifest.json"
+
+      - name: Upload immutable release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swimcrm-release-${{ github.sha }}
+          path: |
+            releases/swimcrm-release-*.zip
+            releases/swimcrm-release-*.manifest.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          overwrite: false
 
   postgres-backend-check:
     runs-on: ubuntu-latest

@@ -12,8 +12,6 @@ $blocked = New-Object System.Collections.Generic.List[string]
 $canUseGitFileList = $false
 
 $requiredReleaseFiles = @(
-    "package.json",
-    "package-lock.json",
     "frontend\package.json",
     "frontend\package-lock.json"
 )
@@ -48,13 +46,10 @@ function Add-BlockedPath {
 
 $blockedDirs = @(
     ".runtime",
-    ".nocobase",
-    ".nocobase-logs",
     ".npm-cache",
     ".yarn-cache",
     "receipts",
     "swimcrm\receipts",
-    "swimcrm-hybrid",
     "backups",
     "releases",
     "frontend\dist",
@@ -66,8 +61,7 @@ if ($Strict) {
         ".venv",
         "swimcrm\.venv",
         "node_modules",
-        "frontend\node_modules",
-        "swimcrm-hybrid\source\node_modules"
+        "frontend\node_modules"
     )
 }
 

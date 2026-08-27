@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [switch]$Postgres,
-    [switch]$AllowMissingLocalNocoBaseRuntime,
     [switch]$SkipFullStackChecks,
     [switch]$SkipFrontendInstall,
     [switch]$SkipFrontendAudit,
@@ -83,7 +82,7 @@ function Get-ReleaseReviewCategory {
         return "frontend"
     }
     if ($Path -match "^swimcrm/|^swimcrm\\") {
-        if ($Path -match "nocobase|localization|payroll|migrations|tests") {
+        if ($Path -match "localization|payroll|migrations|tests") {
             return "backend_core"
         }
         return "backend"
@@ -94,7 +93,7 @@ function Get-ReleaseReviewCategory {
     if ($Path -match "^docs/|^docs\\") {
         return "docs"
     }
-    if ($Path -match "^package(-lock)?\.json$|^\.gitignore$") {
+    if ($Path -match "^\.gitignore$") {
         return "root_release_manifests"
     }
     return "other"
@@ -106,13 +105,10 @@ function Test-ProductionCriticalPath {
     return ($Path -match "^\.github/|^\.github\\" -or
         $Path -match "^scripts/|^scripts\\" -or
         $Path -match "^docs/PRODUCTION_|^docs\\PRODUCTION_" -or
-        $Path -match "^docs/NOCOBASE_|^docs\\NOCOBASE_" -or
         $Path -match "^docs/RELEASE_CANDIDATE_READINESS\.md$" -or
-        $Path -match "^package(-lock)?\.json$" -or
         $Path -match "^frontend/package(-lock)?\.json$|^frontend\\package(-lock)?\.json$" -or
         $Path -match "migrations" -or
         $Path -match "settings\.py$" -or
-        $Path -match "nocobase" -or
         $Path -match "payroll" -or
         $Path -match "backup|restore|release|cutover|readiness")
 }
@@ -229,8 +225,8 @@ if ($PlanOnly) {
             "capture_github_actions_postgres_backend_check_url",
             "install_release_archive_on_target_host",
             "run_target_host_production_env_preflight",
-            "run_target_host_live_hybrid_health",
-            "run_target_host_hybrid_backup_restore_drill",
+            "run_target_host_live_app_health",
+            "run_target_host_backup_restore_drill",
             "fill_docs_production_cutover_evidence_json",
             "run_scripts_verify_production_cutover_evidence_cmd"
         )
@@ -246,9 +242,6 @@ if (-not $SkipFullStackChecks) {
     $fullArgs = @()
     if ($Postgres) {
         $fullArgs += "-Postgres"
-    }
-    if ($AllowMissingLocalNocoBaseRuntime) {
-        $fullArgs += "-AllowMissingLocalNocoBaseRuntime"
     }
     if ($SkipFrontendInstall) {
         $fullArgs += "-SkipFrontendInstall"

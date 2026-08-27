@@ -65,6 +65,12 @@ body {
 .swim-input:focus,
 .swim-textarea:focus,
 .swim-select:focus { border-color: var(--border-focus) !important; box-shadow: var(--ring) !important; outline: none; }
+.swim-input[aria-invalid="true"],
+.swim-textarea[aria-invalid="true"],
+.swim-select[aria-invalid="true"] {
+  border-color: var(--red-500) !important;
+  box-shadow: 0 0 0 3px rgba(214, 63, 54, 0.14) !important;
+}
 .swim-input::placeholder, .swim-textarea::placeholder { color: var(--text-faint); }
 
 /* Table rows */

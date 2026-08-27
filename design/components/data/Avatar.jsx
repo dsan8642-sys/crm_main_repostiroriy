@@ -7,7 +7,7 @@ import React from 'react';
  */
 const PALETTE = [
   ['#d6ecfb', '#0f5285'], // blue
-  ['#c7efe9', '#0f867a'], // teal
+  ['#eef6fd', '#1364a3'], // pool blue
   ['#e0d5f6', '#6238a8'], // violet
   ['#f9e6bd', '#855708'], // amber
   ['#cdecd7', '#116a38'], // green

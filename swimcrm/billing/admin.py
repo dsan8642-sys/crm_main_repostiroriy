@@ -8,10 +8,10 @@ from .models import Charge, Payment, PaymentEvent, ReceiptFile
 @admin.register(Charge)
 class ChargeAdmin(AuditAdminMixin, admin.ModelAdmin):
     list_display = ("student", "description", "amount", "due_date", "subscription", "created_by")
-    list_filter = ("currency", "due_date", "student__group")
+    list_filter = ("currency", "due_date", "student__groups")
     search_fields = (
         "student__first_name", "student__last_name", "student__email",
-        "student__parent__phone", "student__group__name",
+        "student__parent__phone", "student__groups__name",
         "description",
     )
     autocomplete_fields = ("student", "subscription", "created_by")
@@ -46,10 +46,10 @@ class PaymentAdmin(AuditAdminMixin, admin.ModelAdmin):
         "student", "amount", "source", "method", "status", "paid_at",
         "confirmed_by", "confirmed_at",
     )
-    list_filter = ("source", "status", "method", "currency", "paid_at", "student__group")
+    list_filter = ("source", "status", "method", "currency", "paid_at", "student__groups")
     search_fields = (
         "student__first_name", "student__last_name", "student__email",
-        "student__parent__phone", "student__group__name",
+        "student__parent__phone", "student__groups__name",
         "comment", "confirmed_by__username", "confirmed_by__first_name",
         "confirmed_by__last_name",
     )

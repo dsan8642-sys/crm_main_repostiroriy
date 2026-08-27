@@ -56,52 +56,55 @@ def validate(path=WORKFLOW):
         )
         _require(
             release,
-            r"build-release-source\.ps1",
-            "release source archive builder",
+            r"build-release-artifact\.ps1",
+            "immutable release artifact builder",
             errors,
         )
         _require(
             release,
-            r"verify-release-source-archive\.ps1",
-            "release source archive verifier",
+            r"verify-release-artifact\.ps1",
+            "immutable release artifact verifier",
             errors,
         )
         _require(
             release,
             r"git rev-parse --short=12 HEAD",
-            "release source archive verifier short SHA",
+            "release artifact verifier short SHA",
             errors,
         )
         _require(
             release,
             r"actions/upload-artifact@v4",
-            "release source archive artifact upload",
+            "immutable release artifact upload",
             errors,
         )
         _require(
             release,
-            r"name:\s+swimcrm-release-source-\$\{\{\s*github\.sha\s*\}\}",
-            "release source archive artifact name",
+            r"name:\s+swimcrm-release-\$\{\{\s*github\.sha\s*\}\}",
+            "commit-addressed release artifact name",
             errors,
         )
         _require(
             release,
             r"releases/swimcrm-release-\*\.zip",
-            "release source archive artifact zip path",
+            "release artifact zip path",
             errors,
         )
         _require(
             release,
             r"releases/swimcrm-release-\*\.manifest\.json",
-            "release source archive artifact manifest path",
+            "release artifact manifest path",
             errors,
         )
         _require(
             release,
             r"if-no-files-found:\s+error",
-            "release source archive artifact missing-file guard",
+            "release artifact missing-file guard",
             errors,
         )
+        _require(release, r"retention-days:\s+30", "release artifact retention", errors)
+        _require(release, r"compression-level:\s+0", "already-zipped artifact passthrough", errors)
+        _require(release, r"overwrite:\s+false", "immutable artifact overwrite guard", errors)
         _require_order(
             release,
             "actions/setup-python@v5",
@@ -112,37 +115,43 @@ def validate(path=WORKFLOW):
         _require_order(
             release,
             "python scripts/verify_release_source_manifests.py --require-tracked",
-            "build-release-source.ps1",
-            "tracked manifest check before release source archive",
+            "release-check-full.ps1",
+            "tracked manifest check before full release gate",
             errors,
         )
         _require_order(
             release,
-            "build-release-source.ps1",
-            "verify-release-source-archive.ps1",
-            "release source archive before archive verifier",
+            "release-check-full.ps1",
+            "build-release-artifact.ps1",
+            "full release gate before immutable artifact build",
             errors,
         )
         _require_order(
             release,
-            "verify-release-source-archive.ps1",
+            "build-release-artifact.ps1",
+            "verify-release-artifact.ps1",
+            "immutable artifact build before verification",
+            errors,
+        )
+        _require_order(
+            release,
+            "verify-release-artifact.ps1",
             "actions/upload-artifact@v4",
-            "verified release source archive before artifact upload",
+            "verified immutable artifact before upload",
             errors,
         )
         _require_order(
             release,
-            "actions/upload-artifact@v4",
             "actions/setup-node@v4",
-            "uploaded release source archive before generated Node artifacts",
+            "release-check-full.ps1",
+            "Node setup before full release gate",
             errors,
         )
         _require(release, r"verify-release-tree\.ps1 -Strict", "strict release tree check", errors)
-        _require(release, r"npm ci --cache \.npm-cache", "root Node install", errors)
         _require(release, r"pip install -r swimcrm\\requirements\.txt", "backend dependency install", errors)
         _require(
             release,
-            r"release-check-full\.ps1 -AllowMissingLocalNocoBaseRuntime",
+            r"release-check-full\.ps1",
             "full-stack release gate",
             errors,
         )

@@ -5,14 +5,45 @@ from common.money import CURRENCY_CHOICES, Money
 
 
 class Group(models.Model):
-    """Rule 7: a student is attached to a group statically."""
+    """A recurring training group with its own schedule defaults."""
     name = models.CharField(max_length=120, unique=True)
     description = models.TextField(blank=True)
     default_trainer = models.ForeignKey(
         "accounts.Trainer", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="default_groups",
     )
+    default_location = models.ForeignKey(
+        "scheduling.Location", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="default_groups",
+    )
+    price_minor = models.BigIntegerField(
+        null=True, blank=True,
+        help_text="Цена одного занятия в минорных единицах; пусто = не начислять")
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
+                                default=settings.DEFAULT_CURRENCY)
+    default_capacity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Вместимость по умолчанию для новых групповых занятий",
+    )
+    color_key = models.CharField(max_length=32, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(default_capacity__isnull=True)
+                    | models.Q(default_capacity__gt=0)
+                ),
+                name="catalog_group_default_capacity_positive",
+            ),
+        ]
+
+    @property
+    def price(self) -> Money | None:
+        """Charged per attended session when no subscription covers it."""
+        return None if self.price_minor is None else Money(self.price_minor, self.currency)
 
     def __str__(self):
         return self.name

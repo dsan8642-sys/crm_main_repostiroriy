@@ -4,11 +4,6 @@ from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections
 from django.db.migrations.executor import MigrationExecutor
 
-from common.nocobase_blueprint import (
-    validate_nocobase_blueprint,
-    validate_nocobase_build_pack,
-)
-
 
 def _check_database():
     with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
@@ -68,16 +63,6 @@ def _check_runtime_path(path):
     }
 
 
-def _check_secret(name, value):
-    required = not settings.DEBUG
-    configured = bool(value)
-    return {
-        "ok": configured or not required,
-        "configured": configured,
-        "required": required,
-    }
-
-
 def build_readiness_report():
     checks = {}
 
@@ -92,12 +77,6 @@ def build_readiness_report():
 
     checks["media_root"] = _check_writable_directory(settings.MEDIA_ROOT)
     checks["runtime_dir"] = _check_runtime_path(settings.RUNTIME_DIR)
-    checks["nocobase_bridge_token"] = _check_secret(
-        "NOCOBASE_BRIDGE_TOKEN", settings.NOCOBASE_BRIDGE_TOKEN)
-    checks["nocobase_config_token"] = _check_secret(
-        "NOCOBASE_CONFIG_TOKEN", settings.NOCOBASE_CONFIG_TOKEN)
-    checks["nocobase_first_screens"] = validate_nocobase_blueprint()
-    checks["nocobase_screen_build_pack"] = validate_nocobase_build_pack()
     checks["default_language"] = {
         "ok": bool(settings.SWIMCRM_DEFAULT_LANGUAGE),
         "code": settings.SWIMCRM_DEFAULT_LANGUAGE,

@@ -27,7 +27,8 @@ Finalize the operational baseline before active feature implementation.
 - approved `CRM_CORE_SPEC.md`;
 - approved data model baseline;
 - approved role and permissions matrix;
-- approved module boundaries between Django and optional NocoBase surfaces;
+- approved module boundaries for low-risk admin/configuration surfaces served
+  by Django's own admin settings API;
 - approved environment strategy for local, staging, and production.
 
 ### Key Tasks

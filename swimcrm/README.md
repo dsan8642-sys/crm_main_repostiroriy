@@ -86,7 +86,7 @@ exclusion-constraint против гонок в расписании.
 | 5.5 Должники / «Скоро оплата» | Должники (просрочка / истёкший абонемент / отриц. баланс); «скоро оплата» по окну дней и по остатку занятий; фильтры 1/3/7/14/30 | `analytics/debtors.py` | `DebtorsRule` |
 | 5.9 Отчёты | Доход за период / по группам / по тренерам (кассовый метод — подтверждённые платежи), неоплаченные счета; посещаемость по клиенту/группе/тренеру | `analytics/reports.py` | `ReportsRule` |
 | 5.9/5.10 Экспорт | Выгрузка `.xlsx` (Arial, жирная закреплённая шапка) и CSV (UTF-8 BOM, `;`) | `analytics/exporters.py`, `dataio/exports.py` | `ImportRule` |
-| 5.10 Импорт | Импорт клиентов из `.xlsx`/CSV: маппинг полей, авто-детект кодировки (PL), предпросмотр (new/duplicate/error), атомарный commit, **откат** через `ImportBatch` | `dataio/importer.py` | `ImportRule` |
+| 5.10 Импорт | Единый CSV/XLSX-контракт и server-owned staging для trainers/groups/clients/payments/attendance: auto/manual mapping, row/relation overrides, hash/dedup, отчёт batch; безопасный rollback clients/groups и документированная компенсация immutable history | `dataio/contracts.py`, `dataio/*_importer.py`, `portal/admin_import_views.py` | `ImportRule`, `test_dataio_roundtrip` |
 | 5.6 Уведомления | Планировщик с **настраиваемым таймингом** (`событие + смещение + канал + шаблон`), учёт согласий/отписки (RODO), лог доставки с ретраями; каналы Email, Telegram и SMS идут через provider adapters | `notifications/services.py`, `backends.py` | `NotificationSchedulerRule` |
 
 ## Ключевые решения Фазы 2
@@ -99,8 +99,12 @@ exclusion-constraint против гонок в расписании.
   наличии `chat_id` и отсутствии отзыва. Отписка = отзыв согласия.
 - **Ретраи**: мягкая ошибка доставки оставляет запись в `QUEUED` и растит `retries`;
   после `MAX_RETRIES` — статус `FAILED`.
-- **Импорт безопасен**: предпросмотр без записи; commit в одной транзакции (частичный
-  импорт невозможен); `ImportBatch.rollback()` откатывает применённый импорт целиком.
+- **Импорт безопасен**: preview не пишет доменные записи; staging принадлежит
+  создавшему его администратору, истекает и применяется один раз; commit повторно
+  валидирует серверные строки в транзакции. Строчные validation errors остаются в
+  отчёте, а фатальная ошибка откатывает критическую операцию. Clients/groups имеют
+  dependency-aware rollback; immutable payments/attendance исправляются только
+  новой аудируемой доменной операцией.
 - **Доход — кассовый метод**: считается по подтверждённым платежам (как зафиксировано в 5.9).
 
 ## Новые команды (точки для Celery beat / cron)

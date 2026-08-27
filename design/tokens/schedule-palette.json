@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "standard": {
+    "key": "standard",
+    "label": "Стандартный",
+    "background": "#EEF6FD",
+    "border": "#1A7DC4",
+    "text": "#0F5285"
+  },
+  "colors": [
+    { "key": "navy-01", "label": "Тёмно-синий", "background": "#EFF6FF", "border": "#1E3A8A", "text": "#172554" },
+    { "key": "blue-01", "label": "Васильковый", "background": "#DBEAFE", "border": "#2563EB", "text": "#1E3A8A" },
+    { "key": "sky-01", "label": "Небесный", "background": "#E0F2FE", "border": "#0284C7", "text": "#0C4A6E" },
+    { "key": "cyan-01", "label": "Циановый", "background": "#CFFAFE", "border": "#0891B2", "text": "#164E63" },
+    { "key": "turquoise-01", "label": "Аквамариновый", "background": "#E6FFFB", "border": "#14B8A6", "text": "#134E4A" },
+    { "key": "teal-01", "label": "Лагуна", "background": "#CCFBF1", "border": "#0F766E", "text": "#134E4A" },
+    { "key": "mint-01", "label": "Мятный", "background": "#ECFDF5", "border": "#10B981", "text": "#065F46" },
+    { "key": "emerald-01", "label": "Изумрудный", "background": "#D1FAE5", "border": "#059669", "text": "#064E3B" },
+    { "key": "forest-01", "label": "Лесной", "background": "#E8F5E9", "border": "#2E7D32", "text": "#1B5E20" },
+    { "key": "lime-01", "label": "Лаймовый", "background": "#ECFCCB", "border": "#65A30D", "text": "#365314" },
+    { "key": "olive-01", "label": "Оливковый", "background": "#F5F5DC", "border": "#6B7D24", "text": "#3F4A16" },
+    { "key": "gold-01", "label": "Золотистый", "background": "#FEF3C7", "border": "#D97706", "text": "#78350F" },
+    { "key": "amber-01", "label": "Янтарный", "background": "#FFF7D6", "border": "#B7791F", "text": "#744210" },
+    { "key": "orange-01", "label": "Мандариновый", "background": "#FFEDD5", "border": "#EA580C", "text": "#7C2D12" },
+    { "key": "terracotta-01", "label": "Терракотовый", "background": "#FCE7DC", "border": "#C2410C", "text": "#7C2D12" },
+    { "key": "coral-01", "label": "Коралловый", "background": "#FFF0EC", "border": "#F97360", "text": "#8C2F20" },
+    { "key": "brick-01", "label": "Кирпичный", "background": "#FEE2E2", "border": "#B91C1C", "text": "#7F1D1D" },
+    { "key": "rose-01", "label": "Розовый коралл", "background": "#FFE4E6", "border": "#E11D48", "text": "#881337" },
+    { "key": "raspberry-01", "label": "Малиновый", "background": "#FCE7F3", "border": "#BE185D", "text": "#831843" },
+    { "key": "pink-01", "label": "Розовый", "background": "#FDF2F8", "border": "#DB2777", "text": "#9D174D" },
+    { "key": "magenta-01", "label": "Маджента", "background": "#FAE8FF", "border": "#C026D3", "text": "#701A75" },
+    { "key": "orchid-01", "label": "Орхидея", "background": "#F5E8FF", "border": "#A855F7", "text": "#581C87" },
+    { "key": "purple-01", "label": "Пурпурный", "background": "#F3E8FF", "border": "#9333EA", "text": "#581C87" },
+    { "key": "violet-01", "label": "Фиалковый", "background": "#EDE9FE", "border": "#7C3AED", "text": "#4C1D95" },
+    { "key": "lavender-01", "label": "Лавандовый", "background": "#F5F3FF", "border": "#8B5CF6", "text": "#5B21B6" },
+    { "key": "indigo-01", "label": "Индиго", "background": "#E0E7FF", "border": "#4F46E5", "text": "#312E81" },
+    { "key": "plum-01", "label": "Сливовый", "background": "#F4E8F0", "border": "#7E225F", "text": "#4A1638" },
+    { "key": "brown-01", "label": "Каштановый", "background": "#F5E9DF", "border": "#92400E", "text": "#5C2D0B" },
+    { "key": "sand-01", "label": "Песочный", "background": "#FAF0D7", "border": "#B8860B", "text": "#6B4F00" },
+    { "key": "slate-01", "label": "Графитовый", "background": "#F1F5F9", "border": "#64748B", "text": "#334155" }
+  ]
+}

@@ -1,4 +1,12 @@
 from .support import *
+from .pagination import (
+    choice_param,
+    list_contract_requested,
+    ordered_rows,
+    paginated_payload,
+    positive_int_param,
+    search_param,
+)
 
 
 def _effective_trainer_filter(trainer):
@@ -27,7 +35,11 @@ def trainer_sessions(request):
         qs = qs.filter(is_cancelled=True)
     elif request.GET.get("status") == "active":
         qs = qs.filter(is_cancelled=False)
-    return JsonResponse({"sessions": [_session_payload(session) for session in qs[:300]]})
+    type_colors = session_type_color_keys()
+    return JsonResponse({"sessions": [
+        _role_session_payload(session, type_color_keys=type_colors)
+        for session in qs[:300]
+    ]})
 
 
 @require_GET
@@ -35,6 +47,7 @@ def trainer_groups(request):
     trainer = _trainer_from_request(request)
     today = timezone.localdate()
     groups = Group.objects.filter(default_trainer=trainer).order_by("name", "id")
+    type_colors = session_type_color_keys()
     payload = []
     for group in groups:
         next_session = Session.objects.filter(
@@ -49,7 +62,8 @@ def trainer_groups(request):
             "description": group.description,
             "students_count": group.students.filter(is_active=True).count(),
             "is_active": group.is_active,
-            "next_session": _session_payload(next_session) if next_session else None,
+            "next_session": _role_session_payload(
+                next_session, type_color_keys=type_colors) if next_session else None,
             "students": [{"id": student.id, "full_name": student.full_name} for student in group.students.filter(is_active=True).order_by("last_name", "first_name")],
         })
     return JsonResponse({"groups": payload})
@@ -62,16 +76,46 @@ def trainer_history(request):
         _effective_trainer_filter(trainer), start_at__date__lt=timezone.localdate()
     ).select_related(
         "group", "trainer__user", "substitute_trainer__user", "individual_student"
-    ).order_by("-start_at", "-id")
-    if request.GET.get("group_id"):
-        qs = qs.filter(group_id=request.GET["group_id"])
+    )
+    group_id = positive_int_param(request, "group_id")
+    if group_id:
+        qs = qs.filter(group_id=group_id)
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     if date_from:
         qs = qs.filter(start_at__date__gte=date_from)
     if date_to:
         qs = qs.filter(start_at__date__lte=date_to)
-    return JsonResponse({"sessions": [_session_payload(session) for session in qs[:300]]})
+    q = search_param(request)
+    if q:
+        qs = qs.filter(
+            Q(group__name__icontains=q) |
+            Q(location__icontains=q) |
+            Q(individual_student__first_name__icontains=q) |
+            Q(individual_student__last_name__icontains=q)
+        )
+    status = choice_param(request, "status", {"active", "cancelled"})
+    if status:
+        qs = qs.filter(is_cancelled=status == "cancelled")
+    qs = ordered_rows(request, qs, allowlist={
+        "-date": ("-start_at", "-id"),
+        "date": ("start_at", "id"),
+        "group": ("group__name", "-start_at", "-id"),
+        "-group": ("-group__name", "-start_at", "-id"),
+    }, default="-date")
+    type_colors = session_type_color_keys()
+    if list_contract_requested(request, extra_params={"status"}):
+        return JsonResponse(paginated_payload(
+            request,
+            qs,
+            key="sessions",
+            serializer=lambda session: _role_session_payload(
+                session, type_color_keys=type_colors),
+        ))
+    return JsonResponse({"sessions": [
+        _role_session_payload(session, type_color_keys=type_colors)
+        for session in qs[:300]
+    ]})
 
 
 @require_GET
@@ -85,35 +129,53 @@ def trainer_session_detail(request, session_id):
     )
     attendance = {record.student_id: record for record in session.attendance.all()}
     return JsonResponse({
-        "session": _session_payload(session),
+        "session": _role_session_payload(session),
         "students": [{
             "id": student.id,
             "full_name": student.full_name,
-            "group": {"id": student.group_id, "name": student.group.name} if student.group_id else None,
+            "groups": _student_group_payloads(student),
+            "group": _legacy_group_payload(_student_group_payloads(student)),
             "attendance": {
                 "status": attendance[student.id].status,
                 "comment": attendance[student.id].comment,
                 "marked_at": timezone.localtime(attendance[student.id].marked_at).isoformat(),
             } if student.id in attendance else None,
-        } for student in _session_roster(session)],
+        } for student in (
+            split_roster_students(session)
+            if session.session_type == SessionType.SPLIT
+            else _session_roster(session)
+        )],
     })
 
 
 @require_POST
+@transaction.atomic
 def trainer_mark_attendance(request, session_id):
     trainer = _trainer_from_request(request)
-    session = get_object_or_404(Session.objects.filter(_effective_trainer_filter(trainer)), pk=session_id)
+    session = get_object_or_404(
+        Session.objects.select_for_update().filter(_effective_trainer_filter(trainer)),
+        pk=session_id,
+    )
     data = _json_body(request)
     try:
         student_id = int(data.get("student_id"))
     except (TypeError, ValueError) as exc:
-        raise ValidationError("student_id is required") from exc
+        raise _field_validation_error(
+            "student_id", "Выберите участника.", code="required") from exc
     status = data.get("status")
     if status not in AttendanceStatus.values:
-        raise ValidationError("invalid attendance status")
-    allowed_student_ids = set(_session_roster(session).values_list("id", flat=True))
+        raise _field_validation_error(
+            "status", "Выберите допустимый статус посещения.",
+            code="invalid_choice")
+    allowed_student_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else _session_roster(session).values_list("id", flat=True)
+    )
     if student_id not in allowed_student_ids:
-        raise PermissionDenied("student is not in this trainer session")
+        raise _field_validation_error(
+            "student_id", "Участник недоступен в этом занятии.",
+            code="invalid_choice")
     record = set_attendance(session_id=session.id, student=Student.objects.get(pk=student_id),
                             status=status, actor=request.user)
     return JsonResponse({
@@ -122,4 +184,81 @@ def trainer_mark_attendance(request, session_id):
         "session_id": record.session_id,
         "status": record.status,
         "deducts": record.deducts,
+    })
+
+
+@require_POST
+@transaction.atomic
+def trainer_bulk_attendance(request, session_id):
+    trainer = _trainer_from_request(request)
+    session = get_object_or_404(
+        Session.objects.select_for_update().filter(_effective_trainer_filter(trainer)),
+        pk=session_id,
+    )
+    if session.is_cancelled:
+        raise ValidationError("cancelled session is read-only")
+    data = _json_body(request)
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        raise _field_validation_error(
+            "items", "Добавьте хотя бы одну отметку посещения.",
+            code="required")
+    if len(items) > 500:
+        raise _field_validation_error(
+            "items", "За один запрос можно сохранить не более 500 отметок.",
+            code="max_items")
+    allowed_student_ids = set(
+        split_roster_student_ids(session)
+        if session.session_type == SessionType.SPLIT
+        else _session_roster(session).values_list("id", flat=True)
+    )
+    normalized = []
+    seen = set()
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise _field_validation_error(
+                f"items.{index}", "Некорректная отметка посещения.",
+                code="invalid")
+        try:
+            student_id = int(item.get("student_id"))
+        except (TypeError, ValueError) as exc:
+            raise _field_validation_error(
+                f"items.{index}.student_id", "Выберите участника.",
+                code="required") from exc
+        status = item.get("status")
+        if student_id in seen:
+            raise _field_validation_error(
+                f"items.{index}.student_id",
+                "Участник указан в списке повторно.", code="duplicate")
+        if student_id not in allowed_student_ids:
+            raise _field_validation_error(
+                f"items.{index}.student_id",
+                "Участник недоступен в этом занятии.",
+                code="invalid_choice")
+        if status not in AttendanceStatus.values:
+            raise _field_validation_error(
+                f"items.{index}.status",
+                "Выберите допустимый статус посещения.",
+                code="invalid_choice")
+        seen.add(student_id)
+        normalized.append((student_id, status))
+    students = Student.objects.in_bulk(seen)
+    results = []
+    for student_id, status in normalized:
+        record = set_attendance(
+            session_id=session.id,
+            student=students[student_id],
+            status=status,
+            actor=request.user,
+        )
+        results.append({
+            "id": record.id,
+            "student_id": record.student_id,
+            "status": record.status,
+            "deducts": record.deducts,
+        })
+    return JsonResponse({
+        "session_id": session.id,
+        "updated_count": len(results),
+        "results": results,
     })

@@ -85,8 +85,8 @@ $requiredActions = @(
     "capture_github_actions_postgres_backend_check_url",
     "install_release_archive_on_target_host",
     "run_target_host_production_env_preflight",
-    "run_target_host_live_hybrid_health",
-    "run_target_host_hybrid_backup_restore_drill",
+    "run_target_host_live_app_health",
+    "run_target_host_backup_restore_drill",
     "fill_docs_production_cutover_evidence_json",
     "run_scripts_verify_production_cutover_evidence_cmd"
 )
@@ -144,15 +144,14 @@ function Assert-ChecklistEvidenceContains {
     }
 }
 
-Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_live_hybrid_health" -Fragments @(
+Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_live_app_health" -Fragments @(
     "Operations status ok requirement passed",
-    "real https:// Django production URL",
-    "real https:// NocoBase production URL"
+    "real https:// Django production URL"
 )
-Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_hybrid_backup_restore_drill" -Fragments @(
+Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_host_backup_restore_drill" -Fragments @(
     "64-character SHA256",
-    "Django dump list OK",
-    "NocoBase dump list OK"
+    "Backup dump list OK",
+    "Restore verification OK"
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_release_archive_on_target_host" -Fragments @(
     "Target-host release install completed",
@@ -162,12 +161,8 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_rele
     "tracked_file_count",
     "tracked_file_list_sha256",
     "Backend dependencies installed",
-    "Root Node tooling installed",
-    "NocoBase CLI package installed",
     "Frontend dependencies installed",
-    "Django migrations check passed",
-    "NocoBase app root outside source tree",
-    "NocoBase storage outside source tree"
+    "Django migrations check passed"
 )
 
 $installItem = $operatorChecklist |

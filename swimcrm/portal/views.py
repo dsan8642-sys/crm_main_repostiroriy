@@ -3,7 +3,7 @@ from .admin_views import *
 from .admin_system_views import *
 from .client_views import *
 from .dev_views import *
-from .nocobase_views import *
+from .admin_settings_views import *
 from .public_views import *
 from .trainer_views import *
 

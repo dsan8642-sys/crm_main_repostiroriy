@@ -1,8 +1,10 @@
 import io
+import json
 from datetime import date, datetime, time, timedelta
 
 from django.core import mail
-from django.test import TestCase, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Consent, ConsentType
@@ -125,10 +127,25 @@ class ReportsRule(TestCase):
         self.assertEqual(inc.amount_minor, 24000)
 
     def test_income_by_group(self):
+        trainer = f.make_trainer()
+        session = create_session(
+            trainer=trainer,
+            start_at=timezone.now(),
+            end_at=timezone.now() + timedelta(hours=1),
+            location="A",
+            max_participants=10,
+            group=self.g,
+            price_minor=5300,
+        )
+        set_attendance(
+            session_id=session.id,
+            student=self.st,
+            status=AttendanceStatus.PRESENT,
+        )
         rows = reports.income_by_group(date.today() - timedelta(days=1),
                                        date.today() + timedelta(days=1))
         self.assertEqual(rows[0][0], "Акулы")
-        self.assertEqual(rows[0][1].amount_minor, 24000)
+        self.assertEqual(rows[0][1].amount_minor, 5300)
 
     def test_attendance_summary(self):
         tr = f.make_trainer()
@@ -153,6 +170,7 @@ CSV = ("Фамилия;Имя;Телефон;Email;Группа;Абонемен
 class ImportRule(TestCase):
     def setUp(self):
         f.make_sub_type(name="Абонемент 8", sessions=8)
+        Group.objects.create(name="Дельфины")
         self.mapping = {"Фамилия": "last_name", "Имя": "first_name", "Телефон": "phone",
                         "Email": "email", "Группа": "group", "Абонемент": "subscription"}
 
@@ -196,12 +214,53 @@ class ImportRule(TestCase):
         headers, rows = importer.parse_source(buf.getvalue(), "c.xlsx")
         self.assertEqual(rows[0]["Email"], "t@example.com")
 
+    def test_parse_rejects_excessive_rows_and_columns(self):
+        too_many_columns = ";".join(f"C{i}" for i in range(51)) + "\n"
+        with self.assertRaisesMessage(Exception, "50 столбцов"):
+            importer.parse_source(too_many_columns.encode("utf-8"), "columns.csv")
+        header = "Имя\n"
+        too_many_rows = header + "\n".join("Ян" for _ in range(importer.MAX_IMPORT_ROWS + 1))
+        with self.assertRaisesMessage(Exception, "5 000 строк"):
+            importer.parse_source(too_many_rows.encode("utf-8"), "rows.csv")
+
+    def test_rollback_preview_blocks_later_financial_data(self):
+        headers, rows = importer.parse_source(CSV.encode("utf-8"), "clients.csv")
+        batch = importer.commit(importer.preview(headers, rows, self.mapping))
+        student = Student.objects.get(email="jan@example.com")
+        Payment.objects.create(student=student, amount_minor=100, currency="PLN", paid_at=date.today())
+        preview = importer.rollback_preview(batch)
+        self.assertFalse(preview["can_rollback"])
+        self.assertIn("payments", preview["blockers"][0]["dependencies"])
+
     def test_entity_export_xlsx_and_csv(self):
         f.make_student(first="Ан", last="Ков")
         name, content = exports.export_entity("clients", "xlsx")
         self.assertTrue(name.endswith(".xlsx"))
         self.assertGreater(len(content), 0)
         self.assertEqual(content[:2], b"PK")  # xlsx is a zip
+
+    def test_preview_and_commit_are_reachable_over_http(self):
+        # The importer above is exercised directly; this confirms the same
+        # pipeline is actually wired to the admin API, not just importable.
+        admin_client = Client()
+        admin_client.force_login(f.make_admin(username="import_http_admin"))
+        preview = admin_client.post("/api/admin/import/clients/preview/", {
+            "file": SimpleUploadedFile("clients.csv", CSV.encode("utf-8"), content_type="text/csv"),
+            "mapping": json.dumps(self.mapping),
+        })
+        self.assertEqual(preview.status_code, 200)
+        rows = preview.json()["rows"]
+        self.assertEqual(sum(1 for r in rows if r["status"] == NEW), 2)
+
+        commit = admin_client.post(
+            "/api/admin/import/clients/commit/",
+            data=json.dumps({
+                "batch_id": preview.json()["batch_id"],
+                "selected_indices": [row["index"] for row in rows],
+            }),
+            content_type="application/json")
+        self.assertEqual(commit.status_code, 201)
+        self.assertEqual(commit.json()["rows_imported"], 2)
         name_csv, csv_bytes = exports.export_entity("clients", "csv")
         self.assertIn("Фамилия", csv_bytes.decode("utf-8"))
 

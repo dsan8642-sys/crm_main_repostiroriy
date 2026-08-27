@@ -1,13 +1,17 @@
-/* SwimCRM webfonts.
- *
- * NOTE: font binaries are loaded from the Google Fonts CDN rather than
- * self-hosted in this project (the authoring sandbox cannot download the
- * .woff2 binaries). Consumers with internet access get the real families.
- * To fully self-host, drop the IBM Plex Sans / Mono .woff2 files into
- * tokens/fonts/ and replace the @import below with local @font-face rules.
- *
- * IBM Plex Sans  — UI + data text. Full Polish (Latin Extended) coverage,
- *                  neutral technical character, excellent at small sizes.
- * IBM Plex Mono  — money, counts, IDs, tabular numerals.
- */
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+/* IBM Plex source assets are vendored from the official IBM/plex repository.
+ * See ../assets/fonts/ibm-plex/PROVENANCE.md for URLs, hashes and OFL notice. */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('../assets/fonts/ibm-plex/IBMPlexSans-Variable.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/ibm-plex/IBMPlexMono-Regular.woff2') format('woff2');
+}

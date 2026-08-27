@@ -1,30 +1,78 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { api } from '../../api.js'
-import { formatTime } from '../../mappers.js'
+import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
+import { api, apiErrorMessage } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
+import { formatTime, mapAdminSessionRows } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
+import { ToastNotice } from '../ToastProvider.jsx'
+import { dateToIso } from '../scheduleContracts.js'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
+import { loadAdminParticipantOptions } from '../participantSearch.js'
+import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
+import { FormModal } from '../FormModal.jsx'
+import { ContextBackButton } from '../EntityListPrimitives.jsx'
 
-export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
-  const { Table, Button, Banner, Avatar, StatusPill, Input, Badge } = components
+export function attendanceSessionDisplayStatus(session, now = Date.now()) {
+  if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
+  if (session?.status === 'done') return 'done'
+  const endAt = session?.end_at || session?.endAt
+  const endTimestamp = endAt ? Date.parse(endAt) : Number.NaN
+  return Number.isFinite(endTimestamp) && endTimestamp <= now ? 'done' : 'planned'
+}
+
+export function createAdminAttendanceScreen(components, icons, reloadRoleData, adminData = {}) {
+  const { Table, Button, Banner, Avatar, StatusPill, Input, Badge, Dialog } = components
   const I = icons
   const options = [
-    { value: 'present', label: 'Был', consumes: true },
-    { value: 'absent', label: 'Не был', consumes: true },
-    { value: 'excused', label: 'Уваж.', consumes: false },
-    { value: 'rescheduled', label: 'Перенос', consumes: false },
+    { value: 'present', labelKey: 'attendance.present', consumes: true },
+    { value: 'absent', labelKey: 'attendance.absent', consumes: true },
+    { value: 'excused', labelKey: 'attendance.excused', consumes: false },
+    { value: 'rescheduled', labelKey: 'attendance.rescheduled', consumes: false },
   ]
 
-  return function ApiAdminAttendance({ go, sessionId }) {
-    const sessions = globalThis.AdminData?.sessions || []
-    const clients = globalThis.AdminData?.clients || []
-    const [selectedSessionId, setSelectedSessionId] = useState(sessionId || sessions.find((item) => !item.isCancelled)?.sessionId || sessions[0]?.sessionId || '')
+  return function ApiAdminAttendance({ go, back, sessionId }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
+    const [sessions, setSessions] = useState(() => adminData.sessions || [])
+    const clients = adminData.clients || []
+    const today = dateToIso(new Date())
+    const defaultSession = sessions.find((item) => !item.isCancelled && item.startAt?.slice(0, 10) === today)
+      || sessions.find((item) => !item.isCancelled && item.startAt?.slice(0, 10) > today)
+    const [selectedSessionId, setSelectedSessionId] = useState(sessionId || defaultSession?.sessionId || '')
     const [selectedStudentId, setSelectedStudentId] = useState('')
     const [detail, setDetail] = useState(null)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
+    const [rowErrors, setRowErrors] = useState({})
+    const [studentError, setStudentError] = useState(null)
+    const [cancelReasonError, setCancelReasonError] = useState(null)
     const [busyId, setBusyId] = useState(null)
     const [loading, setLoading] = useState(false)
     const [cancelReason, setCancelReason] = useState('')
+    const [bulkPending, setBulkPending] = useState(false)
+    const [formAction, setFormAction] = useState(null)
+
+    useEffect(() => {
+      let alive = true
+      const now = new Date()
+      const dateFrom = dateToIso(new Date(now.getTime() - 30 * 86400000))
+      const dateTo = dateToIso(new Date(now.getTime() + 60 * 86400000))
+      const query = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        page: '1',
+        page_size: '200',
+      })
+      api.get(`/api/admin/schedule/sessions/?${query}`)
+        .then((payload) => {
+          if (alive) setSessions(mapAdminSessionRows(payload.sessions || []))
+        })
+        .catch((err) => {
+          if (alive) setError(apiErrorMessage(err, t('attendance.loadSessionsError')))
+        })
+      return () => { alive = false }
+    }, [t])
 
     useEffect(() => {
       if (sessionId) setSelectedSessionId(sessionId)
@@ -40,7 +88,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
           if (alive) setDetail(payload)
         })
         .catch((err) => {
-          if (alive) setError(err.message)
+          if (alive) setError(apiErrorMessage(err, t('attendance.loadRosterError')))
         })
         .finally(() => {
           if (alive) setLoading(false)
@@ -48,7 +96,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
       return () => {
         alive = false
       }
-    }, [selectedSessionId])
+    }, [selectedSessionId, t])
 
     const rows = detail?.students || []
     const rosterIds = useMemo(() => new Set(rows.map((row) => Number(row.id))), [rows])
@@ -61,6 +109,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
       if (!selectedSessionId) return
       setBusyId(`mark-${row.id}`)
       setError(null)
+      setRowErrors((current) => {
+        const next = { ...current }
+        delete next[row.id]
+        return next
+      })
       try {
         const record = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, {
           student_id: row.id,
@@ -72,10 +125,12 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
             ? { ...student, attendance: record }
             : student),
         }))
-        setMessage('Посещаемость сохранена.')
+        setMessage(t('attendance.saved'))
         reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const message = apiErrorMessage(err, t('attendance.saveError'))
+        setRowErrors((current) => ({ ...current, [row.id]: message }))
+        document.querySelector(`#admin-attendance-row-${row.id} button`)?.focus()
       } finally {
         setBusyId(null)
       }
@@ -83,29 +138,52 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
 
     async function markAllPresent() {
       if (!selectedSessionId || !rows.length) return
-      setBusyId('mark-all'); setError(null)
+      setBusyId('mark-all'); setError(null); setRowErrors({})
       try {
-        const records = await Promise.all(rows.map((row) => api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, { student_id: row.id, status: 'present' })))
+        const payload = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/bulk/`, {
+          items: rows.map((row) => ({ student_id: row.id, status: 'present' })),
+        })
+        const records = payload.results || []
         const byStudent = new Map(records.map((record) => [record.participant_id, record]))
         setDetail((current) => ({ ...current, students: current.students.map((row) => ({ ...row, attendance: byStudent.get(row.id) || row.attendance })) }))
-        setMessage(`Отмечены присутствующими: ${records.length}.`)
-      } catch (err) { setError(err.message) } finally { setBusyId(null) }
+        setMessage(t('attendance.markedCount', { count: records.length }))
+      } catch (err) {
+        const nextRowErrors = {}
+        for (const [field, items] of Object.entries(err.fieldErrors || {})) {
+          const match = field.match(/^items\.(\d+)\./)
+          const row = match ? rows[Number(match[1])] : null
+          const message = (Array.isArray(items) ? items : [items])
+            .map((item) => typeof item === 'string' ? item : item?.message)
+            .filter(Boolean).join(' ')
+          if (row && message) nextRowErrors[row.id] = message
+        }
+        setRowErrors(nextRowErrors)
+        if (Object.keys(nextRowErrors).length) {
+          const firstId = Object.keys(nextRowErrors)[0]
+          document.querySelector(`#admin-attendance-row-${firstId} button`)?.focus()
+        } else setError(apiErrorMessage(err, t('attendance.saveError')))
+      } finally { setBusyId(null) }
     }
 
     async function addStudent() {
       if (!selectedSessionId || !selectedStudentId) return
       setBusyId('add')
       setError(null)
+      setStudentError(null)
       try {
         const payload = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/participants/`, {
           student_id: selectedStudentId,
         })
         setDetail(payload)
         setSelectedStudentId('')
-        setMessage('Участник добавлен в это занятие.')
+        setFormAction(null)
+        setMessage(t('attendance.memberAdded'))
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, { student_id: 'studentId' })
+        setStudentError(nextErrors.studentId || null)
+        setError(formErrorMessage(err, t('attendance.addError')))
+        if (nextErrors.studentId) document.getElementById('admin-attendance-add-student')?.focus()
       } finally {
         setBusyId(null)
       }
@@ -118,10 +196,10 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
       try {
         const payload = await api.delete(`/api/admin/schedule/sessions/${selectedSessionId}/participants/${row.id}/`)
         setDetail(payload)
-        setMessage('Участник убран из этого занятия.')
+        setMessage(t('attendance.memberRemoved'))
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        setError(apiErrorMessage(err, t('attendance.removeError')))
       } finally {
         setBusyId(null)
       }
@@ -131,13 +209,34 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
       if (!selectedSessionId) return
       setBusyId('cancel-session')
       setError(null)
+      setCancelReasonError(null)
       try {
         await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/cancel/`, { reason: cancelReason })
-        setMessage('Занятие отменено. История не удалена.')
+        setMessage(t('attendance.cancelledSaved'))
         setCancelReason('')
+        setFormAction(null)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(err.message)
+        const nextErrors = fieldErrorsFromApi(err, { reason: 'reason' })
+        setCancelReasonError(nextErrors.reason || null)
+        setError(formErrorMessage(err, t('attendance.cancelError')))
+        if (nextErrors.reason) document.getElementById('admin-attendance-cancel-reason')?.focus()
+      } finally {
+        setBusyId(null)
+      }
+    }
+
+    async function restoreSelectedSession() {
+      if (!selectedSessionId) return
+      setBusyId('restore-session')
+      setError(null)
+      try {
+        const session = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/restore/`)
+        setDetail((current) => ({ ...current, session }))
+        setMessage(t('attendance.restored'))
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(apiErrorMessage(err, t('attendance.restoreError')))
       } finally {
         setBusyId(null)
       }
@@ -151,32 +250,34 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
     const selectedStart = selectedSession?.start_at ? formatTime(selectedSession.start_at) : selectedSession?.start
     const selectedEnd = selectedSession?.end_at ? formatTime(selectedSession.end_at) : selectedSession?.end
     const selectedStatus = selectedSession?.is_cancelled || selectedSession?.isCancelled ? 'cancelled' : selectedSession?.status
-    const sessionTypeLabel = { group: 'Групповое', individual: 'Индивидуальное', split: 'Сплит для двоих' }[selectedSession?.session_type || selectedSession?.sessionType] || 'Групповое'
+    const selectedDisplayStatus = attendanceSessionDisplayStatus(selectedSession)
+    const sessionTypeLabel = { group: t('attendance.sessionTypeGroup'), individual: t('attendance.sessionTypeIndividual'), split: t('attendance.sessionTypeSplit') }[selectedSession?.session_type || selectedSession?.sessionType] || t('attendance.sessionTypeGroup')
 
     return (
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h2 className="page-title">Занятие</h2>
-            <p className="page-desc">Кликабельный состав занятия: добавить, убрать, отметить посещение, открыть профиль клиента.</p>
+            <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('schedule') : go?.('schedule')}>{t('attendance.schedule')}</ContextBackButton>
+            <h1 className="page-title">{t('attendance.title')}</h1>
+            <p className="page-desc">{t('attendance.description')}</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="secondary" onClick={() => go?.('schedule')}>Назад к расписанию</Button>
-            <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={markAllPresent}>Все присутствовали</Button>
+            <Button variant="primary" disabled={selectedStatus === 'cancelled' || !rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={() => setBulkPending(true)}>{t('attendance.allPresent')}</Button>
           </div>
         </div>
-        {message && <Banner tone="success" style={{ marginBottom: 12 }} onClose={() => setMessage(null)}>{message}</Banner>}
-        {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={loading}>Загружаю состав занятия...</BusyBanner>
-        <BusyBanner Banner={Banner} show={busyId != null && !loading}>Сохраняю изменение...</BusyBanner>
+        <ToastNotice id="admin-attendance-result" message={message} />
+        {error && !formAction && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        {selectedStatus === 'cancelled' && <Banner tone="warning" title={t('attendance.cancelled')} style={{ marginBottom: 12 }}>{t('attendance.readOnly')} <Button size="sm" variant="secondary" disabled={busyId != null} loading={busyId === 'restore-session'} onClick={restoreSelectedSession}>{t('attendance.restore')}</Button></Banner>}
+        <BusyBanner Banner={Banner} show={loading}>{t('attendance.loadingRoster')}</BusyBanner>
+        <BusyBanner Banner={Banner} show={busyId != null && !loading}>{t('attendance.saving')}</BusyBanner>
 
         <div className="ops-session-detail-grid">
           <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Выбранное занятие</div>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>{t('attendance.selected')}</div>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Занятие
+              {t('attendance.title')}
               <select value={selectedSessionId} onChange={(event) => setSelectedSessionId(event.target.value)} style={{ minHeight: 38 }}>
-                <option value="">Выберите занятие</option>
+                <option value="">{t('attendance.choose')}</option>
                 {sessions.map((session) => (
                   <option key={session.sessionId} value={session.sessionId}>
                     {session.date} {session.start}-{session.end} - {session.group} - {session.trainer}
@@ -187,88 +288,87 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
 
             <div className="ops-session-summary">
               <div>
-                <div className="muted">Группа / тип</div>
+                <div className="muted">{t('attendance.groupType')}</div>
                 <strong>{selectedGroupName || sessionTypeLabel}</strong>
               </div>
               <div>
-                <div className="muted">Время</div>
+                <div className="muted">{t('attendance.time')}</div>
                 <strong>{selectedStart || '-'}-{selectedEnd || '-'}</strong>
               </div>
               <div>
-                <div className="muted">Тренер</div>
+                <div className="muted">{t('common.trainer')}</div>
                 <strong>{selectedTrainer || '-'}</strong>
               </div>
               <div>
-                <div className="muted">Место</div>
+                <div className="muted">{t('attendance.place')}</div>
                 <strong>{selectedSession?.location || '-'}</strong>
               </div>
               <div>
-                <div className="muted">Статус</div>
-                <StatusPill status={selectedStatus === 'cancelled' ? 'cancelled' : 'planned'} size="sm" />
+                <div className="muted">{t('common.status')}</div>
+                <StatusPill status={selectedDisplayStatus} tone={selectedDisplayStatus === 'done' ? 'present' : undefined} size="sm" />
               </div>
             </div>
-            <div className="ops-inline-add"><Input label="Причина отмены или переноса" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Причина сохранится в истории" /><Button variant="secondary" disabled={!selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>Отменить занятие</Button></div>
+            <div className="ops-button-row" style={{ marginTop: 12 }}><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setSelectedStudentId(''); setStudentError(null); setFormAction('add') }}>{t('attendance.addParticipant')}</Button><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setCancelReason(''); setCancelReasonError(null); setFormAction('cancel') }}>{t('attendance.cancelSession')}</Button></div>
             {selectedSession?.notes && <div className="ops-inline-note">{selectedSession.notes}</div>}
           </div>
-
-          <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Добавить участника</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end' }}>
-              <SearchableSelect
-                label="Клиент / ученик"
-                value={selectedStudentId}
-                onChange={setSelectedStudentId}
-                options={availableStudents.map((client) => clientSelectOption(client, {
-                  description: (row) => `${row.group || 'Индивидуально'} · ${row.phone || 'без телефона'}`,
-                }))}
-              />
-              <Button variant="primary" disabled={!selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>Добавить</Button>
-            </div>
-            <div className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>
-              Добавление создаёт разовое участие только в этом занятии. Основной состав группы не меняется.
-            </div>
-          </div>
         </div>
+
+        <FormModal open={formAction === 'add'} title={t('attendance.addParticipant')} description={t('attendance.addDescription')} size="sm" busy={busyId === 'add'} dirty={Boolean(selectedStudentId)} onRequestClose={() => { setFormAction(null); setSelectedStudentId(''); setStudentError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId === 'add'} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedStudentId || busyId === 'add'} loading={busyId === 'add'} onClick={addStudent}>{t('groups.add')}</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <SearchableSelect inputId="admin-attendance-add-student" label={t('attendance.clientStudent')} value={selectedStudentId} error={studentError} onChange={(value) => { setSelectedStudentId(value); setStudentError(null) }} options={availableStudents.map((client) => clientSelectOption(client, { description: (row) => `${row.group || t('attendance.individual')} · ${row.phone || t('attendance.noPhone')}` }))} loadOptions={loadAdminParticipantOptions} />
+        </FormModal>
+
+        <FormModal open={formAction === 'cancel'} title={t('attendance.cancelSession')} description={t('attendance.cancelDescription')} size="sm" busy={busyId === 'cancel-session'} dirty={Boolean(cancelReason)} onRequestClose={() => { setFormAction(null); setCancelReason(''); setCancelReasonError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busyId === 'cancel-session'} onClick={() => requestClose('cancel')}>{t('attendance.back')}</Button><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} loading={busyId === 'cancel-session'} onClick={cancelSelectedSession}>{t('attendance.cancelSession')}</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <Input id="admin-attendance-cancel-reason" label={t('attendance.reason')} value={cancelReason} error={cancelReasonError} onChange={(event) => { setCancelReason(event.target.value); setCancelReasonError(null) }} placeholder={t('attendance.reasonHint')} />
+        </FormModal>
 
         <div className="card" style={{ overflow: 'hidden' }}>
           <Table
             rows={rows}
-            emptyLabel={selectedSessionId ? 'В этом занятии пока нет участников' : 'Выберите занятие, чтобы увидеть состав'}
+            emptyLabel={selectedSessionId ? t('attendance.emptySession') : t('attendance.chooseForRoster')}
             columns={[
               {
                 key: 'full_name',
-                header: 'Участник',
+                header: t('common.participant'),
                 render: (row) => (
                   <button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>
                     <Avatar name={row.full_name} size={28} />
                     <span>
                       <span className="strong">{row.full_name}</span>
-                      {row.can_remove_from_session && <span className="ops-inline-note">разово</span>}
+                      {row.can_remove_from_session && <span className="ops-inline-note">{t('attendance.oneOff')}</span>}
                     </span>
                   </button>
                 ),
               },
-              { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.client_phone || '-'}</span> },
-              { key: 'group', header: 'Группа', muted: true, render: (row) => row.group?.name || 'Индивидуально' },
-              { key: 'status', header: 'Отметка', width: 120, render: (row) => <StatusPill status={row.attendance?.status === 'rescheduled' ? 'moved' : row.attendance?.status} size="sm" /> },
+              {
+                key: 'balance',
+                header: t('attendance.debt'),
+                render: (row) => row.balance_minor > 0
+                  ? <Badge tone="danger">{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge>
+                  : <Badge tone="success">{t('attendance.noDebt')}</Badge>,
+              },
+              { key: 'group', header: t('common.group'), muted: true, render: (row) => row.group?.name || t('attendance.individual') },
+              { key: 'status', header: t('attendance.mark'), width: 120, render: (row) => <StatusPill status={row.attendance?.status === 'rescheduled' ? 'moved' : row.attendance?.status} size="sm" /> },
               {
                 key: 'attendance',
-                header: 'Посещаемость',
+                header: t('attendance.titleColumn'),
                 width: 340,
                 render: (row) => (
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div id={`admin-attendance-row-${row.id}`} role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {options.map((option) => (
                       <Button
                         key={option.value}
                         size="sm"
                         variant={row.attendance?.status === option.value ? 'primary' : 'secondary'}
                         loading={busyId === `mark-${row.id}`}
-                        disabled={busyId === `mark-${row.id}`}
+                        disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`}
                         onClick={() => mark(row, option.value)}
                       >
-                        {option.label}{option.consumes ? ' -1' : ''}
+                        {t(option.labelKey)}{option.consumes ? ' -1' : ''}
                       </Button>
                     ))}
+                    {rowErrors[row.id] && <small id={`admin-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
                   </div>
                 ),
               },
@@ -278,11 +378,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
                 width: 210,
                 render: (row) => (
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                    <Button size="sm" variant="subtle" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>Профиль</Button>
+                    <Button size="sm" variant="subtle" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>{t('attendance.profile')}</Button>
                     {row.can_remove_from_session ? (
-                      <Button size="sm" variant="secondary" disabled={busyId === `remove-${row.id}`} loading={busyId === `remove-${row.id}`} onClick={() => removeStudent(row)}>Убрать</Button>
+                      <Button size="sm" variant="secondary" disabled={selectedStatus === 'cancelled' || busyId === `remove-${row.id}`} loading={busyId === `remove-${row.id}`} onClick={() => removeStudent(row)}>{t('groups.remove')}</Button>
                     ) : (
-                      <span className="ops-muted-chip">основной состав</span>
+                      <span className="ops-muted-chip">{t('attendance.regularRoster')}</span>
                     )}
                   </div>
                 ),
@@ -290,7 +390,16 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData) {
             ]}
           />
         </div>
-        <div className="card card-pad" style={{ marginTop: 16 }}><div className="eyebrow">История изменений</div>{(detail?.history || []).map((entry) => <div className="ops-detail-row" key={entry.id}><strong>{({ 'session.created': 'Занятие создано', 'session.edited': 'Занятие изменено' }[entry.action] || entry.action)}</strong><span>{entry.actor} · {new Date(entry.created_at).toLocaleString('ru-RU')}</span></div>)}{!(detail?.history || []).length && <div className="empty">Изменений после создания нет.</div>}</div>
+        <Dialog
+          open={bulkPending}
+          title={t('attendance.bulkTitle')}
+          description={t('attendance.bulkDescription', { session: `${selectedSession?.date || ''} ${selectedStart || ''}-${selectedEnd || ''} · ${selectedGroupName || sessionTypeLabel}`, count: rows.length })}
+          confirmLabel={t('attendance.confirmMark')}
+          cancelLabel={t('common.cancel')}
+          onClose={() => setBulkPending(false)}
+          onConfirm={async () => { setBulkPending(false); await markAllPresent() }}
+        />
+        <div className="card card-pad" style={{ marginTop: 16 }}><div className="eyebrow">{t('attendance.history')}</div>{(detail?.history || []).map((entry) => <div className="ops-detail-row" key={entry.id}><strong>{({ 'session.created': t('attendance.historyCreated'), 'session.edited': t('attendance.historyEdited'), 'session.restored': t('attendance.historyRestored') }[entry.action] || entry.action)}</strong><span>{entry.actor} · {new Date(entry.created_at).toLocaleString(localeTag)}</span></div>)}{!(detail?.history || []).length && <div className="empty">{t('attendance.noHistory')}</div>}</div>
       </div>
     )
   }

@@ -1,5 +1,6 @@
 from .support import *
 from .admin_support import _admin_required
+from .pagination import paginated_payload
 
 from payroll.models import (PayrollPeriod, PayrollRule, PayrollScheme,
                             TrainerPayrollAssignment)
@@ -93,21 +94,28 @@ def _apply_payroll_scheme_data(scheme, data):
 def _apply_payroll_rule_data(rule, data):
     data = data.get("rule") or data
     if "scheme_id" in data:
-        rule.scheme = get_object_or_404(PayrollScheme, pk=data.get("scheme_id"))
+        rule.scheme = _object_for_field(
+            PayrollScheme.objects.filter(is_active=True), data.get("scheme_id"),
+            "scheme_id", "схему оплаты")
     if "session_type" in data:
         rule.session_type = data.get("session_type", "") or ""
     if "rule_type" in data:
         rule.rule_type = data.get("rule_type", "") or ""
     if "base_amount_minor" in data:
-        rule.base_amount_minor = int(data.get("base_amount_minor") or 0)
+        rule.base_amount_minor = _required_int(
+            data.get("base_amount_minor"), "base_amount_minor")
     if "currency" in data:
         rule.currency = data.get("currency", "") or "PLN"
     if "min_clients_threshold" in data:
         value = data.get("min_clients_threshold")
-        rule.min_clients_threshold = None if value in (None, "") else int(value)
+        rule.min_clients_threshold = (
+            None if value in (None, "")
+            else _required_int(value, "min_clients_threshold"))
     if "extra_client_amount_minor" in data:
         value = data.get("extra_client_amount_minor")
-        rule.extra_client_amount_minor = None if value in (None, "") else int(value)
+        rule.extra_client_amount_minor = (
+            None if value in (None, "")
+            else _required_int(value, "extra_client_amount_minor"))
     if "is_active" in data:
         rule.is_active = _bool_value(data.get("is_active"), True)
     rule.full_clean()
@@ -118,9 +126,13 @@ def _apply_payroll_rule_data(rule, data):
 def _apply_payroll_assignment_data(assignment, data):
     data = data.get("assignment") or data
     if "trainer_id" in data:
-        assignment.trainer = get_object_or_404(Trainer, pk=data.get("trainer_id"))
+        assignment.trainer = _object_for_field(
+            Trainer.objects.filter(is_active=True, user__is_active=True),
+            data.get("trainer_id"), "trainer_id", "тренера")
     if "scheme_id" in data:
-        assignment.scheme = get_object_or_404(PayrollScheme, pk=data.get("scheme_id"))
+        assignment.scheme = _object_for_field(
+            PayrollScheme.objects.filter(is_active=True), data.get("scheme_id"),
+            "scheme_id", "схему оплаты")
     if "effective_from" in data:
         assignment.effective_from = _parse_date(data.get("effective_from"), "effective_from")
     if "effective_to" in data:
@@ -139,7 +151,8 @@ def admin_payroll_schemes(request):
     qs = PayrollScheme.objects.order_by("name", "id")
     if request.GET.get("active") in {"true", "false"}:
         qs = qs.filter(is_active=request.GET["active"] == "true")
-    return JsonResponse({"schemes": [_payroll_scheme_payload(scheme) for scheme in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="schemes", serializer=_payroll_scheme_payload))
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
@@ -164,7 +177,8 @@ def admin_payroll_rules(request):
     qs = PayrollRule.objects.select_related("scheme").order_by("scheme__name", "session_type", "id")
     if request.GET.get("scheme_id"):
         qs = qs.filter(scheme_id=request.GET["scheme_id"])
-    return JsonResponse({"rules": [_payroll_rule_payload(rule) for rule in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="rules", serializer=_payroll_rule_payload))
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
@@ -190,7 +204,8 @@ def admin_payroll_assignments(request):
         "trainer__user", "scheme").order_by("trainer_id", "-effective_from")
     if request.GET.get("trainer_id"):
         qs = qs.filter(trainer_id=request.GET["trainer_id"])
-    return JsonResponse({"assignments": [_payroll_assignment_payload(assignment) for assignment in qs[:200]]})
+    return JsonResponse(paginated_payload(
+        request, qs, key="assignments", serializer=_payroll_assignment_payload))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])

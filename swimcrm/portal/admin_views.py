@@ -1,6 +1,7 @@
 ﻿from .admin_billing_views import *
 from .admin_catalog_views import *
 from .admin_client_views import *
+from .admin_import_views import *
 from .admin_notification_views import *
 from .admin_overview_views import *
 from .admin_payroll_views import *

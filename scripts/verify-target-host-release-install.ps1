@@ -4,15 +4,14 @@ param(
     [string]$Manifest,
     [Parameter(Mandatory = $true)]
     [string]$ReleaseDir,
-    [string]$NocoBaseAppRoot = $(if ($env:NOCOBASE_APP_ROOT) { $env:NOCOBASE_APP_ROOT } else { "" }),
-    [string]$NocoBaseStorageDir = $(if ($env:NOCOBASE_STORAGE_DIR) { $env:NOCOBASE_STORAGE_DIR } else { "" }),
     [switch]$RequireInstalledDependencies
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$ArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$SourceArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-source-archive.ps1"
+$DeploymentArchiveVerifier = Join-Path $RepoRoot "scripts\verify-release-artifact.ps1"
 $BlockedGeneratedPrefixes = @(
     ".venv/",
     "node_modules/",
@@ -27,11 +26,8 @@ $BlockedGeneratedPrefixes = @(
     "backups/",
     "releases/",
     ".runtime/",
-    ".nocobase/",
-    ".nocobase-logs/",
     ".npm-cache/",
-    ".yarn-cache/",
-    "swimcrm-hybrid/"
+    ".yarn-cache/"
 )
 
 function Resolve-RequiredPath {
@@ -64,7 +60,9 @@ function Test-PathInside {
 function Get-LineListSha256 {
     param([string[]]$Lines)
 
-    $text = (($Lines | Sort-Object) -join "`n") + "`n"
+    [string[]]$sortedLines = @($Lines)
+    [Array]::Sort($sortedLines, [StringComparer]::Ordinal)
+    $text = ($sortedLines -join "`n") + "`n"
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -164,47 +162,36 @@ function Assert-PathExists {
     }
 }
 
-function Assert-NocoBaseCliPackage {
-    param([string]$Root)
-
-    $rootPackagePath = Join-Path $Root "package.json"
-    $installedPackagePath = Join-Path $Root "node_modules\@nocobase\cli\package.json"
-    Assert-PathExists -Path $installedPackagePath -Label "Root @nocobase/cli package"
-
-    $rootPackage = Get-Content -LiteralPath $rootPackagePath -Raw | ConvertFrom-Json
-    $installedPackage = Get-Content -LiteralPath $installedPackagePath -Raw | ConvertFrom-Json
-    $expectedVersion = [string]$rootPackage.devDependencies."@nocobase/cli"
-    if ([string]::IsNullOrWhiteSpace($expectedVersion)) {
-        throw "Root package.json must pin @nocobase/cli."
-    }
-    if ([string]$installedPackage.version -ne $expectedVersion) {
-        throw "Installed @nocobase/cli version mismatch. Expected $expectedVersion but got $($installedPackage.version)."
-    }
+if (-not (Test-Path -LiteralPath $SourceArchiveVerifier)) {
+    throw "Release source archive verifier not found at $SourceArchiveVerifier."
 }
-
-if (-not (Test-Path -LiteralPath $ArchiveVerifier)) {
-    throw "Release archive verifier not found at $ArchiveVerifier."
+if (-not (Test-Path -LiteralPath $DeploymentArchiveVerifier)) {
+    throw "Deployment archive verifier not found at $DeploymentArchiveVerifier."
 }
 
 $manifestPath = Resolve-RequiredPath -Path $Manifest -Label "Manifest"
 $releaseDirPath = Resolve-RequiredPath -Path $ReleaseDir -Label "ReleaseDir"
-$nocoBaseAppRootPath = Resolve-RequiredPath -Path $NocoBaseAppRoot -Label "NocoBaseAppRoot"
-$nocoBaseStorageDirPath = Resolve-RequiredPath -Path $NocoBaseStorageDir -Label "NocoBaseStorageDir"
 
 Assert-PathExists -Path $manifestPath -Label "Release source archive manifest"
 Assert-PathExists -Path $releaseDirPath -Label "Release directory"
 
-if (Test-PathInside -Child $nocoBaseAppRootPath -Parent $releaseDirPath) {
-    throw "NOCOBASE_APP_ROOT must be outside the extracted release source tree."
-}
-if (Test-PathInside -Child $nocoBaseStorageDirPath -Parent $releaseDirPath) {
-    throw "NOCOBASE_STORAGE_DIR must be outside the extracted release source tree."
-}
-
 $manifestData = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$isDeploymentBundle = $manifestData.artifact_type -eq "swimcrm_deployment_bundle"
+if ($isDeploymentBundle) {
+    $BlockedGeneratedPrefixes = @(
+        $BlockedGeneratedPrefixes |
+            Where-Object { $_ -ne "frontend/dist/" }
+    )
+}
+$archiveVerifier = if ($isDeploymentBundle) {
+    $DeploymentArchiveVerifier
+}
+else {
+    $SourceArchiveVerifier
+}
 $archivePath = Resolve-ArchivePath -ManifestData $manifestData -ManifestDir (Split-Path -Parent $manifestPath)
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArchiveVerifier $manifestPath
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $archiveVerifier $manifestPath
 if ($LASTEXITCODE -ne 0) {
     throw "Release source archive verification failed with exit code $LASTEXITCODE."
 }
@@ -225,19 +212,33 @@ if ($missingEntries.Count -gt 0 -or $unexpectedEntries.Count -gt 0) {
 }
 
 $installedFileListHash = Get-LineListSha256 -Lines $releaseEntries
-if ($releaseEntries.Count -ne [int]$manifestData.tracked_file_count) {
-    throw "Installed release tracked file count mismatch. Expected $($manifestData.tracked_file_count) but got $($releaseEntries.Count)."
+$expectedFileCount = if ($isDeploymentBundle) {
+    [int]$manifestData.artifact_file_count
 }
-if ($installedFileListHash -ne ([string]$manifestData.tracked_file_list_sha256).ToLowerInvariant()) {
-    throw "Installed release tracked file list sha256 mismatch. Expected $($manifestData.tracked_file_list_sha256) but got $installedFileListHash."
+else {
+    [int]$manifestData.tracked_file_count
+}
+$expectedFileListHash = if ($isDeploymentBundle) {
+    [string]$manifestData.artifact_file_list_sha256
+}
+else {
+    [string]$manifestData.tracked_file_list_sha256
+}
+if ($releaseEntries.Count -ne $expectedFileCount) {
+    throw "Installed release artifact file count mismatch. Expected $expectedFileCount but got $($releaseEntries.Count)."
+}
+if ($installedFileListHash -ne $expectedFileListHash.ToLowerInvariant()) {
+    throw "Installed release artifact file list sha256 mismatch. Expected $expectedFileListHash but got $installedFileListHash."
 }
 
-Assert-PathExists -Path (Join-Path $releaseDirPath "package.json") -Label "Root package.json"
-Assert-PathExists -Path (Join-Path $releaseDirPath "package-lock.json") -Label "Root package-lock.json"
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\manage.py") -Label "Django manage.py"
 Assert-PathExists -Path (Join-Path $releaseDirPath "swimcrm\requirements.txt") -Label "Backend requirements.txt"
 Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package.json") -Label "Frontend package.json"
 Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\package-lock.json") -Label "Frontend package-lock.json"
+if ($isDeploymentBundle) {
+    Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\dist\index.html") -Label "Bundled frontend index.html"
+    Assert-PathExists -Path (Join-Path $releaseDirPath "RELEASE_PROVENANCE.json") -Label "Release provenance"
+}
 
 if ($RequireInstalledDependencies) {
     $backendPython = Join-Path $releaseDirPath "swimcrm\.venv\Scripts\python.exe"
@@ -246,22 +247,22 @@ if ($RequireInstalledDependencies) {
     if ($LASTEXITCODE -ne 0) {
         throw "Backend virtualenv must include the Waitress production WSGI server."
     }
-    Assert-NocoBaseCliPackage -Root $releaseDirPath
     Assert-PathExists -Path (Join-Path $releaseDirPath "frontend\node_modules") -Label "Frontend node_modules"
-    Assert-PathExists -Path $nocoBaseAppRootPath -Label "NocoBase app root"
-    Assert-PathExists -Path $nocoBaseStorageDirPath -Label "NocoBase storage directory"
     Write-Host "Backend dependencies installed."
     Write-Host "Waitress production WSGI server installed."
-    Write-Host "Root Node tooling installed."
-    Write-Host "NocoBase CLI package installed."
     Write-Host "Frontend dependencies installed."
-    Write-Host "NocoBase app root outside source tree."
-    Write-Host "NocoBase storage outside source tree."
 }
 
 Write-Host "Target-host release install verified."
 Write-Host "release_dir: $releaseDirPath"
 Write-Host "commit_sha: $($manifestData.commit_sha)"
 Write-Host "archive_sha256: $($manifestData.archive_sha256)"
-Write-Host "tracked_file_count: $($releaseEntries.Count)"
-Write-Host "tracked_file_list_sha256: $installedFileListHash"
+if ($isDeploymentBundle) {
+    Write-Host "artifact_file_count: $($releaseEntries.Count)"
+    Write-Host "artifact_file_list_sha256: $installedFileListHash"
+    Write-Host "frontend_dist_file_count: $($manifestData.frontend_dist_file_count)"
+}
+else {
+    Write-Host "tracked_file_count: $($releaseEntries.Count)"
+    Write-Host "tracked_file_list_sha256: $installedFileListHash"
+}

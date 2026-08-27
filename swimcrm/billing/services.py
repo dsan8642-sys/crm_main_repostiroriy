@@ -2,10 +2,11 @@
 receipt auto-deletion. Accounting method: cash basis (confirmed payments)."""
 from dataclasses import dataclass
 from datetime import timedelta
+import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -16,6 +17,9 @@ from .models import (
     Charge, Payment, PaymentEvent, PaymentEventType, PaymentMethod,
     PaymentSource, PaymentStatus, ReceiptFile,
 )
+
+
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,79}$")
 
 
 @dataclass
@@ -73,10 +77,75 @@ def _validate_payment_amount(amount_minor):
     try:
         amount_minor = int(amount_minor)
     except (TypeError, ValueError):
-        raise ValidationError("amount_minor must be a positive integer") from None
+        raise ValidationError({
+            "amount_minor": ValidationError(
+                "Введите сумму больше нуля.", code="invalid_integer"),
+        }) from None
     if amount_minor <= 0:
-        raise ValidationError("Payment amount must be greater than zero")
+        raise ValidationError({
+            "amount_minor": ValidationError(
+                "Сумма должна быть больше нуля.", code="min_value"),
+        })
     return amount_minor
+
+
+def payment_reference_id(*, source, actor, idempotency_key):
+    """Scope a caller-provided retry key into the existing unique reference_id."""
+    key = str(idempotency_key or "").strip()
+    if not key:
+        raise ValidationError({
+            "idempotency_key": ValidationError(
+                "Повторите действие: ключ безопасной отправки отсутствует.",
+                code="required"),
+        })
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
+        raise ValidationError({
+            "idempotency_key": ValidationError(
+                "Ключ безопасной отправки имеет недопустимый формат.",
+                code="invalid"),
+        })
+    actor_id = getattr(actor, "pk", None)
+    if not actor_id:
+        raise ValidationError({
+            "idempotency_key": ValidationError(
+                "Не удалось связать ключ отправки с пользователем.",
+                code="invalid"),
+        })
+    return f"ui:{source}:{actor_id}:{key}"
+
+
+def _validate_payment_replay(
+        payment, *, student, amount_minor, currency, paid_at, method, source,
+        comment=""):
+    immutable_values = {
+        "student_id": student.pk,
+        "amount_minor": amount_minor,
+        "currency": currency,
+        "paid_at": paid_at,
+        "method": method,
+        "source": source,
+    }
+    if any(getattr(payment, field) != value for field, value in immutable_values.items()):
+        raise ValidationError({
+            "idempotency_key": ValidationError(
+                "Этот ключ уже использован для другой финансовой операции.",
+                code="conflict"),
+        })
+    original_comment = str(comment or "").strip()
+    if original_comment and not payment.comment.startswith(original_comment):
+        raise ValidationError({
+            "idempotency_key": ValidationError(
+                "Этот ключ уже использован для другой финансовой операции.",
+                code="conflict"),
+        })
+    return payment
+
+
+def _existing_idempotent_payment(reference_id, **expected):
+    payment = Payment.objects.filter(reference_id=reference_id).first()
+    if payment is None:
+        return None
+    return _validate_payment_replay(payment, **expected)
 
 
 def _record_payment_event(payment, event_type, actor, from_status="", note=""):
@@ -100,25 +169,69 @@ def _sync_payment_instance(target, source):
 
 @transaction.atomic
 def create_client_top_up_request(
-        *, student, account, actor, amount_minor, currency, paid_at, file, comment=""):
+        *, student, account, actor, amount_minor, currency, paid_at, file,
+        idempotency_key, comment=""):
     """Create a pending bank-transfer request; never credit the balance here."""
     amount_minor = _validate_payment_amount(amount_minor)
     try:
         Money(amount_minor, currency)
     except (TypeError, ValueError) as exc:
-        raise ValidationError(str(exc)) from exc
+        raise ValidationError({
+            "currency": ValidationError(
+                "Укажите поддерживаемую валюту.", code="invalid_choice"),
+        }) from exc
 
-    payment = Payment.objects.create(
-        student=student,
-        amount_minor=amount_minor,
-        currency=currency,
-        paid_at=paid_at,
-        method=PaymentMethod.TRANSFER,
-        comment=comment or "",
-        status=PaymentStatus.PENDING,
+    reference_id = payment_reference_id(
         source=PaymentSource.CLIENT_TOP_UP,
-        created_by=actor,
+        actor=actor,
+        idempotency_key=idempotency_key,
     )
+    expected = {
+        "student": student,
+        "amount_minor": amount_minor,
+        "currency": currency,
+        "paid_at": paid_at,
+        "method": PaymentMethod.TRANSFER,
+        "source": PaymentSource.CLIENT_TOP_UP,
+        "comment": comment,
+    }
+    existing = _existing_idempotent_payment(reference_id, **expected)
+    if existing is not None:
+        receipt = existing.receipts.order_by("id").first()
+        if receipt is None:
+            raise ValidationError({
+                "idempotency_key": ValidationError(
+                    "Повтор операции найден без подтверждающего документа.",
+                    code="conflict"),
+            })
+        return existing, receipt, False
+
+    try:
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                student=student,
+                amount_minor=amount_minor,
+                currency=currency,
+                paid_at=paid_at,
+                method=PaymentMethod.TRANSFER,
+                reference_id=reference_id,
+                comment=comment or "",
+                status=PaymentStatus.PENDING,
+                source=PaymentSource.CLIENT_TOP_UP,
+                created_by=actor,
+            )
+    except IntegrityError:
+        existing = Payment.objects.get(reference_id=reference_id)
+        _validate_payment_replay(existing, **expected)
+        receipt = existing.receipts.order_by("id").first()
+        if receipt is None:
+            raise ValidationError({
+                "idempotency_key": ValidationError(
+                    "Повтор операции найден без подтверждающего документа.",
+                    code="conflict"),
+            })
+        return existing, receipt, False
+
     receipt = ReceiptFile(
         payment=payment,
         uploaded_by=account,
@@ -132,7 +245,61 @@ def create_client_top_up_request(
         "amount_minor": payment.amount_minor,
         "currency": payment.currency,
     })
-    return payment, receipt
+    return payment, receipt, True
+
+
+@transaction.atomic
+def create_admin_payment(
+        *, student, actor, amount_minor, currency, paid_at, method,
+        idempotency_key, comment="", desired_status=PaymentStatus.CONFIRMED,
+        reason=""):
+    """Create at most one admin payment for one UI attempt."""
+    amount_minor = _validate_payment_amount(amount_minor)
+    reference_id = payment_reference_id(
+        source=PaymentSource.ADMIN,
+        actor=actor,
+        idempotency_key=idempotency_key,
+    )
+    expected = {
+        "student": student,
+        "amount_minor": amount_minor,
+        "currency": currency,
+        "paid_at": paid_at,
+        "method": method,
+        "source": PaymentSource.ADMIN,
+        "comment": comment,
+    }
+    existing = _existing_idempotent_payment(reference_id, **expected)
+    if existing is not None:
+        return existing, False
+
+    try:
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                student=student,
+                amount_minor=amount_minor,
+                currency=currency,
+                paid_at=paid_at,
+                method=method,
+                reference_id=reference_id,
+                comment=comment or "",
+                status=PaymentStatus.PENDING,
+                source=PaymentSource.ADMIN,
+                created_by=actor,
+            )
+    except IntegrityError:
+        existing = Payment.objects.get(reference_id=reference_id)
+        _validate_payment_replay(existing, **expected)
+        return existing, False
+
+    record_admin_payment_created(payment, actor)
+    if desired_status == PaymentStatus.REJECTED:
+        payment = reject_payment(payment, actor, reason)
+    elif desired_status == PaymentStatus.PENDING:
+        pass
+    else:
+        payment = confirm_payment(payment, actor)
+    return payment, True
 
 
 def record_admin_payment_created(payment, actor):
@@ -144,17 +311,20 @@ def record_admin_payment_created(payment, actor):
 def confirm_payment(payment: Payment, admin):
     """Rule 9: admin verifies -> Confirmed. Only now does it affect balance."""
     original = payment
-    payment = Payment.objects.select_for_update().get(pk=payment.pk)
-    if payment.status == PaymentStatus.CONFIRMED:
-        _sync_payment_instance(original, payment)
-        return payment
-    if payment.status != PaymentStatus.PENDING:
+    decided_at = timezone.now()
+    updated = Payment.objects.filter(
+        pk=payment.pk, status=PaymentStatus.PENDING).update(
+            status=PaymentStatus.CONFIRMED,
+            confirmed_by=admin,
+            confirmed_at=decided_at,
+        )
+    payment = Payment.objects.get(pk=payment.pk)
+    if not updated:
+        if payment.status == PaymentStatus.CONFIRMED:
+            _sync_payment_instance(original, payment)
+            return payment
         raise ValidationError("Only a pending payment can be confirmed")
-    previous_status = payment.status
-    payment.status = PaymentStatus.CONFIRMED
-    payment.confirmed_by = admin
-    payment.confirmed_at = timezone.now()
-    payment.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+    previous_status = PaymentStatus.PENDING
     payment.receipts.update(decided_at=timezone.now())
     _record_payment_event(
         payment, PaymentEventType.CONFIRMED, admin, from_status=previous_status)
@@ -166,20 +336,30 @@ def confirm_payment(payment: Payment, admin):
 
 @transaction.atomic
 def reject_payment(payment: Payment, admin, reason=""):
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValidationError({
+            "reason": ValidationError(
+                "Укажите причину отклонения.", code="required"),
+        })
     original = payment
-    payment = Payment.objects.select_for_update().get(pk=payment.pk)
-    if payment.status == PaymentStatus.REJECTED:
-        _sync_payment_instance(original, payment)
-        return payment
-    if payment.status != PaymentStatus.PENDING:
+    decided_at = timezone.now()
+    current = Payment.objects.get(pk=payment.pk)
+    next_comment = (current.comment + f"\nОтклонено: {reason}").strip()
+    updated = Payment.objects.filter(
+        pk=payment.pk, status=PaymentStatus.PENDING).update(
+            status=PaymentStatus.REJECTED,
+            confirmed_by=admin,
+            confirmed_at=decided_at,
+            comment=next_comment,
+        )
+    payment = Payment.objects.get(pk=payment.pk)
+    if not updated:
+        if payment.status == PaymentStatus.REJECTED:
+            _sync_payment_instance(original, payment)
+            return payment
         raise ValidationError("Only a pending payment can be rejected")
-    previous_status = payment.status
-    payment.status = PaymentStatus.REJECTED
-    payment.confirmed_by = admin
-    payment.confirmed_at = timezone.now()
-    if reason:
-        payment.comment = (payment.comment + f"\nОтклонено: {reason}").strip()
-    payment.save(update_fields=["status", "confirmed_by", "confirmed_at", "comment"])
+    previous_status = PaymentStatus.PENDING
     payment.receipts.update(decided_at=timezone.now())
     _record_payment_event(
         payment, PaymentEventType.REJECTED, admin,

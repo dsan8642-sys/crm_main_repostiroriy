@@ -171,14 +171,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "target_host_release_install"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "NocoBase app root outside source tree. ",
+            "Backend dependencies installed. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "target_host_release_install: missing evidence fragment: NocoBase app root outside source tree",
+            "target_host_release_install: missing evidence fragment: Backend dependencies installed",
             errors,
         )
 
@@ -227,24 +227,6 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
-    def test_cutover_evidence_requires_target_host_nocobase_cli_package(self):
-        payload = self._example_payload()
-        item = next(
-            row for row in payload["required_evidence"]
-            if row["id"] == "target_host_release_install"
-        )
-        item["output_excerpt"] = item["output_excerpt"].replace(
-            "NocoBase CLI package installed. ",
-            "",
-        )
-
-        errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
-
-        self.assertIn(
-            "target_host_release_install: missing evidence fragment: NocoBase CLI package installed",
-            errors,
-        )
-
     def test_cutover_evidence_requires_source_archive_release_sha(self):
         payload = self._example_payload()
         item = next(
@@ -271,14 +253,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = (
-            "Release source archive written: releases\\swimcrm-release-0123456789ab.zip. "
-            "Release source manifest written: releases\\swimcrm-release-0123456789ab.manifest.json."
+            "Immutable release artifact written: releases\\swimcrm-release-0123456789ab.zip. "
+            "Release artifact manifest written: releases\\swimcrm-release-0123456789ab.manifest.json."
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: sha256",
+            "release_source_archive: missing evidence fragment: archive_sha256",
             errors,
         )
         self.assertIn(
@@ -293,14 +275,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Release source archive manifest verified. ",
+            "Immutable release artifact verified. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: Release source archive manifest verified",
+            "release_source_archive: missing evidence fragment: Immutable release artifact verified",
             errors,
         )
 
@@ -311,14 +293,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Release source archive contents verified. ",
+            "Immutable release artifact written: releases\\swimcrm-release-0123456789ab.zip. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: Release source archive contents verified",
+            "release_source_archive: missing evidence fragment: Immutable release artifact written",
             errors,
         )
 
@@ -329,14 +311,18 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Release source archive tracked file list verified. ",
+            "frontend_dist_file_count: 16. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: Release source archive tracked file list verified",
+            "release_source_archive: missing evidence fragment: frontend_dist_file_count",
+            errors,
+        )
+        self.assertIn(
+            "release_source_archive: evidence must include frontend_dist_file_count",
             errors,
         )
 
@@ -347,29 +333,29 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "release_source_archive"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "tracked_file_count: 1234. ",
+            "artifact_file_count: 1250. ",
             "",
         ).replace(
-            "tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
+            "artifact_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "release_source_archive: missing evidence fragment: tracked_file_count",
+            "release_source_archive: missing evidence fragment: artifact_file_count",
             errors,
         )
         self.assertIn(
-            "release_source_archive: evidence must include tracked_file_count",
+            "release_source_archive: evidence must include artifact_file_count",
             errors,
         )
         self.assertIn(
-            "release_source_archive: missing evidence fragment: tracked_file_list_sha256",
+            "release_source_archive: missing evidence fragment: artifact_file_list_sha256",
             errors,
         )
         self.assertIn(
-            "release_source_archive: evidence must include tracked_file_list_sha256",
+            "release_source_archive: evidence must include artifact_file_list_sha256",
             errors,
         )
 
@@ -380,29 +366,29 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "target_host_release_install"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "tracked_file_count: 1234. ",
+            "artifact_file_count: 1250. ",
             "",
         ).replace(
-            "tracked_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
+            "artifact_file_list_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "target_host_release_install: missing evidence fragment: tracked_file_count",
+            "target_host_release_install: missing evidence fragment: artifact_file_count",
             errors,
         )
         self.assertIn(
-            "target_host_release_install: evidence must include tracked_file_count",
+            "target_host_release_install: evidence must include artifact_file_count",
             errors,
         )
         self.assertIn(
-            "target_host_release_install: missing evidence fragment: tracked_file_list_sha256",
+            "target_host_release_install: missing evidence fragment: artifact_file_list_sha256",
             errors,
         )
         self.assertIn(
-            "target_host_release_install: evidence must include tracked_file_list_sha256",
+            "target_host_release_install: evidence must include artifact_file_list_sha256",
             errors,
         )
 
@@ -433,14 +419,14 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             if row["id"] == "github_full_stack_release_job"
         )
         item["summary"] = item["summary"].replace(
-            " and uploaded artifact swimcrm-release-source-0123456789abcdef0123456789abcdef01234567",
+            " and uploaded immutable artifact swimcrm-release-0123456789abcdef0123456789abcdef01234567",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "github_full_stack_release_job: missing evidence fragment: swimcrm-release-source-",
+            "github_full_stack_release_job: missing evidence fragment: swimcrm-release-",
             errors,
         )
 
@@ -480,41 +466,41 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
             errors,
         )
 
-    def test_cutover_evidence_requires_hybrid_backup_checksum_fragments(self):
+    def test_cutover_evidence_requires_backup_checksum_fragments(self):
         payload = self._example_payload()
         item = next(
             row for row in payload["required_evidence"]
-            if row["id"] == "hybrid_backup_restore_drill"
+            if row["id"] == "backup_restore_drill"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
-            "Django dump sha256 OK: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. ",
+            "Backup dump sha256 OK: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. ",
             "",
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "hybrid_backup_restore_drill: missing evidence fragment: Django dump sha256 OK",
+            "backup_restore_drill: missing evidence fragment: Backup dump sha256 OK",
             errors,
         )
 
-    def test_cutover_evidence_requires_hybrid_backup_sha256_values(self):
+    def test_cutover_evidence_requires_backup_sha256_values(self):
         payload = self._example_payload()
         item = next(
             row for row in payload["required_evidence"]
-            if row["id"] == "hybrid_backup_restore_drill"
+            if row["id"] == "backup_restore_drill"
         )
         item["output_excerpt"] = (
-            "Hybrid backup set written. backup_set_dir nocobase_database. "
-            "Django dump sha256 OK. NocoBase dump sha256 OK. "
-            "Django dump list OK. NocoBase dump list OK. Restore verification OK. "
-            "Hybrid backup set verification OK."
+            "PostgreSQL backup written. "
+            "Backup dump sha256 OK. "
+            "Backup dump list OK. Restore verification OK. "
+            "Backup set verification OK."
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "hybrid_backup_restore_drill: evidence must include Django and NocoBase dump SHA256 values",
+            "backup_restore_drill: evidence must include a backup dump SHA256 value",
             errors,
         )
 
@@ -581,7 +567,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         payload = self._example_payload()
         item = next(
             row for row in payload["required_evidence"]
-            if row["id"] == "live_hybrid_health"
+            if row["id"] == "live_app_health"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
             "HTTPS live endpoint requirement passed. ",
@@ -591,7 +577,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "live_hybrid_health: missing evidence fragment: HTTPS live endpoint requirement passed",
+            "live_app_health: missing evidence fragment: HTTPS live endpoint requirement passed",
             errors,
         )
 
@@ -599,7 +585,7 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         payload = self._example_payload()
         item = next(
             row for row in payload["required_evidence"]
-            if row["id"] == "live_hybrid_health"
+            if row["id"] == "live_app_health"
         )
         item["output_excerpt"] = item["output_excerpt"].replace(
             "Operations status ok requirement passed. ",
@@ -609,26 +595,25 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "live_hybrid_health: missing evidence fragment: Operations status ok requirement passed",
+            "live_app_health: missing evidence fragment: Operations status ok requirement passed",
             errors,
         )
 
-    def test_cutover_evidence_requires_live_health_production_urls(self):
+    def test_cutover_evidence_requires_live_health_production_url(self):
         payload = self._example_payload()
         item = next(
             row for row in payload["required_evidence"]
-            if row["id"] == "live_hybrid_health"
+            if row["id"] == "live_app_health"
         )
-        item["summary"] = "Live Django and NocoBase health passed."
+        item["summary"] = "Live Django health passed."
         item["output_excerpt"] = (
-            "HTTPS live endpoint requirement passed. Hybrid health check passed. "
-            "nocobase_config_health /api/nocobase/config/languages/"
+            "HTTPS live endpoint requirement passed. App health check passed."
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertIn(
-            "live_hybrid_health: evidence must include Django and NocoBase https:// production URLs",
+            "live_app_health: evidence must include a Django https:// production URL",
             errors,
         )
 
@@ -636,20 +621,18 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         payload = self._example_payload()
         item = next(
             row for row in payload["required_evidence"]
-            if row["id"] == "live_hybrid_health"
+            if row["id"] == "live_app_health"
         )
-        item["summary"] = "Live health passed on https://localhost and https://127.0.0.1."
+        item["summary"] = "Live health passed on https://localhost."
         item["output_excerpt"] = (
             "Django health check passed: https://localhost/api/health/. "
-            "NocoBase process health check passed: https://127.0.0.1/api/__health_check. "
-            "HTTPS live endpoint requirement passed. Hybrid health check passed. "
-            "nocobase_config_health /api/nocobase/config/languages/"
+            "HTTPS live endpoint requirement passed. App health check passed."
         )
 
         errors = self.verifier.validate(self._write_manifest(payload), allow_example=True)
 
         self.assertTrue(
-            any(error.startswith("live_hybrid_health: evidence URL must be a real production host") for error in errors),
+            any(error.startswith("live_app_health: evidence URL must be a real production host") for error in errors),
             errors,
         )
 
@@ -659,27 +642,24 @@ class ProductionCutoverEvidenceVerifierRule(SimpleTestCase):
         self.assertIn("release_archive_passed", generator)
         self.assertIn("archive_sha256", generator)
         self.assertIn("_archive_manifest_data", generator)
-        self.assertIn("Release source archive manifest verified", generator)
-        self.assertIn("Release source archive contents verified", generator)
-        self.assertIn("Release source archive tracked file list verified", generator)
-        self.assertIn("tracked_file_count", generator)
-        self.assertIn("tracked_file_list_sha256", generator)
+        self.assertIn("Immutable release artifact verified", generator)
+        self.assertIn("artifact_file_count", generator)
+        self.assertIn("artifact_file_list_sha256", generator)
+        self.assertIn("frontend_dist_file_count", generator)
         self.assertIn("Tracked release-source guard passed", generator)
-        self.assertIn("swimcrm-release-source-<commit-sha>", generator)
+        self.assertIn("swimcrm-release-<commit-sha>", generator)
         self.assertIn("postgres-backend-check", generator)
         self.assertIn("HTTPS reverse-proxy settings passed", generator)
-        self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", generator)
+        self.assertIn("check-app-health.cmd -RequireHttps -RequireOpsOk", generator)
         self.assertIn("target_host_release_install", generator)
         self.assertIn("install-release-on-target-host.cmd", generator)
         self.assertIn("-RunInstall", generator)
         self.assertIn("Target-host release install completed", generator)
         self.assertIn("Target-host release install verified", generator)
-        self.assertIn("NocoBase CLI package installed", generator)
-        self.assertIn("NocoBase app root outside source tree", generator)
+        self.assertIn("Backend dependencies installed", generator)
         self.assertIn("HTTPS live endpoint requirement passed", generator)
         self.assertIn("Operations status ok requirement passed", generator)
         self.assertIn("production-django-host", generator)
-        self.assertIn("production-nocobase-host", generator)
         self.assertIn("<64-hex-sha256>", generator)
         self.assertIn("stop writers", generator)
         self.assertIn("migrate --check", generator)
@@ -696,11 +676,12 @@ class ReleaseSourceManifestVerifierRule(SimpleTestCase):
         (repo / "frontend").mkdir()
         for rel_path in self.verifier.REQUIRED_RELEASE_FILES:
             (repo / rel_path).write_text("{}\n", encoding="utf-8")
+        (repo / "README.md").write_text("placeholder\n", encoding="utf-8")
         subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
         if tracked:
             subprocess.run(["git", "add", *self.verifier.REQUIRED_RELEASE_FILES], cwd=repo, check=True, capture_output=True, text=True)
         else:
-            subprocess.run(["git", "add", "frontend/package.json", "frontend/package-lock.json"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "add", "README.md"], cwd=repo, check=True, capture_output=True, text=True)
         return repo
 
     def test_release_source_manifests_pass_when_required_files_are_tracked(self):
@@ -708,11 +689,11 @@ class ReleaseSourceManifestVerifierRule(SimpleTestCase):
 
         self.assertEqual(errors, [])
 
-    def test_release_source_manifests_fail_when_root_tooling_is_untracked(self):
+    def test_release_source_manifests_fail_when_frontend_manifests_are_untracked(self):
         errors = self.verifier.validate(self._make_repo(tracked=False), require_tracked=True)
 
-        self.assertIn("package.json: required release manifest is not tracked by git", errors)
-        self.assertIn("package-lock.json: required release manifest is not tracked by git", errors)
+        self.assertIn("frontend/package.json: required release manifest is not tracked by git", errors)
+        self.assertIn("frontend/package-lock.json: required release manifest is not tracked by git", errors)
 
 
 class CiReleaseWorkflowVerifierRule(SimpleTestCase):
@@ -774,111 +755,124 @@ class CiReleaseWorkflowVerifierRule(SimpleTestCase):
             errors,
         )
 
-    def test_release_workflow_requires_source_archive_builder_after_manifest_guard(self):
+    def test_release_workflow_requires_artifact_builder_after_release_gate(self):
         text = self._workflow_text()
         text = text.replace(
-            "\n      - name: Build release source archive\n"
+            "\n      - name: Build immutable release artifact\n"
             "        shell: pwsh\n"
-            "        run: .\\scripts\\build-release-source.ps1\n",
+            "        run: .\\scripts\\build-release-artifact.ps1\n",
             "",
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            r"missing release source archive builder: build-release-source\.ps1",
+            r"missing immutable release artifact builder: build-release-artifact\.ps1",
             errors,
         )
 
-    def test_release_workflow_requires_source_archive_verifier(self):
+    def test_release_workflow_requires_artifact_verifier(self):
         text = self._workflow_text()
         text = text.replace(
-            "\n      - name: Verify release source archive\n"
+            "\n      - name: Verify immutable release artifact\n"
             "        shell: pwsh\n"
             "        run: |\n"
             "          $shortSha = (git rev-parse --short=12 HEAD).Trim()\n"
-            "          .\\scripts\\verify-release-source-archive.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n",
+            "          .\\scripts\\verify-release-artifact.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n",
             "",
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            r"missing release source archive verifier: verify-release-source-archive\.ps1",
+            r"missing immutable release artifact verifier: verify-release-artifact\.ps1",
             errors,
         )
 
-    def test_release_workflow_requires_verified_source_archive_before_node_artifacts(self):
+    def test_release_workflow_requires_verified_artifact_before_upload(self):
         text = self._workflow_text()
         verifier_step = (
-            "\n      - name: Verify release source archive\n"
+            "\n      - name: Verify immutable release artifact\n"
             "        shell: pwsh\n"
             "        run: |\n"
             "          $shortSha = (git rev-parse --short=12 HEAD).Trim()\n"
-            "          .\\scripts\\verify-release-source-archive.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n"
+            "          .\\scripts\\verify-release-artifact.ps1 \"releases\\swimcrm-release-$shortSha.manifest.json\"\n"
         )
-        text = text.replace(verifier_step, "", 1)
-        text = text.replace(
-            "        uses: actions/setup-node@v4\n",
-            "        uses: actions/setup-node@v4\n" + verifier_step,
-            1,
-        )
-
-        errors = self.verifier.validate(self._write_workflow(text))
-
-        self.assertIn(
-            "invalid order for verified release source archive before artifact upload: "
-            "expected 'verify-release-source-archive.ps1' before 'actions/upload-artifact@v4'",
-            errors,
-        )
-
-    def test_release_workflow_uploads_verified_source_archive_artifact(self):
-        text = self._workflow_text()
-        text = text.replace(
-            "\n      - name: Upload verified release source archive\n"
+        upload_step = (
+            "\n      - name: Upload immutable release artifact\n"
             "        uses: actions/upload-artifact@v4\n"
             "        with:\n"
-            "          name: swimcrm-release-source-${{ github.sha }}\n"
+            "          name: swimcrm-release-${{ github.sha }}\n"
             "          path: |\n"
             "            releases/swimcrm-release-*.zip\n"
             "            releases/swimcrm-release-*.manifest.json\n"
             "          if-no-files-found: error\n"
-            "          retention-days: 14\n",
+            "          retention-days: 30\n"
+            "          compression-level: 0\n"
+            "          overwrite: false\n"
+        )
+        text = text.replace(verifier_step, "", 1)
+        text = text.replace(upload_step, upload_step + verifier_step, 1)
+
+        errors = self.verifier.validate(self._write_workflow(text))
+
+        self.assertIn(
+            "invalid order for verified immutable artifact before upload: "
+            "expected 'verify-release-artifact.ps1' before 'actions/upload-artifact@v4'",
+            errors,
+        )
+
+    def test_release_workflow_uploads_verified_immutable_artifact(self):
+        text = self._workflow_text()
+        text = text.replace(
+            "\n      - name: Upload immutable release artifact\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: swimcrm-release-${{ github.sha }}\n"
+            "          path: |\n"
+            "            releases/swimcrm-release-*.zip\n"
+            "            releases/swimcrm-release-*.manifest.json\n"
+            "          if-no-files-found: error\n"
+            "          retention-days: 30\n"
+            "          compression-level: 0\n"
+            "          overwrite: false\n",
             "",
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            r"missing release source archive artifact upload: actions/upload-artifact@v4",
+            r"missing immutable release artifact upload: actions/upload-artifact@v4",
             errors,
         )
 
     def test_release_workflow_requires_artifact_upload_after_archive_verifier(self):
         text = self._workflow_text()
         upload_step = (
-            "\n      - name: Upload verified release source archive\n"
+            "\n      - name: Upload immutable release artifact\n"
             "        uses: actions/upload-artifact@v4\n"
             "        with:\n"
-            "          name: swimcrm-release-source-${{ github.sha }}\n"
+            "          name: swimcrm-release-${{ github.sha }}\n"
             "          path: |\n"
             "            releases/swimcrm-release-*.zip\n"
             "            releases/swimcrm-release-*.manifest.json\n"
             "          if-no-files-found: error\n"
-            "          retention-days: 14\n"
+            "          retention-days: 30\n"
+            "          compression-level: 0\n"
+            "          overwrite: false\n"
         )
         text = text.replace(upload_step, "", 1)
         text = text.replace(
-            "\n      - name: Verify release source archive\n",
-            upload_step + "\n      - name: Verify release source archive\n",
+            "\n      - name: Verify immutable release artifact\n",
+            upload_step + "\n      - name: Verify immutable release artifact\n",
             1,
         )
 
         errors = self.verifier.validate(self._write_workflow(text))
 
         self.assertIn(
-            "invalid order for verified release source archive before artifact upload: "
-            "expected 'verify-release-source-archive.ps1' before 'actions/upload-artifact@v4'",
+            "invalid order for verified immutable artifact before upload: "
+            "expected 'verify-release-artifact.ps1' before 'actions/upload-artifact@v4'",
             errors,
         )
 
@@ -897,6 +891,24 @@ class ReleaseSourceArchiveBuilderRule(SimpleTestCase):
         self.assertIn("tracked_file_count", script)
         self.assertIn("tracked_file_list_sha256", script)
         self.assertIn("ls-tree -r --name-only HEAD", script)
+
+
+class ReleaseFileListHashPortabilityRule(SimpleTestCase):
+    def test_release_file_list_hashes_use_ordinal_sorting(self):
+        scripts = (
+            "build-release-artifact.ps1",
+            "build-release-source.ps1",
+            "verify-release-artifact.ps1",
+            "verify-release-source-archive.ps1",
+            "verify-target-host-release-install.ps1",
+        )
+
+        for script_name in scripts:
+            with self.subTest(script=script_name):
+                script = (REPO_ROOT / "scripts" / script_name).read_text(
+                    encoding="utf-8-sig"
+                )
+                self.assertIn("[StringComparer]::Ordinal", script)
 
 
 class ReleaseSourceArchiveVerifierRule(SimpleTestCase):
@@ -936,8 +948,6 @@ class TargetHostReleaseInstallerRule(SimpleTestCase):
         self.assertIn("verify-release-source-archive.ps1", script)
         self.assertIn("Expand-Archive", script)
         self.assertIn("ReleaseDir must be empty before extraction", script)
-        self.assertIn("NOCOBASE_APP_ROOT must be outside the extracted release source tree", script)
-        self.assertIn("NOCOBASE_STORAGE_DIR must be outside the extracted release source tree", script)
         self.assertIn("python.exe", script)
         self.assertIn("-m venv", script)
         self.assertIn("pip install -r", script)
@@ -946,8 +956,6 @@ class TargetHostReleaseInstallerRule(SimpleTestCase):
         self.assertIn("migrate", script)
         self.assertIn("--check", script)
         self.assertIn("Backend dependencies installed", script)
-        self.assertIn("Root Node tooling installed", script)
-        self.assertIn("NocoBase CLI package installed", script)
         self.assertIn("Frontend dependencies installed", script)
         self.assertIn("Django migrations check passed", script)
         self.assertIn("Target-host release install completed", script)
@@ -971,20 +979,13 @@ class TargetHostReleaseInstallVerifierRule(SimpleTestCase):
         self.assertIn("__pycache__", script)
         self.assertIn("\\.py[co]$", script)
         self.assertIn("Installed release source tree must match the verified release archive", script)
-        self.assertIn("Installed release tracked file count mismatch", script)
-        self.assertIn("Installed release tracked file list sha256 mismatch", script)
+        self.assertIn("Installed release artifact file count mismatch", script)
+        self.assertIn("Installed release artifact file list sha256 mismatch", script)
         self.assertIn("RequireInstalledDependencies", script)
         self.assertIn("swimcrm\\.venv\\Scripts\\python.exe", script)
         self.assertIn('import waitress', script)
         self.assertIn("Waitress production WSGI server installed", script)
-        self.assertIn("node_modules\\@nocobase\\cli\\package.json", script)
-        self.assertIn('devDependencies."@nocobase/cli"', script)
-        self.assertIn("Root package.json must pin @nocobase/cli", script)
-        self.assertIn("Installed @nocobase/cli version mismatch", script)
-        self.assertIn("NocoBase CLI package installed", script)
         self.assertIn("frontend\\node_modules", script)
-        self.assertIn("NOCOBASE_APP_ROOT must be outside the extracted release source tree", script)
-        self.assertIn("NOCOBASE_STORAGE_DIR must be outside the extracted release source tree", script)
         self.assertIn("Target-host release install verified", script)
         self.assertIn("tracked_file_count", script)
         self.assertIn("tracked_file_list_sha256", script)
@@ -1057,8 +1058,8 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("capture_github_actions_postgres_backend_check_url", script)
         self.assertIn("install_release_archive_on_target_host", script)
         self.assertIn("run_target_host_production_env_preflight", script)
-        self.assertIn("run_target_host_live_hybrid_health", script)
-        self.assertIn("run_target_host_hybrid_backup_restore_drill", script)
+        self.assertIn("run_target_host_live_app_health", script)
+        self.assertIn("run_target_host_backup_restore_drill", script)
         self.assertIn("fill_docs_production_cutover_evidence_json", script)
         self.assertIn("run_scripts_verify_production_cutover_evidence_cmd", script)
 
@@ -1089,12 +1090,10 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Target-host release install verified", script)
         self.assertIn("Release archive extracted on target host", script)
         self.assertIn("Backend dependencies installed", script)
-        self.assertIn("NocoBase app root outside source tree", script)
         self.assertIn("expected_evidence", script)
         self.assertIn("stop_if_missing", script)
         self.assertIn("HTTPS reverse-proxy settings passed", script)
         self.assertIn("real https:// Django production URL", script)
-        self.assertIn("real https:// NocoBase production URL", script)
         self.assertIn("64-character SHA256", script)
         self.assertIn("Rollback plan reviewed", script)
         self.assertIn("acknowledge-production-rollback.cmd", script)
@@ -1125,8 +1124,6 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertIn("Target-host release install completed", script)
         self.assertIn("Target-host release install verified", script)
         self.assertIn("Backend dependencies installed", script)
-        self.assertIn("NocoBase storage outside source tree", script)
-        self.assertIn("NocoBase CLI package installed", script)
         self.assertIn("is missing expected_evidence", script)
         self.assertIn("must stop if evidence is missing", script)
         self.assertIn("Assert-ChecklistEvidenceContains", script)
@@ -1153,57 +1150,26 @@ class LocalReleaseCandidateVerifierRule(SimpleTestCase):
         self.assertNotIn("POSTGRES_PASSWORD=postgres", restore_wrapper)
         self.assertNotIn("pg_restore.exe", restore_wrapper)
 
-    def test_live_hybrid_health_supports_https_required_release_mode(self):
-        script = (REPO_ROOT / "scripts" / "check-hybrid-health.ps1").read_text(encoding="utf-8-sig")
+    def test_live_app_health_supports_https_required_release_mode(self):
+        script = (REPO_ROOT / "scripts" / "check-app-health.ps1").read_text(encoding="utf-8-sig")
         handoff = (REPO_ROOT / "scripts" / "new-release-handoff.ps1").read_text(encoding="utf-8-sig")
 
         self.assertIn("RequireHttps", script)
         self.assertIn("DJANGO_BASE_URL must use https://", script)
-        self.assertIn("NOCOBASE_BASE_URL must use https://", script)
         self.assertIn("HTTPS live endpoint requirement passed", script)
         self.assertIn("RequireOpsOk", script)
         self.assertIn("Operations status must be ok when -RequireOpsOk is set", script)
         self.assertIn("Operations status ok requirement passed", script)
-        self.assertIn("check-hybrid-health.cmd -RequireHttps -RequireOpsOk", handoff)
+        self.assertIn("check-app-health.cmd -RequireHttps -RequireOpsOk", handoff)
 
-    def test_hybrid_cutover_audit_uses_release_health_plan(self):
-        script = (REPO_ROOT / "scripts" / "verify-hybrid-cutover-readiness.ps1").read_text(encoding="utf-8-sig")
+    def test_app_cutover_audit_uses_release_health_plan(self):
+        script = (REPO_ROOT / "scripts" / "verify-app-cutover-readiness.ps1").read_text(encoding="utf-8-sig")
         release_check = (REPO_ROOT / "scripts" / "release-check-backend.ps1").read_text(encoding="utf-8-sig")
 
-        self.assertIn("check-hybrid-health.ps1", script)
-        self.assertIn("acknowledge-production-rollback.ps1", script)
-        self.assertIn("acknowledge-production-rollback.cmd", script)
+        self.assertIn("check-app-health.ps1", script)
         self.assertIn("-RequireHttps -RequireOpsOk -PlanOnly", script)
-        self.assertIn("Hybrid health plan check", release_check)
+        self.assertIn("App health plan check", release_check)
         self.assertIn("-RequireHttps -RequireOpsOk -PlanOnly", release_check)
-
-    def test_nocobase_runtime_requires_strong_production_app_key(self):
-        runtime = (REPO_ROOT / "scripts" / "run-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")
-        verifier = (REPO_ROOT / "scripts" / "verify-nocobase-runtime.ps1").read_text(encoding="utf-8-sig")
-
-        self.assertIn("Assert-ProductionSecret", runtime)
-        self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_APP_KEY\"", runtime)
-        self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_DB_PASSWORD\"", runtime)
-        self.assertIn("Assert-ProductionSecret -Name \"NOCOBASE_ROOT_PASSWORD\"", runtime)
-        self.assertIn("must be a real production secret at least 32 characters long", runtime)
-        self.assertIn("release-check", runtime)
-        self.assertIn("short-key", verifier)
-        self.assertIn("NocoBase production app key strength guard passed", verifier)
-        self.assertIn("short-root-password", verifier)
-        self.assertIn("NocoBase production root password strength guard passed", verifier)
-
-    def test_production_env_preflight_requires_strong_nocobase_secrets(self):
-        preflight = (REPO_ROOT / "scripts" / "check-production-env.ps1").read_text(encoding="utf-8-sig")
-        release_check = (REPO_ROOT / "scripts" / "release-check-backend.ps1").read_text(encoding="utf-8-sig")
-
-        self.assertIn("Assert-RealProductionSecret", preflight)
-        self.assertIn("SECRET_KEY\" -Value $secret -MinLength 50", preflight)
-        self.assertIn("NOCOBASE_BRIDGE_TOKEN\" -Value $bridgeToken -MinLength 32", preflight)
-        self.assertIn("NOCOBASE_CONFIG_TOKEN\" -Value $configToken -MinLength 32", preflight)
-        self.assertIn("NOCOBASE_APP_KEY\" -Value $nocobaseAppKey -MinLength 32", preflight)
-        self.assertIn("NOCOBASE_ROOT_PASSWORD\" -Value $nocobaseRootPassword -MinLength 32", preflight)
-        self.assertIn("prodpreflightbridgeTOKEN123456789012", release_check)
-        self.assertIn("prodpreflightnocobaseappkey123456789012", release_check)
 
 
 class HealthAndReadinessRule(TestCase):
@@ -1230,11 +1196,7 @@ class HealthAndReadinessRule(TestCase):
 
     def test_admin_readiness_reports_backend_checks(self):
         with tempfile.TemporaryDirectory() as media_root:
-            with override_settings(
-                MEDIA_ROOT=media_root,
-                NOCOBASE_BRIDGE_TOKEN="test-bridge-token",
-                NOCOBASE_CONFIG_TOKEN="test-config-token",
-            ):
+            with override_settings(MEDIA_ROOT=media_root):
                 self.client.force_login(self.admin)
                 response = self.client.get("/api/admin/readiness/")
 
@@ -1244,28 +1206,15 @@ class HealthAndReadinessRule(TestCase):
         self.assertTrue(payload["checks"]["database"]["ok"])
         self.assertTrue(payload["checks"]["migrations"]["ok"])
         self.assertTrue(payload["checks"]["media_root"]["ok"])
-        self.assertIn("nocobase_bridge_token", payload["checks"])
-        self.assertTrue(payload["checks"]["nocobase_first_screens"]["ok"])
-        self.assertEqual(payload["checks"]["nocobase_first_screens"]["screens_count"], 9)
-        self.assertTrue(payload["checks"]["nocobase_screen_build_pack"]["ok"])
-        self.assertEqual(payload["checks"]["nocobase_screen_build_pack"]["screens_count"], 9)
-        self.assertNotIn("NOCOBASE_BRIDGE_TOKEN", str(payload))
+        self.assertTrue(payload["checks"]["default_language"]["ok"])
 
-    def test_production_readiness_requires_nocobase_tokens(self):
+    def test_production_readiness_report_checks_runtime_placement(self):
         with tempfile.TemporaryDirectory() as runtime_dir:
-            with override_settings(
-                DEBUG=False,
-                RUNTIME_DIR=runtime_dir,
-                MEDIA_ROOT=runtime_dir,
-                NOCOBASE_BRIDGE_TOKEN="",
-                NOCOBASE_CONFIG_TOKEN="",
-            ):
+            with override_settings(DEBUG=False, RUNTIME_DIR=runtime_dir, MEDIA_ROOT=runtime_dir):
                 report = build_readiness_report()
 
-        self.assertFalse(report["ok"])
-        self.assertFalse(report["checks"]["nocobase_bridge_token"]["ok"])
-        self.assertTrue(report["checks"]["nocobase_bridge_token"]["required"])
-        self.assertFalse(report["checks"]["nocobase_config_token"]["ok"])
+        self.assertTrue(report["checks"]["runtime_dir"]["ok"])
+        self.assertTrue(report["checks"]["runtime_dir"]["production_required"])
 
     def test_admin_ops_status_reports_operational_backlog(self):
         now = timezone.now()
@@ -1310,15 +1259,3 @@ class HealthAndReadinessRule(TestCase):
         self.assertEqual(payload["receipt_cleanup"]["expired_receipts_waiting_cleanup"], 1)
         self.assertIn("notification_queue_due_over_60_minutes", payload["critical"])
         self.assertIn("notifications.tasks.run_due_jobs", str(payload["celery"]["beat_schedule"]))
-
-    @override_settings(NOCOBASE_BRIDGE_TOKEN="bridge-secret")
-    def test_nocobase_ops_status_uses_bridge_token(self):
-        missing = self.client.get("/api/nocobase/ops-status/")
-        ok = self.client.get(
-            "/api/nocobase/ops-status/",
-            HTTP_AUTHORIZATION="Bearer bridge-secret",
-        )
-
-        self.assertEqual(missing.status_code, 403)
-        self.assertEqual(ok.status_code, 200)
-        self.assertEqual(ok.json()["component"], "operations")

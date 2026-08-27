@@ -5,6 +5,7 @@ import { labelStyle } from './Input.jsx';
 export function Select({ label, hint, error, required = false, size = 'md', children, id, style, containerStyle, ...rest }) {
   const heights = { sm: 'var(--control-h-sm)', md: 'var(--control-h-md)', lg: 'var(--control-h-lg)' };
   const inputId = id || (label ? `sel-${label.replace(/\s+/g, '-').toLowerCase()}` : undefined);
+  const errorId = inputId ? `${inputId}-error` : undefined;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, ...containerStyle }}>
       {label && (
@@ -36,6 +37,8 @@ export function Select({ label, hint, error, required = false, size = 'md', chil
             ...style,
           }}
           {...rest}
+          aria-invalid={error ? true : rest['aria-invalid']}
+          aria-describedby={error ? errorId : rest['aria-describedby']}
         >
           {children}
         </select>
@@ -47,7 +50,7 @@ export function Select({ label, hint, error, required = false, size = 'md', chil
         </svg>
       </div>
       {error ? (
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--red-600)' }}>{error}</span>
+        <span id={errorId} className="ops-field-error" role="alert" style={{ fontSize: 'var(--fs-xs)', color: 'var(--red-600)' }}>{error}</span>
       ) : hint ? (
         <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{hint}</span>
       ) : null}

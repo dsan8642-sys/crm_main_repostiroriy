@@ -7,6 +7,7 @@ param(
     [string]$HostName = $env:POSTGRES_HOST,
     [string]$Port = $env:POSTGRES_PORT,
     [string]$PgBin = $(if ($env:PG_BIN) { $env:PG_BIN } else { "C:\Program Files\PostgreSQL\17\bin" }),
+    [string]$ExpectedSha256 = "",
     [switch]$KeepTempDb
 )
 
@@ -35,6 +36,28 @@ foreach ($tool in @($dropdb, $createdb, $pgRestore, $psql)) {
 if (-not (Test-Path -LiteralPath $BackupFile)) {
     throw "Backup file not found: $BackupFile"
 }
+
+if ([string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+    $sidecar = "$BackupFile.sha256"
+    if (-not (Test-Path -LiteralPath $sidecar)) {
+        throw "Backup checksum file not found: $sidecar"
+    }
+    $ExpectedSha256 = ((Get-Content -LiteralPath $sidecar -Raw).Trim() -split '\s+')[0]
+}
+if ($ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+    throw "ExpectedSha256 must be a SHA-256 digest"
+}
+$actualSha256 = (Get-FileHash -LiteralPath $BackupFile -Algorithm SHA256).Hash
+if (-not $actualSha256.Equals($ExpectedSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Backup SHA-256 mismatch; restore was not attempted"
+}
+Write-Host "Backup dump SHA-256 verified: $actualSha256"
+
+& $pgRestore -l $BackupFile | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "pg_restore catalog verification failed with exit code $LASTEXITCODE"
+}
+Write-Host "Backup dump catalog verification passed."
 
 & $dropdb -w -h $HostName -p $Port -U $User --if-exists $TempDb
 & $createdb -w -h $HostName -p $Port -U $User $TempDb

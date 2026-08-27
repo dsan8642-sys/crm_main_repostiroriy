@@ -1,6 +1,0 @@
-{
-  "devDependencies": {
-    "@nocobase/cli": "2.1.24",
-    "yarn": "1.22.22"
-  }
-}

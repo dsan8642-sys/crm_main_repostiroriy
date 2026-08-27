@@ -6,8 +6,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_RELEASE_FILES = (
-    "package.json",
-    "package-lock.json",
     "frontend/package.json",
     "frontend/package-lock.json",
 )
@@ -51,7 +49,7 @@ def validate(repo_root=REPO_ROOT, require_tracked=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Verify release-source package manifests required for NocoBase hybrid builds."
+        description="Verify release-source package manifests required for frontend builds."
     )
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     parser.add_argument("--require-tracked", action="store_true")

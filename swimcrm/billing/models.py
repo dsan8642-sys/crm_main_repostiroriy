@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Q
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -18,6 +19,9 @@ class Charge(models.Model):
     student = models.ForeignKey("students.Student", on_delete=models.CASCADE, related_name="charges")
     subscription = models.ForeignKey("subscriptions.Subscription", null=True, blank=True,
                                      on_delete=models.SET_NULL, related_name="charges")
+    attendance = models.ForeignKey("attendance.AttendanceRecord", null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name="charges",
+                                   help_text="Заполняется для платного разового занятия")
     description = models.CharField(max_length=255)
     amount_minor = models.BigIntegerField()
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
@@ -25,6 +29,15 @@ class Charge(models.Model):
     due_date = models.DateField()
     created_by = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscription"],
+                condition=Q(subscription__isnull=False),
+                name="billing_one_charge_per_subscription",
+            ),
+        ]
 
     @property
     def amount(self) -> Money:
@@ -85,6 +98,7 @@ class Payment(models.Model):
                                 default=settings.DEFAULT_CURRENCY)
     paid_at = models.DateField()
     method = models.CharField(max_length=16, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
+    reference_id = models.CharField(max_length=128, blank=True, db_index=True)
     comment = models.TextField(blank=True)
     status = models.CharField(max_length=16, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     source = models.CharField(
@@ -97,6 +111,15 @@ class Payment(models.Model):
                                      on_delete=models.SET_NULL, related_name="confirmed_payments")
     confirmed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reference_id"],
+                condition=~Q(reference_id=""),
+                name="billing_payment_unique_nonempty_reference_id",
+            ),
+        ]
 
     @property
     def amount(self) -> Money:

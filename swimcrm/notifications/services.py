@@ -105,7 +105,7 @@ def _collect_session_reminder(now):
     horizon = now + timedelta(days=14)
     for sess in Session.objects.filter(is_cancelled=False, start_at__gte=now,
                                         start_at__lte=horizon, group__isnull=False):
-        for st in Student.objects.filter(group=sess.group, is_active=True).select_related("parent"):
+        for st in Student.objects.filter(groups=sess.group, is_active=True).select_related("parent"):
             yield Candidate(
                 parent=st.parent, reference=sess.start_at,
                 context={"student": st.full_name, "location": sess.location,
@@ -265,9 +265,9 @@ def mass_mailing_recipients(*, audience, group_id=None, trainer_id=None, parent_
     if audience == "all":
         return qs.filter(students__is_active=True).distinct()
     if audience == "group":
-        return qs.filter(students__group_id=group_id, students__is_active=True).distinct()
+        return qs.filter(students__groups__id=group_id, students__is_active=True).distinct()
     if audience == "trainer":
-        return qs.filter(students__group__default_trainer_id=trainer_id,
+        return qs.filter(students__groups__default_trainer_id=trainer_id,
                          students__is_active=True).distinct()
     if audience == "selected":
         return qs.filter(id__in=parent_ids or []).distinct()
@@ -331,7 +331,7 @@ def notify_schedule_change(session, *, changed_by=None):
     Uses the SCHEDULE_CHANGE templates/rules per channel that are active."""
     rules = NotificationRule.objects.filter(event_type=EventType.SCHEDULE_CHANGE,
                                              is_active=True).select_related("template")
-    students = Student.objects.filter(group=session.group, is_active=True).select_related("parent")
+    students = Student.objects.filter(groups=session.group, is_active=True).select_related("parent")
     count = 0
     for rule in rules:
         for st in students:

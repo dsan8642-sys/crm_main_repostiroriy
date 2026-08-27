@@ -32,11 +32,7 @@ The local gate must:
 - run production environment guard checks with safe synthetic values;
 - validate API contract docs and CI workflow structure;
 - validate operational wrappers;
-- validate NocoBase prerequisites, runtime guards, first-screen blueprint, and
-  screen build pack;
-- run the NocoBase API build-pack smoke suite;
-- run production readiness and hybrid cutover audits;
-- run backup/restore guard checks;
+- run production readiness and app cutover audits;
 - run frontend dependency install, dependency audit, production build, and
   Playwright smoke tests;
 - build a source archive from `git archive HEAD`;
@@ -74,17 +70,15 @@ Production approval requires evidence that cannot be invented locally:
 - Git remote configured and release branch pushed;
 - GitHub Actions `release-check` run URL for the exact release commit;
 - GitHub Actions `postgres-backend-check` run URL for the exact release commit;
-- target-host `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -NocoBaseAppRoot <nocobase-app-root> -NocoBaseStorageDir <nocobase-storage-dir> -RunInstall`
+- target-host `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -RunInstall`
   output proving the verified archive was extracted, dependencies were
-  installed, the repository-pinned NocoBase CLI package was present, migrations
-  were checked, the extracted source tree was verified against the release
-  archive, and NocoBase app/storage roots are outside the source tree;
+  installed, migrations were checked, and the extracted source tree was
+  verified against the release archive;
 - target-host `scripts\check-production-env.cmd` output with real production
   environment variables;
-- target-host `scripts\check-hybrid-health.cmd -RequireHttps -RequireOpsOk`
-  output proving Django,
-  NocoBase bridge/config APIs, ops status, and NocoBase process health;
-- target-host hybrid backup/restore drill evidence with checksum-backed backup
+- target-host `scripts\check-app-health.cmd -RequireHttps -RequireOpsOk`
+  output proving Django health and ops status;
+- target-host backup/restore drill evidence with checksum-backed backup
   verification;
 - target-host `scripts\acknowledge-production-rollback.cmd -ConfirmStopWriters -ConfirmVerifiedBackup -ConfirmRestorePlan -ConfirmMigrateCheck -ConfirmRestartServices -ConfirmLiveSmoke`
   output proving the rollback plan was explicitly reviewed before approval.

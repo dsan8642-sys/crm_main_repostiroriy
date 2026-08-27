@@ -28,18 +28,24 @@ if ($status) {
 
 $commitSha = (& git -C $RepoRoot rev-parse HEAD).Trim()
 $shortSha = (& git -C $RepoRoot rev-parse --short=12 HEAD).Trim()
-$branch = (& git -C $RepoRoot branch --show-current).Trim()
+$branch = ((& git -C $RepoRoot branch --show-current) -join "").Trim()
 $trackedEntries = @(
     & git -C $RepoRoot -c core.quotepath=false ls-tree -r --name-only HEAD |
         ForEach-Object { $_.Replace("\", "/") } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         Sort-Object
 )
+$nonPortablePaths = @($trackedEntries | Where-Object { $_ -match "[^\x00-\x7F]" })
+if ($nonPortablePaths.Count -gt 0) {
+    throw "Release source paths must use ASCII for cross-host verification: $($nonPortablePaths -join ', ')"
+}
 
 function Get-LineListSha256 {
     param([string[]]$Lines)
 
-    $text = (($Lines | Sort-Object) -join "`n") + "`n"
+    [string[]]$sortedLines = @($Lines)
+    [Array]::Sort($sortedLines, [StringComparer]::Ordinal)
+    $text = ($sortedLines -join "`n") + "`n"
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {

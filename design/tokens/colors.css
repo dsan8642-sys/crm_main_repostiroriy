@@ -38,15 +38,15 @@
   /* ---- Semantic families ---- */
   --green-50:  #e9f7ee;
   --green-100: #cdecd7;
-  --green-500: #1f9d55;
-  --green-600: #178245;
-  --green-700: #116a38;
+  --green-500: #147818;
+  --green-600: #147818;
+  --green-700: #0f6114;
 
-  --amber-50:  #fdf4e3;
+  --amber-50:  #fff4d6;
   --amber-100: #f9e6bd;
-  --amber-500: #cf8a12;
-  --amber-600: #a86e08;
-  --amber-700: #855708;
+  --amber-500: #fc9e05;
+  --amber-600: #966300;
+  --amber-700: #966300;
 
   --red-50:    #fdeeed;
   --red-100:   #f9d5d2;
@@ -91,7 +91,7 @@
   --primary-active: var(--blue-700);
   --primary-soft:   var(--blue-50);
   --primary-soft-border: var(--blue-200);
-  --accent:         var(--teal-500);
+  --accent:         var(--blue-500);
 
   /* Focus ring */
   --ring: 0 0 0 3px rgba(26, 125, 196, 0.28);
