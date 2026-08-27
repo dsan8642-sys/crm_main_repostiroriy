@@ -109,6 +109,42 @@ class ProductionAuthApiTest(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_default_csrf_failure_is_safe_structured_json(self):
+        f.make_admin(username="csrf_json_admin")
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.raise_request_exception = False
+
+        response = csrf_client.post(
+            "/api/auth/login/",
+            {"login": "csrf_json_admin", "password": "Str0ngPass!123"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(response.json()["code"], "csrf_failed")
+        self.assertNotIn("reason", response.json())
+
+    def test_csrf_failure_uses_the_requested_ui_language(self):
+        expected_messages = {
+            "uk": "Сесія форми застаріла. Оновіть сторінку та повторіть дію.",
+            "pl": "Sesja formularza wygasła. Odśwież stronę i spróbuj ponownie.",
+            "en": "The form session expired. Refresh the page and try again.",
+        }
+
+        for language, expected in expected_messages.items():
+            with self.subTest(language=language):
+                csrf_client = Client(enforce_csrf_checks=True)
+                csrf_client.raise_request_exception = False
+                response = csrf_client.post(
+                    "/api/auth/login/",
+                    {"login": "missing", "password": "missing"},
+                    content_type="application/json",
+                    HTTP_ACCEPT_LANGUAGE=language,
+                )
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["error"], expected)
+
     def test_login_rejects_invalid_password(self):
         f.make_admin(username="bad_password_admin")
 

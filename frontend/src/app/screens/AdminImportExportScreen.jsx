@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -9,22 +11,22 @@ import {
 import { FormModal } from '../FormModal.jsx'
 
 const DATASETS = [
-  { kind: 'trainers', label: 'Тренеры', help: 'Сначала импортируйте тренеров.' },
-  { kind: 'groups', label: 'Группы', help: 'Группы связываются с тренерами по ID или username.' },
-  { kind: 'clients', label: 'Клиенты', help: 'Клиенты связываются с группами; существующий импорт сохранён.' },
-  { kind: 'payments', label: 'Оплаты', help: 'Оплата не импортируется без однозначного или ручного выбора клиента.' },
-  { kind: 'attendance', label: 'Посещаемость', help: 'Посещения связываются с клиентом, занятием, группой и тренером.' },
+  { kind: 'trainers', label: 'import.dataset.trainers', help: 'import.help.trainers' },
+  { kind: 'groups', label: 'import.dataset.groups', help: 'import.help.groups' },
+  { kind: 'clients', label: 'import.dataset.clients', help: 'import.help.clients' },
+  { kind: 'payments', label: 'import.dataset.payments', help: 'import.help.payments' },
+  { kind: 'attendance', label: 'import.dataset.attendance', help: 'import.help.attendance' },
 ]
 
 const STATUS_META = {
-  new: ['Новая запись', '#1a7f37'],
-  matched: ['Связи найдены', '#1a7f37'],
-  will_create_session: ['Будет создано занятие', '#9a6700'],
-  duplicate: ['Дубликат — пропуск', '#9a6700'],
-  possible_duplicate: ['Вероятный дубликат', '#b54708'],
-  update: ['Будет обновлено', '#0969da'],
-  skipped: ['Пропуск по режиму', '#57606a'],
-  error: ['Требует исправления', '#cf222e'],
+  new: ['import.status.new', '#1a7f37'],
+  matched: ['import.status.matched', '#1a7f37'],
+  will_create_session: ['import.status.willCreateSession', '#9a6700'],
+  duplicate: ['import.status.duplicate', '#9a6700'],
+  possible_duplicate: ['import.status.possibleDuplicate', '#b54708'],
+  update: ['import.status.update', '#0969da'],
+  skipped: ['import.status.skipped', '#57606a'],
+  error: ['import.status.error', '#cf222e'],
 }
 
 const READY = new Set(['new', 'update', 'matched', 'will_create_session', 'possible_duplicate'])
@@ -34,11 +36,13 @@ function cleanMapping(mapping) {
 }
 
 function StatusText({ status }) {
-  const [label, color] = STATUS_META[status] || [status, '#57606a']
-  return <span style={{ color, fontWeight: 650 }}>{label}</span>
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
+  const [label, color] = STATUS_META[status] || [null, '#57606a']
+  return <span style={{ color, fontWeight: 650 }}>{label ? t(label) : status}</span>
 }
 
-function useImportTab(kind, effectMode, reloadRoleData) {
+function useImportTab(kind, effectMode, reloadRoleData, t) {
   const [file, setFile] = useState(null)
   const [headers, setHeaders] = useState([])
   const [mapping, setMapping] = useState({})
@@ -81,7 +85,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
 
   async function runPreview(targetFile = file, targetMapping = mapping) {
     if (!targetFile) {
-      setFieldErrors({ file: 'Выберите CSV или XLSX-файл.' })
+      setFieldErrors({ file: t('import.fileRequired') })
       return
     }
     setBusy(true); setError(''); setFieldErrors({}); setSummary(null)
@@ -97,7 +101,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
         file: 'file', mapping: 'mapping', effect_mode: 'effectMode', import_mode: 'importMode',
       })
       setFieldErrors(nextErrors)
-      setError(formErrorMessage(err, 'Не удалось проверить файл.') || '')
+      setError(formErrorMessage(err, t('import.previewError')) || '')
       focusFirstFieldError(nextErrors, {
         file: `admin-import-${kind}-file`,
         mapping: `admin-import-${kind}-mapping-0`,
@@ -128,7 +132,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       }
       return payload.row
     } catch (err) {
-      setError(apiErrorMessage(err, 'Не удалось сохранить строку импорта.'))
+      setError(apiErrorMessage(err, t('import.rowSaveError')))
     } finally {
       setBusy(false)
     }
@@ -143,7 +147,7 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       setCounts(payload.counts || {})
       if (patch.excluded) setSelected([])
     } catch (err) {
-      setError(apiErrorMessage(err, 'Не удалось изменить выбранные строки.'))
+      setError(apiErrorMessage(err, t('import.bulkSaveError')))
     } finally {
       setBusy(false)
     }
@@ -173,8 +177,8 @@ function useImportTab(kind, effectMode, reloadRoleData) {
       delete nextErrors.batch_id
       setFieldErrors((current) => ({ ...current, ...nextErrors }))
       setError(err.fieldErrors?.batch_id
-        ? apiErrorMessage(err, 'Предварительная проверка импорта устарела. Выполните её заново.')
-        : formErrorMessage(err, 'Не удалось выполнить импорт.') || '')
+        ? apiErrorMessage(err, t('import.previewExpired'))
+        : formErrorMessage(err, t('import.commitError')) || '')
       focusFirstFieldError(nextErrors, {
         selectedIndices: `admin-import-${kind}-selected-indices`,
         confirmFinancialEffects: 'admin-import-attendance-financial-confirmation',
@@ -199,10 +203,12 @@ function useImportTab(kind, effectMode, reloadRoleData) {
 }
 
 function ImportSummary({ summary }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   if (!summary) return null
   const parts = Object.entries(summary)
     .filter(([key]) => !['errors', 'created_ids', 'created_client_ids'].includes(key))
-    .map(([key, value]) => `${key}: ${value}`)
+    .map(([key, value]) => `${t(`import.summary.${key}`)}: ${value}`)
     .join(', ')
   return <div className="banner banner-success" role="status" style={{ marginBottom: 12 }}>
     <div>{parts}</div>
@@ -213,6 +219,8 @@ function ImportSummary({ summary }) {
 }
 
 function ClientSearch({ Button, disabled, onChoose }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [error, setError] = useState('')
@@ -224,25 +232,27 @@ function ClientSearch({ Button, disabled, onChoose }) {
       const payload = await api.get(`/api/admin/import/client-search/?q=${encodeURIComponent(query.trim())}`)
       setResults(payload.clients || [])
     } catch (err) {
-      setError(apiErrorMessage(err, 'Не удалось найти клиента.'))
+      setError(apiErrorMessage(err, t('import.clientSearchError')))
     }
   }
 
   return <div style={{ display: 'grid', gap: 8 }}>
     <div className="ops-button-row">
       <input value={query} onChange={(event) => setQuery(event.target.value)}
-        placeholder="ID, email, телефон, имя или дата рождения" />
-      <Button size="sm" variant="secondary" disabled={disabled} onClick={search}>Найти клиента</Button>
+        placeholder={t('import.clientSearchPlaceholder')} />
+      <Button size="sm" variant="secondary" disabled={disabled} onClick={search}>{t('import.findClient')}</Button>
     </div>
     {error && <span className="muted">{error}</span>}
     {results.map((client) => <button type="button" key={client.id} className="card card-pad"
       style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => onChoose(client)}>
-      <strong>{client.name}</strong> · ID {client.id} · {client.email || 'без email'} · {client.phone || 'без телефона'}
+      <strong>{client.name}</strong> · ID {client.id} · {client.email || t('import.noEmail')} · {client.phone || t('import.noPhone')}
     </button>)}
   </div>
 }
 
 function RowEditor({ state, row, Button, Banner, onClose }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   const editable = state.fieldOptions.filter((field) => field.editable)
   const readOnly = state.fieldOptions.filter((field) => !field.editable && row.data?.[field.key])
   const [values, setValues] = useState(() => Object.fromEntries(
@@ -271,7 +281,7 @@ function RowEditor({ state, row, Button, Banner, onClose }) {
 
   const baseline = Object.fromEntries(editable.map((field) => [field.key, row.data?.[field.key] ?? '']))
 
-  return <FormModal open title={`Исправление строки ${row.index}`} size="lg" busy={state.busy} dirty={JSON.stringify(values) !== JSON.stringify(baseline)} onRequestClose={onClose} footer={({ requestClose }) => <><Button variant="secondary" disabled={state.busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>Сохранить исправления</Button></>}>
+  return <FormModal open title={t('import.rowEditorTitle', { index: row.index })} size="lg" busy={state.busy} dirty={JSON.stringify(values) !== JSON.stringify(baseline)} onRequestClose={onClose} footer={({ requestClose }) => <><Button variant="secondary" disabled={state.busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>{t('import.saveCorrections')}</Button></>}>
     {state.error && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
     <div className="ops-form-grid">
       {editable.map((field) => <label key={field.key}>
@@ -281,16 +291,16 @@ function RowEditor({ state, row, Button, Banner, onClose }) {
       </label>)}
     </div>
     {readOnly.length > 0 && <div className="muted">
-      Системные поля только для чтения: {readOnly.map((field) => `${field.label}: ${row.data[field.key]}`).join(' · ')}
+      {t('import.readOnlyFields', { fields: readOnly.map((field) => `${field.label}: ${row.data[field.key]}`).join(' · ') })}
     </div>}
     {['payments', 'attendance'].includes(state.kind) && <>
-      <div className="eyebrow">Связь с клиентом</div>
+      <div className="eyebrow">{t('import.clientRelation')}</div>
       <ClientSearch Button={Button} disabled={state.busy} onChoose={assign} />
       <div className="ops-button-row">
-        <Button size="sm" variant="secondary" onClick={clearClient}>Снять автосопоставление</Button>
+        <Button size="sm" variant="secondary" onClick={clearClient}>{t('import.clearAutoMatch')}</Button>
         {state.kind === 'payments' && <Button size="sm" variant="secondary"
           onClick={() => state.patchRow(row.index, { relations: { create_client: 'true' } })}>
-          Создать клиента из строки при импорте
+          {t('import.createClientFromRow')}
         </Button>}
       </div>
     </>}
@@ -299,6 +309,8 @@ function RowEditor({ state, row, Button, Banner, onClose }) {
 
 function ImportWorkspace({ state, dataset, components, financial, possibleDuplicates, onFinancial, onDuplicates }) {
   const { Button, Banner, Table } = components
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [editing, setEditing] = useState(null)
@@ -319,24 +331,24 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
 
   const columns = [
     { key: 'selected', header: '', width: 42, render: (row) => <input type="checkbox"
-      aria-label={`Выбрать строку ${row.index}`} checked={state.selected.includes(row.index)}
+      aria-label={t('import.selectRow', { index: row.index })} checked={state.selected.includes(row.index)}
       disabled={row.excluded || row.status === 'error' || row.status === 'duplicate'}
       onChange={() => state.toggle(row.index)} /> },
     { key: 'index', header: '#', width: 52, render: (row) => row.index },
-    { key: 'status', header: 'Статус', width: 190, render: (row) => <StatusText status={row.status} /> },
-    { key: 'summary', header: 'Данные', render: (row) => Object.values(row.data || {}).filter(Boolean).slice(0, 8).join(' · ') },
-    { key: 'match', header: 'Связи / изменения', render: (row) => {
+    { key: 'status', header: t('common.status'), width: 190, render: (row) => <StatusText status={row.status} /> },
+    { key: 'summary', header: t('import.data'), render: (row) => Object.values(row.data || {}).filter(Boolean).slice(0, 8).join(' · ') },
+    { key: 'match', header: t('import.relationsChanges'), render: (row) => {
       const changes = Object.entries(row.resolved?.changes || {})
         .map(([field, value]) => `${field}: ${value.old ?? '∅'} → ${value.new ?? '∅'}`)
       return changes.join(' · ') || row.resolved?.matching_reason || row.resolved?.group_reason || '—'
     } },
-    { key: 'issues', header: 'Ошибки и предупреждения', render: (row) => [
+    { key: 'issues', header: t('import.issues'), render: (row) => [
       ...(row.errors || []), ...(row.warnings || []),
     ].join('; ') || '—' },
-    { key: 'actions', header: 'Действия', width: 190, render: (row) => <div className="ops-button-row">
-      <Button size="sm" variant="subtle" onClick={() => setEditing(row.index)}>Исправить</Button>
+    { key: 'actions', header: t('import.actions'), width: 190, render: (row) => <div className="ops-button-row">
+      <Button size="sm" variant="subtle" onClick={() => setEditing(row.index)}>{t('import.correct')}</Button>
       <Button size="sm" variant="subtle" onClick={() => state.patchRow(row.index, { excluded: !row.excluded })}>
-        {row.excluded ? 'Вернуть' : 'Исключить'}
+        {t(row.excluded ? 'import.restoreRow' : 'import.excludeRow')}
       </Button>
     </div> },
   ]
@@ -349,16 +361,16 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
 
   return <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
     <div className="card card-pad">
-      <div className="eyebrow">{dataset.label}: CSV / XLSX</div>
-      <p className="muted" style={{ margin: '6px 0 12px' }}>{dataset.help}</p>
+      <div className="eyebrow">{t(dataset.label)}: CSV / XLSX</div>
+      <p className="muted" style={{ margin: '6px 0 12px' }}>{t(dataset.help)}</p>
       {state.kind === 'attendance' && financial.controls}
       {state.kind === 'groups' && <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
-        <span className="eyebrow">Безопасный режим конфликта</span>
+        <span className="eyebrow">{t('import.conflictMode')}</span>
         <select id={`admin-import-${state.kind}-mode`} value={state.importMode} disabled={Boolean(state.file)} aria-invalid={Boolean(state.fieldErrors.importMode)} aria-describedby={state.fieldErrors.importMode ? `admin-import-${state.kind}-mode-error` : undefined}
           onChange={(event) => { state.setImportMode(event.target.value); state.setFieldErrors((current) => clearFieldError(current, 'importMode')) }}>
-          <option value="create_only">Создать только новые, существующие пропустить</option>
-          <option value="update_existing">Обновить только существующие</option>
-          <option value="upsert">Создать новые или обновить существующие</option>
+          <option value="create_only">{t('import.modeCreateOnly')}</option>
+          <option value="update_existing">{t('import.modeUpdateOnly')}</option>
+          <option value="upsert">{t('import.modeUpsert')}</option>
         </select>
         {state.fieldErrors.importMode && <small id={`admin-import-${state.kind}-mode-error`} className="ops-field-error" role="alert">{state.fieldErrors.importMode}</small>}
       </label>}
@@ -369,24 +381,24 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
 
     {state.error && !editing && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
     <ImportSummary summary={state.summary} />
-    {state.meta.ownExport && <Banner tone="success">Собственный export CRM распознан автоматически · schema {state.meta.schema}</Banner>}
-    {state.meta.duplicateFile && <Banner tone="warning">Этот файл уже был импортирован. Проверьте дубликаты перед commit.</Banner>}
+    {state.meta.ownExport && <Banner tone="success">{t('import.ownExport', { schema: state.meta.schema })}</Banner>}
+    {state.meta.duplicateFile && <Banner tone="warning">{t('import.duplicateFile')}</Banner>}
     {state.meta.requiredMissing?.length > 0 && <Banner tone="warning">
-      Не сопоставлены обязательные поля: {state.meta.requiredMissing.join(', ')}
+      {t('import.requiredMissing', { fields: state.meta.requiredMissing.join(', ') })}
     </Banner>}
 
     {state.headers.length > 0 && <div className="card card-pad">
-      <div className="eyebrow">Сопоставление колонок</div>
+      <div className="eyebrow">{t('import.columnMapping')}</div>
       <div className="ops-form-grid" style={{ marginTop: 8 }}>
         {state.headers.filter((header) => !['schema_version', 'exported_at', 'source_system', 'entity_type'].includes(header))
           .map((header, index) => <label key={header}>
             <span>{header}{state.meta.sourceSamples?.[header]
-              ? <small className="muted"> · пример: {state.meta.sourceSamples[header]}</small>
+              ? <small className="muted"> · {t('import.example', { value: state.meta.sourceSamples[header] })}</small>
               : null}</span>
             <select id={`admin-import-${state.kind}-mapping-${index}`} value={state.mapping[header] || ''}
               aria-invalid={Boolean(state.fieldErrors.mapping)}
               onChange={(event) => { state.setMapping({ ...state.mapping, [header]: event.target.value }); state.setFieldErrors((current) => clearFieldError(current, 'mapping')) }}>
-              <option value="">— не использовать —</option>
+              <option value="">{t('import.doNotUse')}</option>
               {state.fieldOptions.map((field) => <option key={field.key} value={field.key}>
                 {field.label}{field.required ? ' *' : ''}
               </option>)}
@@ -395,53 +407,53 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       </div>
       {state.fieldErrors.mapping && <small className="ops-field-error" role="alert">{state.fieldErrors.mapping}</small>}
       {state.meta.unusedHeaders?.length > 0 && <p className="muted">
-        Неиспользуемые колонки: {state.meta.unusedHeaders.join(', ')}
+        {t('import.unusedColumns', { columns: state.meta.unusedHeaders.join(', ') })}
       </p>}
       <Button size="sm" variant="secondary" disabled={state.busy} onClick={() => state.runPreview()}>
-        Обновить preview с этим mapping
+        {t('import.updatePreview')}
       </Button>
     </div>}
 
     {state.rows.length > 0 && <>
       <div className="card card-pad">
         <div className="ops-button-row" style={{ justifyContent: 'space-between' }}>
-          <strong>Всего {state.counts.total || state.rows.length} · ошибок {state.counts.error || 0} · дубликатов {(state.counts.duplicate || 0) + (state.counts.possible_duplicate || 0)} · исключено {state.counts.excluded || 0}</strong>
+          <strong>{t('import.counts', { total: state.counts.total || state.rows.length, errors: state.counts.error || 0, duplicates: (state.counts.duplicate || 0) + (state.counts.possible_duplicate || 0), excluded: state.counts.excluded || 0 })}</strong>
           <div className="ops-button-row">
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по строкам" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('import.rowSearch')} />
             <select value={filter} onChange={(event) => setFilter(event.target.value)}>
-              <option value="all">Все строки</option>
-              <option value="error">С ошибками</option>
-              <option value="warning">С предупреждениями</option>
-              <option value="unmatched">Несопоставленные</option>
-              <option value="new">Новые</option>
-              <option value="update">Обновляемые</option>
-              <option value="duplicate">Дубликаты</option>
-              <option value="excluded">Исключённые</option>
+              <option value="all">{t('import.filterAll')}</option>
+              <option value="error">{t('import.filterErrors')}</option>
+              <option value="warning">{t('import.filterWarnings')}</option>
+              <option value="unmatched">{t('import.filterUnmatched')}</option>
+              <option value="new">{t('import.filterNew')}</option>
+              <option value="update">{t('import.filterUpdate')}</option>
+              <option value="duplicate">{t('import.filterDuplicates')}</option>
+              <option value="excluded">{t('import.filterExcluded')}</option>
             </select>
           </div>
         </div>
       </div>
       <Table rows={visibleRows} rowKey={(row) => row.row_key || row.index} columns={columns} density="sm"
-        emptyLabel="Нет строк для выбранного фильтра" />
+        emptyLabel={t('import.noFilteredRows')} />
       {editing && <RowEditor state={state} row={state.rows.find((row) => row.index === editing)}
         Button={Button} Banner={Banner} onClose={() => { state.setError(''); setEditing(null) }} />}
       <div className="card card-pad" style={{ display: 'grid', gap: 10 }}>
-        <div className="eyebrow">Массовые действия · выбрано {state.selected.length}</div>
+        <div className="eyebrow">{t('import.bulkActions', { count: state.selected.length })}</div>
         <div className="ops-button-row">
           <Button size="sm" variant="secondary" disabled={!state.selected.length || state.busy}
-            onClick={() => state.bulkPatch(state.selected, { excluded: true })}>Исключить выбранные</Button>
+            onClick={() => state.bulkPatch(state.selected, { excluded: true })}>{t('import.excludeSelected')}</Button>
           <Button size="sm" variant="subtle" disabled={!visibleRows.length}
             onClick={() => state.setSelected(visibleRows.filter((row) => READY.has(row.status) && !row.excluded).map((row) => row.index))}>
-            Выбрать видимые безопасные строки
+            {t('import.selectVisibleSafe')}
           </Button>
         </div>
         {['payments', 'attendance'].includes(state.kind) && <>
-          <div className="eyebrow">Назначить одного клиента выбранным строкам</div>
+          <div className="eyebrow">{t('import.assignClientHeading')}</div>
           <ClientSearch Button={Button} disabled={!state.selected.length || state.busy}
             onChoose={(client) => setBulkClient(client)} />
           {bulkClient && <Button size="sm" variant="secondary" disabled={!state.selected.length}
             onClick={() => state.bulkPatch(state.selected, { relations: { client_id: bulkClient.id } })}>
-            Назначить {bulkClient.name} выбранным строкам
+            {t('import.assignClient', { name: bulkClient.name })}
           </Button>}
         </>}
       </div>
@@ -452,7 +464,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
           aria-invalid={Boolean(state.fieldErrors.possibleDuplicates)}
           aria-describedby={state.fieldErrors.possibleDuplicates ? `admin-import-${state.kind}-possible-duplicates-error` : undefined}
           onChange={(event) => { onDuplicates(event.target.checked); state.setFieldErrors((current) => clearFieldError(current, 'possibleDuplicates')) }} />
-        <span>Я проверил вероятные дубликаты и явно разрешаю выбранные строки без Reference ID.
+        <span>{t('import.approveDuplicates')}
           {state.fieldErrors.possibleDuplicates && <small id={`admin-import-${state.kind}-possible-duplicates-error`} className="ops-field-error" role="alert">{state.fieldErrors.possibleDuplicates}</small>}
         </span>
       </label>}
@@ -464,7 +476,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
           onClick={() => state.commit({
             ...(state.kind === 'payments' ? { approve_possible_duplicates: possibleDuplicates } : {}),
             ...(state.kind === 'attendance' && financial.required ? { confirm_financial_effects: true } : {}),
-          })}>Подтвердить импорт выбранных строк</Button>
+          })}>{t('import.confirmSelected')}</Button>
       </div>
       {state.fieldErrors.selectedIndices && <small id={`admin-import-${state.kind}-selected-indices-error`} className="ops-field-error" role="alert">{state.fieldErrors.selectedIndices}</small>}
     </>}
@@ -476,6 +488,8 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
   const I = icons
 
   return function AdminImportExportScreen() {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
     const [tab, setTab] = useState('export')
     const [exportBusy, setExportBusy] = useState(null)
     const [exportError, setExportError] = useState('')
@@ -485,11 +499,11 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
     const [financialConfirmed, setFinancialConfirmed] = useState(false)
     const [possibleDuplicates, setPossibleDuplicates] = useState(false)
 
-    const trainers = useImportTab('trainers', null, reloadRoleData)
-    const groups = useImportTab('groups', null, reloadRoleData)
-    const clients = useImportTab('clients', null, reloadRoleData)
-    const payments = useImportTab('payments', null, reloadRoleData)
-    const attendance = useImportTab('attendance', attendanceEffectMode, reloadRoleData)
+    const trainers = useImportTab('trainers', null, reloadRoleData, t)
+    const groups = useImportTab('groups', null, reloadRoleData, t)
+    const clients = useImportTab('clients', null, reloadRoleData, t)
+    const payments = useImportTab('payments', null, reloadRoleData, t)
+    const attendance = useImportTab('attendance', attendanceEffectMode, reloadRoleData, t)
     const states = { trainers, groups, clients, payments, attendance }
 
     async function loadBatches() {
@@ -497,25 +511,25 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
         const payload = await api.get('/api/admin/system/imports/')
         setBatches(payload.batches || [])
       } catch (err) {
-        setBatchesError(apiErrorMessage(err, 'Не удалось загрузить историю импортов.'))
+        setBatchesError(apiErrorMessage(err, t('import.historyLoadError')))
       }
     }
 
-    useEffect(() => { if (tab !== 'export') loadBatches() }, [tab])
+    useEffect(() => { if (tab !== 'export') loadBatches() }, [tab, t])
 
     async function rollbackBatch(kind, batchId) {
       setBatchesError('')
       try {
         const preview = await api.get(`/api/admin/import/${kind}/${batchId}/rollback/`)
-        if (!preview.can_rollback) throw new Error('Откат заблокирован зависимыми данными')
-        const confirmation = window.prompt(`Введите ID batch ${batchId} для подтверждения отката:`)
+        if (!preview.can_rollback) throw new Error(t('import.rollbackBlocked'))
+        const confirmation = window.prompt(t('import.rollbackPrompt', { id: batchId }))
         if (confirmation !== String(batchId)) return
         await api.post(`/api/admin/import/${kind}/${batchId}/rollback/`, {
           confirm_batch_id: batchId, confirm_rollback: true,
         })
         await loadBatches()
       } catch (err) {
-        setBatchesError(apiErrorMessage(err, 'Не удалось откатить импорт.'))
+        setBatchesError(apiErrorMessage(err, t('import.rollbackError')))
       }
     }
 
@@ -524,7 +538,7 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
       try {
         await downloadFile(`/api/admin/export/${entity}/${fmt}/`, `${entity}.${fmt}`)
       } catch (err) {
-        setExportError(apiErrorMessage(err, 'Не удалось подготовить экспорт.'))
+        setExportError(apiErrorMessage(err, t('import.exportError')))
       } finally {
         setExportBusy(null)
       }
@@ -534,13 +548,13 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
       required: attendanceEffectMode === 'apply_financial',
       confirmed: financialConfirmed,
       controls: <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
-        <span className="eyebrow">Режим импорта</span>
+        <span className="eyebrow">{t('import.importMode')}</span>
         <select id="admin-import-attendance-effect-mode" value={attendanceEffectMode} disabled={Boolean(attendance.file)}
           aria-invalid={Boolean(attendance.fieldErrors.effectMode)}
           aria-describedby={attendance.fieldErrors.effectMode ? 'admin-import-attendance-effect-mode-error' : undefined}
           onChange={(event) => { setAttendanceEffectMode(event.target.value); setFinancialConfirmed(false); attendance.setFieldErrors((current) => clearFieldError(current, 'effectMode')) }}>
-          <option value="history_only">Только история, без списаний и начислений</option>
-          <option value="apply_financial">Применить списания или начисления</option>
+          <option value="history_only">{t('import.historyOnly')}</option>
+          <option value="apply_financial">{t('import.applyFinancial')}</option>
         </select>
         {attendance.fieldErrors.effectMode && <small id="admin-import-attendance-effect-mode-error" className="ops-field-error" role="alert">{attendance.fieldErrors.effectMode}</small>}
       </label>,
@@ -550,25 +564,25 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
             aria-invalid={Boolean(attendance.fieldErrors.confirmFinancialEffects)}
             aria-describedby={attendance.fieldErrors.confirmFinancialEffects ? 'admin-import-attendance-financial-confirmation-error' : undefined}
             onChange={(event) => { setFinancialConfirmed(event.target.checked); attendance.setFieldErrors((current) => clearFieldError(current, 'confirmFinancialEffects')) }} />
-          <span>Я подтверждаю финансовые последствия для выбранных строк.
+          <span>{t('import.confirmFinancialEffects')}
             {attendance.fieldErrors.confirmFinancialEffects && <small id="admin-import-attendance-financial-confirmation-error" className="ops-field-error" role="alert">{attendance.fieldErrors.confirmFinancialEffects}</small>}
           </span>
         </label>
-        : <Banner tone="info">Безопасный режим: история без изменений баланса.</Banner>,
+        : <Banner tone="info">{t('import.safeHistoryMode')}</Banner>,
     }
 
     return <div>
       <Tabs value={tab} onChange={setTab} items={[
-        { value: 'export', label: 'Экспорт' },
-        ...DATASETS.map((dataset) => ({ value: dataset.kind, label: dataset.label })),
+        { value: 'export', label: t('import.export') },
+        ...DATASETS.map((dataset) => ({ value: dataset.kind, label: t(dataset.label) })),
       ]} />
 
       {tab === 'export' && <div className="card card-pad" style={{ marginTop: 12 }}>
         {exportError && <Banner tone="danger" onClose={() => setExportError('')}>{exportError}</Banner>}
-        <p className="muted">CSV — UTF-8; даты — ISO 8601; деньги — точный decimal/minor units; каждый файл содержит schema version и stable keys.</p>
+        <p className="muted">{t('import.exportFormatHint')}</p>
         <div className="ops-action-strip">
           {DATASETS.map((dataset) => <div key={dataset.kind} className="card card-pad" style={{ display: 'grid', gap: 8 }}>
-            <strong>{dataset.label}</strong>
+            <strong>{t(dataset.label)}</strong>
             <div className="ops-button-row">
               {['xlsx', 'csv'].map((fmt) => <Button key={fmt} size="sm" variant="secondary"
                 iconLeft={<I.Download size={14} />} loading={exportBusy === `${dataset.kind}-${fmt}`}
@@ -584,13 +598,11 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
         onFinancial={setFinancialConfirmed} onDuplicates={setPossibleDuplicates} />)}
 
       {tab !== 'export' && <div className="card card-pad" style={{ marginTop: 16 }}>
-        <div className="eyebrow">История import batches</div>
+        <div className="eyebrow">{t('import.historyTitle')}</div>
         {batchesError && <Banner tone="danger" onClose={() => setBatchesError('')}>{batchesError}</Banner>}
         {batches.slice(0, 10).map((batch) => <div key={batch.id} className="ops-button-row"
           style={{ justifyContent: 'space-between', padding: '6px 0' }}>
-          <span>#{batch.id} · {batch.kind} · {batch.source_name || 'Импорт'} · создано {batch.created || 0}
-            {' · '}обновлено {batch.updated || 0} · пропущено {batch.skipped || 0}
-            {' · '}ошибок {batch.errors_count || 0} · {batch.status}
+          <span>{t('import.batchSummary', { id: batch.id, kind: batch.kind, source: batch.source_name || t('import.import'), created: batch.created || 0, updated: batch.updated || 0, skipped: batch.skipped || 0, errors: batch.errors_count || 0, status: batch.status })}
             {batch.rollback_strategy?.label ? <small className="muted" style={{ display: 'block' }}>
               {batch.rollback_strategy.label}
             </small> : null}</span>
@@ -599,13 +611,13 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
               variant="subtle" onClick={() => downloadFile(
                 `/api/admin/import/batches/${batch.id}/report/${fmt}/`,
                 `import-${batch.kind}-${batch.id}-report.${fmt}`)}>
-              Отчёт {fmt.toUpperCase()}
+              {t('import.reportFormat', { format: fmt.toUpperCase() })}
             </Button>)}
             {['clients', 'groups'].includes(batch.kind) && batch.status === 'committed' && !batch.is_rolled_back
-              && <Button size="sm" variant="subtle" onClick={() => rollbackBatch(batch.kind, batch.id)}>Откатить</Button>}
+              && <Button size="sm" variant="subtle" onClick={() => rollbackBatch(batch.kind, batch.id)}>{t('import.rollback')}</Button>}
           </div>
         </div>)}
-        {!batches.length && <p className="muted">Импортов пока не было.</p>}
+        {!batches.length && <p className="muted">{t('import.noHistory')}</p>}
       </div>}
     </div>
   }

@@ -24,7 +24,7 @@ const groups = [
     default_location: { id: 12, name: 'Pool B', is_active: true },
     default_capacity: 8,
     participants_count: 0,
-    price_minor: null,
+    price_minor: 6500,
     currency: 'PLN',
     color_key: null,
     is_active: true,
@@ -37,14 +37,16 @@ const groups = [
     default_location: null,
     default_capacity: null,
     participants_count: 0,
-    price_minor: null,
+    price_minor: 7000,
     currency: 'PLN',
     color_key: null,
     is_active: true,
   },
 ]
 
-async function mockAdmin(page, { onClientCreate, onGroupCreate } = {}) {
+async function mockAdmin(page, { onClientCreate, onGroupCreate, sessions = [] } = {}) {
+  const sessionBodies = []
+  const sessionPatchBodies = []
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -80,12 +82,34 @@ async function mockAdmin(page, { onClientCreate, onGroupCreate } = {}) {
       groups,
       pagination: { page: 1, page_size: 50, total: groups.length, pages: 1, has_next: false, has_previous: false },
     })
+    if (path === '/api/admin/schedule/check-conflict/' && request.method() === 'POST') {
+      return json(route, { has_conflict: false, errors: {}, non_field_errors: [] })
+    }
+    const sessionMatch = path.match(/^\/api\/admin\/schedule\/sessions\/(\d+)\/$/)
+    if (sessionMatch && request.method() === 'PATCH') {
+      const body = request.postDataJSON()
+      sessionPatchBodies.push(body)
+      const original = sessions.find((session) => String(session.id) === sessionMatch[1]) || {}
+      const selectedGroup = groups.find((group) => String(group.id) === String(body.group_id ?? original.group?.id))
+      return json(route, {
+        ...original,
+        ...body,
+        group: selectedGroup ? { id: selectedGroup.id, name: selectedGroup.name } : original.group,
+        price_minor: selectedGroup?.price_minor ?? original.price_minor,
+        currency: selectedGroup?.currency ?? original.currency,
+      })
+    }
+    if (path === '/api/admin/schedule/sessions/' && request.method() === 'POST') {
+      sessionBodies.push(request.postDataJSON())
+      return json(route, { id: 501 }, 201)
+    }
     if (path === '/api/admin/schedule/sessions/') return json(route, {
-      sessions: [],
-      pagination: { page: 1, page_size: 200, total: 0, pages: 0, has_next: false, has_previous: false },
+      sessions,
+      pagination: { page: 1, page_size: 200, total: sessions.length, pages: sessions.length ? 1 : 0, has_next: false, has_previous: false },
     })
     return json(route, { error: `Unhandled endpoint: ${request.method()} ${path}` }, 404)
   })
+  return { sessionBodies, sessionPatchBodies }
 }
 
 test('activation returns to login with canonical username and the new password without auto-login', async ({ page }) => {
@@ -171,7 +195,7 @@ test('new client keeps Instagram beside groups on desktop and below them on mobi
 test('group editor saves a default location and group sessions reapply all group defaults', async ({ page }) => {
   test.skip(page.viewportSize()?.width !== 1440, 'one desktop group defaults contract is sufficient')
   const groupBodies = []
-  await mockAdmin(page, {
+  const state = await mockAdmin(page, {
     onClientCreate: (route) => json(route, { id: 100 }, 201),
     onGroupCreate: (route, request) => {
       groupBodies.push(request.postDataJSON())
@@ -202,6 +226,7 @@ test('group editor saves a default location and group sessions reapply all group
   await expect(trainer).toHaveValue('2')
   await expect(location).toHaveValue('Pool B')
   await expect(capacity).toHaveValue('8')
+  await expect(sessionModal.getByText('65 PLN — цена группы «Dolphins»')).toBeVisible()
 
   await trainer.selectOption('1')
   await location.selectOption('Pool A')
@@ -215,6 +240,7 @@ test('group editor saves a default location and group sessions reapply all group
   await expect(trainer).toHaveValue('')
   await expect(location).toHaveValue('')
   await expect(capacity).toHaveValue('10')
+  await expect(sessionModal.getByText('70 PLN — цена группы «No defaults»')).toBeVisible()
 
   await group.selectOption('21')
   await expect(trainer).toHaveValue('2')
@@ -229,4 +255,52 @@ test('group editor saves a default location and group sessions reapply all group
   await expect(trainer).toHaveValue('2')
   await expect(location).toHaveValue('Pool B')
   await expect(capacity).toHaveValue('8')
+  await expect(sessionModal.getByText('65 PLN — цена группы «Dolphins»')).toBeVisible()
+
+  await group.selectOption('22')
+  await trainer.selectOption('1')
+  await location.selectOption('Pool A')
+  await sessionModal.getByRole('button', { name: 'Создать занятие' }).click()
+  await expect.poll(() => state.sessionBodies).toHaveLength(1)
+  expect(state.sessionBodies[0].group_id).toBe('22')
+  expect(state.sessionBodies[0]).not.toHaveProperty('price_minor')
+})
+
+test('group session edit shows the selected group tariff as read-only and never posts a stale price', async ({ page }) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'one desktop tariff edit contract is sufficient')
+  const start = new Date(Date.now() + 60 * 60 * 1000)
+  const end = new Date(start.getTime() + 45 * 60 * 1000)
+  const state = await mockAdmin(page, {
+    sessions: [{
+      id: 901,
+      start_at: start.toISOString(),
+      end_at: end.toISOString(),
+      session_type: 'group',
+      trainer_id: 1,
+      trainer: 'First Trainer',
+      group: { id: 22, name: 'No defaults' },
+      location: 'Pool A',
+      max_participants: 10,
+      participants_count: 0,
+      price_minor: 6500,
+      currency: 'PLN',
+      is_cancelled: false,
+      notes: '',
+    }],
+  })
+
+  await page.goto('/?role=admin&view=schedule')
+  const event = page.locator('.ops-schedule-event-wrap:visible').filter({ hasText: 'No defaults' }).first()
+  await event.hover()
+  await event.locator('.ops-schedule-event-edit').click()
+  const editor = page.getByRole('dialog', { name: 'Редактирование занятия' })
+  const price = editor.getByLabel('Цена, PLN')
+  await expect(price).toHaveValue('70')
+  await expect(price).toHaveAttribute('readonly', '')
+  await expect(editor.getByText('70 PLN — цена группы «No defaults»')).toBeVisible()
+  await editor.getByRole('button', { name: 'Сохранить занятие' }).click()
+
+  await expect.poll(() => state.sessionPatchBodies).toHaveLength(1)
+  expect(state.sessionPatchBodies[0]).not.toHaveProperty('price_minor')
+  expect(String(state.sessionPatchBodies[0].group_id)).toBe('22')
 })

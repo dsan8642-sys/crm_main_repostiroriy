@@ -19,8 +19,8 @@ function multipartValue(body, field) {
   return match?.[1] || ''
 }
 
-async function mockClientFinance(page) {
-  let created = false
+async function mockClientFinance(page, { initialPayment = false } = {}) {
+  let created = initialPayment
   let submitCount = 0
   const attemptKeys = []
   const participant = {
@@ -44,7 +44,7 @@ async function mockClientFinance(page) {
     status: 'pending',
     affects_balance: false,
     events: [{ type: 'requested' }],
-    receipt: { original_name: 'proof.pdf', download_url: '/api/documents/91/download/' },
+    receipt: { original_name: 'proof-with-a-very-long-descriptive-file-name-for-bank-transfer.pdf', download_url: '/api/documents/91/download/' },
   }
 
   await page.route('**/api/**', async (route) => {
@@ -113,6 +113,42 @@ test('Wave 4 client mobile tabs preserve a failed form and reuse one safe-attemp
   expect(state.attemptKeys).toHaveLength(2)
   expect(state.attemptKeys[0]).toBeTruthy()
   expect(state.attemptKeys[1]).toBe(state.attemptKeys[0])
+})
+
+test('client payment history stays complete and horizontally reachable on tablet', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 768, 'tablet payment-history contract')
+  await mockClientFinance(page, { initialPayment: true })
+  await page.goto('/?role=client&view=payments')
+
+  const region = page.getByRole('region', { name: 'История платежей' })
+  await expect(region).toBeVisible()
+  await expect(page.getByText('Прокрутите таблицу вправо, чтобы увидеть все столбцы.')).toBeVisible()
+
+  const initialGeometry = await region.evaluate((node) => ({
+    clientWidth: node.clientWidth,
+    scrollWidth: node.scrollWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }))
+  expect(initialGeometry.scrollWidth).toBeGreaterThan(initialGeometry.clientWidth)
+  expect(initialGeometry.documentWidth).toBeLessThanOrEqual(initialGeometry.viewportWidth)
+
+  await region.evaluate((node) => { node.scrollLeft = node.scrollWidth })
+  const receipt = region.getByRole('button', { name: 'proof-with-a-very-long-descriptive-file-name-for-bank-transfer.pdf' })
+  await receipt.focus()
+  await expect(receipt).toBeFocused()
+  const finalGeometry = await region.evaluate((node) => {
+    const regionBox = node.getBoundingClientRect()
+    const receiptBox = node.querySelector('button')?.getBoundingClientRect()
+    return {
+      receiptLeft: receiptBox?.left,
+      receiptRight: receiptBox?.right,
+      regionLeft: regionBox.left,
+      regionRight: regionBox.right,
+    }
+  })
+  expect(finalGeometry.receiptLeft).toBeGreaterThanOrEqual(finalGeometry.regionLeft)
+  expect(finalGeometry.receiptRight).toBeLessThanOrEqual(finalGeometry.regionRight)
 })
 
 async function mockAdminDebt(page) {

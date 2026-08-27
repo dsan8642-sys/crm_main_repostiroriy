@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useLocale } from '../i18n.jsx'
 
 function normalizeSearch(value) {
   return String(value || '')
@@ -34,14 +35,15 @@ export function SearchableSelect({
   onChange,
   options,
   loadOptions,
-  placeholder = 'Начните вводить имя или фамилию',
-  emptyLabel = 'Клиенты не найдены',
+  placeholder,
+  emptyLabel,
   disabled = false,
   className = '',
   inputAriaLabel,
   inputId,
   error,
 }) {
+  const { t } = useLocale()
   const id = useId().replace(/:/g, '')
   const rootRef = useRef(null)
   const inputRef = useRef(null)
@@ -99,9 +101,11 @@ export function SearchableSelect({
 
   const filteredOptions = useMemo(() => {
     const tokens = normalizeSearch(query).split(/\s+/).filter(Boolean)
-    const source = remoteQuery === normalizeSearch(query) && remoteOptions != null
-      ? remoteOptions
-      : options
+    const hasCurrentRemoteResults = (
+      remoteQuery === normalizeSearch(query) && remoteOptions != null
+    )
+    if (hasCurrentRemoteResults) return remoteOptions
+    const source = options
     if (!tokens.length || query === selected?.label) return source
     return source.filter((option) => {
       const haystack = normalizeSearch(`${option.label} ${option.searchText || ''}`)
@@ -169,7 +173,7 @@ export function SearchableSelect({
           type="text"
           value={query}
           disabled={disabled}
-          placeholder={placeholder}
+          placeholder={placeholder || t('select.placeholder')}
           role="combobox"
           aria-label={inputAriaLabel || label}
           aria-autocomplete="list"
@@ -187,7 +191,7 @@ export function SearchableSelect({
           type="button"
           className="ops-search-select-toggle"
           tabIndex="-1"
-          aria-label={open ? 'Закрыть список' : 'Открыть список'}
+          aria-label={open ? t('select.close') : t('select.open')}
           aria-controls={listboxId}
           aria-expanded={open}
           disabled={disabled}
@@ -220,7 +224,7 @@ export function SearchableSelect({
               {option.description && <small>{option.description}</small>}
             </li>
           ))}
-          {!filteredOptions.length && <li className="is-empty" role="presentation">{remoteLoading ? 'Ищу клиентов...' : emptyLabel}</li>}
+          {!filteredOptions.length && <li className="is-empty" role="presentation">{remoteLoading ? t('select.searching') : (emptyLabel || t('select.empty'))}</li>}
         </ul>
       )}
     </label>

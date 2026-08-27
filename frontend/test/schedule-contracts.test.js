@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { validateAdminSessionForm } from '../src/app/scheduleContracts.js'
+import { adminTranslator } from '../src/adminLocales.js'
+import { validateAdminSessionForm as rawValidateAdminSessionForm } from '../src/app/scheduleContracts.js'
+
+const ru = adminTranslator('ru')
+const validateAdminSessionForm = (form) => rawValidateAdminSessionForm(form, ru)
 
 function validSplitForm(overrides = {}) {
   return {

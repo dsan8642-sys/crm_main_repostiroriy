@@ -27,6 +27,16 @@ test('remote participant search and trainer reactivation remain available', asyn
     client_is_active: true,
     group: null,
   }
+  const scaleParticipants = Array.from({ length: 400 }, (_, index) => ({
+    id: 1000 + index,
+    client_id: 2000 + index,
+    first_name: `Client${String(index).padStart(3, '0')}`,
+    last_name: 'ScaleSearch',
+    full_name: `ScaleSearch Client${String(index).padStart(3, '0')}`,
+    is_active: true,
+    client_is_active: true,
+    group: null,
+  }))
   let trainerUpdate = null
   const trainerAccessActions = []
 
@@ -45,7 +55,10 @@ test('remote participant search and trainer reactivation remain available', asyn
     if (path === '/api/admin/clients/') return json(route, { clients: [], pagination: { total: 315 } })
     if (path === '/api/admin/schedule/sessions/') return json(route, { sessions: [], pagination: { total: 0 } })
     if (path === '/api/admin/reference/') {
-      const participants = url.searchParams.get('q') ? [remoteParticipant] : [initialParticipant]
+      const query = url.searchParams.get('q')
+      const participants = query === 'ScaleSearch'
+        ? scaleParticipants
+        : query ? [remoteParticipant] : [initialParticipant]
       return json(route, {
         trainers: [], groups: [], subscription_types: [], locations: [],
         participants, choices: { session_types: [] },
@@ -106,7 +119,15 @@ test('remote participant search and trainer reactivation remain available', asyn
   if ((page.viewportSize()?.width || 0) <= 767) {
     await page.getByRole('button', { name: 'Открыть глобальный поиск' }).click()
   }
-  await page.getByRole('textbox', { name: 'Глобальный поиск', exact: true }).fill('Remote Participant')
+  const globalSearch = page.getByRole('textbox', { name: 'Глобальный поиск', exact: true })
+  await globalSearch.fill('ScaleSearch')
+  const globalResults = (page.viewportSize()?.width || 0) <= 767
+    ? page.locator('.ops-mobile-search-results button')
+    : page.locator('.ops-search-results button')
+  await expect(globalResults).toHaveCount(400)
+  await globalSearch.fill('Remote Participant')
+  await expect(page.getByRole('button', { name: /Remote Participant/ })).toBeVisible()
+  await globalSearch.fill('Account Owner')
   await expect(page.getByRole('button', { name: /Remote Participant/ })).toBeVisible()
 
   if ((page.viewportSize()?.width || 0) <= 767) {
@@ -116,7 +137,20 @@ test('remote participant search and trainer reactivation remain available', asyn
   }
   await page.getByRole('button', { name: 'Индивидуальная тренировка' }).click()
   const sessionDialog = page.getByRole('dialog', { name: 'Новое занятие' })
-  await sessionDialog.getByRole('combobox', { name: 'Участник' }).fill('Remote Participant')
+  const participantInput = sessionDialog.getByRole('combobox', { name: 'Участник' })
+  if ((page.viewportSize()?.width || 0) >= 960) {
+    await participantInput.fill('ScaleSearch')
+    const resultList = sessionDialog.locator('.ops-search-select-list')
+    await expect(resultList.getByRole('option')).toHaveCount(400)
+    const inputBox = await participantInput.boundingBox()
+    const listBox = await resultList.boundingBox()
+    expect(inputBox).not.toBeNull()
+    expect(listBox).not.toBeNull()
+    expect(listBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height)
+  }
+  await participantInput.fill('Remote Participant')
+  await expect(sessionDialog.getByRole('option', { name: /Participant Remote/ })).toBeVisible()
+  await participantInput.fill('Account Owner')
   await expect(sessionDialog.getByRole('option', { name: /Participant Remote/ })).toBeVisible()
   await sessionDialog.getByRole('contentinfo').getByRole('button', { name: 'Закрыть', exact: true }).click()
 
@@ -264,6 +298,19 @@ test('client profile exposes contact links and opens routed individual and split
     ],
     group: null,
   }
+  const referenceParticipants = [
+    ...Array.from({ length: 399 }, (_, index) => ({
+      id: 1000 + index,
+      client_id: 2000 + index,
+      first_name: `Scale${String(index).padStart(3, '0')}`,
+      last_name: 'Participant',
+      full_name: `Participant Scale${String(index).padStart(3, '0')}`,
+      is_active: true,
+      client_is_active: true,
+      group: null,
+    })),
+    participant,
+  ]
   let contactMode = 'valid'
 
   const detail = () => ({
@@ -307,7 +354,7 @@ test('client profile exposes contact links and opens routed individual and split
         ],
         subscription_types: [],
         locations: [{ id: 1, code: 'pool', name: 'Pool A' }],
-        participants: [participant],
+        participants: referenceParticipants,
         choices: {
           session_types: [
             { value: 'group', label: 'Групповое', default_capacity: 10 },

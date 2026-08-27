@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { accessCodeClipboardText } from './accessContracts.js'
+import { adminTranslator } from '../adminLocales.js'
+import { useLocale } from '../i18n.jsx'
 
 export function AccessButtons({
   Button,
@@ -8,37 +9,44 @@ export function AccessButtons({
   busy = false,
   onAction,
 }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   if (portalAccess === 'revoked') {
-    return <Button variant="secondary" disabled={busy} onClick={() => onAction('restore')}>Вернуть доступ</Button>
+    return <Button variant="secondary" disabled={busy} onClick={() => onAction('restore')}>{t('access.restore')}</Button>
   }
   return (
     <>
-      <Button variant="secondary" disabled={busy} onClick={() => onAction('issue')}>{accessActivated ? 'Восстановить доступ' : 'Выдать доступ'}</Button>
-      <Button variant="secondary" disabled={busy} onClick={() => onAction('revoke')}>Отозвать доступ</Button>
+      <Button variant="secondary" disabled={busy} onClick={() => onAction('issue')}>{accessActivated ? t('access.recover') : t('access.issue')}</Button>
+      <Button variant="secondary" disabled={busy} onClick={() => onAction('revoke')}>{t('access.revoke')}</Button>
     </>
   )
 }
 
 export function AccessCodeCard({ info, Button, onClose }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   const [copyStatus, setCopyStatus] = useState('')
   if (!info) return null
   async function copy(value) {
     try {
       await navigator.clipboard.writeText(value)
-      setCopyStatus('Скопировано.')
+      setCopyStatus(t('access.copied'))
     } catch {
-      setCopyStatus('Ошибка копирования.')
+      setCopyStatus(t('access.copyError'))
     }
   }
   return (
     <div className="card card-pad ops-access-card">
-      <strong>{info.purpose === 'recovery' ? 'Код восстановления доступа' : 'Код активации доступа'}</strong>
-      <div className="ops-detail-row"><span>Логин: <strong>{info.login}</strong></span><Button size="sm" variant="secondary" onClick={() => copy(info.login)}>Копировать логин</Button></div>
-      <div className="ops-detail-row"><span className="mono" style={{ wordBreak: 'break-all' }}>{info.activation_code}</span><Button size="sm" variant="secondary" onClick={() => copy(info.activation_code)}>Копировать код</Button></div>
-      <Button size="sm" variant="primary" onClick={() => copy(accessCodeClipboardText(info))}>Копировать всё</Button>
+      <strong>{info.purpose === 'recovery' ? t('access.recoveryCode') : t('access.activationCode')}</strong>
+      <div className="ops-detail-row"><span>{t('access.login', { login: info.login })}</span><Button size="sm" variant="secondary" onClick={() => copy(info.login)}>{t('access.copyLogin')}</Button></div>
+      <div className="ops-detail-row"><span className="mono" style={{ wordBreak: 'break-all' }}>{info.activation_code}</span><Button size="sm" variant="secondary" onClick={() => copy(info.activation_code)}>{t('access.copyCode')}</Button></div>
+      <Button size="sm" variant="primary" onClick={() => copy([
+        t('access.login', { login: info.login }),
+        `${info.purpose === 'recovery' ? t('access.recoveryCode') : t('access.activationCode')}: ${info.activation_code}`,
+      ].join('\n'))}>{t('access.copyAll')}</Button>
       {copyStatus && <span role="status" className="muted">{copyStatus}</span>}
-      <div className="muted">Срок: {info.expires_at}</div>
-      {onClose && <Button size="sm" variant="subtle" onClick={onClose}>Закрыть</Button>}
+      <div className="muted">{t('access.expires', { date: info.expires_at })}</div>
+      {onClose && <Button size="sm" variant="subtle" onClick={onClose}>{t('common.close')}</Button>}
     </div>
   )
 }

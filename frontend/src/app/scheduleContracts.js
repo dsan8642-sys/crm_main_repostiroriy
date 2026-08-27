@@ -2,6 +2,13 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const ISO_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/
 export const DEFAULT_SCHEDULE_VIEW = 'week'
 
+function scheduleMessage(t, key, params = {}) {
+  const template = t ? t(key, params) : key
+  return template.replace(/\{(\w+)\}/g, (match, name) => (
+    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match
+  ))
+}
+
 export function localToday() {
   return dateToIso(new Date())
 }
@@ -80,9 +87,9 @@ export function periodSessionCount(sessions, focusDate, viewMode) {
   return (sessions || []).filter((session) => sessionIsoDate(session).slice(0, 7) === month).length
 }
 
-export function periodCountLabel(count, viewMode) {
-  const period = viewMode === 'day' ? 'день' : viewMode === 'month' ? 'месяц' : 'неделю'
-  return `За ${period}: ${count}`
+export function periodCountLabel(count, viewMode, t) {
+  const period = viewMode === 'day' ? 'day' : viewMode === 'month' ? 'month' : 'week'
+  return scheduleMessage(t, `schedule.periodCount.${period}`, { count })
 }
 
 export function newSessionCapacity({ groupCapacity, typeCapacity, currentCapacity }) {
@@ -90,36 +97,36 @@ export function newSessionCapacity({ groupCapacity, typeCapacity, currentCapacit
   return preferred == null ? '' : String(preferred)
 }
 
-export function validateAdminSessionForm(form) {
+export function validateAdminSessionForm(form, t) {
   const errors = {}
-  if (!form.trainerId) errors.trainerId = 'Выберите тренера.'
-  if (!validIsoDate(form.date)) errors.date = 'Укажите дату.'
-  if (!validTime(form.start)) errors.start = 'Укажите время в формате ЧЧ:ММ.'
+  if (!form.trainerId) errors.trainerId = scheduleMessage(t, 'schedule.validation.trainer')
+  if (!validIsoDate(form.date)) errors.date = scheduleMessage(t, 'schedule.validation.date')
+  if (!validTime(form.start)) errors.start = scheduleMessage(t, 'schedule.validation.time')
   const duration = Number(form.durationMinutes)
   if (!Number.isInteger(duration) || duration < 15 || duration > 480 || duration % 5 !== 0) {
-    errors.durationMinutes = 'От 15 до 480 минут с шагом 5 минут.'
+    errors.durationMinutes = scheduleMessage(t, 'schedule.validation.duration')
   }
-  if (!form.location) errors.location = 'Выберите локацию.'
+  if (!form.location) errors.location = scheduleMessage(t, 'schedule.validation.location')
   const capacity = Number(form.maxParticipants)
-  if (!Number.isInteger(capacity) || capacity < 1) errors.maxParticipants = 'Укажите число больше нуля.'
-  if (form.sessionType === 'group' && !form.groupId) errors.groupId = 'Выберите группу.'
-  if (form.sessionType !== 'group' && !form.participantId) errors.participantId = 'Выберите участника.'
+  if (!Number.isInteger(capacity) || capacity < 1) errors.maxParticipants = scheduleMessage(t, 'schedule.validation.capacity')
+  if (form.sessionType === 'group' && !form.groupId) errors.groupId = scheduleMessage(t, 'schedule.validation.group')
+  if (form.sessionType !== 'group' && !form.participantId) errors.participantId = scheduleMessage(t, 'schedule.validation.participant')
   if (form.sessionType === 'split' && form.requireSecondParticipant && !form.secondParticipantId) {
-    errors.secondParticipantId = 'Выберите второго клиента для сплит-тренировки.'
+    errors.secondParticipantId = scheduleMessage(t, 'schedule.validation.secondParticipant')
   }
   if (
     form.sessionType === 'split'
     && form.secondParticipantId
     && String(form.secondParticipantId) === String(form.participantId)
-  ) errors.secondParticipantId = 'Выберите другого второго клиента.'
+  ) errors.secondParticipantId = scheduleMessage(t, 'schedule.validation.differentSecondParticipant')
   const selectedRosterSize = form.sessionType === 'split'
     ? 1 + Number(form.extraParticipantCount || 0) + (form.secondParticipantId ? 1 : 0)
     : Number(form.rosterCount || 0)
   if (Number.isInteger(capacity) && capacity > 0 && selectedRosterSize > capacity) {
-    errors.maxParticipants = `Лимит не может быть меньше текущего состава (${selectedRosterSize}).`
+    errors.maxParticipants = scheduleMessage(t, 'schedule.validation.rosterCapacity', { count: selectedRosterSize })
   }
   if (form.price !== '' && (!Number.isFinite(Number(form.price)) || Number(form.price) < 0)) {
-    errors.price = 'Цена не может быть отрицательной.'
+    errors.price = scheduleMessage(t, 'schedule.validation.price')
   }
   return errors
 }

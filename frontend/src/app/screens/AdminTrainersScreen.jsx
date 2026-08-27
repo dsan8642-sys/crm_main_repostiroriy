@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
 import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
 import { BusyBanner } from '../runtime.jsx'
 import { FormModal } from '../FormModal.jsx'
@@ -29,12 +31,15 @@ const PERIOD_FIELD_IDS = {
 
 const today = () => new Date().toISOString().slice(0, 10)
 const monthStart = () => `${today().slice(0, 8)}01`
-const money = (minor = 0, currency = 'PLN') => `${(Number(minor) / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${currency}`
+const money = (minor = 0, currency = 'PLN', localeTag = 'ru-RU') => `${(Number(minor) / 100).toLocaleString(localeTag, { minimumFractionDigits: 2 })} ${currency}`
 
 export function createAdminTrainersScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Input, Badge, Select, Checkbox, Dialog } = components
 
   return function ApiAdminTrainers({ go, currentUser }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
     const trainerList = useScreenList({
       path: '/api/admin/trainers/',
       itemKey: 'trainers',
@@ -85,9 +90,9 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       ]).then(([schemes, rules, assignments, periods]) => {
         if (!active) return
         setPayroll({ schemes: schemes.schemes || [], rules: rules.rules || [], assignments: assignments.assignments || [], periods: periods.periods || [] })
-      }).catch((err) => active && setError(apiErrorMessage(err, 'Не удалось загрузить расчёты тренера.')))
+      }).catch((err) => active && setError(apiErrorMessage(err, t('trainers.loadPayrollError'))))
       return () => { active = false }
-    }, [selected, tab])
+    }, [selected, tab, t])
 
     function openTrainer(row) {
       const parts = String(row.name || '').trim().split(/\s+/)
@@ -110,7 +115,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           ? await api.post('/api/admin/trainers/', payload)
           : await api.post(`/api/admin/trainers/${selected.trainerId}/`, payload)
         if (!isNew) setSelected(mapAdminTrainerRows([saved])[0])
-        setMessage(isNew ? 'Тренер создан.' : 'Профиль тренера обновлён.')
+        setMessage(isNew ? t('trainers.created') : t('trainers.updated'))
         setCreating(false); setEditing(false)
         setFormBaseline(null)
         await reloadRoleData?.('admin')
@@ -124,7 +129,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           'trainer.is_active': 'isActive',
         })
         setFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось сохранить тренера.'))
+        setError(formErrorMessage(err, t('trainers.saveError')))
         focusFirstFieldError(nextErrors, TRAINER_FIELD_IDS)
       } finally { setBusy(false) }
     }
@@ -149,9 +154,9 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       const baseAmount = Number(String(rule.baseAmount || '').replace(',', '.'))
       const threshold = Number(rule.threshold)
       const extraAmount = Number(String(rule.extraAmount || '').replace(',', '.'))
-      if (!Number.isFinite(baseAmount) || baseAmount < 0) nextErrors.baseAmount = 'Введите неотрицательную базовую сумму.'
-      if (rule.sessionType === 'group' && (!Number.isInteger(threshold) || threshold < 0)) nextErrors.threshold = 'Введите целое число не меньше нуля.'
-      if (rule.sessionType === 'group' && (!Number.isFinite(extraAmount) || extraAmount < 0)) nextErrors.extraAmount = 'Введите неотрицательную доплату.'
+      if (!Number.isFinite(baseAmount) || baseAmount < 0) nextErrors.baseAmount = t('trainers.baseInvalid')
+      if (rule.sessionType === 'group' && (!Number.isInteger(threshold) || threshold < 0)) nextErrors.threshold = t('trainers.thresholdInvalid')
+      if (rule.sessionType === 'group' && (!Number.isFinite(extraAmount) || extraAmount < 0)) nextErrors.extraAmount = t('trainers.extraInvalid')
       if (Object.keys(nextErrors).length) {
         setRuleErrors(nextErrors); setError(null)
         focusFirstFieldError(nextErrors, RULE_FIELD_IDS)
@@ -161,7 +166,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       try {
         let schemeId = rule.schemeId
         if (!schemeId) {
-          const scheme = await api.post('/api/admin/payroll/schemes/', { name: `Ставки: ${selected.name}`, location: '' })
+          const scheme = await api.post('/api/admin/payroll/schemes/', { name: t('trainers.schemeName', { name: selected.name }), location: '' })
           schemeId = scheme.id
           await api.post('/api/admin/payroll/assignments/', { trainer_id: selected.trainerId, scheme_id: schemeId, effective_from: today() })
         }
@@ -174,7 +179,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           min_clients_threshold: rule.sessionType === 'group' ? threshold : null,
           extra_client_amount_minor: rule.sessionType === 'group' ? Math.round(extraAmount * 100) : null,
         })
-        setMessage('Ставка сохранена и назначена тренеру.')
+        setMessage(t('trainers.rateSaved'))
         setRule((current) => ({ ...current, schemeId, baseAmount: '', extraAmount: '' }))
         setPayrollAction(null)
         setPayrollBaseline(null)
@@ -190,16 +195,16 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           extra_client_amount_minor: 'extraAmount',
         })
         setRuleErrors(nextFieldErrors)
-        setError(formErrorMessage(err, 'Не удалось сохранить ставку.'))
+        setError(formErrorMessage(err, t('trainers.rateError')))
         focusFirstFieldError(nextFieldErrors, RULE_FIELD_IDS)
       } finally { setBusy(false) }
     }
 
     async function calculatePayroll() {
       const nextErrors = {}
-      if (!validIsoDate(period.dateFrom)) nextErrors.dateFrom = 'Введите начальную дату.'
-      if (!validIsoDate(period.dateTo)) nextErrors.dateTo = 'Введите конечную дату.'
-      if (validIsoDate(period.dateFrom) && validIsoDate(period.dateTo) && period.dateTo < period.dateFrom) nextErrors.dateTo = 'Конечная дата не может быть раньше начальной.'
+      if (!validIsoDate(period.dateFrom)) nextErrors.dateFrom = t('trainers.startDateInvalid')
+      if (!validIsoDate(period.dateTo)) nextErrors.dateTo = t('trainers.endDateInvalid')
+      if (validIsoDate(period.dateFrom) && validIsoDate(period.dateTo) && period.dateTo < period.dateFrom) nextErrors.dateTo = t('trainers.dateOrderInvalid')
       if (Object.keys(nextErrors).length) {
         setPeriodErrors(nextErrors); setError(null)
         focusFirstFieldError(nextErrors, PERIOD_FIELD_IDS)
@@ -208,7 +213,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       setBusy(true); setError(null); setPeriodErrors({})
       try {
         const result = await api.post('/api/admin/payroll/periods/', { date_from: period.dateFrom, date_to: period.dateTo, location: period.location })
-        setMessage(`Расчёт создан: ${money(result.summary?.total_amount_minor, result.summary?.currency)}.`)
+        setMessage(t('trainers.payrollCreated', { amount: money(result.summary?.total_amount_minor, result.summary?.currency, localeTag) }))
         setPayroll((current) => ({ ...current, periods: [result, ...current.periods.filter((item) => item.id !== result.id)] }))
         setPayrollAction(null)
         setPayrollBaseline(null)
@@ -217,7 +222,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           date_from: 'dateFrom', date_to: 'dateTo', location: 'location',
         })
         setPeriodErrors(nextFieldErrors)
-        setError(formErrorMessage(err, 'Не удалось рассчитать зарплату.'))
+        setError(formErrorMessage(err, t('trainers.payrollError')))
         focusFirstFieldError(nextFieldErrors, PERIOD_FIELD_IDS)
       } finally { setBusy(false) }
     }
@@ -229,13 +234,13 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
         const payload = await api.post(`/api/admin/trainers/${selected.trainerId}/access/${action}/`)
         if (action === 'revoke') {
           setSelected((current) => ({ ...current, portalAccess: 'revoked' }))
-          setMessage('Portal-доступ тренера отозван. Рабочий профиль остался активным.')
+          setMessage(t('trainers.accessRevoked'))
         } else {
           setAccessInfo(payload)
           setSelected((current) => ({ ...current, accessActivated: true, portalAccess: 'active' }))
         }
         await reloadRoleData?.('admin')
-      } catch (err) { setError(apiErrorMessage(err, 'Не удалось изменить доступ тренера.')) } finally { setBusy(false) }
+      } catch (err) { setError(apiErrorMessage(err, t('trainers.accessError'))) } finally { setBusy(false) }
     }
 
     async function deactivateTrainer() {
@@ -245,11 +250,11 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
         await api.delete(`/api/admin/trainers/${selected.trainerId}/`)
         setSelected((current) => ({ ...current, active: false, portalAccess: 'revoked' }))
         setForm((current) => ({ ...current, isActive: false }))
-        setMessage(`Тренер ${selected.name} деактивирован.`)
+        setMessage(t('trainers.deactivated', { name: selected.name }))
         setDeactivateConfirm(false)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось деактивировать тренера.'))
+        setError(apiErrorMessage(err, t('trainers.deactivateError')))
       } finally {
         setBusy(false)
       }
@@ -259,89 +264,89 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       <>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="ops-form-grid">
-          <Input id={TRAINER_FIELD_IDS.firstName} label="Имя" value={form.firstName} error={fieldErrors.firstName} onChange={(event) => updateTrainerForm('firstName', event.target.value)} />
-          <Input id={TRAINER_FIELD_IDS.lastName} label="Фамилия" value={form.lastName} error={fieldErrors.lastName} onChange={(event) => updateTrainerForm('lastName', event.target.value)} />
-          <Input id={TRAINER_FIELD_IDS.username} label="Логин" value={form.username} error={fieldErrors.username} onChange={(event) => updateTrainerForm('username', event.target.value)} />
+          <Input id={TRAINER_FIELD_IDS.firstName} label={t('trainers.firstName')} value={form.firstName} error={fieldErrors.firstName} onChange={(event) => updateTrainerForm('firstName', event.target.value)} />
+          <Input id={TRAINER_FIELD_IDS.lastName} label={t('trainers.lastName')} value={form.lastName} error={fieldErrors.lastName} onChange={(event) => updateTrainerForm('lastName', event.target.value)} />
+          <Input id={TRAINER_FIELD_IDS.username} label={t('trainers.login')} value={form.username} error={fieldErrors.username} onChange={(event) => updateTrainerForm('username', event.target.value)} />
           <Input id={TRAINER_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => updateTrainerForm('email', event.target.value)} />
-          <Input id={TRAINER_FIELD_IDS.phone} label="Телефон" value={form.phone} error={fieldErrors.phone} onChange={(event) => updateTrainerForm('phone', event.target.value)} />
-          <Checkbox id={TRAINER_FIELD_IDS.isActive} label="Активен" checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateTrainerForm('isActive', event.target.checked)} />
+          <Input id={TRAINER_FIELD_IDS.phone} label={t('common.phone')} value={form.phone} error={fieldErrors.phone} onChange={(event) => updateTrainerForm('phone', event.target.value)} />
+          <Checkbox id={TRAINER_FIELD_IDS.isActive} label={t('trainers.active')} checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateTrainerForm('isActive', event.target.checked)} />
         </div>
       </>
     )
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">Тренеры</h1><p className="page-desc">Профили, расписание, группы и расчёт зарплаты.</p></div><Button variant="primary" onClick={() => { const next = { firstName: '', lastName: '', email: '', phone: '', username: '', isActive: true }; setCreating(true); setSelected(null); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>Новый тренер</Button></div>
+        <div className="page-head"><div><h1 className="page-title">{t('trainers.title')}</h1><p className="page-desc">{t('trainers.description')}</p></div><Button variant="primary" onClick={() => { const next = { firstName: '', lastName: '', email: '', phone: '', username: '', isActive: true }; setCreating(true); setSelected(null); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('trainers.new')}</Button></div>
         <ToastNotice id="admin-trainer-result" message={message} />
         {error && !creating && !editing && !payrollAction && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Выполняю операцию...</BusyBanner>
-        <ListToolbar list={trainerList} searchLabel="Поиск тренеров" searchPlaceholder="Имя, логин, email или телефон">
-          <label>Статус<select value={trainerList.draftFilters.active} onChange={(event) => trainerList.setDraftFilter('active', event.target.value)}><option value="">Все</option><option value="true">Активные</option><option value="false">Неактивные</option></select></label>
+        <BusyBanner Banner={Banner} show={busy}>{t('trainers.busy')}</BusyBanner>
+        <ListToolbar list={trainerList} searchLabel={t('trainers.search')} searchPlaceholder={t('trainers.searchPlaceholder')}>
+          <label>{t('common.status')}<select value={trainerList.draftFilters.active} onChange={(event) => trainerList.setDraftFilter('active', event.target.value)}><option value="">{t('common.all')}</option><option value="true">{t('common.active')}</option><option value="false">{t('common.inactive')}</option></select></label>
         </ListToolbar>
-        <FormModal open={creating || editing} title={creating ? 'Новый тренер' : 'Редактирование профиля'} size="lg" busy={busy} dirty={Boolean(formBaseline) && JSON.stringify(form) !== JSON.stringify(formBaseline)} onRequestClose={() => { if (formBaseline) setForm(formBaseline); setCreating(false); setEditing(false); setFormBaseline(null); setFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={busy} onClick={() => saveTrainer(creating)}>Сохранить</Button></>}>
+        <FormModal open={creating || editing} title={creating ? t('trainers.new') : t('trainers.edit')} size="lg" busy={busy} dirty={Boolean(formBaseline) && JSON.stringify(form) !== JSON.stringify(formBaseline)} onRequestClose={() => { if (formBaseline) setForm(formBaseline); setCreating(false); setEditing(false); setFormBaseline(null); setFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy} onClick={() => saveTrainer(creating)}>{t('common.save')}</Button></>}>
           {editor}
         </FormModal>
 
         {selected && !creating && (
-          <section className="card ops-entity-card" aria-label={`Профиль тренера ${selected.name}`}>
-            <ContextBackButton onClick={() => setSelected(null)}>К списку тренеров</ContextBackButton>
-            <div className="ops-entity-head"><div className="ops-entity-person"><Avatar name={selected.name} size={44} /><div><h3>{selected.name}</h3><div className="muted">{selected.email || 'Email не указан'} · {selected.phone || 'Телефон не указан'}</div></div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active && <AccessButtons Button={Button} portalAccess={selected.portalAccess} accessActivated={selected.accessActivated} busy={busy} onAction={accessAction} />}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>Редактировать</Button>{selected.active && <Button variant="danger" disabled={busy} onClick={() => setDeactivateConfirm(true)}>Деактивировать</Button>}</div></div>
+          <section className="card ops-entity-card" aria-label={t('trainers.profileAria', { name: selected.name })}>
+            <ContextBackButton onClick={() => setSelected(null)}>{t('trainers.back')}</ContextBackButton>
+            <div className="ops-entity-head"><div className="ops-entity-person"><Avatar name={selected.name} size={44} /><div><h3>{selected.name}</h3><div className="muted">{selected.email || t('trainers.emailMissing')} · {selected.phone || t('trainers.phoneMissing')}</div></div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active && <AccessButtons Button={Button} portalAccess={selected.portalAccess} accessActivated={selected.accessActivated} busy={busy} onAction={accessAction} />}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button>{selected.active && <Button variant="danger" disabled={busy} onClick={() => setDeactivateConfirm(true)}>{t('trainers.deactivate')}</Button>}</div></div>
             <AccessCodeCard info={accessInfo} Button={Button} />
-            <div className="ops-tabs" role="tablist">{[['profile', 'Обзор'], ['schedule', `Расписание ${trainerSessions.length}`], ['payroll', 'Зарплата и ставки']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{label}</button>)}</div>
-            {tab === 'profile' && <div className="ops-detail-grid"><div><div className="eyebrow">Группы</div>{trainerGroups.map((group) => <button key={group.id} className="ops-detail-row" type="button" onClick={() => go?.('groups', { groupId: group.groupId })}><strong>{group.name}</strong><span>{group.students} участников</span></button>)}{!trainerGroups.length && <div className="empty">Назначенных групп нет</div>}</div><div><div className="eyebrow">Ближайшие занятия</div>{trainerSessions.slice(0, 5).map((session) => <button key={session.id} type="button" className="ops-detail-row" onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}</strong><span>{session.group} · {session.location}</span></button>)}{!trainerSessions.length && <div className="empty">Занятий нет</div>}</div></div>}
-            {tab === 'schedule' && <div className="ops-card-list">{trainerSessions.map((session) => <button key={session.id} type="button" className={`ops-session-tile${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><span><strong>{session.date} · {session.start}-{session.end}</strong><small>{session.group} · {session.location}</small></span><Badge tone={session.isCancelled ? 'danger' : 'primary'}>{session.isCancelled ? 'Отменено' : 'Открыть занятие'}</Badge></button>)}{!trainerSessions.length && <div className="empty">В расписании тренера пока нет занятий.</div>}</div>}
+            <div className="ops-tabs" role="tablist">{[['profile', t('trainers.overview')], ['schedule', t('trainers.scheduleCount', { count: trainerSessions.length })], ['payroll', t('trainers.payrollTab')]].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{label}</button>)}</div>
+            {tab === 'profile' && <div className="ops-detail-grid"><div><div className="eyebrow">{t('common.groups')}</div>{trainerGroups.map((group) => <button key={group.id} className="ops-detail-row" type="button" onClick={() => go?.('groups', { groupId: group.groupId })}><strong>{group.name}</strong><span>{t('trainers.groupCount', { count: group.students })}</span></button>)}{!trainerGroups.length && <div className="empty">{t('trainers.noGroups')}</div>}</div><div><div className="eyebrow">{t('trainers.upcoming')}</div>{trainerSessions.slice(0, 5).map((session) => <button key={session.id} type="button" className="ops-detail-row" onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}</strong><span>{session.group} · {session.location}</span></button>)}{!trainerSessions.length && <div className="empty">{t('trainers.noSessions')}</div>}</div></div>}
+            {tab === 'schedule' && <div className="ops-card-list">{trainerSessions.map((session) => <button key={session.id} type="button" className={`ops-session-tile${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><span><strong>{session.date} · {session.start}-{session.end}</strong><small>{session.group} · {session.location}</small></span><Badge tone={session.isCancelled ? 'danger' : 'primary'}>{session.isCancelled ? t('trainers.cancelled') : t('trainers.openSession')}</Badge></button>)}{!trainerSessions.length && <div className="empty">{t('trainers.scheduleEmpty')}</div>}</div>}
             {tab === 'payroll' && <div className="ops-detail-grid">
-              <div><div className="ops-section-head"><div className="eyebrow">Ставки по типам занятий</div><Button size="sm" variant="primary" onClick={() => { setPayrollAction('rule'); setPayrollBaseline({ ...rule }) }}>Создать ставку</Button></div>{payroll.rules.filter((item) => trainerAssignments.some((assignment) => assignment.scheme_id === item.scheme_id)).map((item) => <div className="ops-detail-row" key={item.id}><strong>{{ group: 'Групповое', individual: 'Индивидуальное', split: 'Сплит' }[item.session_type]}</strong><span>{money(item.base_amount_minor, item.currency)}{item.session_type === 'group' ? ` + ${money(item.extra_client_amount_minor, item.currency)} после ${item.min_clients_threshold}` : ''}</span></div>)}</div>
-              <div><div className="ops-section-head"><div className="eyebrow">Расчёты зарплаты</div><Button size="sm" variant="primary" onClick={() => { setPayrollAction('period'); setPayrollBaseline({ ...period }) }}>Рассчитать период</Button></div>{trainerTotals.map((item) => <div className="ops-detail-row" key={item.id}><strong>{item.date_from} - {item.date_to}</strong><span>{money(item.total.total_amount_minor, item.total.currency)}</span></div>)}</div>
+              <div><div className="ops-section-head"><div className="eyebrow">{t('trainers.rates')}</div><Button size="sm" variant="primary" onClick={() => { setPayrollAction('rule'); setPayrollBaseline({ ...rule }) }}>{t('trainers.createRate')}</Button></div>{payroll.rules.filter((item) => trainerAssignments.some((assignment) => assignment.scheme_id === item.scheme_id)).map((item) => <div className="ops-detail-row" key={item.id}><strong>{{ group: t('trainers.typeGroup'), individual: t('trainers.typeIndividual'), split: t('trainers.typeSplit') }[item.session_type]}</strong><span>{money(item.base_amount_minor, item.currency, localeTag)}{item.session_type === 'group' ? t('trainers.extraAfter', { amount: money(item.extra_client_amount_minor, item.currency, localeTag), threshold: item.min_clients_threshold }) : ''}</span></div>)}</div>
+              <div><div className="ops-section-head"><div className="eyebrow">{t('trainers.payrollCalculations')}</div><Button size="sm" variant="primary" onClick={() => { setPayrollAction('period'); setPayrollBaseline({ ...period }) }}>{t('trainers.calculatePeriod')}</Button></div>{trainerTotals.map((item) => <div className="ops-detail-row" key={item.id}><strong>{item.date_from} - {item.date_to}</strong><span>{money(item.total.total_amount_minor, item.total.currency, localeTag)}</span></div>)}</div>
             </div>}
           </section>
         )}
 
-        <FormModal open={payrollAction === 'rule'} title="Ставка тренера" size="sm" busy={busy} dirty={Boolean(payrollBaseline) && JSON.stringify(rule) !== JSON.stringify(payrollBaseline)} onRequestClose={() => { if (payrollBaseline) setRule(payrollBaseline); setPayrollAction(null); setPayrollBaseline(null); setRuleErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={busy || !rule.baseAmount} onClick={createSchemeAndRule}>Сохранить ставку</Button></>}>
+        <FormModal open={payrollAction === 'rule'} title={t('trainers.rateTitle')} size="sm" busy={busy} dirty={Boolean(payrollBaseline) && JSON.stringify(rule) !== JSON.stringify(payrollBaseline)} onRequestClose={() => { if (payrollBaseline) setRule(payrollBaseline); setPayrollAction(null); setPayrollBaseline(null); setRuleErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy || !rule.baseAmount} onClick={createSchemeAndRule}>{t('trainers.saveRate')}</Button></>}>
           {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
           <div className="ops-form-stack">
-            <Select id={RULE_FIELD_IDS.schemeId} label="Схема" value={rule.schemeId} error={ruleErrors.schemeId} onChange={(event) => updateRule('schemeId', event.target.value)}><option value="">Создать схему для тренера</option>{payroll.schemes.map((scheme) => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}</Select>
-            <Select id={RULE_FIELD_IDS.sessionType} label="Тип занятия" value={rule.sessionType} error={ruleErrors.sessionType} onChange={(event) => updateRule('sessionType', event.target.value)}><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит</option></Select>
-            <Input id={RULE_FIELD_IDS.baseAmount} label="Базовая сумма, PLN" value={rule.baseAmount} error={ruleErrors.baseAmount} onChange={(event) => updateRule('baseAmount', event.target.value)} />
-            {rule.sessionType === 'group' && <><Input id={RULE_FIELD_IDS.threshold} label="Порог клиентов" value={rule.threshold} error={ruleErrors.threshold} onChange={(event) => updateRule('threshold', event.target.value)} /><Input id={RULE_FIELD_IDS.extraAmount} label="За каждого сверх порога, PLN" value={rule.extraAmount} error={ruleErrors.extraAmount} onChange={(event) => updateRule('extraAmount', event.target.value)} /></>}
+            <Select id={RULE_FIELD_IDS.schemeId} label={t('trainers.scheme')} value={rule.schemeId} error={ruleErrors.schemeId} onChange={(event) => updateRule('schemeId', event.target.value)}><option value="">{t('trainers.createScheme')}</option>{payroll.schemes.map((scheme) => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}</Select>
+            <Select id={RULE_FIELD_IDS.sessionType} label={t('trainers.sessionType')} value={rule.sessionType} error={ruleErrors.sessionType} onChange={(event) => updateRule('sessionType', event.target.value)}><option value="group">{t('trainers.typeGroup')}</option><option value="individual">{t('trainers.typeIndividual')}</option><option value="split">{t('trainers.typeSplit')}</option></Select>
+            <Input id={RULE_FIELD_IDS.baseAmount} label={t('trainers.baseAmount')} value={rule.baseAmount} error={ruleErrors.baseAmount} onChange={(event) => updateRule('baseAmount', event.target.value)} />
+            {rule.sessionType === 'group' && <><Input id={RULE_FIELD_IDS.threshold} label={t('trainers.threshold')} value={rule.threshold} error={ruleErrors.threshold} onChange={(event) => updateRule('threshold', event.target.value)} /><Input id={RULE_FIELD_IDS.extraAmount} label={t('trainers.extraAmount')} value={rule.extraAmount} error={ruleErrors.extraAmount} onChange={(event) => updateRule('extraAmount', event.target.value)} /></>}
           </div>
         </FormModal>
 
-        <FormModal open={payrollAction === 'period'} title="Рассчитать зарплату" size="sm" busy={busy} dirty={Boolean(payrollBaseline) && JSON.stringify(period) !== JSON.stringify(payrollBaseline)} onRequestClose={() => { if (payrollBaseline) setPeriod(payrollBaseline); setPayrollAction(null); setPayrollBaseline(null); setPeriodErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Отмена</Button><Button variant="primary" disabled={busy} onClick={calculatePayroll}>Рассчитать</Button></>}>
+        <FormModal open={payrollAction === 'period'} title={t('trainers.calculatePayroll')} size="sm" busy={busy} dirty={Boolean(payrollBaseline) && JSON.stringify(period) !== JSON.stringify(payrollBaseline)} onRequestClose={() => { if (payrollBaseline) setPeriod(payrollBaseline); setPayrollAction(null); setPayrollBaseline(null); setPeriodErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy} onClick={calculatePayroll}>{t('trainers.calculate')}</Button></>}>
           {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
           <div className="ops-form-stack">
-            <DateField id={PERIOD_FIELD_IDS.dateFrom} label="С даты" value={period.dateFrom} error={periodErrors.dateFrom} onChange={(value) => updatePeriod('dateFrom', value)} />
-            <DateField id={PERIOD_FIELD_IDS.dateTo} label="По дату" value={period.dateTo} error={periodErrors.dateTo} onChange={(value) => updatePeriod('dateTo', value)} />
-            <Input id={PERIOD_FIELD_IDS.location} label="Локация (необязательно)" value={period.location} error={periodErrors.location} onChange={(event) => updatePeriod('location', event.target.value)} />
+            <DateField id={PERIOD_FIELD_IDS.dateFrom} label={t('trainers.dateFrom')} value={period.dateFrom} error={periodErrors.dateFrom} onChange={(value) => updatePeriod('dateFrom', value)} />
+            <DateField id={PERIOD_FIELD_IDS.dateTo} label={t('trainers.dateTo')} value={period.dateTo} error={periodErrors.dateTo} onChange={(value) => updatePeriod('dateTo', value)} />
+            <Input id={PERIOD_FIELD_IDS.location} label={t('trainers.locationOptional')} value={period.location} error={periodErrors.location} onChange={(event) => updatePeriod('location', event.target.value)} />
           </div>
         </FormModal>
 
-        <ListFeedback list={trainerList} emptyLabel="Тренеров пока нет" />
-        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel="Тренеров пока нет" columns={[
-          { key: 'name', header: 'Тренер', render: (row) => <button type="button" className="ops-link-button" onClick={() => openTrainer(row)}><Avatar name={row.name} size={28} /><span className="strong">{row.name}</span></button> },
+        <ListFeedback list={trainerList} emptyLabel={t('trainers.empty')} />
+        <div className="ops-entity-desktop-table ops-trainer-list-scroll"><Table rows={rows} emptyLabel={t('trainers.empty')} columns={[
+          { key: 'name', header: t('common.trainer'), render: (row) => <button type="button" className="ops-link-button" onClick={() => openTrainer(row)}><Avatar name={row.name} size={28} /><span className="strong">{row.name}</span></button> },
           { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
-          { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
-          { key: 'groups', header: 'Группы', align: 'right', width: 90, render: (row) => <button type="button" className="ops-count-button" onClick={() => openTrainer(row)}>{row.groups}</button> },
-          { key: 'active', header: 'Статус', width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
-          { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openTrainer(row)}>Профиль</Button> },
+          { key: 'phone', header: t('common.phone'), muted: true, render: (row) => <span className="mono">{row.phone || '-'}</span> },
+          { key: 'groups', header: t('common.groups'), align: 'right', width: 90, render: (row) => <button type="button" className="ops-count-button" onClick={() => openTrainer(row)}>{row.groups}</button> },
+          { key: 'active', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
+          { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openTrainer(row)}>{t('trainers.profile')}</Button> },
         ]} /></div>
         <div className="ops-entity-mobile-list">
           {rows.map((row) => (
             <EntityMobileCard key={row.id} className="ops-trainer-compact-card" labelledBy={`trainer-card-${row.id}`}>
               <div className="ops-compact-card-head">
                 <button type="button" className="ops-compact-card-title with-avatar" onClick={() => openTrainer(row)}><Avatar name={row.name} size={34} /><strong id={`trainer-card-${row.id}`} title={row.name}>{row.name}</strong></button>
-                <ActionPopover label={`Действия: ${row.name}`} actions={[
-                  { key: 'profile', label: 'Профиль', onSelect: () => openTrainer(row) },
-                  { key: 'edit', label: 'Изменить', onSelect: () => { openTrainer(row); setEditing(true) } },
+                <ActionPopover label={t('common.actionsFor', { name: row.name })} actions={[
+                  { key: 'profile', label: t('trainers.profile'), onSelect: () => openTrainer(row) },
+                  { key: 'edit', label: t('common.edit'), onSelect: () => { openTrainer(row); setEditing(true) } },
                 ]} />
               </div>
-              <div className="ops-compact-card-line"><span>Телефон</span><strong className="mono" title={row.phone || ''}>{row.phone || '—'}</strong></div>
-              <div className="ops-compact-card-footer"><span>Активных групп: {row.groups ?? 0}</span><StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /></div>
+              <div className="ops-compact-card-line"><span>{t('common.phone')}</span><strong className="mono" title={row.phone || ''}>{row.phone || '—'}</strong></div>
+              <div className="ops-compact-card-footer"><span>{t('trainers.activeGroups', { count: row.groups ?? 0 })}</span><StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /></div>
             </EntityMobileCard>
           ))}
         </div>
         <ListPagination list={trainerList} />
-        {deactivateConfirm && <Dialog title={`Деактивировать ${selected?.name}?`} description="Вход в портал будет закрыт, а профиль и история останутся в системе." tone="danger" confirmLabel="Деактивировать" onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>}
+        {deactivateConfirm && <Dialog title={t('trainers.deactivateTitle', { name: selected?.name })} description={t('trainers.deactivateDescription')} tone="danger" confirmLabel={t('trainers.deactivate')} onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>}
       </div>
     )
   }

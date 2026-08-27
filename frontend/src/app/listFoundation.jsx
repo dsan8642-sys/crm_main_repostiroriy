@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiErrorMessage } from '../api.js'
+import { useLocale } from '../i18n.jsx'
 import {
   buildListUrl,
   createListRequestController,
@@ -67,6 +68,7 @@ export function useScreenList({
   serializeFilters = IDENTITY_FILTERS,
   enabled = true,
 }) {
+  const { t } = useLocale()
   const mobile = isMobileViewport()
   const storageKey = listStateKey({ userKey, role, route })
   const fixedParamsKey = JSON.stringify(fixedParams)
@@ -183,7 +185,7 @@ export function useScreenList({
         requestAnimationFrame(() => window.scrollTo({ top: scrollY }))
       }
     } catch (next) {
-      const message = apiErrorMessage(next, 'Не удалось загрузить список.')
+      const message = apiErrorMessage(next, t('list.loadFailed'))
       if (isNextPage && rowsRef.current.length) {
         setNextError(message)
         setStatus('ready')
@@ -192,7 +194,7 @@ export function useScreenList({
         setStatus('error')
       }
     }
-  }, [enabled, itemKey, mapRows, mobile, page, pageSize, path, requestParams])
+  }, [enabled, itemKey, mapRows, mobile, page, pageSize, path, requestParams, t])
 
   useEffect(() => {
     load()
@@ -280,30 +282,31 @@ export function useScreenList({
   }
 }
 
-export function ListToolbar({ list, searchLabel = 'Поиск', searchPlaceholder, children }) {
+export function ListToolbar({ list, searchLabel, searchPlaceholder, children }) {
+  const { t } = useLocale()
   const [open, setOpen] = useState(false)
   return (
     <div className="ops-list-tools">
       <label className="ops-list-search">
-        <span>{searchLabel}</span>
+        <span>{searchLabel || t('list.search')}</span>
         <input
           type="search"
           value={list.search}
           onChange={(event) => list.setSearch(event.target.value)}
-          placeholder={searchPlaceholder || 'Введите минимум 2 символа'}
+          placeholder={searchPlaceholder || t('list.minChars')}
         />
       </label>
       {children && (
         <>
           <button type="button" className="ops-list-filter-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-            Фильтры ({list.filterCount})
+            {t('list.filters', undefined, { count: list.filterCount })}
           </button>
           {open && (
             <div className="ops-list-filter-panel">
               <div className="ops-list-filter-fields">{children}</div>
               <div className="ops-list-filter-actions">
-                <button type="button" onClick={list.resetFilters}>Сбросить</button>
-                <button type="button" className="primary" onClick={list.applyFilters}>Применить</button>
+                <button type="button" onClick={list.resetFilters}>{t('list.reset')}</button>
+                <button type="button" className="primary" onClick={list.applyFilters}>{t('list.apply')}</button>
               </div>
             </div>
           )}
@@ -313,19 +316,20 @@ export function ListToolbar({ list, searchLabel = 'Поиск', searchPlaceholde
   )
 }
 
-export function ListFeedback({ list, emptyLabel = 'Записей пока нет', noResultsLabel = 'По запросу ничего не найдено.' }) {
+export function ListFeedback({ list, emptyLabel, noResultsLabel }) {
+  const { t } = useLocale()
   if (list.status === 'loading' && !list.rows.length) {
-    return <div className="ops-list-skeleton" role="status" aria-label="Загрузка списка"><span /><span /><span /></div>
+    return <div className="ops-list-skeleton" role="status" aria-label={t('list.loading')}><span /><span /><span /></div>
   }
   if (list.error && !list.rows.length) {
-    return <div className="ops-list-error" role="alert"><span>{list.error}</span><button type="button" onClick={list.retry}>Повторить</button></div>
+    return <div className="ops-list-error" role="alert"><span>{list.error}</span><button type="button" onClick={list.retry}>{t('shared.retry')}</button></div>
   }
   if (!list.rows.length) {
     const filtered = Boolean(list.search.trim()) || list.filterCount > 0
     return (
       <div className="empty ops-list-empty">
-        <span>{filtered ? noResultsLabel : emptyLabel}</span>
-        {filtered && <button type="button" onClick={list.resetFilters}>Сбросить поиск и фильтры</button>}
+        <span>{filtered ? (noResultsLabel || t('list.noResults')) : (emptyLabel || t('list.empty'))}</span>
+        {filtered && <button type="button" onClick={list.resetFilters}>{t('list.resetSearch')}</button>}
       </div>
     )
   }
@@ -333,17 +337,18 @@ export function ListFeedback({ list, emptyLabel = 'Записей пока не�
 }
 
 export function ListPagination({ list }) {
+  const { t } = useLocale()
   const { pagination } = list
   if (!list.rows.length) return null
   if (list.mobile) {
     return (
       <div className="ops-list-pagination">
-        {list.nextError && <div className="ops-list-error" role="alert"><span>{list.nextError}</span><button type="button" onClick={list.retry}>Повторить</button></div>}
+        {list.nextError && <div className="ops-list-error" role="alert"><span>{list.nextError}</span><button type="button" onClick={list.retry}>{t('shared.retry')}</button></div>}
         {pagination.has_next ? (
           <button type="button" disabled={list.status === 'loading-more'} onClick={list.loadMore}>
-            {list.status === 'loading-more' ? 'Загружаю…' : 'Показать ещё'}
+            {list.status === 'loading-more' ? t('list.loadingMore') : t('list.showMore')}
           </button>
-        ) : <span>Показаны все {pagination.total} записей</span>}
+        ) : <span>{t('list.allShown', undefined, { count: pagination.total })}</span>}
       </div>
     )
   }
@@ -351,13 +356,13 @@ export function ListPagination({ list }) {
   const pages = visiblePageNumbers(pagination.page, totalPages)
   return (
     <div className="ops-list-pagination">
-      <label>На странице <select value={list.pageSize} onChange={(event) => list.setPageSize(event.target.value)}><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="500" disabled>500 — после проверки</option></select></label>
-      <div className="ops-list-pages" aria-label="Страницы">
-        <button type="button" disabled={!pagination.has_previous} aria-label="Предыдущая страница" onClick={() => list.setPage(pagination.page - 1)}>‹</button>
+      <label>{t('list.perPage')} <select value={list.pageSize} onChange={(event) => list.setPageSize(event.target.value)}><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="500" disabled>500 — {t('list.afterReview')}</option></select></label>
+      <div className="ops-list-pages" aria-label={t('list.pages')}>
+        <button type="button" disabled={!pagination.has_previous} aria-label={t('list.previousPage')} onClick={() => list.setPage(pagination.page - 1)}>‹</button>
         {pages.map((page) => <button type="button" key={page} className={page === pagination.page ? 'is-current' : ''} aria-current={page === pagination.page ? 'page' : undefined} onClick={() => list.setPage(page)}>{page}</button>)}
-        <button type="button" disabled={!pagination.has_next} aria-label="Следующая страница" onClick={() => list.setPage(pagination.page + 1)}>›</button>
+        <button type="button" disabled={!pagination.has_next} aria-label={t('list.nextPage')} onClick={() => list.setPage(pagination.page + 1)}>›</button>
       </div>
-      <span>{pagination.total} записей</span>
+      <span>{t('list.records', undefined, { count: pagination.total })}</span>
     </div>
   )
 }

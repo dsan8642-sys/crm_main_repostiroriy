@@ -184,6 +184,7 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_FAILURE_VIEW = "portal.csrf_views.csrf_failure"
 _default_csrf_trusted_origins = "http://127.0.0.1:5173,http://localhost:5173" if DEBUG else ""
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", _default_csrf_trusted_origins).split(",")

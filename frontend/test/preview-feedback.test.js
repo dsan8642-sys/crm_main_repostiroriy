@@ -7,15 +7,21 @@ import {
   DEFAULT_SCHEDULE_VIEW,
   moveCalendarFocus,
   newSessionCapacity,
-  periodCountLabel,
+  periodCountLabel as rawPeriodCountLabel,
   periodSessionCount,
-  validateAdminSessionForm,
+  validateAdminSessionForm as rawValidateAdminSessionForm,
   validIsoDate,
   validTime,
 } from '../src/app/scheduleContracts.js'
+import { adminTranslator } from '../src/adminLocales.js'
 import { mapAdminPortalData, mapClientPortalData, mapTrainerSession } from '../src/mappers.js'
-import { accessCodeClipboardText } from '../src/app/accessContracts.js'
+import { accessCodeClipboardText as rawAccessCodeClipboardText } from '../src/app/accessContracts.js'
 import { toastReducer } from '../src/app/toastContracts.js'
+
+const ru = adminTranslator('ru')
+const validateAdminSessionForm = (form) => rawValidateAdminSessionForm(form, ru)
+const periodCountLabel = (count, viewMode) => rawPeriodCountLabel(count, viewMode, ru)
+const accessCodeClipboardText = (info) => rawAccessCodeClipboardText(info, ru)
 
 test('date and time contracts accept only real ISO and 24-hour values', () => {
   assert.equal(validIsoDate('2026-07-29'), true)

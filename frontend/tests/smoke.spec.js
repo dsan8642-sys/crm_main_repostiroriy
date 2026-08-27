@@ -1580,7 +1580,12 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Восстановить' })).toHaveCount(0)
   } else {
     await expect(page.getByRole('row', { name: /Nowak Piotr/ })).toBeVisible()
-    await page.getByRole('button', { name: 'Восстановить' }).click()
+    if ((page.viewportSize()?.width || 0) === 768) {
+      await page.getByRole('button', { name: 'Действия: Nowak Piotr' }).click()
+      await page.getByRole('menuitem', { name: 'Восстановить' }).click()
+    } else {
+      await page.getByRole('button', { name: 'Восстановить' }).click()
+    }
     await page.getByRole('dialog').getByRole('button', { name: 'Восстановить' }).click()
     await expect(page.getByText('Клиент восстановлен и снова отображается в рабочем списке.')).toBeVisible()
     expect(seenAdminEndpoints).toContain('/api/admin/clients/11/restore/')
@@ -1746,7 +1751,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   let subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
   await expect(subscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('1')
   await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Абонемент продлён с начислением.')).toBeVisible()
+  await expect(page.getByText('Абонемент продлён, начисление создано.')).toBeVisible()
 
   await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
   subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })

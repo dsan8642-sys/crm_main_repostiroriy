@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './FormModal.css'
 import { useOverlayLayer, useUnsavedChanges } from './uiLifecycle.jsx'
+import { useLocale } from '../i18n.jsx'
 
 export function FormModal({
   open,
@@ -15,6 +16,7 @@ export function FormModal({
   footer,
   children,
 }) {
+  const { t } = useLocale()
   const titleId = useId()
   const descriptionId = useId()
   const panelRef = useRef(null)
@@ -73,7 +75,7 @@ export function FormModal({
           <button
             type="button"
             className="form-modal__close"
-            aria-label="Закрыть"
+            aria-label={t('modal.close')}
             disabled={busy}
             onClick={() => modalLifecycle.requestClose('close-button')}
           >
@@ -90,10 +92,10 @@ export function FormModal({
       {confirmDiscard && (
         <div className="form-modal-confirm-layer">
           <section ref={confirmRef} className="form-modal-confirm" role="alertdialog" aria-modal="true" aria-labelledby={`${titleId}-discard`} tabIndex={-1}>
-            <h3 id={`${titleId}-discard`}>Закрыть без сохранения?</h3>
-            <p>Внесённые изменения будут потеряны.</p>
+            <h3 id={`${titleId}-discard`}>{t('modal.discardTitle')}</h3>
+            <p>{t('modal.discardDescription')}</p>
             <div>
-              <button type="button" onClick={() => confirmLifecycle.requestClose('stay')}>Продолжить редактирование</button>
+              <button type="button" onClick={() => confirmLifecycle.requestClose('stay')}>{t('modal.continueEditing')}</button>
               <button
                 type="button"
                 className="is-danger"
@@ -101,7 +103,7 @@ export function FormModal({
                   confirmLifecycle.requestClose('discard', () => onRequestClose?.('discard'))
                 }}
               >
-                Закрыть без сохранения
+                {t('modal.discard')}
               </button>
             </div>
           </section>

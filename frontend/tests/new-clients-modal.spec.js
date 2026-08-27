@@ -189,6 +189,37 @@ test('client group API errors stay beside the modal field and disappear when the
   await expect(page.getByText('Группа недоступна.', { exact: true })).toHaveCount(0)
 })
 
+test('untouched and reverted new-client fields close without a false dirty warning', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop dirty-baseline contract is sufficient')
+  await mockAdmin(page, [], {
+    groups: [{
+      id: 3, name: 'Masters', description: '', default_trainer: null,
+      participants_count: 0, price_minor: null, currency: 'PLN',
+      default_capacity: 12, color_key: 'blue', is_active: true,
+    }],
+  })
+
+  await page.goto('/?role=admin&view=clients')
+  const launcher = page.getByRole('button', { name: /^Новый клиент/ })
+
+  await launcher.click()
+  let modal = page.getByRole('dialog', { name: 'Новый клиент' })
+  await modal.getByRole('button', { name: 'Закрыть', exact: true }).last().click()
+  await expect(modal).toHaveCount(0)
+  await expect(page.getByRole('alertdialog', { name: 'Закрыть без сохранения?' })).toHaveCount(0)
+
+  await launcher.click()
+  modal = page.getByRole('dialog', { name: 'Новый клиент' })
+  await modal.getByLabel('Имя владельца аккаунта').fill('Временное имя')
+  await modal.getByLabel('Имя владельца аккаунта').fill('')
+  const groups = modal.locator('#admin-client-groupIds')
+  await groups.getByRole('checkbox', { name: 'Masters' }).check()
+  await groups.getByRole('checkbox', { name: 'Masters' }).uncheck()
+  await modal.getByRole('button', { name: 'Закрыть', exact: true }).last().click()
+  await expect(modal).toHaveCount(0)
+  await expect(page.getByRole('alertdialog', { name: 'Закрыть без сохранения?' })).toHaveCount(0)
+})
+
 test('mobile client card exposes actions without a status pill', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile client contract')
   await mockAdmin(page, [{
@@ -201,10 +232,34 @@ test('mobile client card exposes actions without a status pill', async ({ page }
   const card = page.getByTestId('client-compact-card')
   await expect(card).toBeVisible()
   await expect(card.getByText('Активен', { exact: true })).toHaveCount(0)
-  await card.getByRole('button', { name: 'Действия: Kowalski Jan' }).click()
-  const menu = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
+  const trigger = card.getByRole('button', { name: 'Действия: Kowalski Jan' })
+  await trigger.click()
+  let menu = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
   await expect(menu.getByRole('menuitem', { name: 'Изменить', exact: true })).toBeVisible()
   await expect(menu.getByRole('menuitem', { name: 'В чёрный список', exact: true })).toBeVisible()
+
+  await menu.getByRole('menuitem', { name: 'В чёрный список', exact: true }).click()
+  let dialog = page.getByRole('dialog', { name: /Переместить Kowalski Jan/ })
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+
+  await trigger.click()
+  menu = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
+  await menu.getByRole('menuitem', { name: 'В чёрный список', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: /Переместить Kowalski Jan/ })
+  await dialog.locator('[data-dialog-cancel]').click()
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+
+  await trigger.click()
+  menu = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
+  await menu.getByRole('menuitem', { name: 'В чёрный список', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: /Переместить Kowalski Jan/ })
+  await dialog.getByRole('button', { name: 'В чёрный список', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByLabel('Поиск клиентов')).toBeFocused()
 })
 
 test('an archived client detail is read-only except for restoration', async ({ page }) => {
@@ -225,4 +280,36 @@ test('an archived client detail is read-only except for restoration', async ({ p
   await expect(page.getByRole('button', { name: 'Скачать данные' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Архивировать' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Анонимизировать' })).toBeDisabled()
+})
+
+test('tablet clients use a compact complete table until the 960 desktop boundary', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 768, 'tablet client table contract')
+  await mockAdmin(page, [{
+    id: 7, client_id: 10, first_name: 'Jan', last_name: 'Kowalski',
+    client_phone: '+48123456789', email: 'jan@example.test',
+    is_active: true, client_is_active: true,
+    has_current_subscription: true,
+    current_subscription_total: 8,
+    current_subscription_remaining: 5,
+    balance_minor: -7000,
+    last_present_at: '2026-08-20T10:00:00Z',
+    group: { id: 3, name: 'Masters' },
+  }])
+
+  await page.goto('/?role=admin&view=clients')
+  const tablet = page.locator('.ops-client-tablet-table')
+  await expect(tablet).toBeVisible()
+  await expect(page.locator('.ops-client-desktop-table')).toBeHidden()
+  await expect(page.locator('.ops-client-mobile-list')).toBeHidden()
+  await expect(tablet.getByText('+48123456789', { exact: true })).toBeVisible()
+  await expect(tablet.getByText('jan@example.test', { exact: true })).toBeVisible()
+  await expect(tablet.getByText('Masters', { exact: true })).toBeVisible()
+  await expect(tablet.getByText('5 из 8', { exact: true })).toBeVisible()
+  await expect(tablet.getByText(/\+70,00\s*zł/)).toBeVisible()
+
+  await page.setViewportSize({ width: 959, height: 900 })
+  await expect(tablet).toBeVisible()
+  await page.setViewportSize({ width: 960, height: 900 })
+  await expect(tablet).toBeHidden()
+  await expect(page.locator('.ops-client-desktop-table')).toBeVisible()
 })

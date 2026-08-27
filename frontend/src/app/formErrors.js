@@ -24,7 +24,7 @@ export function fieldErrorsFromApi(error, fieldMap = {}) {
   return result
 }
 
-export function formErrorMessage(error, fallback = 'Не удалось сохранить данные.') {
+export function formErrorMessage(error, fallback = '') {
   const nonField = messages(error?.nonFieldErrors || [])
   if (nonField) return nonField
   if (Object.keys(error?.fieldErrors || {}).length) return null

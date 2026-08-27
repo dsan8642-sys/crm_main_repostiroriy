@@ -7,6 +7,8 @@ import {
   validIsoDate,
   validTime,
 } from './scheduleContracts.js'
+import { useLocale } from '../i18n.jsx'
+import { uiLocaleTag } from '../localeContracts.js'
 
 function FieldShell({
   id,
@@ -80,6 +82,8 @@ export function DateField({
   min,
   error: externalError,
 }) {
+  const { locale, t } = useLocale()
+  const localeTag = uiLocaleTag(locale)
   const generatedId = React.useId()
   const fieldId = id || `date-${generatedId.replace(/:/g, '')}`
   const [open, setOpen] = useState(false)
@@ -91,14 +95,14 @@ export function DateField({
     if (selected) setShownMonth(selected)
   }, [value])
   const error = externalError || (!value && required
-    ? 'Укажите дату.'
+    ? t('date.required')
     : value && !validIsoDate(value)
-      ? 'Введите дату в формате ГГГГ-ММ-ДД.'
+      ? t('date.invalid')
       : value && min && value < min
-        ? `Дата не может быть раньше ${min}.`
+        ? t('date.minimum', undefined, { date: min })
         : null)
   const dates = calendarDates(dateToIso(shownMonth), 'month')
-  const monthLabel = shownMonth.toLocaleDateString('ru-RU', {
+  const monthLabel = shownMonth.toLocaleDateString(localeTag, {
     month: 'long',
     year: 'numeric',
   })
@@ -114,17 +118,17 @@ export function DateField({
       label={label}
       value={value}
       onChange={onChange}
-      placeholder="ГГГГ-ММ-ДД"
+      placeholder={t('date.placeholder')}
       error={error}
       open={open}
       setOpen={setOpen}
-      buttonLabel={`Открыть календарь: ${label}`}
+      buttonLabel={t('date.openCalendar', undefined, { label })}
       buttonIcon="▦"
     >
       <div className="ops-picker-head">
         <button
           type="button"
-          aria-label="Предыдущий месяц"
+          aria-label={t('date.previousMonth')}
           onClick={() => setShownMonth(new Date(shownMonth.getFullYear(), shownMonth.getMonth() - 1, 1, 12))}
         >
           ‹
@@ -132,14 +136,14 @@ export function DateField({
         <strong aria-live="polite">{monthLabel}</strong>
         <button
           type="button"
-          aria-label="Следующий месяц"
+          aria-label={t('date.nextMonth')}
           onClick={() => setShownMonth(new Date(shownMonth.getFullYear(), shownMonth.getMonth() + 1, 1, 12))}
         >
           ›
         </button>
       </div>
       <div className="ops-date-weekdays" aria-hidden="true">
-        {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => <span key={day}>{day}</span>)}
+        {t('date.weekdays').split(',').map((day) => <span key={day}>{day}</span>)}
       </div>
       <div className="ops-date-grid">
         {dates.map((date) => {
@@ -152,7 +156,7 @@ export function DateField({
               type="button"
               className={`${outside ? 'is-outside' : ''}${date === value ? ' is-selected' : ''}`}
               aria-pressed={date === value}
-              aria-label={parsed.toLocaleDateString('ru-RU', { dateStyle: 'long' })}
+              aria-label={parsed.toLocaleDateString(localeTag, { dateStyle: 'long' })}
               disabled={disabled}
               onClick={() => choose(date)}
             >
@@ -162,7 +166,7 @@ export function DateField({
         })}
       </div>
       <button type="button" className="ops-picker-today" onClick={() => choose(localToday())}>
-        Сегодня
+        {t('calendar.today')}
       </button>
     </FieldShell>
   )
@@ -176,15 +180,16 @@ export function TimeField({
   required = false,
   error: externalError,
 }) {
+  const { t } = useLocale()
   const generatedId = React.useId()
   const fieldId = id || `time-${generatedId.replace(/:/g, '')}`
   const [open, setOpen] = useState(false)
   const valid = validTime(value)
   const [hour, minute] = valid ? value.split(':') : ['00', '00']
   const error = externalError || (!value && required
-    ? 'Укажите время.'
+    ? t('time.required')
     : value && !valid
-      ? 'Введите время в 24-часовом формате ЧЧ:ММ.'
+      ? t('time.invalid')
       : null)
   const minutes = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
 
@@ -198,16 +203,16 @@ export function TimeField({
       label={label}
       value={value}
       onChange={onChange}
-      placeholder="ЧЧ:ММ"
+      placeholder={t('time.placeholder')}
       error={error}
       open={open}
       setOpen={setOpen}
-      buttonLabel={`Открыть выбор времени: ${label}`}
+      buttonLabel={t('time.open', undefined, { label })}
       buttonIcon="◷"
     >
-      <div className="ops-time-picker" aria-label="24-часовой выбор времени">
+      <div className="ops-time-picker" aria-label={t('time.picker')}>
         <div>
-          <strong>Часы</strong>
+          <strong>{t('time.hours')}</strong>
           <div className="ops-time-options">
             {Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0')).map((item) => (
               <button
@@ -223,7 +228,7 @@ export function TimeField({
           </div>
         </div>
         <div>
-          <strong>Минуты</strong>
+          <strong>{t('time.minutes')}</strong>
           <div className="ops-time-options is-minutes">
             {minutes.map((item) => (
               <button
@@ -239,8 +244,8 @@ export function TimeField({
           </div>
         </div>
       </div>
-      <button type="button" className="ops-picker-today" onClick={() => setOpen(false)}>
-        Готово
+      <button type="button" className="ops-picker-today ops-picker-done" onClick={() => setOpen(false)}>
+        {t('time.done')}
       </button>
     </FieldShell>
   )

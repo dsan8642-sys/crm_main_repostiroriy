@@ -16,6 +16,8 @@ import {
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ContextRow } from '../EntityListPrimitives.jsx'
 import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor } from '../financialContracts.js'
+import { useLocale } from '../../i18n.jsx'
+import { uiLocaleTag } from '../../localeContracts.js'
 
 const serializeClientPeriodFilters = (filters) => {
   const days = Number(filters.period || 0)
@@ -56,20 +58,22 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   const I = icons
 
   function ReceiptAction({ payment }) {
+    const { t } = useLocale()
     const [error, setError] = useState(null)
-    if (!payment.receiptUrl) return <span className="muted">Нет файла</span>
-    return <span><button type="button" className="ops-link-button" onClick={async () => { try { setError(null); await downloadFile(payment.receiptUrl, payment.receipt) } catch (err) { setError(err.status === 403 ? 'Нет доступа к документу.' : 'Документ больше недоступен.') } }}>{payment.receipt || 'Скачать подтверждение'}</button>{error && <small role="alert" className="muted">{error}</small>}</span>
+    if (!payment.receiptUrl) return <span className="muted">{t('client.receipt.none')}</span>
+    return <span><button type="button" className="ops-link-button" onClick={async () => { try { setError(null); await downloadFile(payment.receiptUrl, payment.receipt) } catch (err) { setError(err.status === 403 ? t('client.receipt.forbidden') : t('client.receipt.unavailable')) } }}>{payment.receipt || t('client.receipt.download')}</button>{error && <small role="alert" className="muted">{error}</small>}</span>
   }
 
   function ChildButtons({ kid, setKid }) {
+    const { t } = useLocale()
     const children = parentData.children || []
     const selected = children.find((child) => child.id === kid) || children[0]
     const [open, setOpen] = useState(false)
     if (!selected) return null
     return (
       <div className="ops-participant-context">
-        <ContextRow value={selected.name} onChange={children.length > 1 ? () => setOpen((value) => !value) : null} changeLabel={open ? 'Скрыть' : 'Сменить'} />
-        {open && <div className="ops-participant-options" role="group" aria-label="Выбор участника">
+        <ContextRow value={selected.name} onChange={children.length > 1 ? () => setOpen((value) => !value) : null} changeLabel={open ? t('client.participant.hide') : t('client.participant.change')} />
+        {open && <div className="ops-participant-options" role="group" aria-label={t('client.participant.choose')}>
           {children.map((child) => (
             <button key={child.id} type="button" aria-pressed={child.id === selected.id} onClick={() => { setKid(child.id); setOpen(false) }}>
               <Avatar name={child.name} size={28} /><span>{child.name}</span>
@@ -81,32 +85,33 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   }
 
   function Home({ kid, setKid, go }) {
+    const { locale, t } = useLocale()
     const data = parentData
     const child = data.children?.find((item) => item.id === kid) || data.children?.[0]
     const next = child ? (data.schedule?.[child.id] || []).find((session) => session.status === 'planned') : null
     return (
       <div className="page" style={{ maxWidth: 900 }}>
         <div className="page-head">
-          <div><h1 className="page-title">Главная</h1><p className="page-desc">Ближайшее занятие, абонемент и состояние оплаты.</p></div>
+          <div><h1 className="page-title">{t('runtime.client.home.title')}</h1><p className="page-desc">{t('client.home.desc')}</p></div>
           <ChildButtons kid={child?.id || kid} setKid={setKid} />
         </div>
         {child?.balance < 0 && (
-          <Banner tone="danger" title="Есть задолженность" style={{ marginBottom: 14 }} action={<Button size="sm" variant="subtle" onClick={() => go('payments')}>Перейти к платежам</Button>}>
-            {child.name}: к оплате <strong>{Math.abs(child.balance).toLocaleString('ru-RU')} zl</strong>.
+          <Banner tone="danger" title={t('client.home.debt')} style={{ marginBottom: 14 }} action={<Button size="sm" variant="subtle" onClick={() => go('payments')}>{t('client.home.toPayments')}</Button>}>
+            {t('client.home.amountDue', undefined, { name: child.name, amount: Math.abs(child.balance).toLocaleString(uiLocaleTag(locale)) })}
           </Banner>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <button type="button" className="card card-pad ops-action-card" onClick={() => go('schedule', { tab: next?.sessionId ? String(next.sessionId) : null })}>
-            <div className="kpi-label"><span className="kpi-ico"><I.Calendar size={15} /></span>Следующее занятие</div>
-            {next ? <><div className="strong" style={{ fontSize: 'var(--fs-lg)', margin: '4px 0 2px' }}>{next.date} · {next.start}</div><div className="muted">{next.group} · {next.trainer}</div></> : <div className="muted">Запланированных занятий нет.</div>}
+            <div className="kpi-label"><span className="kpi-ico"><I.Calendar size={15} /></span>{t('client.home.next')}</div>
+            {next ? <><div className="strong" style={{ fontSize: 'var(--fs-lg)', margin: '4px 0 2px' }}>{next.date} · {next.start}</div><div className="muted">{next.group} · {next.trainer}</div></> : <div className="muted">{t('client.home.noPlanned')}</div>}
           </button>
           <button type="button" className="card card-pad ops-action-card" onClick={() => go('subscription')}>
-            <div className="kpi-label"><span className="kpi-ico"><I.Layers size={15} /></span>Абонемент</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Layers size={15} /></span>{t('runtime.client.subscription.title')}</div>
             <div className="strong" style={{ fontSize: 'var(--fs-lg)', margin: '4px 0 2px' }}>{child?.sub || '-'}</div>
-            <div className="muted">Осталось: {child?.subLeft == null ? '∞' : child.subLeft} · до {child?.subEnds || '-'}</div>
+            <div className="muted">{t('client.home.remaining', undefined, { count: child?.subLeft == null ? '∞' : child.subLeft, date: child?.subEnds || '-' })}</div>
           </button>
           <button type="button" className="card card-pad ops-action-card" onClick={() => go('payments')}>
-            <div className="kpi-label"><span className="kpi-ico"><I.Wallet size={15} /></span>Баланс</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Wallet size={15} /></span>{t('client.home.balance')}</div>
             <Money amount={child?.balance || 0} signed size="var(--fs-lg)" />
           </button>
         </div>
@@ -115,6 +120,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   }
 
   function Schedule({ kid, setKid, initialTab }) {
+    const { t } = useLocale()
     const child = (parentData.children || []).find((item) => item.id === kid)
     const normalize = (session) => session.startAt ? session : ({
       id: String(session.id),
@@ -125,7 +131,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       endAt: session.end_at,
       start: formatTime(session.start_at),
       end: formatTime(session.end_at),
-      group: session.group?.name || 'Индивидуальное',
+      group: session.group?.name || t('shared.individual'),
       trainer: session.effective_trainer || session.trainer,
       location: session.location,
       status: session.is_cancelled ? 'cancelled' : 'planned',
@@ -145,7 +151,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     useEffect(() => { if (initialTab) setSelectedId(initialTab) }, [initialTab])
     useEffect(() => {
       setRows((parentData.schedule?.[kid] || []).map(normalize))
-    }, [kid, parentData.schedule])
+    }, [kid, parentData.schedule, t])
     useEffect(() => {
       if (!child?.studentId) return undefined
       let active = true
@@ -159,26 +165,27 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           if (active) setRows((payload.sessions || []).map(normalize))
         })
         .catch((err) => {
-          if (active) setError(apiErrorMessage(err, 'Не удалось загрузить расписание.'))
+          if (active) setError(apiErrorMessage(err, t('client.schedule.loadFailed')))
         })
       return () => { active = false }
-    }, [child?.studentId, range.dateFrom, range.dateTo])
+    }, [child?.studentId, range.dateFrom, range.dateTo, t])
     const selected = rows.find((row) => String(row.sessionId) === String(selectedId))
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">Расписание</h1><p className="page-desc">Календарь занятий выбранного участника.</p></div><div className="ops-page-actions"><ChildButtons kid={kid} setKid={setKid} /><ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} /></div></div>
+        <div className="page-head"><div><h1 className="page-title">{t('runtime.client.schedule.title')}</h1><p className="page-desc">{t('client.schedule.desc')}</p></div><div className="ops-page-actions"><ChildButtons kid={kid} setKid={setKid} /><ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} /></div></div>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="card card-pad" style={{ marginBottom: 14 }}>
           <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} />
         </div>
-        {selected && <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Детали занятия</div><h3>{selected.group}</h3></div><Button size="sm" variant="subtle" onClick={() => setSelectedId(null)}>Закрыть</Button></div><div className="ops-summary-grid"><div><span>Дата и время</span><strong>{selected.date} · {selected.start}-{selected.end}</strong></div><div><span>Тренер</span><strong>{selected.trainer}</strong></div><div><span>Место</span><strong>{selected.location}</strong></div><div><span>Списание</span><strong>{selected.deductsExpected ? '-1 занятие' : '0 занятий'}</strong></div></div><StatusPill status={selected.status} /></div>}
-        {displayMode === 'calendar' && <ScheduleCalendar sessions={rows} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(row) => setSelectedId(row.sessionId)} ariaLabel={`Календарь занятий: ${child?.name || 'участник'}`} />}
-        {displayMode === 'list' && <ScheduleList sessions={rows} testId="client-schedule-list" onOpenSession={(row) => setSelectedId(row.sessionId)} renderStatus={(row) => <span><StatusPill status={row.status} size="sm" /><small>Списание: {row.deductsExpected ? '-1' : '0'}</small></span>} />}
+        {selected && <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">{t('client.schedule.details')}</div><h3>{selected.group}</h3></div><Button size="sm" variant="subtle" onClick={() => setSelectedId(null)}>{t('shared.close')}</Button></div><div className="ops-summary-grid"><div><span>{t('client.schedule.dateTime')}</span><strong>{selected.date} · {selected.start}-{selected.end}</strong></div><div><span>{t('shared.trainer')}</span><strong>{selected.trainer}</strong></div><div><span>{t('client.schedule.place')}</span><strong>{selected.location}</strong></div><div><span>{t('client.schedule.deduction')}</span><strong>{selected.deductsExpected ? t('client.schedule.oneSession') : t('client.schedule.zeroSessions')}</strong></div></div><StatusPill status={selected.status} /></div>}
+        {displayMode === 'calendar' && <ScheduleCalendar sessions={rows} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(row) => setSelectedId(row.sessionId)} ariaLabel={t('client.schedule.calendarLabel', undefined, { name: child?.name || t('client.schedule.fallbackParticipant') })} />}
+        {displayMode === 'list' && <ScheduleList sessions={rows} testId="client-schedule-list" onOpenSession={(row) => setSelectedId(row.sessionId)} renderStatus={(row) => <span><StatusPill status={row.status} size="sm" /><small>{t('client.schedule.deductionShort', undefined, { count: row.deductsExpected ? '-1' : '0' })}</small></span>} />}
       </div>
     )
   }
 
   function Payments({ kid, setKid, currentUser }) {
+    const { t } = useLocale()
     const fileInputRef = useRef(null)
     const [file, setFile] = useState(null)
     const [amount, setAmount] = useState('')
@@ -218,14 +225,14 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       let amountMinor = null
       amountMinor = moneyMajorToMinor(amount)
       if (!amountMinor) {
-        const nextErrors = { amount: 'Введите положительную сумму, не более двух знаков после запятой.' }
+        const nextErrors = { amount: t('client.topup.invalidAmount') }
         setFieldErrors(nextErrors)
         setError(null)
         focusFirstFieldError(nextErrors, TOP_UP_FIELD_IDS)
         return
       }
       if (!file) {
-        const nextErrors = { file: 'Приложите подтверждение банковского перевода: PDF, JPG или PNG.' }
+        const nextErrors = { file: t('client.topup.fileRequired') }
         setFieldErrors(nextErrors)
         setError(null)
         focusFirstFieldError(nextErrors, TOP_UP_FIELD_IDS)
@@ -245,7 +252,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         const readbackPayload = await api.get(`/api/client/payment-history/${participantQuery}`)
         const readback = (readbackPayload.payments || []).find((payment) => String(payment.id) === String(created.id))
         assertPaymentReadback(created, readback, 'pending')
-        setMessage('Запрос проверен сервером и находится на проверке. Баланс изменится только после подтверждения администратором.')
+        setMessage(t('client.topup.submitted'))
         setError(null)
         setFile(null)
         setAmount('')
@@ -258,7 +265,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           amount_minor: 'amount', file: 'file', currency: 'amount',
         })
         setFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось отправить запрос на пополнение.'))
+        setError(formErrorMessage(err, t('client.topup.failed')))
         focusFirstFieldError(nextErrors, TOP_UP_FIELD_IDS)
       } finally {
         setBusy(false)
@@ -267,62 +274,71 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     return (
       <div className="page" style={{ maxWidth: 900 }}>
-        <div className="page-head"><div><h1 className="page-title">Платежи</h1><p className="page-desc">Начисления, история операций и запросы на пополнение баланса.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="page-head"><div><h1 className="page-title">{t('runtime.client.payments.title')}</h1><p className="page-desc">{t('client.payments.desc')}</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
         <ToastNotice id="client-payment-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Отправляю запрос на пополнение...</BusyBanner>
-        <div className="ops-client-finance-tabs" role="tablist" aria-label="Разделы платежей">
-          {[['charges', 'Начисления'], ['history', 'История'], ['topup', 'Пополнить']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mobileTab === value} className={mobileTab === value ? 'is-active' : ''} onClick={() => setMobileTab(value)}>{label}</button>)}
+        <BusyBanner Banner={Banner} show={busy}>{t('client.topup.sending')}</BusyBanner>
+        <div className="ops-client-finance-tabs" role="tablist" aria-label={t('client.payments.sections')}>
+          {[['charges', t('client.payments.charges')], ['history', t('client.payments.history')], ['topup', t('client.payments.topup')]].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mobileTab === value} className={mobileTab === value ? 'is-active' : ''} onClick={() => setMobileTab(value)}>{label}</button>)}
         </div>
         <div className={`card card-pad ops-client-finance-section${mobileTab === 'topup' ? ' is-mobile-active' : ''}`} style={{ marginBottom: 16 }}>
-          <div className="eyebrow">Запрос на пополнение</div>
-          <div className="ops-inline-note" role="status">Участник: <strong>{child?.name || 'не выбран'}</strong> · текущий баланс: <Money amount={child?.balance || 0} signed /></div>
-          <p className="muted" style={{ margin: '6px 0 14px' }}>Запрос не меняет баланс автоматически. Администратор проверит перевод, после чего сумма будет зачислена или запрос будет отклонён.</p>
+          <div className="eyebrow">{t('client.topup.title')}</div>
+          <div className="ops-inline-note" role="status">{t('client.topup.context', undefined, { name: child?.name || t('shared.notSelected') })} <Money amount={child?.balance || 0} signed /></div>
+          <p className="muted" style={{ margin: '6px 0 14px' }}>{t('client.topup.explanation')}</p>
           <div className="ops-top-up-form">
-            <Input id={TOP_UP_FIELD_IDS.amount} label="Сумма пополнения, zł" inputMode="decimal" value={amount} error={fieldErrors.amount} onChange={(event) => { setAmount(event.target.value); setFieldErrors((current) => clearFieldError(current, 'amount')) }} placeholder="240,00" />
+            <Input id={TOP_UP_FIELD_IDS.amount} label={t('client.topup.amount')} inputMode="decimal" value={amount} error={fieldErrors.amount} onChange={(event) => { setAmount(event.target.value); setFieldErrors((current) => clearFieldError(current, 'amount')) }} placeholder="240,00" />
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              Файл подтверждения
+              {t('client.topup.file')}
               <input id={TOP_UP_FIELD_IDS.file} ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" aria-invalid={Boolean(fieldErrors.file)} aria-describedby={fieldErrors.file ? `${TOP_UP_FIELD_IDS.file}-error` : undefined} onChange={(event) => { setFile(event.target.files?.[0] || null); setFieldErrors((current) => clearFieldError(current, 'file')) }} />
               {fieldErrors.file && <small id={`${TOP_UP_FIELD_IDS.file}-error`} className="ops-field-error" role="alert">{fieldErrors.file}</small>}
             </label>
-            <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>Отправить запрос</Button>
+            <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>{t('client.topup.submit')}</Button>
           </div>
         </div>
         <div className={`ops-client-finance-section${mobileTab === 'charges' ? ' is-mobile-active' : ''}`}>
-        <div className="ops-financial-context" aria-label="Сводка начислений">
-          <div><span>Не оплачено</span><strong>{asMoneyMajor(chargeList.payload?.summary?.unpaid_minor || 0).toFixed(2).replace('.', ',')} zł</strong></div>
-          <div><span>Просрочено</span><strong>{chargeList.payload?.summary?.overdue_count || 0}</strong></div>
+        <div className="ops-financial-context" aria-label={t('client.charges.summary')}>
+          <div><span>{t('client.charges.unpaid')}</span><strong>{asMoneyMajor(chargeList.payload?.summary?.unpaid_minor || 0).toFixed(2).replace('.', ',')} zł</strong></div>
+          <div><span>{t('client.charges.overdue')}</span><strong>{chargeList.payload?.summary?.overdue_count || 0}</strong></div>
         </div>
-        <ListToolbar list={chargeList} searchLabel="Поиск начислений" searchPlaceholder="Описание начисления">
-          <label>Статус<select value={chargeList.draftFilters.status} onChange={(event) => chargeList.setDraftFilter('status', event.target.value)}><option value="">Все</option><option value="overdue">Просроченные</option><option value="upcoming">Предстоящие</option></select></label>
+        <ListToolbar list={chargeList} searchLabel={t('client.charges.search')} searchPlaceholder={t('client.charges.searchPlaceholder')}>
+          <label>{t('shared.status')}<select value={chargeList.draftFilters.status} onChange={(event) => chargeList.setDraftFilter('status', event.target.value)}><option value="">{t('shared.all')}</option><option value="overdue">{t('client.charges.overdueOption')}</option><option value="upcoming">{t('client.charges.upcomingOption')}</option></select></label>
         </ListToolbar>
-        <ListFeedback list={chargeList} emptyLabel="Начислений нет" />
-        <Table rows={charges} emptyLabel="Начислений нет" columns={[
-          { key: 'desc', header: 'Начисление' },
-          { key: 'child', header: 'Участник', muted: true },
-          { key: 'due', header: 'Срок', muted: true },
-          { key: 'amount', header: 'Сумма', align: 'right', render: (row) => <Money amount={-Math.abs(row.amount)} signed /> },
-          { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status} size="sm" /> },
+        <ListFeedback list={chargeList} emptyLabel={t('client.charges.empty')} />
+        <Table rows={charges} emptyLabel={t('client.charges.empty')} columns={[
+          { key: 'desc', header: t('client.charges.charge') },
+          { key: 'child', header: t('shared.participant'), muted: true },
+          { key: 'due', header: t('client.charges.due'), muted: true },
+          { key: 'amount', header: t('shared.amount'), align: 'right', render: (row) => <Money amount={-Math.abs(row.amount)} signed /> },
+          { key: 'status', header: t('shared.status'), render: (row) => <StatusPill status={row.status} size="sm" /> },
         ]} />
         <ListPagination list={chargeList} />
         </div>
         <div style={{ height: 16 }} />
         <div className={`ops-client-finance-section${mobileTab === 'history' ? ' is-mobile-active' : ''}`}>
-        <ListToolbar list={paymentList} searchLabel="Поиск платежей" searchPlaceholder="Комментарий к операции">
-          <label>Статус<select value={paymentList.draftFilters.status} onChange={(event) => paymentList.setDraftFilter('status', event.target.value)}><option value="">Все</option><option value="pending">На проверке</option><option value="confirmed">Подтверждённые</option><option value="rejected">Отклонённые</option></select></label>
-          <label>Способ<select value={paymentList.draftFilters.method} onChange={(event) => paymentList.setDraftFilter('method', event.target.value)}><option value="">Все</option><option value="cash">Наличные</option><option value="bank_transfer">Банковский перевод</option><option value="card">Карта</option><option value="other">Другое</option></select></label>
+        <ListToolbar list={paymentList} searchLabel={t('client.payments.search')} searchPlaceholder={t('client.payments.searchPlaceholder')}>
+          <label>{t('shared.status')}<select value={paymentList.draftFilters.status} onChange={(event) => paymentList.setDraftFilter('status', event.target.value)}><option value="">{t('shared.all')}</option><option value="pending">{t('status.pending')}</option><option value="confirmed">{t('client.payments.confirmed')}</option><option value="rejected">{t('client.payments.rejected')}</option></select></label>
+          <label>{t('client.payments.method')}<select value={paymentList.draftFilters.method} onChange={(event) => paymentList.setDraftFilter('method', event.target.value)}><option value="">{t('shared.all')}</option><option value="cash">{t('client.payments.cash')}</option><option value="bank_transfer">{t('client.payments.bank')}</option><option value="card">{t('client.payments.card')}</option><option value="other">{t('client.payments.other')}</option></select></label>
         </ListToolbar>
-        <ListFeedback list={paymentList} emptyLabel="Платежей нет" />
-        <Table rows={payments} emptyLabel="Платежей нет" columns={[
-          { key: 'sourceLabel', header: 'Операция' },
-          { key: 'child', header: 'Участник' },
-          { key: 'date', header: 'Дата', muted: true },
-          { key: 'method', header: 'Способ', muted: true },
-          { key: 'amount', header: 'Сумма', align: 'right', render: (row) => <Money amount={Math.abs(row.amount)} signed /> },
-          { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status} size="sm" /> },
-          { key: 'effect', header: 'Баланс', muted: true, render: (row) => row.affectsBalance ? 'Зачислено' : 'Не влияет' },
-          { key: 'receipt', header: 'Документ', render: (row) => <ReceiptAction payment={row} /> },
-        ]} />
+        <ListFeedback list={paymentList} emptyLabel={t('client.payments.empty')} />
+        <p id="client-payment-history-scroll-hint" className="ops-client-payment-scroll-hint">{t('client.payments.scrollHint')}</p>
+        <div
+          className="ops-client-payment-table-region"
+          role="region"
+          aria-label={t('client.payments.historyLabel')}
+          aria-describedby="client-payment-history-scroll-hint"
+          tabIndex="0"
+        >
+          <Table rows={payments} emptyLabel={t('client.payments.empty')} columns={[
+            { key: 'sourceLabel', header: t('client.payments.operation'), render: (row) => t(row.source === 'client_top_up' ? 'client.payments.sourceTopup' : 'client.payments.sourceAdmin') },
+            { key: 'child', header: t('shared.participant') },
+            { key: 'date', header: t('shared.date'), muted: true },
+            { key: 'method', header: t('client.payments.method'), muted: true, render: (row) => t(`client.payments.${row.methodCode === 'bank_transfer' ? 'bank' : row.methodCode}`, row.method) },
+            { key: 'amount', header: t('shared.amount'), align: 'right', render: (row) => <Money amount={Math.abs(row.amount)} signed /> },
+            { key: 'status', header: t('shared.status'), render: (row) => <StatusPill status={row.status} size="sm" /> },
+            { key: 'effect', header: t('client.payments.balance'), muted: true, render: (row) => row.affectsBalance ? t('client.payments.credited') : t('client.payments.noEffect') },
+            { key: 'receipt', header: t('client.payments.document'), render: (row) => <ReceiptAction payment={row} /> },
+          ]} />
+        </div>
         <ListPagination list={paymentList} />
         </div>
       </div>
@@ -330,12 +346,14 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   }
 
   function Subscription({ kid, setKid }) {
+    const { t } = useLocale()
     const child = (parentData.children || []).find((item) => item.id === kid)
     const subscription = child?.subscription
-    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h1 className="page-title">Абонемент</h1><p className="page-desc">Срок действия, статус и остаток занятий.</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">Текущий абонемент</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>Осталось занятий</span><strong>{subscription.remaining_sessions == null ? 'Без лимита' : subscription.remaining_sessions}</strong></div><div><span>Начало</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>Действует до</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>Статус</span><strong>{subscription.status}</strong></div></div></div> : <div className="card card-pad empty">Активного абонемента нет. Обратитесь к администратору клуба.</div>}</div>
+    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h1 className="page-title">{t('runtime.client.subscription.title')}</h1><p className="page-desc">{t('client.subscription.desc')}</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">{t('client.subscription.current')}</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>{t('client.subscription.remaining')}</span><strong>{subscription.remaining_sessions == null ? t('client.subscription.unlimited') : subscription.remaining_sessions}</strong></div><div><span>{t('client.subscription.start')}</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>{t('client.subscription.validUntil')}</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>{t('shared.status')}</span><strong>{t(`status.${subscription.status}`, subscription.status)}</strong></div></div></div> : <div className="card card-pad empty">{t('client.subscription.none')}</div>}</div>
   }
 
   function History({ kid, setKid, currentUser }) {
+    const { t } = useLocale()
     const child = (parentData.children || []).find((item) => item.id === kid)
     const participantQuery = child?.studentId ? `?student_id=${encodeURIComponent(child.studentId)}` : ''
     const attendanceList = useScreenList({
@@ -355,24 +373,24 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const visibleAttendance = attendance
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">История</h1><p className="page-desc">Посещения выбранного участника. Раздел сообщений временно недоступен.</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
-        <div className="ops-tabs" role="tablist" aria-label="Разделы истории">
-          <button type="button" role="tab" aria-selected={historyTab === 'attendance'} className={historyTab === 'attendance' ? 'is-active' : ''} onClick={() => setHistoryTab('attendance')}>Посещения</button>
-          <button type="button" role="tab" aria-selected="false" aria-disabled="true" disabled title="Не определён authoritative source сообщений">Сообщения · недоступно</button>
+        <div className="page-head"><div><h1 className="page-title">{t('runtime.client.history.title')}</h1><p className="page-desc">{t('client.history.desc')}</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="ops-tabs" role="tablist" aria-label={t('client.history.sections')}>
+          <button type="button" role="tab" aria-selected={historyTab === 'attendance'} className={historyTab === 'attendance' ? 'is-active' : ''} onClick={() => setHistoryTab('attendance')}>{t('client.history.attendance')}</button>
+          <button type="button" role="tab" aria-selected="false" aria-disabled="true" disabled title={t('client.history.messagesTitle')}>{t('client.history.messagesUnavailable')}</button>
         </div>
-        {historyTab === 'attendance' && <ListToolbar list={attendanceList} searchLabel="Поиск посещений" searchPlaceholder="Группа, тренер или локация">
-          <label>Период<select value={attendanceList.draftFilters.period} onChange={(event) => attendanceList.setDraftFilter('period', event.target.value)}><option value="30">30 дней</option><option value="90">90 дней</option><option value="365">Год</option><option value="">Всё время</option></select></label>
-          <label>Статус<select value={attendanceList.draftFilters.status} onChange={(event) => attendanceList.setDraftFilter('status', event.target.value)}><option value="">Все</option><option value="present">Был</option><option value="absent">Не был</option><option value="excused">Уважительная причина</option><option value="rescheduled">Перенос</option></select></label>
+        {historyTab === 'attendance' && <ListToolbar list={attendanceList} searchLabel={t('client.history.search')} searchPlaceholder={t('client.history.searchPlaceholder')}>
+          <label>{t('shared.period')}<select value={attendanceList.draftFilters.period} onChange={(event) => attendanceList.setDraftFilter('period', event.target.value)}><option value="30">{t('client.history.days30')}</option><option value="90">{t('client.history.days90')}</option><option value="365">{t('client.history.year')}</option><option value="">{t('client.history.allTime')}</option></select></label>
+          <label>{t('shared.status')}<select value={attendanceList.draftFilters.status} onChange={(event) => attendanceList.setDraftFilter('status', event.target.value)}><option value="">{t('shared.all')}</option><option value="present">{t('status.present')}</option><option value="absent">{t('status.absent')}</option><option value="excused">{t('client.history.excused')}</option><option value="rescheduled">{t('status.moved')}</option></select></label>
         </ListToolbar>}
-        {selectedHistory && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="ops-section-head"><div><div className="eyebrow">Детали операции</div><strong>{selectedHistory.label || selectedHistory.method}</strong></div><Button size="sm" variant="subtle" onClick={() => setSelectedHistory(null)}>Закрыть</Button></div><div className="muted">Дата: {selectedHistory.date} · сумма/списание и статус сохранены в истории.</div></div>}
+        {selectedHistory && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="ops-section-head"><div><div className="eyebrow">{t('client.history.details')}</div><strong>{selectedHistory.label || selectedHistory.method}</strong></div><Button size="sm" variant="subtle" onClick={() => setSelectedHistory(null)}>{t('shared.close')}</Button></div><div className="muted">{t('client.history.detailLine', undefined, { date: selectedHistory.date })}</div></div>}
         {historyTab === 'attendance' && <div>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>Посещения</div>
-            <ListFeedback list={attendanceList} emptyLabel="Посещений пока нет" />
-            <Table rows={visibleAttendance} emptyLabel="Посещений пока нет" columns={[
-              { key: 'date', header: 'Дата', muted: true },
-              { key: 'label', header: 'Занятие', render: (row) => <button type="button" className="ops-link-button" onClick={() => setSelectedHistory(row)}><span className="strong">{row.label}</span></button> },
-              { key: 'trainer', header: 'Тренер', muted: true },
-              { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.status === 'rescheduled' ? 'moved' : row.status} size="sm" /> },
+            <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.history.attendance')}</div>
+            <ListFeedback list={attendanceList} emptyLabel={t('client.history.empty')} />
+            <Table rows={visibleAttendance} emptyLabel={t('client.history.empty')} columns={[
+              { key: 'date', header: t('shared.date'), muted: true },
+              { key: 'label', header: t('client.history.session'), render: (row) => <button type="button" className="ops-link-button" onClick={() => setSelectedHistory(row)}><span className="strong">{row.label}</span></button> },
+              { key: 'trainer', header: t('shared.trainer'), muted: true },
+              { key: 'status', header: t('shared.status'), render: (row) => <StatusPill status={row.status === 'rescheduled' ? 'moved' : row.status} size="sm" /> },
             ]} />
             <ListPagination list={attendanceList} />
         </div>}
@@ -381,6 +399,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   }
 
   function Profile({ kid, setKid, go }) {
+    const { t } = useLocale()
     const account = parentData.account || {}
     const participants = parentData.profileParticipants || []
     const selectedChild = (parentData.children || []).find((item) => item.id === kid) || (parentData.children || [])[0]
@@ -420,13 +439,13 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           },
         })
         setBaseline({ ...form })
-        setMessage('Профиль сохранён.')
+        setMessage(t('client.profile.saved'))
         setError(null)
         reloadRoleData?.('client', { studentId: (parentData.children || []).find((item) => item.id === kid)?.studentId })
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, PROFILE_FIELD_MAP)
         setFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось сохранить профиль.'))
+        setError(formErrorMessage(err, t('client.profile.saveFailed')))
         focusFirstFieldError(nextErrors, PROFILE_FIELD_IDS)
       } finally {
         setBusy(false)
@@ -439,35 +458,35 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         await api.post('/api/client/profile/', { account: { telegram_disconnect: true } })
         await reloadRoleData?.('client')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось отключить Telegram.'))
+        setError(apiErrorMessage(err, t('client.profile.telegramFailed')))
       }
     }
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">{account.full_name || 'Профиль'}</h1><p className="page-desc">Текущий баланс: <Money amount={selectedChild?.balance || 0} signed currency="zł" /></p></div><div className="ops-page-actions"><Button variant="primary" onClick={() => go('payments')}>Пополнить баланс</Button><Button variant="secondary" onClick={() => go('consents')}>Согласия</Button></div></div>
+        <div className="page-head"><div><h1 className="page-title">{account.full_name || t('runtime.client.profile.title')}</h1><p className="page-desc">{t('client.profile.currentBalance')} <Money amount={selectedChild?.balance || 0} signed currency="zł" /></p></div><div className="ops-page-actions"><Button variant="primary" onClick={() => go('payments')}>{t('client.profile.topup')}</Button><Button variant="secondary" onClick={() => go('consents')}>{t('runtime.client.consents.title')}</Button></div></div>
         <ChildButtons kid={kid} setKid={setKid} />
         <ToastNotice id="client-profile-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Сохраняю профиль...</BusyBanner>
+        <BusyBanner Banner={Banner} show={busy}>{t('client.profile.saving')}</BusyBanner>
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div className="ops-profile-form-grid">
-            <Input id={PROFILE_FIELD_IDS.firstName} label="Имя" value={form.firstName} error={fieldErrors.firstName} onChange={(event) => update('firstName', event.target.value)} />
-            <Input id={PROFILE_FIELD_IDS.lastName} label="Фамилия" value={form.lastName} error={fieldErrors.lastName} onChange={(event) => update('lastName', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.firstName} label={t('client.profile.firstName')} value={form.firstName} error={fieldErrors.firstName} onChange={(event) => update('firstName', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.lastName} label={t('client.profile.lastName')} value={form.lastName} error={fieldErrors.lastName} onChange={(event) => update('lastName', event.target.value)} />
             <Input id={PROFILE_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => update('email', event.target.value)} />
-            <Input id={PROFILE_FIELD_IDS.phone} label="Телефон" value={form.phone} error={fieldErrors.phone} onChange={(event) => update('phone', event.target.value)} />
-            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? 'Подключён' : 'Не подключён'}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={disconnectTelegram}>Отключить</Button>}</div>
-            <Select id={PROFILE_FIELD_IDS.language} label="Язык интерфейса" value={form.language} error={fieldErrors.language} hint="Язык доставки указан в истории сообщений." onChange={(event) => update('language', event.target.value)}><option value="ru">Русский</option><option value="pl">Polski</option><option value="en">English</option></Select>
+            <Input id={PROFILE_FIELD_IDS.phone} label={t('client.profile.phone')} value={form.phone} error={fieldErrors.phone} onChange={(event) => update('phone', event.target.value)} />
+            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? t('client.profile.connected') : t('client.profile.disconnected')}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={disconnectTelegram}>{t('client.profile.disconnect')}</Button>}</div>
+            <Select id={PROFILE_FIELD_IDS.language} label={t('client.profile.notificationLanguage')} value={form.language} error={fieldErrors.language} hint={t('client.profile.notificationHint')} onChange={(event) => update('language', event.target.value)}><option value="ru">{t('client.profile.russian')}</option><option value="pl">Polski</option><option value="en">English</option></Select>
           </div>
         </div>
-        <Table rows={participants} emptyLabel="Участников нет" columns={[
-          { key: 'full_name', header: 'Участник', render: (row) => <button type="button" className="ops-link-button" onClick={() => { const child = (parentData.children || []).find((item) => item.studentId === row.id); if (child) setKid(child.id) }}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
-          { key: 'birth_date', header: 'Дата рождения', muted: true, render: (row) => row.birth_date || '-' },
+        <Table rows={participants} emptyLabel={t('client.profile.participantsEmpty')} columns={[
+          { key: 'full_name', header: t('shared.participant'), render: (row) => <button type="button" className="ops-link-button" onClick={() => { const child = (parentData.children || []).find((item) => item.studentId === row.id); if (child) setKid(child.id) }}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
+          { key: 'birth_date', header: t('client.profile.birthDate'), muted: true, render: (row) => row.birth_date || '-' },
           { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
-          { key: 'group', header: 'Группа', render: (row) => row.group?.name || 'Индивидуально' },
-          { key: 'status', header: 'Статус', render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
+          { key: 'group', header: t('shared.group'), render: (row) => row.group?.name || t('shared.individually') },
+          { key: 'status', header: t('shared.status'), render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
         ]} />
-        <div className="ops-profile-save-row"><Button variant="primary" loading={busy} disabled={busy} onClick={saveProfile}>Сохранить профиль</Button></div>
+        <div className="ops-profile-save-row"><Button variant="primary" loading={busy} disabled={busy} onClick={saveProfile}>{t('client.profile.save')}</Button></div>
       </div>
     )
   }
@@ -477,16 +496,17 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   const ALL_CONSENTS = '__all__'
 
   function Consents() {
+    const { t } = useLocale()
     const rows = parentData.consents || []
     const [localRows, setLocalRows] = useState(rows)
     const [message, setMessage] = useState(null)
     const [error, setError] = useState(null)
     const [busyType, setBusyType] = useState(null)
     const descriptions = {
-      data: 'Разрешает хранить и обрабатывать данные, необходимые для оказания услуг клуба.',
-      email: 'Разрешает получать сервисные и информационные сообщения по email.',
-      sms: 'Разрешает получать уведомления и напоминания по SMS.',
-      telegram: 'Разрешает получать уведомления в Telegram.',
+      data: t('client.consent.dataDesc'),
+      email: t('client.consent.emailDesc'),
+      sms: t('client.consent.smsDesc'),
+      telegram: t('client.consent.telegramDesc'),
     }
 
     useEffect(() => {
@@ -508,11 +528,11 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       setBusyType(row.type)
       try {
         await saveConsent(row, granted)
-        setMessage('Согласие сохранено.')
+        setMessage(t('client.consent.saved'))
         setError(null)
         reloadRoleData?.('client')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось сохранить согласие.'))
+        setError(apiErrorMessage(err, t('client.consent.saveFailed')))
       } finally {
         setBusyType(null)
       }
@@ -534,13 +554,13 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         setLocalRows((current) => current.map(
           (row) => successful.find((saved) => saved.type === row.type) || row))
         const failures = payload.results.filter((result) => !result.success)
-        setMessage(`Сохранено согласий: ${payload.summary.succeeded}.`)
+        setMessage(t('client.consent.savedCount', undefined, { count: payload.summary.succeeded }))
         setError(failures.length
           ? failures.map((result) => `${result.type || `#${result.index + 1}`}: ${result.error}`).join('; ')
           : null)
-        reloadRoleData?.('client', { studentId: child?.studentId })
+        reloadRoleData?.('client')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось сохранить согласия.'))
+        setError(apiErrorMessage(err, t('client.consent.saveAllFailed')))
       } finally {
         setBusyType(null)
       }
@@ -548,17 +568,17 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     return (
       <div className="page" style={{ maxWidth: 760 }}>
-        <div className="page-head"><div><h1 className="page-title">Согласия</h1><p className="page-desc">Управление согласиями и каналами связи.</p></div></div>
+        <div className="page-head"><div><h1 className="page-title">{t('runtime.client.consents.title')}</h1><p className="page-desc">{t('client.consent.desc')}</p></div></div>
         <ToastNotice id="client-consent-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busyType != null}>
-          {busyType === ALL_CONSENTS ? 'Сохраняю согласия...' : 'Сохраняю согласие...'}
+          {busyType === ALL_CONSENTS ? t('client.consent.savingAll') : t('client.consent.saving')}
         </BusyBanner>
         {pending.length > 1 && (
           <div className="ops-button-row" style={{ marginBottom: 12 }}>
             <Button variant="primary" loading={busyType === ALL_CONSENTS}
               disabled={busyType != null} onClick={grantAll}>
-              Подтвердить все ({pending.length})
+              {t('client.consent.confirmAll', undefined, { count: pending.length })}
             </Button>
           </div>
         )}
@@ -567,16 +587,16 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
             <div key={row.type} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: index < localRows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
               <div style={{ flex: 1 }}>
                 <div className="strong">{row.type_label || row.type}</div>
-                <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{descriptions[row.type] || 'Управление согласием на выбранный канал связи.'}</div>
-                <div className="muted" style={{ fontSize: 'var(--fs-2xs)', marginTop: 3 }}>Версия: {row.policy_version || 'не указана'} · выдано: {row.granted_at ? formatDate(row.granted_at) : '-'} · отозвано: {row.revoked_at ? formatDate(row.revoked_at) : '-'}</div>
+                <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{descriptions[row.type] || t('client.consent.fallbackDesc')}</div>
+                <div className="muted" style={{ fontSize: 'var(--fs-2xs)', marginTop: 3 }}>{t('client.consent.versionLine', undefined, { version: row.policy_version || t('client.consent.notSpecified'), granted: row.granted_at ? formatDate(row.granted_at) : '-', revoked: row.revoked_at ? formatDate(row.revoked_at) : '-' })}</div>
               </div>
               <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" />
               <Button size="sm" loading={busyType === row.type} disabled={busyType != null} variant={row.is_active ? 'secondary' : 'primary'} onClick={() => setConsent(row, !row.is_active)}>
-                {row.is_active ? 'Отозвать' : 'Подтвердить'}
+                {row.is_active ? t('client.consent.revoke') : t('client.consent.confirm')}
               </Button>
             </div>
           ))}
-          {localRows.length === 0 && <div className="muted" style={{ padding: 16 }}>Согласия пока не настроены.</div>}
+          {localRows.length === 0 && <div className="muted" style={{ padding: 16 }}>{t('client.consent.empty')}</div>}
         </div>
       </div>
     )

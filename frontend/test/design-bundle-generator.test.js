@@ -23,6 +23,68 @@ test('design bundle is reproducible from authoring sources', () => {
   assert.match(result.stdout, /DESIGN_BUNDLE_REPRODUCIBLE=PASS/)
 })
 
+test('authoring bundle keeps the documented component surface without demo screen code', async () => {
+  const bundle = await readFile(path.join(repoRoot, 'design', '_ds_bundle.js'), 'utf8')
+
+  for (const publicComponent of ['EmptyState', 'Radio', 'SidebarNav', 'Switch', 'Toast']) {
+    assert.match(bundle, new RegExp(`\\b${publicComponent}\\b`))
+  }
+  assert.doesNotMatch(bundle, /ui_kits\//)
+  assert.doesNotMatch(bundle, /window\.(?:AdminScreens|ParentScreens|TrainerScreens)\b/)
+})
+
+test('runtime design bundle excludes authoring-only demo screens', async () => {
+  const bundle = await readFile(path.join(frontendRoot, 'src', 'design', '_ds_bundle.js'), 'utf8')
+
+  assert.match(bundle, /^\/\* @ds-bundle: \{"format":5,/)
+  assert.match(bundle, /from\s*["']react["']/)
+  assert.doesNotMatch(bundle, /__ds_scope|__ds_ns\.__errors/)
+  assert.doesNotMatch(bundle, /ui_kits\//)
+  assert.doesNotMatch(bundle, /window\.(?:AdminScreens|ParentScreens|TrainerScreens)\b/)
+  for (const authoringOnlyComponent of [
+    'feedback/EmptyState.jsx',
+    'feedback/Toast.jsx',
+    'forms/Radio.jsx',
+    'forms/Switch.jsx',
+    'navigation/SidebarNav.jsx',
+  ]) assert.doesNotMatch(bundle, new RegExp(authoringOnlyComponent.replace('.', '\\.')))
+  for (const authoringOnlyIcon of [
+    'ArrowUpRight', 'Chart', 'Clock', 'Dots', 'Filter', 'Heart', 'Import',
+    'Mail', 'Phone', 'Plus', 'Shield', 'Snowflake', 'Trash', 'Whistle',
+  ]) assert.doesNotMatch(bundle, new RegExp(`\\b${authoringOnlyIcon}:`))
+  for (const runtimeIcon of [
+    'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'ChevronL',
+    'ChevronR', 'ClientFamily', 'Download', 'File', 'GroupMembers', 'Home',
+    'Layers', 'Location', 'Logout', 'Pencil', 'Search', 'Settings',
+    'TrainerWhistle', 'Upload', 'User', 'Users', 'Wallet', 'Waves', 'X',
+  ]) assert.match(bundle, new RegExp(`\\b${runtimeIcon}:`))
+})
+
+test('dialog and banner expose localizable fallback labels', async () => {
+  const [dialog, banner] = await Promise.all([
+    readFile(path.join(repoRoot, 'design', 'components', 'feedback', 'Dialog.jsx'), 'utf8'),
+    readFile(path.join(repoRoot, 'design', 'components', 'feedback', 'Banner.jsx'), 'utf8'),
+  ])
+
+  assert.match(dialog, /confirmLabel/)
+  assert.match(dialog, /cancelLabel/)
+  assert.match(dialog, /irreversibleLabel/)
+  assert.match(banner, /closeLabel/)
+})
+
+test('table, money and attendance metadata expose locale-aware fallbacks', async () => {
+  const [tableSource, moneySource, statusSource] = await Promise.all([
+    readFile(path.join(repoRoot, 'design', 'components', 'data', 'Table.jsx'), 'utf8'),
+    readFile(path.join(repoRoot, 'design', 'components', 'data', 'Money.jsx'), 'utf8'),
+    readFile(path.join(repoRoot, 'design', 'components', 'data', 'StatusPill.jsx'), 'utf8'),
+  ])
+  assert.match(tableSource, /emptyLabel = 'Brak danych'/)
+  assert.match(moneySource, /locale = 'pl-PL'/)
+  assert.match(moneySource, /toLocaleString\(locale/)
+  assert.match(statusSource, /consumesLabel = 'Zajęcie zostaje spisane'/)
+  assert.match(statusSource, /doesNotConsumeLabel = 'Zajęcie nie jest spisane'/)
+})
+
 test('runtime theme uses the approved blue palette and real variable weights', async () => {
   const [colors, fonts, typography, opsCss] = await Promise.all([
     readFile(path.join(repoRoot, 'design', 'tokens', 'colors.css'), 'utf8'),

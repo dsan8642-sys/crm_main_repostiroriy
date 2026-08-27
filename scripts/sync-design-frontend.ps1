@@ -26,7 +26,9 @@ function Copy-IfChanged {
 }
 
 Copy-IfChanged (Join-Path $DesignDir "styles.css") (Join-Path $FrontendDesignDir "styles.css")
-Copy-IfChanged (Join-Path $DesignDir "_ds_bundle.js") (Join-Path $FrontendDesignDir "_ds_bundle.js")
+# The application bundle is a tree-shaken runtime artifact generated separately
+# by generate-design-bundle.mjs. Do not overwrite it with the larger authoring
+# bundle used by the standalone design specimens.
 Get-ChildItem -LiteralPath (Join-Path $DesignDir "tokens") -Filter "*.css" -File |
     ForEach-Object {
         Copy-IfChanged $_.FullName (Join-Path (Join-Path $FrontendDesignDir "tokens") $_.Name)
@@ -41,4 +43,4 @@ Get-ChildItem -LiteralPath (Join-Path $DesignDir "assets\fonts\ibm-plex") -File 
         Copy-IfChanged $_.FullName (Join-Path (Join-Path $FrontendDesignDir "assets\fonts\ibm-plex") $_.Name)
     }
 
-Write-Host "Synced design runtime assets into frontend\src\design."
+Write-Host "Synced design styles, tokens and fonts into frontend\src\design."

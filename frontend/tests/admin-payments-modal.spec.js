@@ -71,6 +71,15 @@ async function mockPayments(page, {
       })
       return
     }
+    if (subscriptionMatch && method === 'POST') {
+      requests.push({ path, body: request.postDataJSON() })
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ subscription: { id: 33 }, charge: { id: 44 } }),
+      })
+      return
+    }
     if (/^\/api\/admin\/subscriptions\/\d+\/renew\/$/.test(path) && method === 'POST') {
       requests.push({ path, body: request.postDataJSON() })
       await route.fulfill({
@@ -132,6 +141,26 @@ test('subscription operations can target a client other than the first', async (
 
   await expect.poll(() => mock.requests).toHaveLength(1)
   expect(mock.requests[0].path).toBe('/api/admin/subscriptions/22/renew/')
+  expect(mock.requests[0].body).not.toHaveProperty('create_charge')
+  expect(mock.requests[0].body.idempotency_key).toMatch(/^admin-subscription-/)
+})
+
+test('issuing a subscription always creates its charge through one idempotent operation', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop finance contract check is sufficient')
+  const mock = await mockPayments(page)
+
+  await page.goto('/?role=admin&view=payments')
+  await page.getByRole('button', { name: /Баланс клиента/ }).click()
+  await page.getByRole('button', { name: 'Выдать абонемент', exact: true }).click()
+
+  const modal = page.getByRole('dialog', { name: 'Выдать абонемент' })
+  await expect(modal.getByRole('checkbox', { name: 'Создать начисление' })).toHaveCount(0)
+  await modal.getByRole('button', { name: 'Выдать абонемент', exact: true }).click()
+
+  await expect.poll(() => mock.requests).toHaveLength(1)
+  expect(mock.requests[0].path).toBe('/api/admin/participants/1/subscriptions/')
+  expect(mock.requests[0].body).not.toHaveProperty('create_charge')
+  expect(mock.requests[0].body.idempotency_key).toMatch(/^admin-subscription-/)
 })
 
 test('switching the finance participant clears the previous subscription before the new request finishes', async ({ page }) => {

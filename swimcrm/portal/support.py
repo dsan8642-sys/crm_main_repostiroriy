@@ -867,9 +867,15 @@ def _account_data(data):
     return data.get("account") or data.get("client") or data
 
 
-def _apply_account_data(account, data):
+def _apply_account_data(account, data, *, allow_lifecycle=True):
     account_data = _account_data(data)
     user = account.user
+    if "is_active" in account_data and not allow_lifecycle:
+        raise _field_validation_error(
+            "account.is_active",
+            "Используйте отдельное действие архивации или восстановления.",
+            code="lifecycle_only",
+        )
     if any(field in account_data for field in ("email", "username", "phone")):
         email, username = _portal_identity(
             account_data.get("email", user.email),
@@ -881,23 +887,34 @@ def _apply_account_data(account, data):
             field_prefix="account",
         )
         account_data = {**account_data, "email": email, "username": username}
+    user_update_fields = []
     for field in ("first_name", "last_name", "email"):
         if field in account_data:
             setattr(user, field, account_data.get(field, "") or "")
+            user_update_fields.append(field)
     if "is_active" in account_data:
         user.is_active = _bool_value(account_data.get("is_active"), True)
+        user_update_fields.append("is_active")
     if "username" in account_data and account_data["username"] != user.username:
         user.username = account_data["username"]
-    user.role = Role.PARENT
-    user.save()
+        user_update_fields.append("username")
+    if user.role != Role.PARENT:
+        user.role = Role.PARENT
+        user_update_fields.append("role")
+    if user_update_fields:
+        user.save(update_fields=list(dict.fromkeys(user_update_fields)))
 
+    account_update_fields = []
     if "phone" in account_data:
         phone = account_data.get("phone", "") or ""
         account.phone = phone
+        account_update_fields.append("phone")
     if "email" in account_data:
         account.email = account_data.get("email", "") or ""
+        account_update_fields.append("email")
     if "telegram_chat_id" in account_data:
         account.telegram_chat_id = account_data.get("telegram_chat_id", "") or ""
+        account_update_fields.append("telegram_chat_id")
     if "instagram_username" in account_data:
         try:
             account.instagram_username = normalize_instagram_username(
@@ -905,6 +922,7 @@ def _apply_account_data(account, data):
         except ValidationError as exc:
             raise _field_validation_error(
                 "account.instagram_username", exc.messages[0], code="invalid") from exc
+        account_update_fields.append("instagram_username")
     if "preferred_language" in account_data:
         language = (account_data.get("preferred_language", "") or "").lower()
         if language not in {"ru", "pl", "en"}:
@@ -912,8 +930,10 @@ def _apply_account_data(account, data):
                 "account.preferred_language", "Выберите поддерживаемый язык.",
                 code="invalid_choice")
         account.preferred_language = language
+        account_update_fields.append("preferred_language")
     account.full_clean(exclude=["user"])
-    account.save()
+    if account_update_fields:
+        account.save(update_fields=list(dict.fromkeys(account_update_fields)))
     return account
 
 
@@ -1329,16 +1349,19 @@ def _create_charge_for_participant(participant, data, *, actor=None, subscriptio
 
 def _create_subscription_charge(subscription, *, actor=None, due_date=None):
     subscription_type = subscription.subscription_type
-    charge = Charge.objects.create(
-        student=subscription.student,
+    charge, created = Charge.objects.get_or_create(
         subscription=subscription,
-        description=subscription_type.name,
-        amount_minor=subscription_type.price_minor,
-        currency=subscription_type.currency,
-        due_date=due_date or subscription.start_date,
-        created_by=actor,
+        defaults={
+            "student": subscription.student,
+            "description": subscription_type.name,
+            "amount_minor": subscription_type.price_minor,
+            "currency": subscription_type.currency,
+            "due_date": due_date or subscription.start_date,
+            "created_by": actor,
+        },
     )
-    audit(actor, "charge.created", charge, {"subscription_id": subscription.id})
+    if created:
+        audit(actor, "charge.created", charge, {"subscription_id": subscription.id})
     return charge
 
 
@@ -1480,6 +1503,21 @@ def _session_changes_from_data(data, *, current_session=None):
             raise _field_validation_error(
                 "group_id", "Выберите группу.", code="required")
         changes["individual_student"] = None
+        group_changed = (
+            current_session is not None
+            and final_group.id != current_session.group_id
+        )
+        changed_to_group = (
+            current_session is not None
+            and current_session.session_type != SessionType.GROUP
+        )
+        # Group prices are catalogue-owned. A hidden client value must neither
+        # override the tariff nor refresh an unchanged historical snapshot.
+        changes.pop("price_minor", None)
+        changes.pop("currency", None)
+        if group_changed or changed_to_group:
+            changes["price_minor"] = final_group.price_minor
+            changes["currency"] = final_group.currency
     else:
         if "group_id" in data and "session_type" not in data:
             raise _field_validation_error(
@@ -1620,15 +1658,22 @@ def _create_session_from_data(data, *, actor=None):
                 "Для двух клиентов установите лимит не меньше 2.",
                 code="capacity_below_roster",
             )
-    price_minor = data.get("price_minor")
-    if price_minor not in (None, ""):
-        price_minor = _required_int(price_minor, "price_minor")
-        if price_minor < 0:
-            raise _field_validation_error(
-                "price_minor", "Цена не может быть отрицательной.",
-                code="min_value")
+    if session_type == SessionType.GROUP:
+        # A group session is always billed from the selected group's tariff.
+        # Ignore stale or manipulated client-side price fields.
+        price_minor = group.price_minor
+        currency = group.currency
     else:
-        price_minor = None
+        price_minor = data.get("price_minor")
+        if price_minor not in (None, ""):
+            price_minor = _required_int(price_minor, "price_minor")
+            if price_minor < 0:
+                raise _field_validation_error(
+                    "price_minor", "Цена не может быть отрицательной.",
+                    code="min_value")
+        else:
+            price_minor = None
+        currency = data.get("currency")
     session = create_session(
         trainer=trainer,
         start_at=start_at,
@@ -1641,7 +1686,7 @@ def _create_session_from_data(data, *, actor=None):
         individual_student=individual_student,
         manually_modified=_bool_value(data.get("is_manually_modified")),
         price_minor=price_minor,
-        currency=data.get("currency"),
+        currency=currency,
         notes=data.get("notes", "") or "",
         actor=actor,
     )

@@ -13,6 +13,8 @@ function clientRow(index) {
     is_active: true,
     client_is_active: true,
     has_current_subscription: index % 2 === 1,
+    current_subscription_total: index % 2 === 1 ? 8 : null,
+    current_subscription_remaining: index % 2 === 1 ? 5 : null,
     is_recently_active: index % 3 === 0,
     balance_minor: 0,
     group: null,
@@ -22,17 +24,17 @@ function clientRow(index) {
 test('screen-owned clients enforce Wave 2 search, filters and page policy', async ({ page }) => {
   const width = page.viewportSize()?.width || 0
   test.skip(![390, 1440].includes(width), 'Wave 2 list contract uses one mobile and one desktop viewport')
-  const allClients = Array.from({ length: 75 }, (_, index) => clientRow(index + 1))
+  if (width === 390) await page.setViewportSize({ width: 320, height: 844 })
+  const allClients = Array.from({ length: 400 }, (_, index) => clientRow(index + 1))
   const clientEndpointRequests = []
   const listRequests = []
-  let failNextMobilePage = false
 
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const staticRoutes = {
       '/api/health/': { status: 'ok', service: 'swimcrm' },
       '/api/me/': { id: 901, username: 'wave2-admin', role: 'admin', full_name: 'Wave Two Admin' },
-      '/api/admin/dashboard/': { metrics: { clients: 75, active_subscriptions: 38, debtors: 0 } },
+      '/api/admin/dashboard/': { metrics: { clients: 400, active_subscriptions: 200, debtors: 0 } },
       '/api/admin/reference/': {
         trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [],
         choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
@@ -59,31 +61,27 @@ test('screen-owned clients enforce Wave 2 search, filters and page policy', asyn
     const isScreenRequest = url.searchParams.get('active') === 'true'
     clientEndpointRequests.push(url)
     if (isScreenRequest) listRequests.push(url)
-    if (isScreenRequest && width === 390 && pageNumber === 2 && failNextMobilePage) {
-      failNextMobilePage = false
-      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic next-page failure' }) })
-      return
-    }
     const search = (url.searchParams.get('search') || '').toLocaleLowerCase('ru-RU')
     const subscription = url.searchParams.get('subscription')
     let rows = allClients
     if (search) rows = rows.filter((row) => row.full_name.toLocaleLowerCase('ru-RU').includes(search))
     if (subscription) rows = rows.filter((row) => row.has_current_subscription === (subscription === 'with'))
     const total = rows.length
+    const allRequested = url.searchParams.get('all') === 'true'
     const start = (pageNumber - 1) * pageSize
-    const pageRows = rows.slice(start, start + pageSize)
-    const pages = Math.ceil(total / pageSize)
+    const pageRows = allRequested ? rows : rows.slice(start, start + pageSize)
+    const pages = allRequested ? (total ? 1 : 0) : Math.ceil(total / pageSize)
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         clients: pageRows,
         pagination: {
           page: pageNumber,
-          page_size: pageSize,
+          page_size: allRequested ? total : pageSize,
           total,
           pages,
-          has_next: pageNumber < pages,
-          has_previous: pageNumber > 1,
+          has_next: allRequested ? false : pageNumber < pages,
+          has_previous: allRequested ? false : pageNumber > 1,
         },
       }),
     })
@@ -93,44 +91,48 @@ test('screen-owned clients enforce Wave 2 search, filters and page policy', asyn
   const rows = width === 390
     ? page.locator('.ops-client-mobile-list article')
     : page.locator('.ops-client-desktop-table tbody tr')
-  await expect(rows).toHaveCount(width === 390 ? 20 : 50)
-  await expect(page.getByText('Найдено: 75')).toBeVisible()
+  await expect(rows).toHaveCount(400)
+  await expect(page.getByText('Найдено: 400')).toBeVisible()
   expect(clientEndpointRequests.every((url) => url.searchParams.get('active') === 'true')).toBe(true)
-  expect(listRequests.some((url) => url.searchParams.get('page_size') === (width === 390 ? '20' : '50'))).toBe(true)
+  expect(listRequests.some((url) => url.searchParams.get('all') === 'true')).toBe(true)
+  await expect(page.locator('.ops-list-pagination')).toHaveCount(0)
 
   const searchInput = page.getByLabel('Поиск клиентов')
   await searchInput.fill('P')
   await page.waitForTimeout(400)
   expect(listRequests.some((url) => url.searchParams.get('search') === 'P')).toBe(false)
-  await searchInput.fill('Person7')
-  await expect.poll(() => listRequests.some((url) => url.searchParams.get('search') === 'Person7')).toBe(true)
-  await expect(page.getByText('Найдено: 7')).toBeVisible()
+  await searchInput.fill('Person400')
+  await expect.poll(() => listRequests.some((url) => url.searchParams.get('search') === 'Person400')).toBe(true)
+  await expect(page.getByText('Найдено: 1')).toBeVisible()
 
   await searchInput.fill('')
-  await expect(page.getByText('Найдено: 75')).toBeVisible()
+  await expect(page.getByText('Найдено: 400')).toBeVisible()
   const beforeDraft = listRequests.length
   await page.getByLabel('Абонемент').selectOption('with')
   await page.waitForTimeout(350)
   expect(listRequests.length).toBe(beforeDraft)
   await page.getByRole('button', { name: /Применить/ }).click()
   await expect.poll(() => listRequests.some((url) => url.searchParams.get('subscription') === 'with')).toBe(true)
-  await expect(page.getByText('Найдено: 38')).toBeVisible()
+  await expect(page.getByText('Найдено: 200')).toBeVisible()
   await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
-  await expect(page.getByText('Найдено: 75')).toBeVisible()
+  await expect(page.getByText('Найдено: 400')).toBeVisible()
 
   if (width === 390) {
-    failNextMobilePage = true
-    await page.getByRole('button', { name: 'Показать ещё' }).click()
-    await expect(page.getByRole('alert')).toContainText('Synthetic next-page failure')
-    await expect(rows).toHaveCount(20)
-    await page.getByRole('button', { name: 'Повторить' }).click()
-    await expect(rows).toHaveCount(40)
-    expect(listRequests.some((url) => url.searchParams.get('page') === '2' && url.searchParams.get('page_size') === '20')).toBe(true)
-  } else {
-    const size500 = page.locator('.ops-list-pagination select option[value="500"]')
-    expect(await size500.evaluate((option) => option.disabled)).toBe(true)
-    await page.getByRole('button', { name: '2', exact: true }).click()
-    await expect(rows).toHaveCount(25)
-    expect(listRequests.some((url) => url.searchParams.get('page') === '2' && url.searchParams.get('page_size') === '50')).toBe(true)
+    await searchInput.fill('Клиент которого нет')
+    await expect(page.getByText('Найдено: 0')).toBeVisible()
+    await expect(page.getByText('По заданным фильтрам ничего не найдено.', { exact: true })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Сбросить поиск и фильтры' })).toHaveCount(1)
+    const geometry = await page.locator('.ops-command-row').evaluate((node) => {
+      const box = node.getBoundingClientRect()
+      return {
+        left: box.left,
+        right: box.right,
+        viewport: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      }
+    })
+    expect(geometry.left).toBeGreaterThanOrEqual(0)
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport)
+    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewport)
   }
 })

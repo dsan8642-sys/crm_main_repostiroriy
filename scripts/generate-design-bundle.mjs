@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { transformSync } from '../frontend/node_modules/esbuild/lib/main.js'
+import { buildSync, transformSync } from '../frontend/node_modules/esbuild/lib/main.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const designRoot = path.join(repoRoot, 'design')
@@ -31,8 +31,43 @@ const publicComponents = [
   ['Tabs', 'components/navigation/Tabs.jsx'],
 ]
 
-// Dependencies must precede their importers. UI-kit scripts register globals.
-const sourcePaths = [
+const runtimeComponents = publicComponents.filter(([name]) => !new Set([
+  'STATUS',
+  'EmptyState',
+  'Toast',
+  'Radio',
+  'Switch',
+  'SidebarNav',
+]).has(name))
+
+const runtimeIconNames = new Set([
+  'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'ChevronL',
+  'ChevronR', 'ClientFamily', 'Download', 'File', 'GroupMembers', 'Home',
+  'Layers', 'Location', 'Logout', 'Pencil', 'Search', 'Settings',
+  'TrainerWhistle', 'Upload', 'User', 'Users', 'Wallet', 'Waves', 'X',
+])
+
+// Dependencies must precede their importers. Demo UI kits are authoring-only;
+// shipping them in the application duplicated the real lazy-loaded screens.
+const runtimeSourcePaths = [
+  'assets/icons.jsx',
+  'components/data/Avatar.jsx',
+  'components/data/Badge.jsx',
+  'components/data/Money.jsx',
+  'components/data/StatusPill.jsx',
+  'components/data/Table.jsx',
+  'components/forms/Button.jsx',
+  'components/forms/Checkbox.jsx',
+  'components/forms/IconButton.jsx',
+  'components/forms/Input.jsx',
+  'components/forms/Select.jsx',
+  'components/forms/Textarea.jsx',
+  'components/feedback/Banner.jsx',
+  'components/feedback/Dialog.jsx',
+  'components/navigation/Tabs.jsx',
+]
+
+const authoringSourcePaths = [
   'assets/icons.jsx',
   'components/data/Avatar.jsx',
   'components/data/Badge.jsx',
@@ -53,21 +88,22 @@ const sourcePaths = [
   'components/feedback/Toast.jsx',
   'components/navigation/SidebarNav.jsx',
   'components/navigation/Tabs.jsx',
-  'ui_kits/admin/data.jsx',
-  'ui_kits/admin/Attendance.jsx',
-  'ui_kits/admin/Clients.jsx',
-  'ui_kits/admin/Debtors.jsx',
-  'ui_kits/admin/Overview.jsx',
-  'ui_kits/admin/Payments.jsx',
-  'ui_kits/admin/Schedule.jsx',
-  'ui_kits/parent/data.jsx',
-  'ui_kits/parent/screens.jsx',
-  'ui_kits/trainer/data.jsx',
-  'ui_kits/trainer/screens.jsx',
 ]
 
 const readDesign = relativePath => fs.readFileSync(path.join(designRoot, relativePath), 'utf8').replace(/\r\n/g, '\n')
 const sha12 = value => crypto.createHash('sha256').update(value).digest('hex').slice(0, 12)
+
+function runtimeSource(relativePath) {
+  const source = readDesign(relativePath)
+  if (relativePath !== 'assets/icons.jsx') return source
+  let insideIcons = false
+  return source.split('\n').filter((line) => {
+    if (line.includes('window.SwimIcons = {')) insideIcons = true
+    if (insideIcons && /^\s{2}};/.test(line)) insideIcons = false
+    const icon = insideIcons ? line.match(/^\s{4}([A-Za-z_$][\w$]*):/)?.[1] : null
+    return !icon || runtimeIconNames.has(icon)
+  }).join('\n')
+}
 
 function exportsFrom(source) {
   const names = new Set()
@@ -103,7 +139,7 @@ function prepareModule(source) {
 }
 
 function buildBundle() {
-  const sourceHashes = Object.fromEntries(sourcePaths.map(relativePath => [relativePath, sha12(readDesign(relativePath))]))
+  const sourceHashes = Object.fromEntries(authoringSourcePaths.map(relativePath => [relativePath, sha12(readDesign(relativePath))]))
   const header = {
     format: 4,
     namespace,
@@ -117,13 +153,55 @@ function buildBundle() {
     ],
   }
 
-  const sections = sourcePaths.map(relativePath => {
+  const sections = authoringSourcePaths.map(relativePath => {
     const code = prepareModule(readDesign(relativePath))
     return `// ${relativePath}\ntry { (() => {\n${code}\n})(); } catch (e) { __ds_ns.__errors.push({ path: ${JSON.stringify(relativePath)}, error: String((e && e.message) || e) }); }`
   })
   const exposures = publicComponents.map(([name]) => `__ds_ns.${name} = __ds_scope.${name};`).join('\n')
 
   return `/* @ds-bundle: ${JSON.stringify(header)} */\n\n(() => {\nconst __ds_ns = (window.${namespace} = window.${namespace} || {});\nconst __ds_scope = {};\n(__ds_ns.__errors = __ds_ns.__errors || []);\n\n${sections.join('\n\n')}\n\n${exposures}\n})();\n`
+}
+
+function buildRuntimeBundle() {
+  const sourceHashes = Object.fromEntries(runtimeSourcePaths.map(relativePath => [relativePath, sha12(readDesign(relativePath))]))
+  const header = {
+    format: 5,
+    namespace,
+    components: runtimeComponents.map(([name, sourcePath]) => ({ name, sourcePath })),
+    sourceHashes,
+    inlinedExternals: [],
+  }
+  const importsByPath = new Map()
+  for (const [name, sourcePath] of runtimeComponents) {
+    const names = importsByPath.get(sourcePath) || []
+    names.push(name)
+    importsByPath.set(sourcePath, names)
+  }
+  const imports = [...importsByPath].map(([sourcePath, names]) => (
+    `import { ${names.join(', ')} } from './${sourcePath}'`
+  )).join('\n')
+  const exposures = runtimeComponents.map(([name]) => name).join(', ')
+  const entry = `${imports}\nimport React from 'react'\n\n${runtimeSource('assets/icons.jsx')}\n\nwindow.${namespace} = { ${exposures} }\n`
+  const result = buildSync({
+    stdin: {
+      contents: entry,
+      loader: 'jsx',
+      resolveDir: designRoot,
+      sourcefile: 'runtime-entry.jsx',
+    },
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    jsx: 'transform',
+    minify: true,
+    legalComments: 'none',
+    treeShaking: true,
+    external: ['react'],
+    charset: 'utf8',
+  })
+  return `/* @ds-bundle: ${JSON.stringify(header)} */\n${result.outputFiles[0].text}`
 }
 
 function cardMetadata() {
@@ -201,6 +279,7 @@ function buildManifest() {
 const outputs = [
   [path.join(designRoot, '_ds_bundle.js'), buildBundle()],
   [path.join(designRoot, '_ds_manifest.json'), buildManifest()],
+  [path.join(repoRoot, 'frontend', 'src', 'design', '_ds_bundle.js'), buildRuntimeBundle()],
 ]
 const checkOnly = process.argv.includes('--check')
 

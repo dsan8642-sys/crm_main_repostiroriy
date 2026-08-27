@@ -34,6 +34,14 @@ class OpenApiContractTest(TestCase):
         detail = schema["paths"]["/api/admin/settings/locations/{location_id}/"]
         self.assertIn("patch", detail)
         self.assertNotIn("post", detail)
+        client_parameters = {
+            item["name"]: item
+            for item in schema["paths"]["/api/admin/clients/"]["get"]["parameters"]
+        }
+        self.assertEqual(
+            client_parameters["all"]["schema"]["enum"],
+            ["true", "false"],
+        )
 
     def test_operation_ids_are_unique(self):
         schema = build_openapi_schema()

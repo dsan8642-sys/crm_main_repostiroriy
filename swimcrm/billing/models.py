@@ -30,6 +30,15 @@ class Charge(models.Model):
     created_by = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(default=timezone.now)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscription"],
+                condition=Q(subscription__isnull=False),
+                name="billing_one_charge_per_subscription",
+            ),
+        ]
+
     @property
     def amount(self) -> Money:
         return Money(self.amount_minor, self.currency)

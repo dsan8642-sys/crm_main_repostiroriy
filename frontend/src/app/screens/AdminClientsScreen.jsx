@@ -1,5 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
+import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
 import { mapAdminClientRows } from '../../mappers.js'
 import { updateClientIdentity } from '../clientContracts.js'
 import {
@@ -13,9 +15,9 @@ import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { DateField } from '../DateTimeField.jsx'
 import { FormModal } from '../FormModal.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
-import { ListFeedback, ListPagination, useScreenList } from '../listFoundation.jsx'
+import { ListFeedback, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
-import { clientActivity, formatEntityMoney } from '../entityListContracts.js'
+import { clientActivity, formatEntityDate, formatEntityMoney } from '../entityListContracts.js'
 import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
 
 const CLIENT_FIELD_MAP = {
@@ -69,6 +71,29 @@ const PARTICIPANT_FIELD_MAP = {
 const mapActiveClientRows = (rows) => mapAdminClientRows(rows).active
 const mapBlacklistedClientRows = (rows) => mapAdminClientRows(rows).blacklisted
 
+function hasMeaningfulFormValue(value) {
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'boolean') return value
+  return String(value ?? '').trim().length > 0
+}
+
+function currentClientListLayout() {
+  if (typeof window === 'undefined') return 'desktop'
+  if (window.innerWidth < 768) return 'mobile'
+  if (window.innerWidth < 960) return 'tablet'
+  return 'desktop'
+}
+
+function useClientListLayout() {
+  const [layout, setLayout] = useState(currentClientListLayout)
+  useEffect(() => {
+    const update = () => setLayout(currentClientListLayout())
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  return layout
+}
+
 async function loadClientAccountOptions(query, requestOptions = {}) {
   const payload = await api.get(`/api/admin/reference/?q=${encodeURIComponent(query)}`, requestOptions)
   const rows = mapAdminClientRows(payload.participants || []).active
@@ -82,6 +107,10 @@ async function loadClientAccountOptions(query, requestOptions = {}) {
 export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
   return function ApiAdminClients({ go, currentUser }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
+    const clientListLayout = useClientListLayout()
     const groups = adminData.groups || []
     const [scope, setScope] = useState('active')
     const clientList = useScreenList({
@@ -92,7 +121,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       route: `clients-${scope}`,
       userKey: currentUser?.id || currentUser?.username,
       initialFilters: { subscription: '', balance: '', activity: '' },
-      fixedParams: { active: scope === 'blacklist' ? 'false' : 'true' },
+      fixedParams: { active: scope === 'blacklist' ? 'false' : 'true', all: 'true' },
       defaultOrder: 'name',
     })
     const rows = clientList.rows
@@ -144,12 +173,14 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     const filteredRows = rows
     const hasActiveFilter = Boolean(clientList.search.trim()) || clientList.filterCount > 0
     const emptyLabel = hasActiveFilter
-      ? 'По заданным фильтрам ничего не найдено.'
+      ? t('clients.emptyFiltered')
       : scope === 'blacklist'
-        ? 'Чёрный список пуст'
-        : 'Активных клиентов пока нет'
-    const clientFormDirty = Object.entries(clientForm).some(([key, value]) => key !== 'usernameManual' && Boolean(value))
-    const participantFormDirty = Object.values(participantForm).some(Boolean)
+        ? t('clients.emptyBlacklist')
+        : t('clients.emptyActive')
+    const clientFormDirty = Object.entries(clientForm).some(
+      ([key, value]) => key !== 'usernameManual' && hasMeaningfulFormValue(value),
+    )
+    const participantFormDirty = Object.values(participantForm).some(hasMeaningfulFormValue)
     const clientEditDirty = Boolean(clientEditBaseline) && JSON.stringify(clientEditForm) !== JSON.stringify(clientEditBaseline)
 
     function closeQuickAction() {
@@ -165,12 +196,17 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     }
 
     const subscriptionUsage = (row) => {
-      if (!row.hasCurrentSubscription) return 'Нет абонемента'
-      if (row.currentSubscriptionIsUnlimited) return 'Безлимитный'
-      return `${row.currentSubscriptionRemaining} из ${row.currentSubscriptionTotal}`
+      if (!row.hasCurrentSubscription) return t('clients.noPass')
+      if (row.currentSubscriptionIsUnlimited) return t('clients.unlimited')
+      return t('clients.remaining', { remaining: row.currentSubscriptionRemaining, total: row.currentSubscriptionTotal })
     }
 
-    const activity = (row) => clientActivity(row.lastPresentAt)
+    const activity = (row) => {
+      const value = clientActivity(row.lastPresentAt)
+      if (value.days == null || value.days > 180) return { ...value, label: t('clients.inactiveLong') }
+      const date = formatEntityDate(row.lastPresentAt, localeTag)
+      return { ...value, label: t(value.state === 'active' ? 'clients.activeAt' : 'clients.inactiveAt', { date }) }
+    }
 
     const updateClientForm = (field, value) => {
       setClientFieldErrors((current) => {
@@ -235,7 +271,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           return next
         })
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось загрузить данные клиента.'))
+        setError(apiErrorMessage(err, t('clients.loadError')))
       } finally {
         setBusy(false)
       }
@@ -244,8 +280,8 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     async function createClient() {
       if (!clientForm.firstName.trim() && !clientForm.lastName.trim()) {
         const nextErrors = {
-          firstName: 'Укажите имя или фамилию участника.',
-          lastName: 'Укажите имя или фамилию участника.',
+          firstName: t('clients.nameRequired'),
+          lastName: t('clients.nameRequired'),
         }
         setClientFieldErrors(nextErrors)
         setError(null)
@@ -275,7 +311,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             is_account_holder: true,
           },
         })
-        setMessage('Клиент создан.')
+        setMessage(t('clients.created'))
         setQuickAction(null)
         setClientForm({
           firstName: '',
@@ -292,7 +328,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, CLIENT_FIELD_MAP)
         setClientFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось создать клиента.'))
+        setError(formErrorMessage(err, t('clients.createError')))
         setTimeout(() => focusFirstFieldError(nextErrors, CLIENT_FIELD_IDS), 0)
       } finally {
         setBusy(false)
@@ -301,15 +337,15 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
     async function addParticipant() {
       if (!participantForm.clientId) {
-        setParticipantFieldErrors({ clientId: 'Выберите аккаунт клиента.' })
+        setParticipantFieldErrors({ clientId: t('clients.accountRequired') })
         setTimeout(() => focusFirstFieldError(
           { clientId: true }, { clientId: 'admin-participant-clientId' }), 0)
         return
       }
       if (!participantForm.firstName.trim() && !participantForm.lastName.trim()) {
         const nextErrors = {
-          firstName: 'Укажите имя или фамилию участника.',
-          lastName: 'Укажите имя или фамилию участника.',
+          firstName: t('clients.nameRequired'),
+          lastName: t('clients.nameRequired'),
         }
         setParticipantFieldErrors(nextErrors)
         setError(null)
@@ -332,14 +368,14 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             group_ids: participantForm.groupIds,
           },
         })
-        setMessage('Участник добавлен к аккаунту клиента.')
+        setMessage(t('clients.participantAdded'))
         setQuickAction(null)
         setParticipantForm({ clientId: '', firstName: '', lastName: '', birthDate: '', email: '', groupIds: [] })
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, PARTICIPANT_FIELD_MAP)
         setParticipantFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось добавить участника.'))
+        setError(formErrorMessage(err, t('clients.participantError')))
         setTimeout(() => focusFirstFieldError(nextErrors, {
           clientId: 'admin-participant-clientId',
           firstName: 'admin-participant-firstName',
@@ -382,7 +418,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
         })
         setEditingClient(null)
         setClientEditBaseline(null)
-        setMessage('Данные клиента и участника обновлены.')
+        setMessage(t('clients.updated'))
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, {
@@ -390,7 +426,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
           ...PARTICIPANT_FIELD_MAP,
         })
         setClientEditFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось сохранить данные клиента.'))
+        setError(formErrorMessage(err, t('clients.updateError')))
         setTimeout(() => focusFirstFieldError(nextErrors, {
           accountFirstName: 'admin-client-edit-accountFirstName',
           accountLastName: 'admin-client-edit-accountLastName',
@@ -415,15 +451,18 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       try {
         if (clientAction.type === 'archive') {
           await api.delete(`/api/admin/clients/${clientAction.row.clientId}/`)
-          setMessage('Клиент перемещён в чёрный список. Вся история сохранена.')
+          setMessage(t('clients.archived'))
         } else {
           await api.post(`/api/admin/clients/${clientAction.row.clientId}/restore/`)
-          setMessage('Клиент восстановлен и снова отображается в рабочем списке.')
+          setMessage(t('clients.restored'))
         }
         setClientAction(null)
         await reloadRoleData?.('admin')
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.getElementById('admin-clients-search')?.focus({ preventScroll: true })
+        }))
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось изменить статус клиента.'))
+        setError(apiErrorMessage(err, t('clients.statusError')))
       } finally {
         setBusy(false)
       }
@@ -433,64 +472,64 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
       <div className="page page-wide">
         <div className="page-head">
           <div>
-            <h1 className="page-title">Клиенты</h1>
-            <p className="page-desc">Родители, дети, контакты и связанные группы.</p>
+            <h1 className="page-title">{t('clients.title')}</h1>
+            <p className="page-desc">{t('clients.description')}</p>
           </div>
         </div>
         <ToastNotice id="admin-clients-result" message={message} />
         {error && !quickAction && !editingClient && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <BusyBanner Banner={Banner} show={busy}>Сохраняю данные клиента...</BusyBanner>
+        <BusyBanner Banner={Banner} show={busy}>{t('clients.saving')}</BusyBanner>
 
         <div className="ops-action-strip">
           <button type="button" className={`ops-action-card${quickAction === 'client' ? ' is-active' : ''}`} onClick={() => setQuickAction((current) => current === 'client' ? null : 'client')}>
-            <span>Новый клиент</span>
-            <small>Открыть форму создания</small>
+            <span>{t('clients.new')}</span>
+            <small>{t('clients.openCreate')}</small>
           </button>
           <button type="button" className={`ops-action-card${quickAction === 'participant' ? ' is-active' : ''}`} onClick={() => setQuickAction((current) => current === 'participant' ? null : 'participant')}>
-            <span>Участник к аккаунту</span>
-            <small>Добавить второго ребенка/участника</small>
+            <span>{t('clients.participantToAccount')}</span>
+            <small>{t('clients.addSecond')}</small>
           </button>
         </div>
 
         <FormModal
           open={quickAction === 'client'}
-          title="Новый клиент"
+          title={t('clients.new')}
           size="lg"
           busy={busy}
           dirty={clientFormDirty}
           onRequestClose={closeQuickAction}
           footer={({ requestClose }) => (
             <>
-              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button>
-              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>Создать клиента</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button>
+              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={createClient}>{t('clients.create')}</Button>
             </>
           )}
         >
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid ops-client-create-grid">
-              <Input id="admin-client-firstName" label="Имя владельца аккаунта" value={clientForm.firstName} error={clientFieldErrors.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
-              <Input id="admin-client-lastName" label="Фамилия владельца" value={clientForm.lastName} error={clientFieldErrors.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
+              <Input id="admin-client-firstName" label={t('clients.ownerFirstName')} value={clientForm.firstName} error={clientFieldErrors.firstName} onChange={(event) => updateClientForm('firstName', event.target.value)} />
+              <Input id="admin-client-lastName" label={t('clients.ownerLastName')} value={clientForm.lastName} error={clientFieldErrors.lastName} onChange={(event) => updateClientForm('lastName', event.target.value)} />
               <Input id="admin-client-email" label="Email" value={clientForm.email} error={clientFieldErrors.email} onChange={(event) => updateClientForm('email', event.target.value)} />
-              <Input id="admin-client-username" label="Логин" value={clientForm.username} error={clientFieldErrors.username} hint="Автоматически из email, телефона или имени; можно изменить." onChange={(event) => updateClientForm('username', event.target.value)} />
-              <Input id="admin-client-phone" label="Телефон" value={clientForm.phone} error={clientFieldErrors.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
-              <DateField id="admin-client-birthDate" label="Дата рождения" value={clientForm.birthDate} error={clientFieldErrors.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
+              <Input id="admin-client-username" label={t('trainers.login')} value={clientForm.username} error={clientFieldErrors.username} hint={t('clients.usernameHint')} onChange={(event) => updateClientForm('username', event.target.value)} />
+              <Input id="admin-client-phone" label={t('common.phone')} value={clientForm.phone} error={clientFieldErrors.phone} onChange={(event) => updateClientForm('phone', event.target.value)} />
+              <DateField id="admin-client-birthDate" label={t('clients.birthDate')} value={clientForm.birthDate} error={clientFieldErrors.birthDate} onChange={(value) => updateClientForm('birthDate', value)} />
               <GroupMultiSelect id="admin-client-groupIds" groups={groups} value={clientForm.groupIds} error={clientFieldErrors.groupIds} onChange={(value) => updateClientForm('groupIds', value)} />
-              <Input id="admin-client-instagramUsername" label="Instagram" value={clientForm.instagramUsername} error={clientFieldErrors.instagramUsername} hint="Имя профиля, например h2o_client" onChange={(event) => updateClientForm('instagramUsername', event.target.value)} />
+              <Input id="admin-client-instagramUsername" label="Instagram" value={clientForm.instagramUsername} error={clientFieldErrors.instagramUsername} hint={t('clients.instagramHint')} onChange={(event) => updateClientForm('instagramUsername', event.target.value)} />
             </div>
-            <p className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>Владелец аккаунта будет создан как участник. Другого участника можно добавить отдельным действием.</p>
+            <p className="muted" style={{ marginTop: 10, fontSize: 'var(--fs-sm)' }}>{t('clients.ownerParticipantHint')}</p>
         </FormModal>
 
         <FormModal
           open={quickAction === 'participant'}
-          title="Новый участник аккаунта"
+          title={t('clients.newParticipant')}
           size="lg"
           busy={busy}
           dirty={participantFormDirty}
           onRequestClose={closeQuickAction}
           footer={({ requestClose }) => (
             <>
-              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button>
-              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={addParticipant}>Добавить участника</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button>
+              <Button variant="primary" loading={busy && !editingClient} disabled={busy} onClick={addParticipant}>{t('clients.addParticipant')}</Button>
             </>
           )}
         >
@@ -499,7 +538,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               <SearchableSelect
                 className="ops-grid-full"
                 inputId="admin-participant-clientId"
-                label="Аккаунт клиента"
+                label={t('clients.account')}
                 value={participantForm.clientId}
                 error={participantFieldErrors.clientId}
                 onChange={(value) => updateParticipantForm('clientId', value)}
@@ -508,11 +547,11 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   description: (client) => client.phone || client.email || `ID ${client.clientId}`,
                 }))}
                 loadOptions={loadClientAccountOptions}
-                placeholder="Найдите аккаунт по имени или фамилии"
+                placeholder={t('clients.findAccount')}
               />
-              <Input id="admin-participant-firstName" label="Имя" value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
-              <Input id="admin-participant-lastName" label="Фамилия" value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
-              <DateField id="admin-participant-birthDate" label="Дата рождения" value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
+              <Input id="admin-participant-firstName" label={t('trainers.firstName')} value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
+              <Input id="admin-participant-lastName" label={t('trainers.lastName')} value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
+              <DateField id="admin-participant-birthDate" label={t('clients.birthDate')} value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
               <Input id="admin-participant-email" label="Email" value={participantForm.email} error={participantFieldErrors.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
               <GroupMultiSelect id="admin-participant-groupIds" groups={groups} value={participantForm.groupIds} error={participantFieldErrors.groupIds} onChange={(value) => updateParticipantForm('groupIds', value)} />
             </div>
@@ -520,99 +559,103 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
         <FormModal
           open={Boolean(editingClient)}
-          title="Редактирование клиента и участника"
+          title={t('clients.edit')}
           size="lg"
           busy={busy}
           dirty={clientEditDirty}
           onRequestClose={() => { if (clientEditBaseline) setClientEditForm(clientEditBaseline); setEditingClient(null); setClientEditBaseline(null); setClientEditFieldErrors({}); setError(null) }}
           footer={({ requestClose }) => (
             <>
-              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button>
-              <Button variant="primary" loading={busy} disabled={busy} onClick={saveClientEdit}>Сохранить</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button>
+              <Button variant="primary" loading={busy} disabled={busy} onClick={saveClientEdit}>{t('common.save')}</Button>
             </>
           )}
         >
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
-              <Input id="admin-client-edit-accountFirstName" label="Имя владельца" value={clientEditForm.accountFirstName} error={clientEditFieldErrors.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
-              <Input id="admin-client-edit-accountLastName" label="Фамилия владельца" value={clientEditForm.accountLastName} error={clientEditFieldErrors.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
-              <Input id="admin-client-edit-accountEmail" label="Email владельца" value={clientEditForm.accountEmail} error={clientEditFieldErrors.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
-              <Input id="admin-client-edit-accountUsername" label="Логин" value={clientEditForm.accountUsername} error={clientEditFieldErrors.accountUsername} onChange={(event) => updateClientEditForm('accountUsername', event.target.value)} />
-              <Input id="admin-client-edit-accountPhone" label="Телефон владельца" value={clientEditForm.accountPhone} error={clientEditFieldErrors.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
-              <Input id="admin-client-edit-firstName" label="Имя участника" value={clientEditForm.firstName} error={clientEditFieldErrors.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
-              <Input id="admin-client-edit-lastName" label="Фамилия участника" value={clientEditForm.lastName} error={clientEditFieldErrors.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
-              <DateField id="admin-client-edit-birthDate" label="Дата рождения" value={clientEditForm.birthDate} error={clientEditFieldErrors.birthDate} onChange={(value) => updateClientEditForm('birthDate', value)} />
-              <Input id="admin-client-edit-email" label="Email участника" value={clientEditForm.email} error={clientEditFieldErrors.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
+              <Input id="admin-client-edit-accountFirstName" label={t('clients.ownerFirstShort')} value={clientEditForm.accountFirstName} error={clientEditFieldErrors.accountFirstName} onChange={(event) => updateClientEditForm('accountFirstName', event.target.value)} />
+              <Input id="admin-client-edit-accountLastName" label={t('clients.ownerLastName')} value={clientEditForm.accountLastName} error={clientEditFieldErrors.accountLastName} onChange={(event) => updateClientEditForm('accountLastName', event.target.value)} />
+              <Input id="admin-client-edit-accountEmail" label={t('clients.ownerEmail')} value={clientEditForm.accountEmail} error={clientEditFieldErrors.accountEmail} onChange={(event) => updateClientEditForm('accountEmail', event.target.value)} />
+              <Input id="admin-client-edit-accountUsername" label={t('trainers.login')} value={clientEditForm.accountUsername} error={clientEditFieldErrors.accountUsername} onChange={(event) => updateClientEditForm('accountUsername', event.target.value)} />
+              <Input id="admin-client-edit-accountPhone" label={t('clients.ownerPhone')} value={clientEditForm.accountPhone} error={clientEditFieldErrors.accountPhone} onChange={(event) => updateClientEditForm('accountPhone', event.target.value)} />
+              <Input id="admin-client-edit-firstName" label={t('clients.participantFirst')} value={clientEditForm.firstName} error={clientEditFieldErrors.firstName} onChange={(event) => updateClientEditForm('firstName', event.target.value)} />
+              <Input id="admin-client-edit-lastName" label={t('clients.participantLast')} value={clientEditForm.lastName} error={clientEditFieldErrors.lastName} onChange={(event) => updateClientEditForm('lastName', event.target.value)} />
+              <DateField id="admin-client-edit-birthDate" label={t('clients.birthDate')} value={clientEditForm.birthDate} error={clientEditFieldErrors.birthDate} onChange={(value) => updateClientEditForm('birthDate', value)} />
+              <Input id="admin-client-edit-email" label={t('clients.participantEmail')} value={clientEditForm.email} error={clientEditFieldErrors.email} onChange={(event) => updateClientEditForm('email', event.target.value)} />
               <GroupMultiSelect id="admin-client-edit-groupIds" groups={groups} value={clientEditForm.groupIds} error={clientEditFieldErrors.groupIds} onChange={(value) => updateClientEditForm('groupIds', value)} />
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 21, fontSize: 'var(--fs-sm)' }}>
                 <input type="checkbox" checked={clientEditForm.isActive} onChange={(event) => updateClientEditForm('isActive', event.target.checked)} />
-                Активен
+                {t('trainers.active')}
               </label>
             </div>
         </FormModal>
         <div className="ops-command-row">
           <div className="ops-client-list-tools">
-            <div className="seg" aria-label="Режим списка клиентов">
-              <button type="button" className={scope === 'active' ? 'on' : ''} onClick={() => setScope('active')}>Клиенты</button>
-              <button type="button" className={scope === 'blacklist' ? 'on' : ''} onClick={() => setScope('blacklist')}>Чёрный список</button>
+            <div className="seg" aria-label={t('clients.listMode')}>
+              <button type="button" className={scope === 'active' ? 'on' : ''} onClick={() => setScope('active')}>{t('clients.title')}</button>
+              <button type="button" className={scope === 'blacklist' ? 'on' : ''} onClick={() => setScope('blacklist')}>{t('clients.blacklist')}</button>
             </div>
             <div className="ops-search">
               <span aria-hidden="true">⌕</span>
-              <input aria-label="Поиск клиентов" value={clientList.search} onChange={(event) => clientList.setSearch(event.target.value)} placeholder="Имя, телефон, email или группа" />
+              <input id="admin-clients-search" aria-label={t('clients.search')} value={clientList.search} onChange={(event) => clientList.setSearch(event.target.value)} placeholder={t('clients.searchPlaceholder')} />
             </div>
             <div className="ops-client-filter-selects">
               <label className="ops-client-filter-field">
-                <span>Абонемент</span>
-                <select aria-label="Абонемент" value={clientList.draftFilters.subscription} onChange={(event) => clientList.setDraftFilter('subscription', event.target.value)}>
-                  <option value="">Все</option>
-                  <option value="with">Есть</option>
-                  <option value="without">Нет</option>
+                <span>{t('clients.subscription')}</span>
+                <select aria-label={t('clients.subscription')} value={clientList.draftFilters.subscription} onChange={(event) => clientList.setDraftFilter('subscription', event.target.value)}>
+                  <option value="">{t('common.all')}</option>
+                  <option value="with">{t('clients.with')}</option>
+                  <option value="without">{t('clients.without')}</option>
                 </select>
               </label>
               <label className="ops-client-filter-field">
-                <span>Баланс</span>
-                <select aria-label="Баланс" value={clientList.draftFilters.balance} onChange={(event) => clientList.setDraftFilter('balance', event.target.value)}>
-                  <option value="">Любой</option>
-                  <option value="positive">Положительный — переплата</option>
-                  <option value="negative">Отрицательный — долг</option>
+                <span>{t('common.balance')}</span>
+                <select aria-label={t('common.balance')} value={clientList.draftFilters.balance} onChange={(event) => clientList.setDraftFilter('balance', event.target.value)}>
+                  <option value="">{t('clients.any')}</option>
+                  <option value="positive">{t('clients.overpayment')}</option>
+                  <option value="negative">{t('clients.debt')}</option>
                 </select>
               </label>
               <label className="ops-client-filter-field">
-                <span>Активность</span>
-                <select aria-label="Активность" value={clientList.draftFilters.activity} onChange={(event) => clientList.setDraftFilter('activity', event.target.value)}>
-                  <option value="">Все</option>
-                  <option value="active">Активные за 60 дней</option>
-                  <option value="inactive">Неактивные</option>
+                <span>{t('clients.activity')}</span>
+                <select aria-label={t('clients.activity')} value={clientList.draftFilters.activity} onChange={(event) => clientList.setDraftFilter('activity', event.target.value)}>
+                  <option value="">{t('common.all')}</option>
+                  <option value="active">{t('clients.active60')}</option>
+                  <option value="inactive">{t('common.inactive')}</option>
                 </select>
               </label>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="muted">Найдено: {clientList.pagination.total}</span>
-            <Button size="sm" variant="secondary" onClick={clientList.applyFilters}>Применить · Фильтры ({clientList.filterCount})</Button>
+          <div className="ops-client-command-actions">
+            <span className="muted">{t('clients.found', { count: clientList.pagination.total })}</span>
+            <Button size="sm" variant="secondary" onClick={clientList.applyFilters}>{t('clients.applyFilters', { count: clientList.filterCount })}</Button>
             {hasActiveFilter && (
-              <Button size="sm" variant="subtle" onClick={clientList.resetFilters}>Сбросить фильтры</Button>
+              <Button size="sm" variant="subtle" onClick={clientList.resetFilters}>{t('clients.resetFilters')}</Button>
             )}
           </div>
         </div>
-        <ListFeedback list={clientList} emptyLabel={scope === 'blacklist' ? 'Чёрный список пуст' : 'Активных клиентов пока нет'} />
-        <div className="ops-client-desktop-table">
+        <ListFeedback
+          list={clientList}
+          emptyLabel={scope === 'blacklist' ? t('clients.emptyBlacklist') : t('clients.emptyActive')}
+          noResultsLabel={t('clients.emptyFiltered')}
+        />
+        {filteredRows.length > 0 && clientListLayout === 'desktop' && <div className="ops-client-desktop-table">
           <Table
             rows={filteredRows}
             emptyLabel={emptyLabel}
             columns={[
-              { key: 'name', header: 'Участник', render: (row) => (
+              { key: 'name', header: t('common.participant'), render: (row) => (
                 <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={`${row.last} ${row.first}`} title={`${row.last} ${row.first}`} disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
                   <Avatar name={`${row.first} ${row.last}`} size={28} />
                   <span className="strong ops-ellipsis-text">{row.last} {row.first}</span>
                 </button>
               ) },
-              { key: 'phone', header: 'Телефон', muted: true, render: (row) => <span className="mono ops-ellipsis-value" data-full-value={row.phone || '-'} title={row.phone || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.phone || '-'}</span></span> },
+              { key: 'phone', header: t('common.phone'), muted: true, render: (row) => <span className="mono ops-ellipsis-value" data-full-value={row.phone || '-'} title={row.phone || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.phone || '-'}</span></span> },
               { key: 'email', header: 'Email', muted: true, render: (row) => <span className="ops-ellipsis-value" data-full-value={row.email || '-'} title={row.email || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.email || '-'}</span></span> },
-              { key: 'group', header: 'Группа', render: (row) => row.groupId ? <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} onClick={() => go?.('groups', { groupId: row.groupId })}><span className="ops-ellipsis-text">{row.group}</span></button> : <span className="ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.group || '-'}</span></span> },
-              { key: 'subscription', header: 'Абонемент', width: 105, render: (row) => <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge> },
-              { key: 'balance', header: 'Баланс', align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
-              { key: 'activity', header: 'Активность', width: 150, render: (row) => (
+              { key: 'group', header: t('common.group'), render: (row) => row.groupId ? <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} onClick={() => go?.('groups', { groupId: row.groupId })}><span className="ops-ellipsis-text">{row.group}</span></button> : <span className="ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.group || '-'}</span></span> },
+              { key: 'subscription', header: t('clients.subscription'), width: 105, render: (row) => <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge> },
+              { key: 'balance', header: t('common.balance'), align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
+              { key: 'activity', header: t('clients.activity'), width: 150, render: (row) => (
                 <span className="ops-client-activity">
                   <StatusPill status={activity(row).state} size="sm" />
                   <small className="ops-ellipsis-value" data-full-value={activity(row).label} title={activity(row).label} tabIndex={0}><span className="ops-ellipsis-text">{activity(row).label}</span></small>
@@ -626,19 +669,60 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   <div className="ops-client-row-actions">
                     {scope === 'active' ? (
                       <>
-                        <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>Изменить</Button>
-                        <Button size="sm" variant="subtle" disabled={busy} onClick={() => setClientAction({ type: 'archive', row })}>В чёрный список</Button>
+                        <Button size="sm" variant="subtle" disabled={busy} onClick={() => openClientEdit(row)}>{t('common.edit')}</Button>
+                        <Button size="sm" variant="subtle" disabled={busy} onClick={() => setClientAction({ type: 'archive', row })}>{t('clients.archive')}</Button>
                       </>
                     ) : (
-                      <Button size="sm" variant="primary" disabled={busy} onClick={() => setClientAction({ type: 'restore', row })}>Восстановить</Button>
+                      <Button size="sm" variant="primary" disabled={busy} onClick={() => setClientAction({ type: 'restore', row })}>{t('clients.restore')}</Button>
                     )}
                   </div>
                 ),
               },
             ]}
           />
-        </div>
-        <div className="ops-client-mobile-list">
+        </div>}
+        {filteredRows.length > 0 && clientListLayout === 'tablet' && <div className="ops-client-tablet-table">
+          <Table
+            rows={filteredRows}
+            columns={[
+              { key: 'client', header: t('clients.client'), render: (row) => (
+                <div className="ops-client-tablet-stack">
+                  <button type="button" className="ops-link-button strong" disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>{row.last} {row.first}</button>
+                  <span className="mono">{row.phone || '-'}</span>
+                  <span>{row.email || '-'}</span>
+                </div>
+              ) },
+              { key: 'membership', header: t('clients.membership'), render: (row) => (
+                <div className="ops-client-tablet-stack">
+                  {row.groupId
+                    ? <button type="button" className="ops-link-button" onClick={() => go?.('groups', { groupId: row.groupId })}>{row.group}</button>
+                    : <span>{row.group || '-'}</span>}
+                  <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge>
+                </div>
+              ) },
+              { key: 'state', header: t('clients.financeActivity'), render: (row) => (
+                <div className="ops-client-tablet-stack">
+                  <Money amount={row.balance} signed currency="zł" />
+                  <span className="ops-client-tablet-activity"><StatusPill status={activity(row).state} size="sm" /><small>{activity(row).label}</small></span>
+                </div>
+              ) },
+              { key: 'actions', header: t('clients.actions'), width: 64, render: (row) => (
+                <ActionPopover
+                  label={t('common.actionsFor', { name: `${row.last} ${row.first}` })}
+                  disabled={busy}
+                  actions={[
+                    { key: 'profile', label: t('trainers.profile'), disabled: !row.clientId, onSelect: () => go?.('clientDetail', { clientId: row.clientId }) },
+                    scope === 'active' && { key: 'edit', label: t('common.edit'), onSelect: () => openClientEdit(row) },
+                    scope === 'active'
+                      ? { key: 'archive', label: t('clients.archive'), danger: true, onSelect: () => setClientAction({ type: 'archive', row }) }
+                      : { key: 'restore', label: t('clients.restore'), onSelect: () => setClientAction({ type: 'restore', row }) },
+                  ]}
+                />
+              ) },
+            ]}
+          />
+        </div>}
+        {filteredRows.length > 0 && clientListLayout === 'mobile' && <div className="ops-client-mobile-list">
           {filteredRows.map((row) => (
             <EntityMobileCard key={row.id} className="ops-client-compact-card" labelledBy={`client-card-${row.id}`} testId="client-compact-card">
               <div className="ops-client-compact-primary">
@@ -646,7 +730,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   type="button"
                   className="ops-client-compact-profile"
                   disabled={!row.clientId}
-                  aria-label={row.clientId ? `Открыть профиль клиента ${row.last} ${row.first}` : undefined}
+                  aria-label={row.clientId ? t('clients.openProfile', { name: `${row.last} ${row.first}` }) : undefined}
                   onClick={row.clientId ? () => go?.('clientDetail', { clientId: row.clientId }) : undefined}
                 >
                   <Avatar name={`${row.first} ${row.last}`} size={36} />
@@ -654,19 +738,19 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                 </button>
                 <span className={`ops-client-compact-balance${row.balance < 0 ? ' is-debt' : ''}`}>{formatEntityMoney(row.balance)}</span>
                 <ActionPopover
-                  label={`Действия: ${row.last} ${row.first}`}
+                  label={t('common.actionsFor', { name: `${row.last} ${row.first}` })}
                   disabled={busy}
                   actions={[
-                    { key: 'profile', label: 'Профиль', disabled: !row.clientId, onSelect: () => go?.('clientDetail', { clientId: row.clientId }) },
-                    scope === 'active' && { key: 'edit', label: 'Изменить', onSelect: () => openClientEdit(row) },
+                    { key: 'profile', label: t('trainers.profile'), disabled: !row.clientId, onSelect: () => go?.('clientDetail', { clientId: row.clientId }) },
+                    scope === 'active' && { key: 'edit', label: t('common.edit'), onSelect: () => openClientEdit(row) },
                     scope === 'active'
-                      ? { key: 'archive', label: 'В чёрный список', danger: true, onSelect: () => setClientAction({ type: 'archive', row }) }
-                      : { key: 'restore', label: 'Восстановить', onSelect: () => setClientAction({ type: 'restore', row }) },
+                      ? { key: 'archive', label: t('clients.archive'), danger: true, onSelect: () => setClientAction({ type: 'archive', row }) }
+                      : { key: 'restore', label: t('clients.restore'), onSelect: () => setClientAction({ type: 'restore', row }) },
                   ]}
                 />
               </div>
               <div className="ops-client-compact-context">
-                <span title={row.group || 'Индивидуально'}>{row.group || 'Индивидуально'}</span>
+                <span title={row.group || t('clients.individual')}>{row.group || t('clients.individual')}</span>
                 <span aria-hidden="true">·</span>
                 <span title={subscriptionUsage(row)}>{subscriptionUsage(row)}</span>
               </div>
@@ -675,19 +759,17 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               </div>
             </EntityMobileCard>
           ))}
-          {!filteredRows.length && <div className="empty">{emptyLabel}</div>}
-        </div>
-        <ListPagination list={clientList} />
+        </div>}
         {clientAction && (
           <Dialog
             title={clientAction.type === 'archive'
-              ? `Переместить ${clientAction.row.last} ${clientAction.row.first} в чёрный список?`
-              : `Восстановить ${clientAction.row.last} ${clientAction.row.first}?`}
+              ? t('clients.archiveTitle', { name: `${clientAction.row.last} ${clientAction.row.first}` })
+              : t('clients.restoreTitle', { name: `${clientAction.row.last} ${clientAction.row.first}` })}
             description={clientAction.type === 'archive'
-              ? 'Клиент исчезнет из рабочего списка, но платежи, посещения, абонементы и журнал действий останутся в системе.'
-              : 'Аккаунт и его участники снова станут активными и появятся в рабочем списке.'}
+              ? t('clients.archiveDescription')
+              : t('clients.restoreDescription')}
             tone={clientAction.type === 'archive' ? 'danger' : 'default'}
-            confirmLabel={clientAction.type === 'archive' ? 'В чёрный список' : 'Восстановить'}
+            confirmLabel={clientAction.type === 'archive' ? t('clients.archive') : t('clients.restore')}
             onClose={() => busy ? null : setClientAction(null)}
             onConfirm={applyClientAction}
           >

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { PAYMENT_METHODS, errorCode, participantKey, paymentMethodLabel, resourceState, safeErrorMessage } from '../src/contracts.js'
-import { api, apiErrorMessage, fetchResourceMap } from '../src/api.js'
+import { api, apiErrorMessage, downloadFile, fetchResourceMap } from '../src/api.js'
 import { clientAutoLogin, updateClientIdentity } from '../src/app/clientContracts.js'
 import { fieldErrorsFromApi, formErrorMessage } from '../src/app/formErrors.js'
 
@@ -34,8 +34,10 @@ test('authorization failures remain a hard boundary', async () => {
 test('safe errors, payment methods and keys are deterministic', () => {
   assert.equal(errorCode(403), 'forbidden')
   assert.equal(safeErrorMessage(500, 'en'), 'The service is temporarily unavailable.')
+  assert.equal(safeErrorMessage(403, 'uk'), 'У вас немає доступу до цієї дії.')
   assert.deepEqual(PAYMENT_METHODS.map((item) => item.code), ['cash', 'bank_transfer', 'card', 'other'])
   assert.equal(paymentMethodLabel('card', 'pl'), 'Karta')
+  assert.equal(paymentMethodLabel('bank_transfer', 'uk'), 'Банківський переказ / IBAN')
   assert.equal(participantKey(4, 9), 'client-4-participant-9')
   assert.throws(() => participantKey(null, 9))
 })
@@ -70,6 +72,98 @@ test('api errors preserve structured field and non-field validation details', as
         return true
       },
     )
+  } finally {
+    globalThis.document = originalDocument
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('mutations use the current CSRF cookie after another tab rotates it', async () => {
+  const originalDocument = globalThis.document
+  const originalFetch = globalThis.fetch
+  const requestHeaders = []
+  globalThis.document = {
+    cookie: 'csrftoken=first-token',
+    documentElement: { lang: 'uk-UA' },
+  }
+  globalThis.fetch = async (_path, options) => {
+    const headers = new Headers(options.headers)
+    requestHeaders.push({
+      csrf: headers.get('X-CSRFToken'),
+      language: headers.get('Accept-Language'),
+    })
+    return new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  try {
+    await api.post('/api/test-mutation/', { value: 1 })
+    globalThis.document.cookie = 'csrftoken=second-token'
+    await api.post('/api/test-mutation/', { value: 2 })
+    assert.deepEqual(requestHeaders, [
+      { csrf: 'first-token', language: 'uk-UA' },
+      { csrf: 'second-token', language: 'uk-UA' },
+    ])
+  } finally {
+    globalThis.document = originalDocument
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('non-JSON mutation errors are redacted and never replayed', async () => {
+  const originalDocument = globalThis.document
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  globalThis.document = {
+    cookie: 'csrftoken=current-token',
+    documentElement: { lang: 'ru' },
+  }
+  globalThis.fetch = async () => {
+    requests += 1
+    return new Response('<html><body>DEBUG secret diagnostic</body></html>', {
+      status: 403,
+      headers: { 'content-type': 'text/html' },
+    })
+  }
+
+  try {
+    await assert.rejects(
+      api.post('/api/test-mutation/', { value: 1 }),
+      (error) => {
+        assert.equal(error.status, 403)
+        assert.equal(error.message, safeErrorMessage(403, 'ru'))
+        assert.doesNotMatch(error.message, /DEBUG|html|diagnostic/i)
+        return true
+      },
+    )
+    assert.equal(requests, 1)
+  } finally {
+    globalThis.document = originalDocument
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('downloads send the current UI language and redact error bodies', async () => {
+  const originalDocument = globalThis.document
+  const originalFetch = globalThis.fetch
+  let language = null
+  globalThis.document = { documentElement: { lang: 'pl' } }
+  globalThis.fetch = async (_path, options) => {
+    language = new Headers(options.headers).get('Accept-Language')
+    return new Response('<html>private proxy diagnostic</html>', {
+      status: 403,
+      headers: { 'content-type': 'text/html' },
+    })
+  }
+
+  try {
+    await assert.rejects(
+      downloadFile('/api/private-export/', 'export.xlsx'),
+      (error) => error.message === safeErrorMessage(403, 'pl'),
+    )
+    assert.equal(language, 'pl')
   } finally {
     globalThis.document = originalDocument
     globalThis.fetch = originalFetch

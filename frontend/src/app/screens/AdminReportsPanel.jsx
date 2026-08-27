@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
 import { DateField } from '../DateTimeField.jsx'
 import './AdminReportsPanel.css'
 
@@ -42,12 +44,12 @@ function totalsFor(rows) {
   return totals
 }
 
-function SessionChart({ rows }) {
+function SessionChart({ rows, t }) {
   const maxValue = Math.max(1, ...rows.flatMap((row) => [row.group, row.individual + row.split]))
-  return <div className="ops-report-chart card card-pad" role="img" aria-label="Диаграмма количества тренировок по тренерам; точные значения приведены в таблице ниже">
+  return <div className="ops-report-chart card card-pad" role="img" aria-label={t('reports.chartAria')}>
     <div className="ops-report-chart-legend" aria-hidden="true">
-      <span><i className="is-group" />Групповые</span>
-      <span><i className="is-personal" />Индивидуальные + Split</span>
+      <span><i className="is-group" />{t('reports.group')}</span>
+      <span><i className="is-personal" />{t('reports.personal')}</span>
     </div>
     <div className="ops-report-chart-scroll">
       {rows.length ? rows.map((row) => {
@@ -65,7 +67,7 @@ function SessionChart({ rows }) {
             </div>
           </div>
         </div>
-      }) : <p className="muted">За выбранный период занятий нет.</p>}
+      }) : <p className="muted">{t('reports.noSessionsSelected')}</p>}
     </div>
   </div>
 }
@@ -81,6 +83,8 @@ export function createAdminReportsPanel(components) {
   const { Banner, Button, Select, Table, Tabs } = components
 
   return function AdminReportsPanel() {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
     const initialRange = useMemo(currentMonthRange, [])
     const [subtab, setSubtab] = useState('sessions')
     const [dateFrom, setDateFrom] = useState(initialRange.dateFrom)
@@ -103,10 +107,10 @@ export function createAdminReportsPanel(components) {
       setSessionError(null)
       api.get(`/api/admin/reports/session-counts/?${queryString({ date_from: dateFrom, date_to: dateTo })}`)
         .then((payload) => { if (active) setSessionReport(payload) })
-        .catch((error) => { if (active) setSessionError(apiErrorMessage(error, 'Не удалось загрузить отчёт по тренировкам.')) })
+        .catch((error) => { if (active) setSessionError(apiErrorMessage(error, t('reports.sessionLoadError'))) })
         .finally(() => { if (active) setSessionLoading(false) })
       return () => { active = false }
-    }, [dateFrom, dateTo])
+    }, [dateFrom, dateTo, t])
 
     useEffect(() => { setIncomePage(1) }, [dateFrom, dateTo, currency])
 
@@ -128,10 +132,10 @@ export function createAdminReportsPanel(components) {
           setCurrencies(payload.available_currencies || [])
           if (!currency && payload.currency) setCurrency(payload.currency)
         })
-        .catch((error) => { if (active) setIncomeError(apiErrorMessage(error, 'Не удалось загрузить отчёт по поступлениям.')) })
+        .catch((error) => { if (active) setIncomeError(apiErrorMessage(error, t('reports.incomeLoadError'))) })
         .finally(() => { if (active) setIncomeLoading(false) })
       return () => { active = false }
-    }, [dateFrom, dateTo, currency, incomePage])
+    }, [dateFrom, dateTo, currency, incomePage, t])
 
     const allSessionRows = sessionReport?.rows || []
     const sessionRows = trainerId
@@ -140,7 +144,7 @@ export function createAdminReportsPanel(components) {
     const sessionTotals = totalsFor(sessionRows)
     const tableRows = trainerId ? sessionRows : [
       ...sessionRows,
-      { trainer_id: 'total', trainer: 'Итого по школе', isTotal: true, ...sessionTotals },
+      { trainer_id: 'total', trainer: t('reports.schoolTotal'), isTotal: true, ...sessionTotals },
     ]
 
     async function exportReport(kind) {
@@ -160,7 +164,7 @@ export function createAdminReportsPanel(components) {
       try {
         await downloadFile(path, `${isSessions ? 'session-counts' : 'income'}.xlsx`)
       } catch (error) {
-        const message = apiErrorMessage(error, 'Не удалось скачать отчёт.')
+        const message = apiErrorMessage(error, t('reports.downloadError'))
         if (isSessions) setSessionError(message)
         else setIncomeError(message)
       } finally {
@@ -169,99 +173,99 @@ export function createAdminReportsPanel(components) {
     }
 
     const sessionColumns = [
-      { key: 'trainer', header: 'Тренер', render: (row) => <span className={row.isTotal ? 'strong' : ''}>{row.trainer}</span> },
-      { key: 'group', header: 'Групповые' },
-      { key: 'individual', header: 'Индивидуальные' },
+      { key: 'trainer', header: t('common.trainer'), render: (row) => <span className={row.isTotal ? 'strong' : ''}>{row.trainer}</span> },
+      { key: 'group', header: t('reports.group') },
+      { key: 'individual', header: t('reports.individual') },
       { key: 'split', header: 'Split' },
-      { key: 'total', header: 'Всего', render: (row) => <strong>{row.total}</strong> },
+      { key: 'total', header: t('reports.total'), render: (row) => <strong>{row.total}</strong> },
     ]
     const incomeColumns = [
-      { key: 'paid_at', header: 'Дата' },
-      { key: 'participant', header: 'Клиент' },
-      { key: 'method_label', header: 'Способ' },
-      { key: 'amount', header: 'Сумма', render: (row) => <strong>{row.amount}</strong> },
+      { key: 'paid_at', header: t('common.date') },
+      { key: 'participant', header: t('reports.client') },
+      { key: 'method_label', header: t('reports.method') },
+      { key: 'amount', header: t('common.amount'), render: (row) => <strong>{row.amount}</strong> },
     ]
     const lessonGroupColumns = [
-      { key: 'group', header: 'Группа / тип занятия' },
-      { key: 'amount', header: 'Стоимость занятий', render: (row) => <strong>{row.amount}</strong> },
+      { key: 'group', header: t('reports.groupType') },
+      { key: 'amount', header: t('reports.sessionValue'), render: (row) => <strong>{row.amount}</strong> },
     ]
     const lessonTrainerColumns = [
-      { key: 'trainer', header: 'Фактический тренер' },
-      { key: 'amount', header: 'Стоимость занятий', render: (row) => <strong>{row.amount}</strong> },
+      { key: 'trainer', header: t('reports.actualTrainer') },
+      { key: 'amount', header: t('reports.sessionValue'), render: (row) => <strong>{row.amount}</strong> },
     ]
 
     return <div className="ops-reports-panel">
       <div className="ops-section-head">
         <div>
-          <div className="eyebrow">Отчёты</div>
-          <h3 className="section-title">Тренировки и поступления</h3>
-          <p className="page-desc">Период общий для обеих вкладок. Отменённые занятия и неподтверждённые платежи не учитываются.</p>
+          <div className="eyebrow">{t('reports.title')}</div>
+          <h3 className="section-title">{t('reports.subtitle')}</h3>
+          <p className="page-desc">{t('reports.description')}</p>
         </div>
       </div>
 
       <div className="card card-pad ops-report-filters">
-        <DateField id="admin-reports-date-from" label="Период с" value={dateFrom} onChange={setDateFrom} />
-        <DateField id="admin-reports-date-to" label="Период по" value={dateTo} onChange={setDateTo} />
+        <DateField id="admin-reports-date-from" label={t('reports.periodFrom')} value={dateFrom} onChange={setDateFrom} />
+        <DateField id="admin-reports-date-to" label={t('reports.periodTo')} value={dateTo} onChange={setDateTo} />
       </div>
 
       <Tabs
         value={subtab}
         onChange={setSubtab}
         items={[
-          { value: 'sessions', label: 'Тренировки' },
-          { value: 'income', label: 'Поступления' },
+          { value: 'sessions', label: t('reports.sessions') },
+          { value: 'income', label: t('reports.income') },
         ]}
       />
 
-      {subtab === 'sessions' ? <section aria-label="Отчёт по тренировкам">
+      {subtab === 'sessions' ? <section aria-label={t('reports.sessionReport')}>
         <div className="ops-report-toolbar">
-          <Select id="admin-report-trainer" label="Тренер" value={trainerId} onChange={(event) => setTrainerId(event.target.value)}>
-            <option value="">Все тренеры</option>
-            {allSessionRows.map((row) => <option key={row.trainer_id} value={row.trainer_id}>{row.trainer}{row.is_active ? '' : ' (неактивен)'}</option>)}
+          <Select id="admin-report-trainer" label={t('common.trainer')} value={trainerId} onChange={(event) => setTrainerId(event.target.value)}>
+            <option value="">{t('reports.allTrainers')}</option>
+            {allSessionRows.map((row) => <option key={row.trainer_id} value={row.trainer_id}>{row.trainer}{row.is_active ? '' : t('reports.inactiveSuffix')}</option>)}
           </Select>
-          <Button variant="secondary" disabled={downloading || sessionLoading} onClick={() => exportReport('sessions')}>Скачать XLSX</Button>
+          <Button variant="secondary" disabled={downloading || sessionLoading} onClick={() => exportReport('sessions')}>{t('reports.download')}</Button>
         </div>
         {sessionError && <Banner tone="danger" onClose={() => setSessionError(null)}>{sessionError}</Banner>}
         <div className="ops-report-kpis" aria-live="polite">
-          <Kpi label="Групповые" value={sessionTotals.group} />
-          <Kpi label="Индивидуальные" value={sessionTotals.individual} />
+          <Kpi label={t('reports.group')} value={sessionTotals.group} />
+          <Kpi label={t('reports.individual')} value={sessionTotals.individual} />
           <Kpi label="Split" value={sessionTotals.split} />
-          <Kpi label="Всего" value={sessionTotals.total} />
+          <Kpi label={t('reports.total')} value={sessionTotals.total} />
         </div>
-        <SessionChart rows={sessionRows} />
+        <SessionChart rows={sessionRows} t={t} />
         <div className="ops-report-table">
-          <Table rowKey={(row) => row.trainer_id} rows={tableRows} columns={sessionColumns} emptyLabel={sessionLoading ? 'Загрузка...' : 'Занятий за период нет'} />
+          <Table rowKey={(row) => row.trainer_id} rows={tableRows} columns={sessionColumns} emptyLabel={sessionLoading ? t('reports.loading') : t('reports.noSessions')} />
         </div>
-      </section> : <section aria-label="Отчёт по поступлениям">
+      </section> : <section aria-label={t('reports.incomeReport')}>
         <div className="ops-report-toolbar">
-          <Select id="admin-report-currency" label="Валюта" value={currency} onChange={(event) => setCurrency(event.target.value)}>
-            {!currency && <option value="">Системная</option>}
+          <Select id="admin-report-currency" label={t('reports.currency')} value={currency} onChange={(event) => setCurrency(event.target.value)}>
+            {!currency && <option value="">{t('reports.systemCurrency')}</option>}
             {currencies.map((code) => <option key={code} value={code}>{code}</option>)}
           </Select>
-          <Button variant="secondary" disabled={downloading || incomeLoading} onClick={() => exportReport('income')}>Скачать XLSX</Button>
+          <Button variant="secondary" disabled={downloading || incomeLoading} onClick={() => exportReport('income')}>{t('reports.download')}</Button>
         </div>
         {incomeError && <Banner tone="danger" onClose={() => setIncomeError(null)}>{incomeError}</Banner>}
         <div className="ops-report-kpis" aria-live="polite">
-          <Kpi label="Всего" value={incomeReport?.total || '—'} />
-          <Kpi label="Наличные" value={incomeReport?.cash || '—'} />
-          <Kpi label="Безналичные" value={incomeReport?.non_cash || '—'} />
+          <Kpi label={t('reports.total')} value={incomeReport?.total || '—'} />
+          <Kpi label={t('reports.cash')} value={incomeReport?.cash || '—'} />
+          <Kpi label={t('reports.cashless')} value={incomeReport?.non_cash || '—'} />
         </div>
         <div className="ops-report-table">
-          <Table rowKey={(row) => row.id} rows={incomeReport?.payments || []} columns={incomeColumns} emptyLabel={incomeLoading ? 'Загрузка...' : 'Подтверждённых платежей за период нет'} />
+          <Table rowKey={(row) => row.id} rows={incomeReport?.payments || []} columns={incomeColumns} emptyLabel={incomeLoading ? t('reports.loading') : t('reports.noPayments')} />
         </div>
-        {(incomeReport?.pagination?.pages || 0) > 1 && <div className="ops-report-pagination" aria-label="Страницы платежей">
-          <Button variant="secondary" size="sm" disabled={incomeLoading || !incomeReport.pagination.has_previous} onClick={() => setIncomePage((page) => page - 1)}>Назад</Button>
-          <span>Страница {incomeReport.pagination.page} из {incomeReport.pagination.pages}</span>
-          <Button variant="secondary" size="sm" disabled={incomeLoading || !incomeReport.pagination.has_next} onClick={() => setIncomePage((page) => page + 1)}>Далее</Button>
+        {(incomeReport?.pagination?.pages || 0) > 1 && <div className="ops-report-pagination" aria-label={t('reports.paymentPages')}>
+          <Button variant="secondary" size="sm" disabled={incomeLoading || !incomeReport.pagination.has_previous} onClick={() => setIncomePage((page) => page - 1)}>{t('reports.previous')}</Button>
+          <span>{t('reports.pageOf', { page: incomeReport.pagination.page, pages: incomeReport.pagination.pages })}</span>
+          <Button variant="secondary" size="sm" disabled={incomeLoading || !incomeReport.pagination.has_next} onClick={() => setIncomePage((page) => page + 1)}>{t('reports.next')}</Button>
         </div>}
         <div className="ops-report-table">
-          <h4>Стоимость занятий по группам</h4>
-          <p className="muted">Рассчитывается по отмеченным посещениям и цене конкретной тренировки, независимо от поступивших платежей.</p>
-          <Table rowKey={(row) => row.group} rows={incomeReport?.lesson_value_by_group || []} columns={lessonGroupColumns} emptyLabel={incomeLoading ? 'Загрузка...' : 'Занятий со списанием за период нет'} />
+          <h4>{t('reports.groupValues')}</h4>
+          <p className="muted">{t('reports.valueExplanation')}</p>
+          <Table rowKey={(row) => row.group} rows={incomeReport?.lesson_value_by_group || []} columns={lessonGroupColumns} emptyLabel={incomeLoading ? t('reports.loading') : t('reports.noChargedSessions')} />
         </div>
         <div className="ops-report-table">
-          <h4>Стоимость занятий по тренерам</h4>
-          <Table rowKey={(row) => row.trainer} rows={incomeReport?.lesson_value_by_trainer || []} columns={lessonTrainerColumns} emptyLabel={incomeLoading ? 'Загрузка...' : 'Занятий со списанием за период нет'} />
+          <h4>{t('reports.trainerValues')}</h4>
+          <Table rowKey={(row) => row.trainer} rows={incomeReport?.lesson_value_by_trainer || []} columns={lessonTrainerColumns} emptyLabel={incomeLoading ? t('reports.loading') : t('reports.noChargedSessions')} />
         </div>
       </section>}
     </div>

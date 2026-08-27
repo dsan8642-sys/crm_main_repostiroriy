@@ -35,7 +35,10 @@ def admin_reference(request):
             participants = participants.filter(
                 Q(first_name__icontains=token) | Q(last_name__icontains=token) |
                 Q(parent__phone__icontains=token) | Q(parent__email__icontains=token) |
-                Q(email__icontains=token)
+                Q(email__icontains=token) |
+                Q(parent__user__first_name__icontains=token) |
+                Q(parent__user__last_name__icontains=token) |
+                Q(parent__user__username__icontains=token)
             )
     session_type_configs = list(SessionTypeConfig.objects.filter(is_active=True).order_by("code", "id"))
     session_type_choices = (
@@ -63,7 +66,7 @@ def admin_reference(request):
             for location in Location.objects.filter(is_active=True).order_by("name", "id")
         ],
         "participants": [_student_payload(participant) for participant in
-                         participants.order_by("last_name", "first_name", "id")[:100]],
+                         participants.order_by("last_name", "first_name", "id")],
         "choices": {
             "payment_methods": [{"value": value, "label": label} for value, label in PaymentMethod.choices],
             "payment_statuses": [{"value": value, "label": label} for value, label in PaymentStatus.choices],

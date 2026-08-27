@@ -5,9 +5,9 @@ import React from 'react';
  * tabular mono numerals. Colours debt (negative) red and credit (positive)
  * green when `signed` is set — matches balance semantics in the brief.
  */
-export function Money({ amount, currency = 'zł', signed = false, muted = false, size = 'inherit', style }) {
+export function Money({ amount, currency = 'zł', locale = 'pl-PL', signed = false, muted = false, size = 'inherit', style }) {
   const n = Number(amount) || 0;
-  const abs = Math.abs(n).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const abs = Math.abs(n).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   let color = 'inherit';
   if (muted) color = 'var(--text-muted)';
   if (signed) {

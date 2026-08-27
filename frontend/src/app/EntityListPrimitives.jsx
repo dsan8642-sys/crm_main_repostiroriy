@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { clampedPopoverPosition } from './entityListContracts.js'
+import { useLocale } from '../i18n.jsx'
 
 export function ActionPopover({ label, actions, disabled = false }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
@@ -96,6 +97,7 @@ export function ActionPopover({ label, actions, disabled = false }) {
           disabled={action.disabled}
           onClick={() => {
             close(false)
+            triggerRef.current?.focus({ preventScroll: true })
             action.onSelect?.()
           }}
         >
@@ -133,11 +135,12 @@ export function EntityMobileCard({ className = '', children, labelledBy, testId 
   )
 }
 
-export function ContextRow({ label = 'Участник', value, onChange, changeLabel = 'Сменить' }) {
+export function ContextRow({ label, value, onChange, changeLabel }) {
+  const { t } = useLocale()
   return (
     <div className="ops-context-row">
-      <span><small>{label}</small><strong>{value || 'Не выбран'}</strong></span>
-      {onChange && <button type="button" onClick={onChange}>{changeLabel}</button>}
+      <span><small>{label || t('shared.participant')}</small><strong>{value || t('shared.notSelectedCapital')}</strong></span>
+      {onChange && <button type="button" onClick={onChange}>{changeLabel || t('client.participant.change')}</button>}
     </div>
   )
 }

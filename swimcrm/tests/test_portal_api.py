@@ -1003,7 +1003,6 @@ class AdminPortalApiRule(TestCase):
                 "phone": "+48555999999",
                 "email": "new@example.com",
                 "telegram_chat_id": "12345",
-                "is_active": False,
             }}),
             content_type="application/json",
         )
@@ -1016,7 +1015,7 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(account.user.username, "updated_client_api")
         self.assertEqual(account.user.first_name, "Client")
         self.assertEqual(account.user.last_name, "Account")
-        self.assertFalse(account.user.is_active)
+        self.assertTrue(account.user.is_active)
         self.assertEqual(account.phone, "+48555999999")
         self.assertEqual(account.email, "new@example.com")
         self.assertEqual(account.telegram_chat_id, "12345")
@@ -1031,7 +1030,7 @@ class AdminPortalApiRule(TestCase):
         self.assertIsNone(self.student.group)
         self.assertFalse(self.student.is_active)
         self.assertEqual(account_response.json()["account"]["username"], "updated_client_api")
-        self.assertFalse(account_response.json()["account"]["is_active"])
+        self.assertTrue(account_response.json()["account"]["is_active"])
         self.assertEqual(participant_response.json()["medical_info"], "Asthma")
         self.assertEqual(participant_response.json()["admin_comments"], "VIP")
 
@@ -1116,7 +1115,7 @@ class AdminPortalApiRule(TestCase):
         account.refresh_from_db()
         self.student.refresh_from_db()
 
-        self.assertEqual(account_update.status_code, 400)
+        self.assertEqual(account_update.status_code, 409)
         self.assertEqual(archived_participant_update.status_code, 400)
         self.assertEqual(active_participant_archived_account_update.status_code, 400)
         self.assertNotEqual(account.phone, "+48000000000")
@@ -2202,6 +2201,7 @@ class AdminPortalApiRule(TestCase):
                 "subscription_type_id": stype.id,
                 "start_date": date.today().isoformat(),
                 "create_charge": True,
+                "idempotency_key": "portal-api-create-subscription-001",
             }),
             content_type="application/json",
         )
@@ -2241,6 +2241,7 @@ class AdminPortalApiRule(TestCase):
                 "subscription_type_id": new_type.id,
                 "start_date": (date.today() + timedelta(days=30)).isoformat(),
                 "create_charge": True,
+                "idempotency_key": "portal-api-renew-subscription-001",
             }),
             content_type="application/json",
         )
@@ -2541,12 +2542,13 @@ class AdminPortalApiRule(TestCase):
         fractional_price = self.client.post(
             "/api/admin/schedule/sessions/",
             data=json.dumps({
-                "group_id": self.group.id,
+                "session_type": "individual",
+                "individual_student_id": self.student.id,
                 "trainer_id": trainer.id,
                 "start_at": "2026-06-05T21:00:00+02:00",
                 "duration_minutes": 60,
                 "location": "Pool A",
-                "max_participants": 8,
+                "max_participants": 1,
                 "price_minor": 12.5,
             }),
             content_type="application/json",
@@ -3001,7 +3003,7 @@ class AdminPortalApiRule(TestCase):
         session = create_session(
             trainer=trainer,
             group=self.group,
-            start_at=f.dt(2026, 6, 12, 17),
+            start_at=f.dt(2030, 6, 12, 17),
             duration_minutes=60,
             location="Lane Locked Convert",
             max_participants=4,
@@ -3036,7 +3038,7 @@ class AdminPortalApiRule(TestCase):
         convertible = create_session(
             trainer=trainer,
             group=empty_group,
-            start_at=f.dt(2026, 6, 12, 19),
+            start_at=f.dt(2030, 6, 12, 19),
             duration_minutes=60,
             location="Lane Capacity Convert",
             max_participants=2,

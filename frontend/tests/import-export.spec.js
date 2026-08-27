@@ -131,7 +131,7 @@ test('admin stages, fixes, reassigns and commits a CRM payment export', async ({
   )
   const fileInput = page.locator('input[type="file"]')
   await fileInput.setInputFiles({ name: 'payments.csv', mimeType: 'text/csv', buffer: crmExport })
-  await expect(page.getByText(/Собственный export CRM распознан автоматически/)).toBeVisible()
+  await expect(page.getByText(/Собственный экспорт CRM распознан автоматически/)).toBeVisible()
   await page.getByRole('combobox').filter({ has: page.locator('option[value="unmatched"]') }).selectOption('unmatched')
   await expect(page.getByRole('cell', { name: 'Клиент не найден' }).first()).toBeVisible()
   await page.getByRole('combobox').filter({ has: page.locator('option[value="unmatched"]') }).selectOption('all')
@@ -147,7 +147,7 @@ test('admin stages, fixes, reassigns and commits a CRM payment export', async ({
   await editor.getByRole('button', { name: /Ручной Клиент · ID 77/ }).click()
   await page.getByLabel('Выбрать строку 2').check()
   await page.getByRole('button', { name: 'Подтвердить импорт выбранных строк' }).click()
-  await expect(page.getByText(/created: 1/)).toBeVisible()
+  await expect(page.getByText(/Создано: 1/)).toBeVisible()
 
   await page.locator('.ops-nav-button[title="Платежи"]').click()
   await page.getByRole('tab', { name: /Подтверждённые 1/ }).click()

@@ -11,6 +11,13 @@ from datetime import timedelta
 
 from django.db.models import Max
 
+from .client_lifecycle import (
+    ClientLifecycleConflict,
+    archive_client_account,
+    edit_client_account,
+    restore_client_account,
+)
+
 
 def _client_list_balances(students):
     student_ids = [student.id for student in students]
@@ -155,6 +162,9 @@ def admin_clients(request):
                 Q(first_name__icontains=token) | Q(last_name__icontains=token) |
                 Q(email__icontains=token) | Q(parent__phone__icontains=token) |
                 Q(parent__email__icontains=token) | Q(groups__name__icontains=token) |
+                Q(parent__user__first_name__icontains=token) |
+                Q(parent__user__last_name__icontains=token) |
+                Q(parent__user__username__icontains=token) |
                 Q(groups__default_trainer__user__first_name__icontains=token) |
                 Q(groups__default_trainer__user__last_name__icontains=token)
             )
@@ -215,58 +225,61 @@ def admin_clients(request):
                 and recent_attendance[student.id] >= activity_cutoff
             ) == (activity == "active")
         ]
-    return JsonResponse(paginated_payload(
-        request,
-        students,
-        key="clients",
-        serializer=lambda student: _client_list_payload(
+    def serialize_client(student):
+        return _client_list_payload(
             student,
             balances,
             current_subscriptions,
             recent_attendance,
             activity_cutoff,
-        ),
+        )
+    all_rows = choice_param(request, "all", {"true", "false"})
+    if all_rows == "true":
+        total = len(students)
+        return JsonResponse({
+            "clients": [serialize_client(student) for student in students],
+            "pagination": {
+                "page": 1,
+                "page_size": total,
+                "total": total,
+                "pages": 1 if total else 0,
+                "has_next": False,
+                "has_previous": False,
+            },
+        })
+    return JsonResponse(paginated_payload(
+        request,
+        students,
+        key="clients",
+        serializer=serialize_client,
     ))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
 def admin_client_detail(request, client_id):
     user = _admin_required(request)
-    account = get_object_or_404(ParentAccount.objects.select_related("user"), pk=client_id)
+    if request.method == "GET":
+        account = get_object_or_404(
+            ParentAccount.objects.select_related("user"), pk=client_id)
+        return JsonResponse(_client_detail_payload(account))
     if request.method == "DELETE":
-        with transaction.atomic():
-            account.user.is_active = False
-            account.user.save(update_fields=["is_active"])
-            account.students.update(is_active=False)
-            invalidated = _invalidate_access_codes(account.user)
-            audit(user, "client_account.archived", account, {
-                "source": "api",
-                "invalidated_codes": invalidated,
-            })
+        account = archive_client_account(client_id, actor=user)
         return JsonResponse(_client_detail_payload(account))
-    if request.method != "GET":
-        if not account.user.is_active:
-            raise ValidationError("archived client account cannot be edited")
-        data = _json_body(request)
-        with transaction.atomic():
-            _apply_account_data(account, data)
-            audit(user, "client_account.updated", account, {"fields": sorted(_account_data(data).keys())})
-        return JsonResponse(_client_detail_payload(account))
+    try:
+        account = edit_client_account(
+            client_id, _json_body(request), actor=user)
+    except ClientLifecycleConflict:
+        return JsonResponse({
+            "error": "Клиент уже находится в архиве; обновите данные.",
+            "code": "client_lifecycle_conflict",
+        }, status=409)
     return JsonResponse(_client_detail_payload(account))
 
 
 @require_POST
 def admin_client_restore(request, client_id):
     user = _admin_required(request)
-    account = get_object_or_404(ParentAccount.objects.select_related("user"), pk=client_id)
-    with transaction.atomic():
-        account.user.is_active = True
-        account.user.save(update_fields=["is_active"])
-        restored_participants = account.students.filter(is_active=False).update(is_active=True)
-        audit(user, "client_account.restored", account, {
-            "source": "api",
-            "restored_participants": restored_participants,
-        })
+    account = restore_client_account(client_id, actor=user)
     return JsonResponse(_client_detail_payload(account))
 
 

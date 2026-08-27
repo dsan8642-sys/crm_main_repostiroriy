@@ -183,12 +183,29 @@ async function mockTrainerWave3(page) {
   })
 }
 
+test('Trainer sessions stacks the page heading and view switcher at 320px', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390, 'single narrow-mobile contract')
+  await page.setViewportSize({ width: 320, height: 844 })
+  await mockTrainerWave3(page)
+  await page.goto('/?role=trainer&view=sessions')
+
+  const headingCopy = page.locator('.ops-trainer-sessions-head > div').first()
+  const switcher = page.locator('.ops-trainer-sessions-head .ops-view-switcher')
+  await expect(headingCopy).toBeVisible()
+  await expect(switcher).toBeVisible()
+  const [copyBox, switcherBox] = await Promise.all([headingCopy.boundingBox(), switcher.boundingBox()])
+  expect(switcherBox.y).toBeGreaterThanOrEqual(copyBox.y + copyBox.height)
+  expect(switcherBox.x + switcherBox.width).toBeLessThanOrEqual(320)
+})
+
 test('Wave 3 trainer history is date-grouped and contextual back returns to it', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile Wave 3 contract')
   await mockTrainerWave3(page)
   await page.goto('/?role=trainer&view=history')
   const groups = page.locator('.ops-history-date-group')
   await expect(groups).toHaveCount(2)
+  await expect(groups.nth(0).getByRole('heading')).toHaveText('10.08.2026')
+  await expect(groups.nth(1).getByRole('heading')).toHaveText('09.08.2026')
   await expect(groups.first().locator('.ops-history-session')).toHaveCount(2)
   await expect(groups.first()).toContainText('Отменено')
   await groups.first().locator('.ops-history-session').first().click()

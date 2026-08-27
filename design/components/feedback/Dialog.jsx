@@ -19,6 +19,7 @@ export function Dialog({
   width = 460,
   hideFooter = false,
   irreversible = false,
+  irreversibleLabel = 'Działanie nieodwracalne',
   dismissOnBackdrop = true,
 }) {
   const titleId = React.useId();
@@ -122,7 +123,7 @@ export function Dialog({
         <div style={{ padding: '18px 20px 0' }}>
           {irreversible && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 10, color: 'var(--red-600)', fontSize: 'var(--fs-2xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              <WarnIcon /> Działanie nieodwracalne
+              <WarnIcon /> {irreversibleLabel}
             </div>
           )}
           {title && <h2 id={titleId} style={{ margin: 0, font: 'var(--text-card-title)', color: 'var(--text-strong)' }}>{title}</h2>}

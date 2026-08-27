@@ -1,6 +1,27 @@
 import { normalizeScheduleColorKey } from './app/schedulePalette.js'
 import { dateToIso } from './app/scheduleContracts.js'
+import { participantKey, paymentMethodLabel as contractPaymentMethodLabel } from './contracts.js'
+import { normalizeUiLocale, uiLocaleTag } from './localeContracts.js'
 
+const MAPPER_LABELS = Object.freeze({
+  individual: { ru: 'Индивидуально', uk: 'Індивідуально', pl: 'Indywidualnie', en: 'Individual' },
+  individualLesson: { ru: 'Индивидуальное', uk: 'Індивідуальне', pl: 'Indywidualne', en: 'Individual' },
+  noSubscription: { ru: 'Нет абонемента', uk: 'Немає абонемента', pl: 'Brak karnetu', en: 'No subscription' },
+  client: { ru: 'Клиент', uk: 'Клієнт', pl: 'Klient', en: 'Client' },
+  clientAccount: { ru: 'Аккаунт клиента', uk: 'Обліковий запис клієнта', pl: 'Konto klienta', en: 'Client account' },
+  session: { ru: 'Занятие', uk: 'Заняття', pl: 'Zajęcia', en: 'Session' },
+  topUpRequest: { ru: 'Запрос на пополнение', uk: 'Запит на поповнення', pl: 'Prośba o doładowanie', en: 'Top-up request' },
+  adminPayment: { ru: 'Платёж администратора', uk: 'Платіж адміністратора', pl: 'Płatność administratora', en: 'Administrator payment' },
+})
+
+function currentUiLocale() {
+  return normalizeUiLocale(globalThis.document?.documentElement?.lang)
+}
+
+function mapperLabel(key, locale = currentUiLocale()) {
+  const normalized = normalizeUiLocale(locale)
+  return MAPPER_LABELS[key]?.[normalized] || MAPPER_LABELS[key]?.ru || key
+}
 
 export function asMoneyMajor(minor) {
   return Math.round((Number(minor || 0) / 100) * 100) / 100
@@ -12,27 +33,27 @@ export function asAccountBalance(minor) {
   return -asMoneyMajor(minor)
 }
 
-export function formatDate(iso) {
+export function formatDate(iso, locale = uiLocaleTag(currentUiLocale())) {
   if (!iso) return '-'
-  return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(iso))
+  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(iso))
 }
 
-export function formatShortDate(iso) {
+export function formatShortDate(iso, locale = uiLocaleTag(currentUiLocale())) {
   if (!iso) return '-'
-  return new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date(iso))
+  return new Intl.DateTimeFormat(locale, { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date(iso))
 }
 
-export function formatTime(iso) {
+export function formatTime(iso, locale = uiLocaleTag(currentUiLocale())) {
   if (!iso) return '-'
-  return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
+  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 }
 
-export function paymentMethodLabel(method) {
-  return contractPaymentMethodLabel(method, 'ru')
+export function paymentMethodLabel(method, locale = currentUiLocale()) {
+  return contractPaymentMethodLabel(method, normalizeUiLocale(locale))
 }
 
-export function paymentSourceLabel(source) {
-  return source === 'client_top_up' ? 'Запрос на пополнение' : 'Платёж администратора'
+export function paymentSourceLabel(source, locale = currentUiLocale()) {
+  return source === 'client_top_up' ? mapperLabel('topUpRequest', locale) : mapperLabel('adminPayment', locale)
 }
 
 function statusFromPayment(status) {
@@ -56,12 +77,12 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         id: `s${student.id}`,
         studentId: student.id,
         name: student.full_name,
-        group: student.group?.name || 'Индивидуально',
+        group: student.group?.name || mapperLabel('individual'),
       trainer: student.next_session?.trainer || '',
       born: student.birth_date || '-',
       email: student.email || '',
       groupId: student.group?.id || '',
-      sub: student.current_subscription?.type || 'Нет абонемента',
+      sub: student.current_subscription?.type || mapperLabel('noSubscription'),
         subLeft: student.current_subscription?.remaining_sessions ?? null,
         subEnds: student.current_subscription?.effective_end_date || '-',
         subscription: profileSubscriptions.find((subscription) => subscription.participant_id === student.id) || student.current_subscription || null,
@@ -70,11 +91,11 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
     : [{
         id: 'account',
         studentId: null,
-        name: account.full_name || account.username || 'Клиент',
-        group: 'Индивидуально',
+        name: account.full_name || account.username || mapperLabel('client'),
+        group: mapperLabel('individual'),
         trainer: '',
         born: '-',
-        sub: 'Нет абонемента',
+        sub: mapperLabel('noSubscription'),
         subLeft: null,
         subEnds: '-',
         balance: 0,
@@ -94,7 +115,7 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         endAt: session.end_at,
         start: formatTime(session.start_at),
         end: formatTime(session.end_at),
-        group: session.group?.name || 'Индивидуальное',
+        group: session.group?.name || mapperLabel('individualLesson'),
         trainer: session.trainer,
         location: session.location,
         count: session.participants_count || 0,
@@ -116,11 +137,11 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         id: String(record.id),
         sessionId: record.session?.id,
         date: record.session?.start_at?.slice(0, 10),
-        label: `${record.session?.group?.name || 'Индивидуальное'} · ${formatTime(record.session?.start_at)}`,
+        label: `${record.session?.group?.name || mapperLabel('individualLesson')} · ${formatTime(record.session?.start_at)}`,
       status: record.status,
         deducts: record.deducts,
         comment: record.comment || '',
-        group: record.session?.group?.name || 'Индивидуальное',
+        group: record.session?.group?.name || mapperLabel('individualLesson'),
         trainer: record.session?.trainer || '',
       })) : [],
   ]))
@@ -174,7 +195,7 @@ export function mapTrainerSession(session) {
     start: formatTime(session.start_at),
     end: formatTime(session.end_at),
     groupId: session.group?.id || '',
-    group: session.group?.name || 'Индивидуальное',
+    group: session.group?.name || mapperLabel('individualLesson'),
     location: session.location,
     count: session.participants_count || 0,
     limit: session.max_participants || 0,
@@ -195,8 +216,8 @@ export function mapTrainerPortalData({ sessions, groups, history, detail }) {
     sessions: sessionRows,
     activeSessionId: detailSession?.id || sessionRows[0]?.sessionId || null,
     activeSessionTitle: detailSession
-      ? `${detailSession.group?.name || 'Индивидуальное'} · ${formatTime(detailSession.start_at)}-${formatTime(detailSession.end_at)}`
-      : 'Занятие',
+      ? `${detailSession.group?.name || mapperLabel('individualLesson')} · ${formatTime(detailSession.start_at)}-${formatTime(detailSession.end_at)}`
+      : mapperLabel('session'),
     activeSessionDate: detailSession ? formatShortDate(detailSession.start_at) : '',
     activeSessionStatus: detailSession ? sessionStatus(detailSession) : null,
     activeSessionCancelled: Boolean(detailSession?.is_cancelled),
@@ -231,15 +252,15 @@ function mapAdminParticipantRow(client) {
     first: client.first_name,
     last: client.last_name,
     born: client.birth_date || '-',
-    parent: client.is_account_holder ? client.full_name : 'Аккаунт клиента',
-    clientName: client.client_name || (client.is_account_holder ? client.full_name : 'Аккаунт клиента'),
+    parent: client.is_account_holder ? client.full_name : mapperLabel('clientAccount'),
+    clientName: client.client_name || (client.is_account_holder ? client.full_name : mapperLabel('clientAccount')),
     isAccountHolder: Boolean(client.is_account_holder),
     phone: client.client_phone || '',
     email: client.email || '',
     groups,
     groupIds: groups.map((group) => group.id),
     groupId: groups.length === 1 ? groups[0].id : '',
-    group: groups.map((group) => group.name).join(', ') || 'Индивидуально',
+    group: groups.map((group) => group.name).join(', ') || mapperLabel('individual'),
     trainer: '',
     isActive: client.is_active,
     accountActive: client.client_is_active !== false,
@@ -344,7 +365,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       durationMinutes: session.duration_minutes || 60,
       priceMinor: session.price_minor,
       currency: session.currency,
-      group: session.group?.name || 'Индивидуальное',
+      group: session.group?.name || mapperLabel('individualLesson'),
       trainer: session.trainer,
       location: session.location,
       count: session.participants_count || 0,
@@ -386,7 +407,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       clientId: row.student.client_id,
       child: row.student.full_name,
       parent: row.student.client_phone || '',
-      group: row.student.group?.name || 'Индивидуально',
+      group: row.student.group?.name || mapperLabel('individual'),
       groupId: row.student.group?.id || '',
       trainer: '',
       reason: row.reasons.join(', '),
@@ -452,11 +473,11 @@ export function mapClientAttendanceRows(rows) {
     id: String(record.id),
     sessionId: record.session?.id,
     date: record.session?.start_at?.slice(0, 10),
-    label: `${record.session?.group?.name || 'Индивидуальное'} · ${formatTime(record.session?.start_at)}`,
+    label: `${record.session?.group?.name || mapperLabel('individualLesson')} · ${formatTime(record.session?.start_at)}`,
     status: record.status,
     deducts: record.deducts,
     comment: record.comment || '',
-    group: record.session?.group?.name || 'Индивидуальное',
+    group: record.session?.group?.name || mapperLabel('individualLesson'),
     trainer: record.session?.trainer || '',
   }))
 }
@@ -496,4 +517,3 @@ export function mapClientPaymentRows(rows) {
     studentId: payment.student_id,
   }))
 }
-import { participantKey, paymentMethodLabel as contractPaymentMethodLabel } from './contracts.js'

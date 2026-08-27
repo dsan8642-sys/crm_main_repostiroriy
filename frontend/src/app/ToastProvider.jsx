@@ -1,9 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from 'react'
 import { toastReducer } from './toastContracts.js'
+import { useLocale } from '../i18n.jsx'
 
 const ToastContext = createContext(null)
 
 function ToastItem({ toast, dismiss }) {
+  const { t } = useLocale()
   useEffect(() => {
     if (!toast.duration) return undefined
     const timer = window.setTimeout(() => dismiss(toast.id), toast.duration)
@@ -15,13 +17,14 @@ function ToastItem({ toast, dismiss }) {
       {toast.tone === 'loading' && <span className="ops-toast-spinner" aria-hidden="true" />}
       <span>{toast.message}</span>
       {toast.tone !== 'loading' && (
-        <button type="button" aria-label="Закрыть уведомление" onClick={() => dismiss(toast.id)}>×</button>
+        <button type="button" aria-label={t('toast.close')} onClick={() => dismiss(toast.id)}>×</button>
       )}
     </div>
   )
 }
 
 export function ToastProvider({ children }) {
+  const { t } = useLocale()
   const [toasts, dispatch] = useReducer(toastReducer, [])
   const dismiss = useCallback((id) => dispatch({ type: 'dismiss', id }), [])
   const show = useCallback(({
@@ -37,7 +40,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="ops-toast-region" role="region" aria-label="Уведомления" aria-live="polite" aria-relevant="additions text">
+      <div className="ops-toast-region" role="region" aria-label={t('toast.region')} aria-live="polite" aria-relevant="additions text">
         {toasts.map((toast) => <ToastItem key={toast.id} toast={toast} dismiss={dismiss} />)}
       </div>
     </ToastContext.Provider>

@@ -1,6 +1,10 @@
 import React from 'react'
+import { adminTranslator } from '../adminLocales.js'
+import { useLocale } from '../i18n.jsx'
 
-export function GroupMultiSelect({ id, groups, value, onChange, error, label = 'Группы' }) {
+export function GroupMultiSelect({ id, groups, value, onChange, error, label }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   const selected = (value || []).map(String)
   const limitReached = selected.length >= 3
 
@@ -11,7 +15,7 @@ export function GroupMultiSelect({ id, groups, value, onChange, error, label = '
   }
 
   return <fieldset id={id} className="ops-group-multiselect" aria-invalid={Boolean(error)} tabIndex={-1}>
-    <legend>{label} <span className="muted">({selected.length}/3)</span></legend>
+    <legend>{label || t('common.groups')} <span className="muted">({selected.length}/3)</span></legend>
     <div className="ops-group-multiselect-options">
       {groups.map((group) => {
         const checked = selected.includes(String(group.groupId))
@@ -25,7 +29,7 @@ export function GroupMultiSelect({ id, groups, value, onChange, error, label = '
           <span>{group.name}</span>
         </label>
       })}
-      {!groups.length && <span className="muted">Активных групп нет</span>}
+      {!groups.length && <span className="muted">{t('groups.noneActive')}</span>}
     </div>
     {error && <small className="ops-field-error" role="alert">{error}</small>}
   </fieldset>

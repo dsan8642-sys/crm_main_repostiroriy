@@ -4,9 +4,14 @@ param()
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$generator = Join-Path $repoRoot "scripts\generate-design-bundle.mjs"
+& node $generator --check
+if ($LASTEXITCODE -ne 0) {
+    throw "Generated design bundles are stale. Run node scripts\generate-design-bundle.mjs from the repository root."
+}
+
 $pairs = @(
     @("design\styles.css", "frontend\src\design\styles.css"),
-    @("design\_ds_bundle.js", "frontend\src\design\_ds_bundle.js"),
     @("design\tokens\colors.css", "frontend\src\design\tokens\colors.css"),
     @("design\tokens\fonts.css", "frontend\src\design\tokens\fonts.css"),
     @("design\tokens\typography.css", "frontend\src\design\tokens\typography.css"),
@@ -45,7 +50,7 @@ foreach ($pair in $pairs) {
 }
 
 if ($failed) {
-    throw "Canonical and runtime design assets differ. Run scripts\sync-design-frontend.ps1 from the repository root."
+    throw "Copied design assets differ. Run scripts\sync-design-frontend.ps1 from the repository root."
 }
 
 Write-Host "DESIGN_RUNTIME_EQUALITY=PASS"

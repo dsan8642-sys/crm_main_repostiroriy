@@ -1,4 +1,6 @@
 import React, { useId, useState } from 'react'
+import { adminTranslator } from '../adminLocales.js'
+import { useLocale } from '../i18n.jsx'
 
 import {
   normalizeScheduleColorKey,
@@ -9,7 +11,7 @@ import {
 
 
 export function ScheduleColorPicker({
-  label = 'Цвет расписания',
+  label,
   value,
   onChange,
   disabled = false,
@@ -17,6 +19,8 @@ export function ScheduleColorPicker({
   id,
   error,
 }) {
+  const { locale } = useLocale()
+  const t = adminTranslator(locale)
   const generatedName = useId()
   const [expanded, setExpanded] = useState(false)
   const selectedKey = normalizeScheduleColorKey(value)
@@ -26,12 +30,12 @@ export function ScheduleColorPicker({
 
   return (
     <fieldset className="ops-schedule-color-picker" disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={error ? `${panelId}-error` : undefined}>
-      <legend>{label}</legend>
+      <legend>{label || t('scheduleColor.label')}</legend>
       <button
         id={id}
         aria-controls={panelId}
         aria-expanded={expanded}
-        aria-label={`Выбрать цвет. Сейчас: ${selectedOption.label}`}
+        aria-label={t('scheduleColor.choose', { color: t(`scheduleColor.${selectedOption.key}`) })}
         className="ops-schedule-color-trigger"
         onClick={() => setExpanded((current) => !current)}
         style={scheduleColorStyle(selectedKey)}
@@ -39,14 +43,14 @@ export function ScheduleColorPicker({
       >
         <span className="ops-schedule-color-swatch" aria-hidden="true"><span>✓</span></span>
         <span className="ops-schedule-color-trigger-copy">
-          <small>Выбранный цвет</small>
-          <strong>{selectedOption.label}</strong>
+          <small>{t('scheduleColor.selected')}</small>
+          <strong>{t(`scheduleColor.${selectedOption.key}`)}</strong>
         </span>
         <span className="ops-schedule-color-chevron" aria-hidden="true">⌄</span>
       </button>
       {expanded && (
         <div className="ops-schedule-color-panel" id={panelId}>
-          <span className="ops-schedule-color-hint">Стандартный цвет или один из 30 утверждённых вариантов.</span>
+          <span className="ops-schedule-color-hint">{t('scheduleColor.hint')}</span>
           <div className="ops-schedule-color-grid">
             {schedulePaletteOptions.map((option) => {
               const selected = option.key === selectedKey
@@ -70,7 +74,7 @@ export function ScheduleColorPicker({
                   <span className="ops-schedule-color-swatch" aria-hidden="true">
                     {selected && <span>✓</span>}
                   </span>
-                  <span>{option.label}</span>
+                  <span>{t(`scheduleColor.${option.key}`)}</span>
                 </label>
               )
             })}

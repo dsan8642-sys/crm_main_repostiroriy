@@ -16,7 +16,7 @@ const ICONS = {
   info: 'M12 8h.01M11 12h1v4h1', // rendered below via paths
 };
 
-export function Banner({ children, title, tone = 'info', icon, onClose, action, style }) {
+export function Banner({ children, title, tone = 'info', icon, onClose, closeLabel = 'Zamknij', action, style }) {
   const [bg, fg, bd] = TONES[tone] || TONES.info;
   return (
     <div
@@ -42,7 +42,7 @@ export function Banner({ children, title, tone = 'info', icon, onClose, action, 
       </div>
       {action}
       {onClose && (
-        <button onClick={onClose} aria-label="Zamknij" style={{ background: 'none', border: 'none', cursor: 'pointer', color: `var(${fg})`, opacity: 0.7, padding: 2, lineHeight: 0 }}>
+        <button onClick={onClose} aria-label={closeLabel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: `var(${fg})`, opacity: 0.7, padding: 2, lineHeight: 0 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
         </button>
       )}

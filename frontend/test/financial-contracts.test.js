@@ -5,6 +5,7 @@ import {
   assertPaymentReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
+  rebasePassiveFormUpdate,
 } from '../src/app/financialContracts.js'
 
 test('money conversion uses exact minor units without rounding', () => {
@@ -35,4 +36,16 @@ test('authoritative read-back requires matching payment, status and audit event'
     () => assertPaymentReadback({ id: 4 }, { ...confirmed, events: [] }, 'confirmed'),
     /audit event/,
   )
+})
+
+test('passive subscription defaults rebase only an untouched finance form', () => {
+  const baseline = { participantId: '1', subscriptionId: '', amount: '' }
+  const untouched = rebasePassiveFormUpdate(baseline, baseline, { subscriptionId: '7' })
+  assert.deepEqual(untouched.form, { ...baseline, subscriptionId: '7' })
+  assert.equal(untouched.baseline, untouched.form)
+
+  const edited = { ...baseline, amount: '100' }
+  const preserved = rebasePassiveFormUpdate(edited, baseline, { subscriptionId: '7' })
+  assert.deepEqual(preserved.form, { ...edited, subscriptionId: '7' })
+  assert.equal(preserved.baseline, baseline)
 })

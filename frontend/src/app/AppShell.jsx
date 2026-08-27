@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { mapAdminClientRows } from '../mappers.js'
 import { ROLE_META, roleNav, screenFor } from './runtime.jsx'
-import { useLocale } from '../i18n.jsx'
+import { SUPPORTED_LOCALES, useLocale } from '../i18n.jsx'
+import { uiLocaleTag } from '../localeContracts.js'
 import {
   clearSessionUiState,
   hasUnsavedChanges,
@@ -42,6 +43,24 @@ function routeState() {
     participantId: params.get('participant'), balanceAmount: params.get('amount'),
     createSession: params.get('createSession'),
   }
+}
+
+function LocaleSelector({ compact = false, locale, setLocale, t }) {
+  return (
+    <label style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+      <span className="sr-only">{t('locale.label')}</span>
+      <select
+        aria-label={t('locale.label')}
+        value={locale}
+        onChange={(event) => setLocale(event.target.value)}
+        style={{ width: '100%', minHeight: 34 }}
+      >
+        {SUPPORTED_LOCALES.map((code) => (
+          <option key={code} value={code}>{compact ? code.toUpperCase() : t(`locale.${code}`)}</option>
+        ))}
+      </select>
+    </label>
+  )
 }
 
 function allowedView(role, view) {
@@ -94,7 +113,7 @@ function routeUrl(role, view, params = {}) {
 }
 
 export function AppShell({ design, health, apiState, initialRole, currentUser, reloadRoleData, onLogout }) {
-  const { t } = useLocale()
+  const { locale, setLocale, t } = useLocale()
   const initialRoute = routeForRole(initialRole || 'admin')
   const [role, setRole] = useState(initialRole || 'admin')
   const [view, setView] = useState(initialRoute.view)
@@ -123,6 +142,12 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     module: null,
     error: null,
   })
+  const previousLocaleRef = useRef(locale)
+  useEffect(() => {
+    if (previousLocaleRef.current === locale) return
+    previousLocaleRef.current = locale
+    void reloadRoleData?.(role)
+  }, [locale, reloadRoleData, role])
 
   const { components, icons, data } = design
   const roleDataRefs = useRef({ AdminData: {}, TrainerData: {}, ParentData: {} })
@@ -131,7 +156,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   Object.assign(roleDataRefs.current.ParentData, data.ParentData)
   const { IconButton } = components
   const meta = ROLE_META[role]
-  const userName = currentUser?.full_name?.trim() || currentUser?.username?.trim() || meta.user
+  const userName = currentUser?.full_name?.trim() || currentUser?.username?.trim() || t(meta.userKey)
   const drawerRef = useRef(null)
   const searchOverlayRef = useRef(null)
   const navigationGuardRef = useRef(null)
@@ -140,7 +165,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const currentUrlRef = useRef(window.location.href)
   const currentHistoryStateRef = useRef(window.history.state || {})
   const sidebarKey = sidebarStateKey(role, currentUser)
-  const nav = useMemo(() => roleNav(role, icons, data, adminListCounts), [role, icons, data, adminListCounts])
+  const nav = useMemo(() => roleNav(role, icons, data, adminListCounts, t), [role, icons, data, adminListCounts, t])
   const runtimeScreens = useMemo(() => {
     if (roleScreenBundle.role !== role || !roleScreenBundle.module) return {}
     const factories = roleScreenBundle.module
@@ -196,13 +221,13 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         })
         if (alive) {
           setRemoteClientSearch({
-            query: query.toLocaleLowerCase('ru-RU'),
+            query: query.toLocaleLowerCase(uiLocaleTag(locale)),
             rows: mapAdminClientRows(payload.participants || []).active,
           })
         }
       } catch {
         if (alive && !controller.signal.aborted) {
-          setRemoteClientSearch({ query: query.toLocaleLowerCase('ru-RU'), rows: [] })
+          setRemoteClientSearch({ query: query.toLocaleLowerCase(uiLocaleTag(locale)), rows: [] })
         }
       }
     }, 250)
@@ -211,18 +236,23 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       clearTimeout(handle)
       controller.abort()
     }
-  }, [searchQuery, role])
+  }, [searchQuery, role, locale])
 
   const searchResults = useMemo(() => {
-    const needle = searchQuery.trim().toLocaleLowerCase('ru-RU')
+    const localeTag = uiLocaleTag(locale)
+    const needle = searchQuery.trim().toLocaleLowerCase(localeTag)
     if (!needle || role !== 'admin') return []
-    const clientSource = remoteClientSearch.query === needle
+    const hasCurrentRemoteResults = remoteClientSearch.query === needle
+    const clientSource = hasCurrentRemoteResults
       ? remoteClientSearch.rows
       : (data.AdminData?.clients || [])
-    const clients = clientSource.filter((row) => [row.first, row.last, `${row.first} ${row.last}`, `${row.last} ${row.first}`, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle))).slice(0, 6).map((row) => ({ key: `client-${row.studentId}`, label: `${row.first} ${row.last}`, hint: row.phone || row.email || row.group, view: 'clientDetail', params: { clientId: row.clientId } }))
-    const groups = (data.AdminData?.groups || []).filter((row) => row.name.toLocaleLowerCase('ru-RU').includes(needle)).slice(0, 3).map((row) => ({ key: `group-${row.groupId}`, label: row.name, hint: 'Группа', view: 'groups', params: { groupId: row.groupId } }))
-    return [...clients, ...groups].slice(0, 10)
-  }, [searchQuery, role, data, remoteClientSearch])
+    const matchingClients = hasCurrentRemoteResults
+      ? clientSource
+      : clientSource.filter((row) => [row.first, row.last, `${row.first} ${row.last}`, `${row.last} ${row.first}`, row.phone, row.email, row.group].some((value) => String(value || '').toLocaleLowerCase(localeTag).includes(needle)))
+    const clients = matchingClients.map((row) => ({ key: `client-${row.studentId}`, label: `${row.first} ${row.last}`, hint: row.phone || row.email || row.group, view: 'clientDetail', params: { clientId: row.clientId } }))
+    const groups = (data.AdminData?.groups || []).filter((row) => row.name.toLocaleLowerCase(localeTag).includes(needle)).map((row) => ({ key: `group-${row.groupId}`, label: row.name, hint: t('shell.groupHint'), view: 'groups', params: { groupId: row.groupId } }))
+    return [...clients, ...groups]
+  }, [searchQuery, role, data, remoteClientSearch, locale, t])
 
   useEffect(() => {
     if (role !== 'admin') return undefined
@@ -519,7 +549,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             <div className="ops-brand-mark">H2O</div>
             <div>
               <div className="ops-brand-name">SwimCRM</div>
-              <div className="ops-brand-sub">операционная панель</div>
+              <div className="ops-brand-sub">{t('shell.brandSubtitle')}</div>
             </div>
           </button>
           {isMobile && (
@@ -528,7 +558,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 <button
                   type="button"
                   className="ops-mobile-search-button"
-                  aria-label="Открыть глобальный поиск"
+                  aria-label={t('shell.openSearch')}
                   aria-controls="ops-mobile-search"
                   aria-expanded={mobileSearchOpen}
                   onClick={() => setMobileSearchOpen(true)}
@@ -539,7 +569,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               <button
                 type="button"
                 className="ops-mobile-menu-button"
-                aria-label="Открыть меню"
+                aria-label={t('shell.openMenu')}
                 aria-controls="ops-mobile-drawer"
                 aria-expanded={mobileMenuOpen}
                 onClick={() => setMobileMenuOpen(true)}
@@ -550,9 +580,9 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
           )}
         </div>
 
-        <nav className="ops-nav" aria-label="Основная навигация">
+        <nav className="ops-nav" aria-label={t('shell.mainNavigation')}>
           {nav.map((item) => {
-            const section = item.section || 'Главное'
+            const section = item.section || t('shell.mainSection')
             const showSection = section !== sidebarLastSection
             sidebarLastSection = section
             return (
@@ -577,22 +607,27 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         </nav>
 
         <div className="ops-user-wrap">
-          <div className="ops-user">
-            <div className="ops-avatar">{initials(userName)}</div>
-            <div>
-              <div className="ops-user-name">{userName}</div>
-            </div>
+          <div className="ops-sidebar-locale">
+            <LocaleSelector compact={sidebarCollapsed} locale={locale} setLocale={setLocale} t={t} />
           </div>
-          <IconButton className="ops-sidebar-logout is-desktop" label="Выйти" disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+          <div className="ops-user-actions">
+            <div className="ops-user">
+              <div className="ops-avatar" title={userName}>{initials(userName)}</div>
+              <div>
+                <div className="ops-user-name">{userName}</div>
+              </div>
+            </div>
+            <IconButton className="ops-sidebar-logout is-desktop" label={t('shell.logout')} disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+          </div>
           <button
             type="button"
             className="ops-sidebar-toggle"
-            aria-label={sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            aria-label={sidebarCollapsed ? t('shell.expandMenu') : t('shell.collapseMenu')}
             aria-expanded={!sidebarCollapsed}
             onClick={toggleSidebar}
           >
             {sidebarCollapsed ? <icons.ChevronR size={17} /> : <icons.ChevronL size={17} />}
-            <span>{sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}</span>
+            <span>{sidebarCollapsed ? t('shell.expandMenu') : t('shell.collapseMenu')}</span>
           </button>
         </div>
       </aside>
@@ -610,18 +645,18 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             className="ops-mobile-drawer"
             role="dialog"
             aria-modal="true"
-            aria-label="Меню"
+            aria-label={t('shell.menu')}
             tabIndex={-1}
           >
             <div className="ops-mobile-drawer-head">
-              <strong>Меню</strong>
-              <button type="button" className="ops-mobile-drawer-close" aria-label="Закрыть меню" onClick={() => drawerLifecycle.requestClose('close-button')}>
+              <strong>{t('shell.menu')}</strong>
+              <button type="button" className="ops-mobile-drawer-close" aria-label={t('shell.closeMenu')} onClick={() => drawerLifecycle.requestClose('close-button')}>
                 <span aria-hidden="true">×</span>
               </button>
             </div>
-            <nav className="ops-mobile-drawer-nav" aria-label="Навигация в меню">
+            <nav className="ops-mobile-drawer-nav" aria-label={t('shell.menuNavigation')}>
               {nav.map((item) => {
-                const section = item.section || 'Главное'
+                const section = item.section || t('shell.mainSection')
                 const showSection = section !== drawerLastSection
                 drawerLastSection = section
                 return (
@@ -645,11 +680,16 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               })}
             </nav>
             <div className="ops-mobile-drawer-user-wrap">
-              <div className="ops-user">
-                <div className="ops-avatar">{initials(userName)}</div>
-                <div className="ops-user-name">{userName}</div>
+              <div className="ops-sidebar-locale">
+                <LocaleSelector locale={locale} setLocale={setLocale} t={t} />
               </div>
-              <IconButton className="ops-sidebar-logout" label="Выйти" disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+              <div className="ops-user-actions">
+                <div className="ops-user">
+                  <div className="ops-avatar" title={userName}>{initials(userName)}</div>
+                  <div className="ops-user-name">{userName}</div>
+                </div>
+                <IconButton className="ops-sidebar-logout" label={t('shell.logout')} disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+              </div>
             </div>
           </aside>
         </div>
@@ -667,17 +707,17 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             tabIndex={-1}
           >
             <header>
-              <h2 id="ops-mobile-search-title">Поиск клиентов и групп</h2>
-              <button type="button" aria-label="Закрыть поиск" onClick={() => searchLifecycle.requestClose('close-button')}>×</button>
+              <h2 id="ops-mobile-search-title">{t('shell.searchTitle')}</h2>
+              <button type="button" aria-label={t('shell.closeSearch')} onClick={() => searchLifecycle.requestClose('close-button')}>×</button>
             </header>
             <label>
-              <span className="sr-only">Глобальный поиск</span>
+              <span className="sr-only">{t('shell.globalSearch')}</span>
               <input
                 autoComplete="off"
-                aria-label="Глобальный поиск"
+                aria-label={t('shell.globalSearch')}
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Найти клиента или группу"
+                placeholder={t('shell.searchPlaceholder')}
               />
             </label>
             <div className="ops-mobile-search-results" aria-live="polite">
@@ -687,7 +727,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                   <span>{result.hint}</span>
                 </button>
               ))}
-              {searchQuery && !searchResults.length && <div className="empty">Ничего не найдено</div>}
+              {searchQuery && !searchResults.length && <div className="empty">{t('shell.noResults')}</div>}
             </div>
           </section>
         </div>
@@ -704,11 +744,11 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             aria-describedby="ops-navigation-guard-description"
             tabIndex={-1}
           >
-            <h2 id="ops-navigation-guard-title">Есть несохранённые изменения</h2>
-            <p id="ops-navigation-guard-description">Если уйти со страницы, внесённые изменения будут потеряны.</p>
+            <h2 id="ops-navigation-guard-title">{t('shell.unsavedTitle')}</h2>
+            <p id="ops-navigation-guard-description">{t('shell.unsavedDescription')}</p>
             <div>
-              <button type="button" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>Остаться</button>
-              <button type="button" className="is-danger" onClick={confirmPendingNavigation}>Уйти без сохранения</button>
+              <button type="button" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>{t('shell.stay')}</button>
+              <button type="button" className="is-danger" onClick={confirmPendingNavigation}>{t('shell.leave')}</button>
             </div>
           </section>
         </div>
@@ -717,18 +757,18 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       <div className="ops-main">
         {role === 'admin' && !isMobile && (
           <header className="topbar ops-topbar">
-            <div className="ops-global-search"><input aria-label="Глобальный поиск" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Найти клиента или группу" />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">Ничего не найдено</div>}</div>}</div>
+            <div className="ops-global-search"><input aria-label={t('shell.globalSearch')} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('shell.searchPlaceholder')} />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">{t('shell.noResults')}</div>}</div>}</div>
             <div className="ops-topbar-statuses">
-              <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>Сервер</span>
-              <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>Данные</span>
+              <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>{t('shell.server')}</span>
+              <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>{t('shell.data')}</span>
             </div>
           </header>
         )}
 
         <main className="scroll" id="main-content" tabIndex={-1}>
-          {apiState.state === 'loading' && <div className="ops-api-state" role="status"><strong>Загружаю рабочие данные...</strong><span>Экран обновится автоматически.</span></div>}
-          {apiState.state === 'partial' && <div className="ops-api-state is-error" role="status"><span><strong>{t('shell.partial')}</strong><small>Доступные разделы сохранены.</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>{t('shell.retry')}</button></div>}
-          {apiState.state === 'error' && <div className="ops-api-state is-error" role="alert"><span><strong>{t('shell.failed')}</strong><small>{apiState.error || 'Проверьте соединение с сервером.'}</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>{t('shell.retry')}</button></div>}
+          {apiState.state === 'loading' && <div className="ops-api-state" role="status"><strong>{t('shell.loadingData')}</strong><span>{t('shell.autoRefresh')}</span></div>}
+          {apiState.state === 'partial' && <div className="ops-api-state is-error" role="status"><span><strong>{t('shell.partial')}</strong><small>{t('shell.availablePreserved')}</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>{t('shell.retry')}</button></div>}
+          {apiState.state === 'error' && <div className="ops-api-state is-error" role="alert"><span><strong>{t('shell.failed')}</strong><small>{apiState.error || t('shell.checkConnection')}</small></span><button type="button" onClick={() => reloadRoleData?.(role)}>{t('shell.retry')}</button></div>}
           {roleScreenBundle.error ? (
             <div className="page">
               <div className="card card-pad" role="alert">
@@ -740,7 +780,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             <Screen key={role === 'admin' && view === 'clientDetail' ? `admin-client-${selectedClientId || 'none'}` : `${role}-${view}`} go={navigate} back={contextBack} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} initialParticipantId={selectedParticipantId} createSession={selectedCreateSession} prefillAmount={selectedBalanceAmount} currentUser={currentUser} />
           ) : (
             <div className="page">
-              <div className="card card-pad">Экран пока не подключен.</div>
+              <div className="card card-pad">{t('shell.screenMissing')}</div>
             </div>
           )}
         </main>

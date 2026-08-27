@@ -94,6 +94,17 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
 
   const trigger = page.getByRole('button', { name: /Фильтры/ })
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+  const lessonStyle = await page.locator('.ops-schedule-event:visible').first().evaluate((node) => {
+    const style = getComputedStyle(node)
+    return {
+      radius: Number.parseFloat(style.borderRadius),
+      cursor: style.cursor,
+      background: style.backgroundColor,
+    }
+  })
+  expect(lessonStyle.radius).toBeGreaterThanOrEqual(8)
+  expect(lessonStyle.cursor).toBe('pointer')
+  expect(lessonStyle.background).not.toBe('rgba(0, 0, 0, 0)')
   await expect(trigger).toContainText('За неделю: 2')
   await trigger.click()
   const filters = page.getByRole('dialog', { name: 'Фильтры расписания' })
@@ -139,10 +150,13 @@ test('Wave 5 desktop Clients keeps actions inside the table and reveals full ell
   }
   await mockAdmin(page, { clients: [client] })
   await page.goto('/?role=admin&view=clients')
-  const table = page.locator('.ops-client-desktop-table .table-wrap')
+  const isTablet = (page.viewportSize()?.width || 0) === 768
+  const table = page.locator(`${isTablet ? '.ops-client-tablet-table' : '.ops-client-desktop-table'} .table-wrap`)
   await expect(table).toBeVisible()
   const row = table.getByRole('row').filter({ hasText: 'Ковальская-Длинная-Фамилия' })
-  const actions = row.locator('.ops-client-row-actions')
+  const actions = isTablet
+    ? row.getByRole('button', { name: /Действия:/ })
+    : row.locator('.ops-client-row-actions')
   const bounds = await Promise.all([table.boundingBox(), actions.boundingBox()])
   expect(bounds[1].x).toBeGreaterThanOrEqual(bounds[0].x - 1)
   expect(bounds[1].x + bounds[1].width).toBeLessThanOrEqual(bounds[0].x + bounds[0].width + 1)
@@ -158,7 +172,7 @@ test('Wave 5 desktop Clients keeps actions inside the table and reveals full ell
     expect(tooltip.display).toBe('block')
     expect(tooltip.content).toContain('very-long-accessible-client-address@example.test')
   }
-  expect(await page.locator('.ops-list-pagination select option[value="500"]').evaluate((option) => option.disabled)).toBe(true)
+  await expect(page.locator('.ops-list-pagination')).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
 })
 

@@ -8,6 +8,8 @@ export default defineConfig({
   plugins: [react()],
   build: {
     manifest: true,
+    target: 'es2022',
+    modulePreload: { polyfill: false },
   },
   server: {
     port: 5173,

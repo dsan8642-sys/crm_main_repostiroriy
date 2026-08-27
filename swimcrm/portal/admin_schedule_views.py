@@ -212,7 +212,39 @@ def admin_schedule_session_detail(request, session_id):
     if request.method in {"POST", "PATCH"}:
         data = _json_body(request)
         changes = _session_changes_from_data(data, current_session=session)
+        group_changed = (
+            "group" in changes
+            and getattr(changes["group"], "id", None) != session.group_id
+        )
+        has_attendance = session.attendance.exists()
+        has_financial_history = (
+            has_attendance
+            or Charge.objects.filter(attendance__session=session).exists()
+        )
+        if group_changed and session.start_at <= timezone.now():
+            raise _field_validation_error(
+                "group_id",
+                "Группу можно менять только у будущего занятия.",
+                code="historical_session",
+            )
+        if group_changed and has_financial_history:
+            raise _field_validation_error(
+                "group_id",
+                "Группу нельзя менять после появления посещений или начислений.",
+                code="financial_history_locked",
+            )
         final_type = changes.get("session_type", session.session_type)
+        final_group = changes.get("group", session.group)
+        if (
+            final_type == SessionType.GROUP
+            and final_group is not None
+            and session.start_at > timezone.now()
+            and not has_financial_history
+        ):
+            # A future group session follows the current tariff of its group.
+            # Saving also repairs a stale snapshot after the tariff changed.
+            changes["price_minor"] = final_group.price_minor
+            changes["currency"] = final_group.currency
         final_student = changes.get("individual_student", session.individual_student)
         second_student = _split_second_student_from_data(
             data,

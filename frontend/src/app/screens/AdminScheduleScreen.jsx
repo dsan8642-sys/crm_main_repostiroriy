@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
 import { formatTime, mapAdminClientRows } from '../../mappers.js'
 import { DateField, TimeField } from '../DateTimeField.jsx'
 import { FormModal } from '../FormModal.jsx'
@@ -103,7 +105,7 @@ function normalizeSession(session) {
     durationMinutes: session.duration_minutes || 60,
     priceMinor: session.price_minor,
     currency: session.currency,
-    group: session.group?.name || 'Индивидуальное',
+    group: session.group?.name || '',
     trainer: session.effective_trainer || session.trainer,
     location: session.location,
     count: session.participants_count || 0,
@@ -153,6 +155,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
   const { Button, Badge, Banner, Dialog, Input, Checkbox } = components
   const I = icons
   return function ApiAdminSchedule({ go, initialTab, initialParticipantId, createSession: createSessionMode }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
     const groups = adminData.groups || []
     const trainers = adminData.trainers || []
     const activeTrainers = trainers.filter((trainer) => trainer.active !== false)
@@ -290,10 +295,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           if (active) setScheduleSessions((payload.sessions || []).map(normalizeSession))
         })
         .catch((err) => {
-          if (active) setLoadError(apiErrorMessage(err, 'Не удалось обновить календарь.'))
+          if (active) setLoadError(apiErrorMessage(err, t('schedule.calendarError')))
         })
       return () => { active = false }
-    }, [range.dateFrom, range.dateTo, rangeRefresh])
+    }, [range.dateFrom, range.dateTo, rangeRefresh, t])
 
     const updateSessionForm = (field, value) => {
       setSessionForm((current) => ({ ...current, [field]: value }))
@@ -318,9 +323,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       ...scheduleSessions.map((session) => session.location),
     ].filter(Boolean))]
     const fixedTypeDefaults = [
-      { code: 'group', label: 'Групповое' },
-      { code: 'individual', label: 'Индивидуальное' },
-      { code: 'split', label: 'Сплит для двоих' },
+      { code: 'group', label: t('schedule.typeGroup') },
+      { code: 'individual', label: t('schedule.typeIndividual') },
+      { code: 'split', label: t('schedule.newSplit') },
     ]
     const sessionTypeOptions = fixedTypeDefaults.map((fixed) => (
       sessionTypeConfigs.find((item) => item.code === fixed.code) || fixed
@@ -340,6 +345,34 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     ))
     const activeFilterCount = Object.values(filters).filter(Boolean).length
     const periodCount = periodSessionCount(visibleSessions, focusDate, viewMode)
+    const localizedSessions = visibleSessions.map((session) => ({
+      ...session,
+      group: session.group || (session.sessionType === 'split' ? t('schedule.newSplit') : t('schedule.typeIndividual')),
+    }))
+    const selectedNewSessionGroup = groups.find(
+      (group) => String(group.groupId) === String(sessionForm.groupId),
+    )
+    const selectedGroupPriceMinor = selectedNewSessionGroup?.priceMinor
+    const selectedGroupPriceHint = !selectedNewSessionGroup
+      ? t('schedule.selectGroupPrice')
+      : selectedGroupPriceMinor == null
+      ? t('schedule.noGroupPrice')
+      : t('schedule.groupPrice', { amount: Number(selectedGroupPriceMinor / 100).toLocaleString(localeTag), currency: selectedNewSessionGroup.currency || 'PLN', name: selectedNewSessionGroup.name })
+    const selectedEditSessionGroup = groups.find(
+      (group) => String(group.groupId) === String(sessionEditForm.groupId),
+    )
+    const selectedEditGroupPrice = selectedEditSessionGroup?.priceMinor == null
+      ? ''
+      : String(selectedEditSessionGroup.priceMinor / 100)
+    const selectedEditGroupPriceHint = !selectedEditSessionGroup
+      ? t('schedule.selectGroupPrice')
+      : selectedEditSessionGroup.priceMinor == null
+        ? t('schedule.noGroupPrice')
+        : t('schedule.groupPrice', {
+            amount: Number(selectedEditSessionGroup.priceMinor / 100).toLocaleString(localeTag),
+            currency: selectedEditSessionGroup.currency || 'PLN',
+            name: selectedEditSessionGroup.name,
+          })
 
     function locationField(label, value, onChange, {
       id,
@@ -356,8 +389,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             aria-describedby={fieldError && id ? `${id}-error` : undefined}
             onChange={(event) => onChange(event.target.value)}
           >
-            <option value="">Выберите локацию</option>
-            {hasLegacyValue && <option value={value}>{value} (сохранённое значение)</option>}
+            <option value="">{t('schedule.chooseLocation')}</option>
+            {hasLegacyValue && <option value={value}>{t('schedule.savedValue', { value })}</option>}
             {locations.map((location) => <option key={location} value={location}>{location}</option>)}
           </select>
           {fieldError && <small id={id ? `${id}-error` : undefined} className="ops-field-error" role="alert">{fieldError}</small>}
@@ -372,7 +405,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         typeCapacity: defaults?.default_capacity,
         currentCapacity: sessionForm.maxParticipants,
       })
-      const defaultPriceMinor = sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor
+      const defaultPriceMinor = sessionType === 'group' ? null : defaults?.default_price_minor
       setSessionForm((current) => ({
         ...current,
         ...(sessionType === 'group' ? groupDefaults : {}),
@@ -402,6 +435,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         ...current,
         groupId,
         ...groupDefaults,
+        price: '',
       }))
       setFieldErrors((current) => {
         if (!current.groupId && !current.trainerId && !current.location && !current.maxParticipants) return current
@@ -417,7 +451,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     function openSessionShortcut(sessionType, participantId = '', requireSecondParticipant = false) {
       setError(null)
       if (sessionType === 'split' && !splitReady) {
-        setError('Тип split не настроен. Восстановите системный тип в Настройки → Типы занятий.')
+        setError(t('schedule.splitNotConfigured'))
         return
       }
       const groupId = sessionForm.groupId || groups[0]?.groupId || ''
@@ -445,9 +479,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           typeCapacity: defaults?.default_capacity || (sessionType === 'split' ? 2 : null),
           currentCapacity: current.maxParticipants,
         }),
-        price: (sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor) == null
+        price: (sessionType === 'group' ? null : defaults?.default_price_minor) == null
           ? ''
-          : String((sessionType === 'group' ? group?.priceMinor : defaults?.default_price_minor) / 100),
+          : String(defaults.default_price_minor / 100),
       }))
       setActionPanel('session')
     }
@@ -465,11 +499,11 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
 
     function validateDateTime(date, time) {
       if (!validIsoDate(date)) {
-        setError('Введите дату в формате ГГГГ-ММ-ДД.')
+        setError(t('schedule.dateInvalid'))
         return false
       }
       if (!validTime(time)) {
-        setError('Введите время в 24-часовом формате ЧЧ:ММ.')
+        setError(t('schedule.timeInvalid'))
         return false
       }
       return true
@@ -479,6 +513,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       setEditingSession(session)
       setEditFieldErrors({})
       const roster = session.roster || []
+      const selectedGroup = groups.find(
+        (group) => String(group.groupId) === String(session.groupId),
+      )
       const nextForm = {
         sessionType: session.sessionType || 'group',
         groupId: session.groupId || '',
@@ -493,7 +530,9 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         date: sessionIsoDate(session),
         start: session.start,
         durationMinutes: String(session.durationMinutes || 60),
-        price: session.priceMinor == null ? '' : String(session.priceMinor / 100),
+        price: session.sessionType === 'group'
+          ? (selectedGroup?.priceMinor == null ? '' : String(selectedGroup.priceMinor / 100))
+          : session.priceMinor == null ? '' : String(session.priceMinor / 100),
         location: session.location || '',
         maxParticipants: String(session.limit || 0),
         notes: session.notes || '',
@@ -526,7 +565,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     }
 
     function validateNewSession() {
-      const next = validateAdminSessionForm(sessionForm)
+      const next = validateAdminSessionForm(sessionForm, t)
       setFieldErrors(next)
       const first = Object.keys(next)[0]
       if (first) {
@@ -537,7 +576,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     }
 
     function validateSessionEdit() {
-      const next = validateAdminSessionForm(sessionEditForm)
+      const next = validateAdminSessionForm(sessionEditForm, t)
       setEditFieldErrors(next)
       const first = Object.keys(next)[0]
       if (first) {
@@ -566,7 +605,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           }
           const nextErrors = fieldErrorsFromApi(conflictError, SESSION_FIELD_MAP)
           setFieldErrors(nextErrors)
-          setError(formErrorMessage(conflictError, 'Обнаружен конфликт расписания.'))
+          setError(formErrorMessage(conflictError, t('schedule.conflict')))
           setTimeout(() => focusFirstFieldError(nextErrors, SESSION_FIELD_IDS), 0)
           return
         }
@@ -583,21 +622,23 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           location: sessionForm.location,
           max_participants: Number(sessionForm.maxParticipants || 0),
           notes: sessionForm.notes,
-          ...(sessionForm.price === '' ? {} : { price_minor: Math.round(Number(sessionForm.price) * 100) }),
+          ...(sessionForm.sessionType === 'group' || sessionForm.price === ''
+            ? {}
+            : { price_minor: Math.round(Number(sessionForm.price) * 100) }),
         })
         const context = sessionForm.sessionType === 'group'
           ? groups.find((group) => String(group.groupId) === String(sessionForm.groupId))?.name
           : participants.find((participant) => String(participant.studentId) === String(sessionForm.participantId))?.name
-        setMessage(`Создано: ${sessionTypeOptions.find((item) => item.code === sessionForm.sessionType)?.label || sessionForm.sessionType}, ${sessionForm.date} ${sessionForm.start}${context ? ` · ${context}` : ''}.`)
+        setMessage(t('schedule.created', { type: sessionTypeOptions.find((item) => item.code === sessionForm.sessionType)?.label || sessionForm.sessionType, date: sessionForm.date, time: sessionForm.start, context: context ? ` · ${context}` : '' }))
         setActionPanel(null)
         setRangeRefresh((current) => current + 1)
         Promise.resolve(reloadRoleData?.('admin')).catch((err) => {
-          setLoadError(apiErrorMessage(err, 'Занятие создано, но общие данные не обновились. Обновите страницу.'))
+          setLoadError(apiErrorMessage(err, t('schedule.reloadError')))
         })
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, SESSION_FIELD_MAP)
         setFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось создать занятие.'))
+        setError(formErrorMessage(err, t('schedule.createError')))
         setTimeout(() => focusFirstFieldError(nextErrors, SESSION_FIELD_IDS), 0)
       } finally {
         setBusy(false)
@@ -624,7 +665,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           }
           const nextErrors = fieldErrorsFromApi(conflictError, SESSION_FIELD_MAP)
           setEditFieldErrors(nextErrors)
-          setError(formErrorMessage(conflictError, 'Обнаружен конфликт расписания.'))
+          setError(formErrorMessage(conflictError, t('schedule.conflict')))
           setTimeout(() => focusFirstFieldError(nextErrors, Object.fromEntries(
             Object.entries(SESSION_FIELD_IDS).map(([field, id]) => [field, id.replace('admin-session-', 'admin-session-edit-')]),
           )), 0)
@@ -642,19 +683,21 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           trainer_id: sessionEditForm.trainerId,
           start_at: startAt,
           duration_minutes: Number(sessionEditForm.durationMinutes || 60),
-          price_minor: sessionEditForm.price === '' ? null : Math.round(Number(sessionEditForm.price) * 100),
+          ...(sessionEditForm.sessionType === 'group' ? {} : {
+            price_minor: sessionEditForm.price === '' ? null : Math.round(Number(sessionEditForm.price) * 100),
+          }),
           location: sessionEditForm.location,
           max_participants: Number(sessionEditForm.maxParticipants || 0),
           notes: sessionEditForm.notes,
         })
         setEditingSession(null)
-        setMessage('Занятие обновлено.')
+        setMessage(t('schedule.updated'))
         setRangeRefresh((current) => current + 1)
         await reloadRoleData?.('admin')
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, SESSION_FIELD_MAP)
         setEditFieldErrors(nextErrors)
-        setError(formErrorMessage(err, 'Не удалось сохранить занятие.'))
+        setError(formErrorMessage(err, t('schedule.updateError')))
         setTimeout(() => focusFirstFieldError(nextErrors, Object.fromEntries(
           Object.entries(SESSION_FIELD_IDS).map(([field, id]) => [field, id.replace('admin-session-', 'admin-session-edit-')]),
         )), 0)
@@ -671,13 +714,13 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           force: true,
           confirm_session_id: session.sessionId,
         })
-        setMessage('Занятие удалено.')
+        setMessage(t('schedule.deleted'))
         setConfirmDelete(null)
         setEditingSession(null)
         setRangeRefresh((current) => current + 1)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось удалить занятие.'))
+        setError(apiErrorMessage(err, t('schedule.deleteError')))
         setConfirmDelete(null)
       } finally {
         setBusy(false)
@@ -689,11 +732,11 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       setError(null)
       try {
         await api.post(`/api/admin/schedule/sessions/${session.sessionId}/cancel/`)
-        setMessage('Занятие отменено.')
+        setMessage(t('schedule.cancelledMessage'))
         setRangeRefresh((current) => current + 1)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось отменить занятие.'))
+        setError(apiErrorMessage(err, t('schedule.cancelError')))
       } finally {
         setBusy(false)
       }
@@ -704,11 +747,11 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       setError(null)
       try {
         await api.post(`/api/admin/schedule/sessions/${session.sessionId}/restore/`)
-        setMessage('Тренировка восстановлена.')
+        setMessage(t('schedule.restoredMessage'))
         setRangeRefresh((current) => current + 1)
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(apiErrorMessage(err, 'Не удалось восстановить тренировку.'))
+        setError(apiErrorMessage(err, t('schedule.restoreError')))
       } finally {
         setBusy(false)
       }
@@ -717,13 +760,13 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
 
     async function previewPeriodCopy() {
       const nextErrors = {}
-      if (!validIsoDate(copyForm.sourceFrom)) nextErrors.sourceFrom = 'Введите начальную дату источника.'
-      if (!validIsoDate(copyForm.sourceTo)) nextErrors.sourceTo = 'Введите конечную дату источника.'
-      if (!validIsoDate(copyForm.targetFrom)) nextErrors.targetFrom = 'Введите начальную дату назначения.'
-      if (!validIsoDate(copyForm.targetTo)) nextErrors.targetTo = 'Введите конечную дату назначения.'
-      if (validIsoDate(copyForm.sourceFrom) && validIsoDate(copyForm.sourceTo) && copyForm.sourceTo < copyForm.sourceFrom) nextErrors.sourceTo = 'Конечная дата не может быть раньше начальной.'
-      if (validIsoDate(copyForm.targetFrom) && validIsoDate(copyForm.targetTo) && copyForm.targetTo < copyForm.targetFrom) nextErrors.targetTo = 'Конечная дата не может быть раньше начальной.'
-      if (!copyForm.includeGroup && !copyForm.includeIndividual && !copyForm.includeSplit) nextErrors.includeGroup = 'Выберите хотя бы один тип занятия.'
+      if (!validIsoDate(copyForm.sourceFrom)) nextErrors.sourceFrom = t('schedule.sourceStartInvalid')
+      if (!validIsoDate(copyForm.sourceTo)) nextErrors.sourceTo = t('schedule.sourceEndInvalid')
+      if (!validIsoDate(copyForm.targetFrom)) nextErrors.targetFrom = t('schedule.targetStartInvalid')
+      if (!validIsoDate(copyForm.targetTo)) nextErrors.targetTo = t('schedule.targetEndInvalid')
+      if (validIsoDate(copyForm.sourceFrom) && validIsoDate(copyForm.sourceTo) && copyForm.sourceTo < copyForm.sourceFrom) nextErrors.sourceTo = t('schedule.dateOrderInvalid')
+      if (validIsoDate(copyForm.targetFrom) && validIsoDate(copyForm.targetTo) && copyForm.targetTo < copyForm.targetFrom) nextErrors.targetTo = t('schedule.dateOrderInvalid')
+      if (!copyForm.includeGroup && !copyForm.includeIndividual && !copyForm.includeSplit) nextErrors.includeGroup = t('schedule.typeRequired')
       if (Object.keys(nextErrors).length) {
         setCopyFieldErrors(nextErrors)
         setError(null)
@@ -755,7 +798,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           include_split: 'includeSplit',
         })
         setCopyFieldErrors(nextFieldErrors)
-        setError(formErrorMessage(err, 'Не удалось проверить копирование периода.'))
+        setError(formErrorMessage(err, t('schedule.previewError')))
         focusFirstFieldError(nextFieldErrors, COPY_FIELD_IDS)
       } finally {
         setBusy(false)
@@ -772,7 +815,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           batch_id: copyPreview.batch_id,
           selected_indices: copyPreview.selectedIndices,
         })
-        setMessage(`Скопировано занятий: ${result.created_count}. Пропущено: ${result.skipped_count}.`)
+        setMessage(t('schedule.copied', { created: result.created_count, skipped: result.skipped_count }))
         setCopyPreview(null)
         setActionPanel(null)
         setRangeRefresh((current) => current + 1)
@@ -784,8 +827,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         delete nextErrors.batch_id
         setCopyFieldErrors((current) => ({ ...current, ...nextErrors }))
         setError(err.fieldErrors?.batch_id
-          ? apiErrorMessage(err, 'Предварительная проверка устарела. Выполните её заново.')
-          : formErrorMessage(err, 'Не удалось скопировать выбранные занятия.'))
+          ? apiErrorMessage(err, t('schedule.previewExpired'))
+          : formErrorMessage(err, t('schedule.copyError')))
         focusFirstFieldError(nextErrors, COPY_FIELD_IDS)
       } finally {
         setBusy(false)
@@ -808,7 +851,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           <button
             type="button"
             className="ops-schedule-event-edit"
-            aria-label={session.isCancelled ? `Восстановить тренировку ${session.start} ${session.group}` : `Изменить занятие ${session.start} ${session.group}`}
+            aria-label={session.isCancelled ? t('schedule.restoreAria', { time: session.start, group: session.group || t('schedule.typeIndividual') }) : t('schedule.editAria', { time: session.start, group: session.group || t('schedule.typeIndividual') })}
             disabled={busy}
             onClick={(event) => {
               event.stopPropagation()
@@ -826,8 +869,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       <div className="page page-wide">
         <div className="page-head ops-schedule-page-head">
           <div>
-            <h1 className="page-title">Расписание</h1>
-            <p className="page-desc">Занятия и копирование периодов.</p>
+            <h1 className="page-title">{t('schedule.title')}</h1>
+            <p className="page-desc">{t('schedule.description')}</p>
           </div>
           <div className="ops-schedule-head-actions" ref={filterPopoverRef}>
             <button
@@ -840,22 +883,22 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                 setFiltersOpen((current) => !current)
               }}
             >
-              <span>Фильтры{activeFilterCount ? ` · ${activeFilterCount}` : ''}</span>
-              <span className="ops-filter-period-count"><Badge tone={activeFilterCount ? 'primary' : 'neutral'}>{periodCountLabel(periodCount, viewMode)}</Badge></span>
+              <span>{t('schedule.filters')}{activeFilterCount ? ` · ${activeFilterCount}` : ''}</span>
+              <span className="ops-filter-period-count"><Badge tone={activeFilterCount ? 'primary' : 'neutral'}>{periodCountLabel(periodCount, viewMode, t)}</Badge></span>
             </button>
             <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
             {filtersOpen && (
-              <div id="admin-schedule-filters" className="ops-filter-popover" role="dialog" aria-label="Фильтры расписания">
+              <div id="admin-schedule-filters" className="ops-filter-popover" role="dialog" aria-label={t('schedule.filtersAria')}>
                 <div className="ops-form-grid">
-                  <label>Тип тренировки<select value={draftFilters.sessionType} onChange={(event) => setDraftFilters({ ...draftFilters, sessionType: event.target.value })}><option value="">Все</option><option value="group">Групповое</option><option value="individual">Индивидуальное</option><option value="split">Сплит</option></select></label>
-                  <label>Тренер<select value={draftFilters.trainerId} onChange={(event) => setDraftFilters({ ...draftFilters, trainerId: event.target.value })}><option value="">Все</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
-                  <label>Группа<select value={draftFilters.groupId} onChange={(event) => setDraftFilters({ ...draftFilters, groupId: event.target.value })}><option value="">Все</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
-                  <label>Локация<select value={draftFilters.location} onChange={(event) => setDraftFilters({ ...draftFilters, location: event.target.value })}><option value="">Все</option>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
-                  <label>Статус<select value={draftFilters.status} onChange={(event) => setDraftFilters({ ...draftFilters, status: event.target.value })}><option value="">Все</option><option value="planned">Запланировано</option><option value="cancelled">Отменено</option></select></label>
+                  <label>{t('schedule.sessionType')}<select value={draftFilters.sessionType} onChange={(event) => setDraftFilters({ ...draftFilters, sessionType: event.target.value })}><option value="">{t('common.all')}</option><option value="group">{t('schedule.typeGroup')}</option><option value="individual">{t('schedule.typeIndividual')}</option><option value="split">{t('schedule.typeSplit')}</option></select></label>
+                  <label>{t('common.trainer')}<select value={draftFilters.trainerId} onChange={(event) => setDraftFilters({ ...draftFilters, trainerId: event.target.value })}><option value="">{t('common.all')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
+                  <label>{t('common.group')}<select value={draftFilters.groupId} onChange={(event) => setDraftFilters({ ...draftFilters, groupId: event.target.value })}><option value="">{t('common.all')}</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
+                  <label>{t('schedule.location')}<select value={draftFilters.location} onChange={(event) => setDraftFilters({ ...draftFilters, location: event.target.value })}><option value="">{t('common.all')}</option>{locations.map((location) => <option key={location}>{location}</option>)}</select></label>
+                  <label>{t('common.status')}<select value={draftFilters.status} onChange={(event) => setDraftFilters({ ...draftFilters, status: event.target.value })}><option value="">{t('common.all')}</option><option value="planned">{t('schedule.planned')}</option><option value="cancelled">{t('schedule.cancelled')}</option></select></label>
                 </div>
                 <div className="ops-filter-actions">
-                  <Button size="sm" variant="subtle" onClick={() => setDraftFilters({ ...EMPTY_SCHEDULE_FILTERS })}>Сбросить</Button>
-                  <Button size="sm" variant="primary" onClick={() => { setFilters({ ...draftFilters }); setFiltersOpen(false) }}>Применить</Button>
+                  <Button size="sm" variant="subtle" onClick={() => setDraftFilters({ ...EMPTY_SCHEDULE_FILTERS })}>{t('schedule.reset')}</Button>
+                  <Button size="sm" variant="primary" onClick={() => { setFilters({ ...draftFilters }); setFiltersOpen(false) }}>{t('schedule.apply')}</Button>
                 </div>
               </div>
             )}
@@ -864,13 +907,13 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         <ToastNotice id="admin-schedule-result" message={message} tone="success" />
         {error && !actionPanel && !editingSession && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         {loadError && <Banner tone="warning" style={{ marginBottom: 12 }} onClose={() => setLoadError(null)}>{loadError}</Banner>}
-        <BusyBanner id="admin-schedule-busy" show={busy}>Сохраняю изменения расписания...</BusyBanner>
+        <BusyBanner id="admin-schedule-busy" show={busy}>{t('schedule.saving')}</BusyBanner>
 
         <div className="ops-action-strip">
           {[
-            ['group', 'Групповая тренировка'],
-            ['individual', 'Индивидуальная тренировка'],
-            ['split', 'Split-тренировка'],
+            ['group', t('schedule.newGroup')],
+            ['individual', t('schedule.newIndividual')],
+            ['split', t('schedule.newSplit')],
           ].map(([type, label]) => (
             <button
               key={type}
@@ -881,95 +924,98 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
               <span>{label}</span>
             </button>
           ))}
-          <button type="button" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => { setActionPanel((current) => current === 'copy' ? null : 'copy'); setCopyFieldErrors({}) }}><span>Копировать период</span></button>
+          <button type="button" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => { setActionPanel((current) => current === 'copy' ? null : 'copy'); setCopyFieldErrors({}) }}><span>{t('schedule.copyPeriod')}</span></button>
         </div>
 
         <FormModal
           open={actionPanel === 'session'}
-          title="Новое занятие"
+          title={t('schedule.newSession')}
           size="lg"
           busy={busy}
           dirty={Boolean(sessionFormBaseline) && JSON.stringify(sessionForm) !== JSON.stringify(sessionFormBaseline)}
           onRequestClose={closeSessionCreate}
-          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" disabled={busy} onClick={createSession}>Создать занятие</Button></>}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" disabled={busy} onClick={createSession}>{t('schedule.createSession')}</Button></>}
         >
           <div className="card card-pad ops-schedule-form-card">
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid ops-schedule-form-grid">
-              <label>Тип занятия<select id="admin-session-sessionType" value={sessionForm.sessionType} aria-invalid={Boolean(fieldErrors.sessionType)} aria-describedby={fieldErrors.sessionType ? 'admin-session-sessionType-error' : undefined} onChange={(event) => updateSessionType(event.target.value)}>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code} disabled={type.configured === false}>{type.label || type.code}</option>)}</select>{fieldErrors.sessionType && <small id="admin-session-sessionType-error" className="ops-field-error" role="alert">{fieldErrors.sessionType}</small>}</label>
-              {sessionForm.sessionType !== 'group' && <SearchableSelect inputId="admin-session-participantId" label={sessionForm.sessionType === 'split' ? 'Клиент 1' : 'Участник'} value={sessionForm.participantId} onChange={(value) => { updateSessionForm('participantId', value); if (String(value) === String(sessionForm.secondParticipantId)) updateSessionForm('secondParticipantId', '') }} options={participants.map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.participantId} />}
-              {sessionForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-secondParticipantId" label={sessionForm.requireSecondParticipant ? 'Клиент 2' : 'Клиент 2 (необязательно)'} value={sessionForm.secondParticipantId} onChange={(value) => updateSessionForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionForm.participantId)).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.secondParticipantId} />}
-              {sessionForm.sessionType === 'group' && <label>Группа<select id="admin-session-groupId" value={sessionForm.groupId} aria-invalid={Boolean(fieldErrors.groupId)} aria-describedby={fieldErrors.groupId ? 'admin-session-groupId-error' : undefined} onChange={(event) => updateNewSessionGroup(event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{fieldErrors.groupId && <small id="admin-session-groupId-error" className="ops-field-error" role="alert">{fieldErrors.groupId}</small>}</label>}
-              <label>Тренер<select id="admin-session-trainerId" value={sessionForm.trainerId} aria-invalid={Boolean(fieldErrors.trainerId)} aria-describedby={fieldErrors.trainerId ? 'admin-session-trainerId-error' : undefined} onChange={(event) => updateSessionForm('trainerId', event.target.value)}><option value="">Выберите тренера</option>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{fieldErrors.trainerId && <small id="admin-session-trainerId-error" className="ops-field-error" role="alert">{fieldErrors.trainerId}</small>}</label>
-              <DateField id="admin-session-date" label="Дата" value={sessionForm.date} onChange={(value) => updateSessionForm('date', value)} required error={fieldErrors.date} />
-              <TimeField id="admin-session-start" label="Начало" value={sessionForm.start} onChange={(value) => updateSessionForm('start', value)} required error={fieldErrors.start} />
-              <Input id="admin-session-durationMinutes" type="number" min="15" max="480" step="5" label="Длительность, мин" value={sessionForm.durationMinutes} error={fieldErrors.durationMinutes} onChange={(event) => updateSessionForm('durationMinutes', event.target.value)} />
-              {locationField('Локация', sessionForm.location, (value) => updateSessionForm('location', value), { id: 'admin-session-location', error: fieldErrors.location })}
-              <Input id="admin-session-maxParticipants" type="number" min="1" step="1" label="Лимит участников" value={sessionForm.maxParticipants} error={fieldErrors.maxParticipants} onChange={(event) => updateSessionForm('maxParticipants', event.target.value)} />
-              {sessionForm.sessionType !== 'group' && <Input id="admin-session-price" type="number" min="0" step="0.01" label="Цена занятия, PLN" value={sessionForm.price} error={fieldErrors.price} onChange={(event) => updateSessionForm('price', event.target.value)} placeholder="Пусто = тариф типа, 0 = бесплатно" />}
-              <Input id="admin-session-notes" label="Заметки" value={sessionForm.notes} error={fieldErrors.notes} onChange={(event) => updateSessionForm('notes', event.target.value)} />
+              <label>{t('schedule.sessionTypeLabel')}<select id="admin-session-sessionType" value={sessionForm.sessionType} aria-invalid={Boolean(fieldErrors.sessionType)} aria-describedby={fieldErrors.sessionType ? 'admin-session-sessionType-error' : undefined} onChange={(event) => updateSessionType(event.target.value)}>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code} disabled={type.configured === false}>{type.label || type.code}</option>)}</select>{fieldErrors.sessionType && <small id="admin-session-sessionType-error" className="ops-field-error" role="alert">{fieldErrors.sessionType}</small>}</label>
+              {sessionForm.sessionType !== 'group' && <SearchableSelect inputId="admin-session-participantId" label={sessionForm.sessionType === 'split' ? t('schedule.client1') : t('common.participant')} value={sessionForm.participantId} onChange={(value) => { updateSessionForm('participantId', value); if (String(value) === String(sessionForm.secondParticipantId)) updateSessionForm('secondParticipantId', '') }} options={participants.map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.participantId} />}
+              {sessionForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-secondParticipantId" label={sessionForm.requireSecondParticipant ? t('schedule.client2') : t('schedule.client2Optional')} value={sessionForm.secondParticipantId} onChange={(value) => updateSessionForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionForm.participantId)).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={fieldErrors.secondParticipantId} />}
+              {sessionForm.sessionType === 'group' && <label>{t('common.group')}<select id="admin-session-groupId" value={sessionForm.groupId} aria-invalid={Boolean(fieldErrors.groupId)} aria-describedby={fieldErrors.groupId ? 'admin-session-groupId-error' : undefined} onChange={(event) => updateNewSessionGroup(event.target.value)}><option value="">{t('schedule.chooseGroup')}</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{fieldErrors.groupId && <small id="admin-session-groupId-error" className="ops-field-error" role="alert">{fieldErrors.groupId}</small>}</label>}
+              {sessionForm.sessionType === 'group' && <p className="ops-grid-full muted ops-session-price-hint" style={{ margin: 0 }}>{selectedGroupPriceHint}</p>}
+              <label>{t('common.trainer')}<select id="admin-session-trainerId" value={sessionForm.trainerId} aria-invalid={Boolean(fieldErrors.trainerId)} aria-describedby={fieldErrors.trainerId ? 'admin-session-trainerId-error' : undefined} onChange={(event) => updateSessionForm('trainerId', event.target.value)}><option value="">{t('schedule.chooseTrainer')}</option>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{fieldErrors.trainerId && <small id="admin-session-trainerId-error" className="ops-field-error" role="alert">{fieldErrors.trainerId}</small>}</label>
+              <DateField id="admin-session-date" label={t('common.date')} value={sessionForm.date} onChange={(value) => updateSessionForm('date', value)} required error={fieldErrors.date} />
+              <TimeField id="admin-session-start" label={t('schedule.start')} value={sessionForm.start} onChange={(value) => updateSessionForm('start', value)} required error={fieldErrors.start} />
+              <Input id="admin-session-durationMinutes" type="number" min="15" max="480" step="5" label={t('schedule.duration')} value={sessionForm.durationMinutes} error={fieldErrors.durationMinutes} onChange={(event) => updateSessionForm('durationMinutes', event.target.value)} />
+              {locationField(t('schedule.location'), sessionForm.location, (value) => updateSessionForm('location', value), { id: 'admin-session-location', error: fieldErrors.location })}
+              <Input id="admin-session-maxParticipants" type="number" min="1" step="1" label={t('schedule.capacity')} value={sessionForm.maxParticipants} error={fieldErrors.maxParticipants} onChange={(event) => updateSessionForm('maxParticipants', event.target.value)} />
+              {sessionForm.sessionType !== 'group' && <Input id="admin-session-price" type="number" min="0" step="0.01" label={t('schedule.price')} value={sessionForm.price} error={fieldErrors.price} onChange={(event) => updateSessionForm('price', event.target.value)} placeholder={t('schedule.pricePlaceholder')} />}
+              <Input id="admin-session-notes" label={t('schedule.notes')} value={sessionForm.notes} error={fieldErrors.notes} onChange={(event) => updateSessionForm('notes', event.target.value)} />
             </div>
-            <div className="muted">Окончание: {endTime(sessionForm.start, sessionForm.durationMinutes)}</div>
+            <div className="muted">{t('schedule.end', { time: endTime(sessionForm.start, sessionForm.durationMinutes) })}</div>
           </div>
         </FormModal>
 
         <FormModal
           open={actionPanel === 'copy'}
-          title="Копирование расписания за период"
+          title={t('schedule.copyTitle')}
           size="lg"
           busy={busy}
           dirty={Boolean(copyFormBaseline) && JSON.stringify(copyForm) !== JSON.stringify(copyFormBaseline)}
           onRequestClose={closePeriodCopy}
-          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="primary" disabled={busy} onClick={previewPeriodCopy}>Проверить</Button>{copyPreview && <Button id={COPY_FIELD_IDS.selectedIndices} variant="secondary" disabled={busy || !copyPreview.selectedIndices.length} aria-invalid={Boolean(copyFieldErrors.selectedIndices)} aria-describedby={copyFieldErrors.selectedIndices ? `${COPY_FIELD_IDS.selectedIndices}-error` : undefined} onClick={commitPeriodCopy}>Скопировать {copyPreview.selectedIndices.length}</Button>}</>}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" disabled={busy} onClick={previewPeriodCopy}>{t('schedule.check')}</Button>{copyPreview && <Button id={COPY_FIELD_IDS.selectedIndices} variant="secondary" disabled={busy || !copyPreview.selectedIndices.length} aria-invalid={Boolean(copyFieldErrors.selectedIndices)} aria-describedby={copyFieldErrors.selectedIndices ? `${COPY_FIELD_IDS.selectedIndices}-error` : undefined} onClick={commitPeriodCopy}>{t('schedule.copyCount', { count: copyPreview.selectedIndices.length })}</Button>}</>}
         >
           <div className="card card-pad ops-schedule-form-card">
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
-              <DateField id={COPY_FIELD_IDS.sourceFrom} label="Источник с" value={copyForm.sourceFrom} error={copyFieldErrors.sourceFrom} onChange={(value) => updateCopyForm('sourceFrom', value)} required />
-              <DateField id={COPY_FIELD_IDS.sourceTo} label="Источник по" value={copyForm.sourceTo} error={copyFieldErrors.sourceTo} onChange={(value) => updateCopyForm('sourceTo', value)} required min={copyForm.sourceFrom || undefined} />
-              <DateField id={COPY_FIELD_IDS.targetFrom} label="Назначение с" value={copyForm.targetFrom} error={copyFieldErrors.targetFrom} onChange={(value) => updateCopyForm('targetFrom', value)} required />
-              <DateField id={COPY_FIELD_IDS.targetTo} label="Назначение по" value={copyForm.targetTo} error={copyFieldErrors.targetTo} onChange={(value) => updateCopyForm('targetTo', value)} required min={copyForm.targetFrom || undefined} />
+              <DateField id={COPY_FIELD_IDS.sourceFrom} label={t('schedule.sourceFrom')} value={copyForm.sourceFrom} error={copyFieldErrors.sourceFrom} onChange={(value) => updateCopyForm('sourceFrom', value)} required />
+              <DateField id={COPY_FIELD_IDS.sourceTo} label={t('schedule.sourceTo')} value={copyForm.sourceTo} error={copyFieldErrors.sourceTo} onChange={(value) => updateCopyForm('sourceTo', value)} required min={copyForm.sourceFrom || undefined} />
+              <DateField id={COPY_FIELD_IDS.targetFrom} label={t('schedule.targetFrom')} value={copyForm.targetFrom} error={copyFieldErrors.targetFrom} onChange={(value) => updateCopyForm('targetFrom', value)} required />
+              <DateField id={COPY_FIELD_IDS.targetTo} label={t('schedule.targetTo')} value={copyForm.targetTo} error={copyFieldErrors.targetTo} onChange={(value) => updateCopyForm('targetTo', value)} required min={copyForm.targetFrom || undefined} />
             </div>
             <div className="ops-button-row">
-              {[['includeGroup', 'Групповые'], ['includeIndividual', 'Индивидуальные'], ['includeSplit', 'Сплит']].map(([field, label]) => <Checkbox id={COPY_FIELD_IDS[field]} key={field} label={label} checked={copyForm[field]} error={copyFieldErrors[field]} onChange={(event) => updateCopyForm(field, event.target.checked)} />)}
+              {[['includeGroup', t('reports.group')], ['includeIndividual', t('reports.individual')], ['includeSplit', t('schedule.typeSplit')]].map(([field, label]) => <Checkbox id={COPY_FIELD_IDS[field]} key={field} label={label} checked={copyForm[field]} error={copyFieldErrors[field]} onChange={(event) => updateCopyForm(field, event.target.checked)} />)}
             </div>
             {copyFieldErrors.selectedIndices && <small id={`${COPY_FIELD_IDS.selectedIndices}-error`} className="ops-field-error" role="alert">{copyFieldErrors.selectedIndices}</small>}
-            {copyPreview && <div className="muted">Готово: {copyPreview.selectedIndices.length}; конфликты или пропуски: {copyPreview.rows.length - copyPreview.selectedIndices.length}. Запись начнётся только после подтверждения.</div>}
+            {copyPreview && <div className="muted">{t('schedule.previewSummary', { ready: copyPreview.selectedIndices.length, skipped: copyPreview.rows.length - copyPreview.selectedIndices.length })}</div>}
           </div>
         </FormModal>
 
         <FormModal
           open={editingSession != null}
-          title="Редактирование занятия"
+          title={t('schedule.editTitle')}
           size="lg"
           busy={busy}
           dirty={Boolean(sessionEditBaseline) && JSON.stringify(sessionEditForm) !== JSON.stringify(sessionEditBaseline)}
           suspended={confirmDelete != null}
           onRequestClose={closeSessionEdit}
-          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>Закрыть</Button><Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(editingSession)}>Удалить занятие</Button><Button variant="primary" disabled={busy} onClick={saveSessionEdit}>Сохранить занятие</Button></>}
+          footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(editingSession)}>{t('schedule.deleteSession')}</Button><Button variant="primary" disabled={busy} onClick={saveSessionEdit}>{t('schedule.saveSession')}</Button></>}
         >
           <div className="card card-pad ops-schedule-form-card">
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               {sessionEditForm.sessionType === 'group'
-                ? <label>Группа<select id="admin-session-edit-groupId" value={sessionEditForm.groupId} aria-invalid={Boolean(editFieldErrors.groupId)} aria-describedby={editFieldErrors.groupId ? 'admin-session-edit-groupId-error' : undefined} onChange={(event) => updateSessionEditForm('groupId', event.target.value)}><option value="">Выберите группу</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{editFieldErrors.groupId && <small id="admin-session-edit-groupId-error" className="ops-field-error" role="alert">{editFieldErrors.groupId}</small>}</label>
-                : <SearchableSelect inputId="admin-session-edit-participantId" label={sessionEditForm.sessionType === 'split' ? 'Клиент 1' : 'Участник'} value={sessionEditForm.participantId} onChange={(value) => { updateSessionEditForm('participantId', value); if (String(value) === String(sessionEditForm.secondParticipantId)) updateSessionEditForm('secondParticipantId', '') }} options={participants.filter((participant) => !editingSession?.roster?.slice(1).filter((row) => String(row.id) !== String(editingSession?.secondStudentId)).some((row) => String(row.id) === String(participant.studentId))).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={editFieldErrors.participantId} />}
-              {sessionEditForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-edit-secondParticipantId" label="Клиент 2 (необязательно)" value={sessionEditForm.secondParticipantId} onChange={(value) => updateSessionEditForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionEditForm.participantId) && !editingSession?.roster?.slice(1).filter((row) => String(row.id) !== String(editingSession?.secondStudentId)).some((row) => String(row.id) === String(participant.studentId))).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={editFieldErrors.secondParticipantId} />}
-              {sessionEditForm.sessionType === 'split' && editingSession?.roster?.length > 0 && <div className="ops-grid-full ops-split-roster-summary" aria-label="Полный состав Split">
-                <span className="muted">Текущий полный состав</span>
+                ? <label>{t('common.group')}<select id="admin-session-edit-groupId" value={sessionEditForm.groupId} aria-invalid={Boolean(editFieldErrors.groupId)} aria-describedby={editFieldErrors.groupId ? 'admin-session-edit-groupId-error' : undefined} onChange={(event) => { const value = event.target.value; const group = groups.find((item) => String(item.groupId) === String(value)); updateSessionEditForm('groupId', value); updateSessionEditForm('price', group?.priceMinor == null ? '' : String(group.priceMinor / 100)) }}><option value="">{t('schedule.chooseGroup')}</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select>{editFieldErrors.groupId && <small id="admin-session-edit-groupId-error" className="ops-field-error" role="alert">{editFieldErrors.groupId}</small>}</label>
+                : <SearchableSelect inputId="admin-session-edit-participantId" label={sessionEditForm.sessionType === 'split' ? t('schedule.client1') : t('common.participant')} value={sessionEditForm.participantId} onChange={(value) => { updateSessionEditForm('participantId', value); if (String(value) === String(sessionEditForm.secondParticipantId)) updateSessionEditForm('secondParticipantId', '') }} options={participants.filter((participant) => !editingSession?.roster?.slice(1).filter((row) => String(row.id) !== String(editingSession?.secondStudentId)).some((row) => String(row.id) === String(participant.studentId))).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={editFieldErrors.participantId} />}
+              {sessionEditForm.sessionType === 'split' && <SearchableSelect inputId="admin-session-edit-secondParticipantId" label={t('schedule.client2Optional')} value={sessionEditForm.secondParticipantId} onChange={(value) => updateSessionEditForm('secondParticipantId', value)} options={participants.filter((participant) => String(participant.studentId) !== String(sessionEditForm.participantId) && !editingSession?.roster?.slice(1).filter((row) => String(row.id) !== String(editingSession?.secondStudentId)).some((row) => String(row.id) === String(participant.studentId))).map((participant) => clientSelectOption(participant))} loadOptions={loadParticipantOptions} error={editFieldErrors.secondParticipantId} />}
+              {sessionEditForm.sessionType === 'split' && editingSession?.roster?.length > 0 && <div className="ops-grid-full ops-split-roster-summary" aria-label={t('schedule.splitRosterAria')}>
+                <span className="muted">{t('schedule.currentRoster')}</span>
                 <strong>{editingSession.roster.map((participant) => participant.full_name).join(' · ')}</strong>
-                {editingSession.roster.length > 2 && <small className="muted">Участники после Клиента 2 сохраняются этой формой и управляются на экране посещаемости.</small>}
+                {editingSession.roster.length > 2 && <small className="muted">{t('schedule.extraRosterHint')}</small>}
               </div>}
-              <label>Тренер<select id="admin-session-edit-trainerId" value={sessionEditForm.trainerId} aria-invalid={Boolean(editFieldErrors.trainerId)} aria-describedby={editFieldErrors.trainerId ? 'admin-session-edit-trainerId-error' : undefined} onChange={(event) => updateSessionEditForm('trainerId', event.target.value)}>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{editFieldErrors.trainerId && <small id="admin-session-edit-trainerId-error" className="ops-field-error" role="alert">{editFieldErrors.trainerId}</small>}</label>
-              <DateField id="admin-session-edit-date" label="Дата" value={sessionEditForm.date} onChange={(value) => updateSessionEditForm('date', value)} required error={editFieldErrors.date} />
-              <TimeField id="admin-session-edit-start" label="Начало" value={sessionEditForm.start} onChange={(value) => updateSessionEditForm('start', value)} required error={editFieldErrors.start} />
-              <Input id="admin-session-edit-durationMinutes" type="number" min="15" max="480" step="5" label="Длительность, мин" value={sessionEditForm.durationMinutes} error={editFieldErrors.durationMinutes} onChange={(event) => updateSessionEditForm('durationMinutes', event.target.value)} />
-              {locationField('Локация', sessionEditForm.location, (value) => updateSessionEditForm('location', value), { id: 'admin-session-edit-location', error: editFieldErrors.location })}
-              <Input id="admin-session-edit-maxParticipants" type="number" min="1" step="1" label="Лимит участников" value={sessionEditForm.maxParticipants} error={editFieldErrors.maxParticipants} onChange={(event) => updateSessionEditForm('maxParticipants', event.target.value)} />
-              <Input id="admin-session-edit-price" type="number" min="0" step="0.01" label="Цена, PLN" value={sessionEditForm.price} error={editFieldErrors.price} onChange={(event) => updateSessionEditForm('price', event.target.value)} />
-              <Input id="admin-session-edit-notes" label="Заметки" value={sessionEditForm.notes} error={editFieldErrors.notes} onChange={(event) => updateSessionEditForm('notes', event.target.value)} />
+              <label>{t('common.trainer')}<select id="admin-session-edit-trainerId" value={sessionEditForm.trainerId} aria-invalid={Boolean(editFieldErrors.trainerId)} aria-describedby={editFieldErrors.trainerId ? 'admin-session-edit-trainerId-error' : undefined} onChange={(event) => updateSessionEditForm('trainerId', event.target.value)}>{activeTrainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select>{editFieldErrors.trainerId && <small id="admin-session-edit-trainerId-error" className="ops-field-error" role="alert">{editFieldErrors.trainerId}</small>}</label>
+              <DateField id="admin-session-edit-date" label={t('common.date')} value={sessionEditForm.date} onChange={(value) => updateSessionEditForm('date', value)} required error={editFieldErrors.date} />
+              <TimeField id="admin-session-edit-start" label={t('schedule.start')} value={sessionEditForm.start} onChange={(value) => updateSessionEditForm('start', value)} required error={editFieldErrors.start} />
+              <Input id="admin-session-edit-durationMinutes" type="number" min="15" max="480" step="5" label={t('schedule.duration')} value={sessionEditForm.durationMinutes} error={editFieldErrors.durationMinutes} onChange={(event) => updateSessionEditForm('durationMinutes', event.target.value)} />
+              {locationField(t('schedule.location'), sessionEditForm.location, (value) => updateSessionEditForm('location', value), { id: 'admin-session-edit-location', error: editFieldErrors.location })}
+              <Input id="admin-session-edit-maxParticipants" type="number" min="1" step="1" label={t('schedule.capacity')} value={sessionEditForm.maxParticipants} error={editFieldErrors.maxParticipants} onChange={(event) => updateSessionEditForm('maxParticipants', event.target.value)} />
+              {sessionEditForm.sessionType === 'group'
+                ? <div><Input id="admin-session-edit-price" type="number" label={t('schedule.priceEdit')} value={selectedEditGroupPrice} readOnly aria-readonly="true" /><small className="muted">{selectedEditGroupPriceHint}</small></div>
+                : <Input id="admin-session-edit-price" type="number" min="0" step="0.01" label={t('schedule.priceEdit')} value={sessionEditForm.price} error={editFieldErrors.price} onChange={(event) => updateSessionEditForm('price', event.target.value)} />}
+              <Input id="admin-session-edit-notes" label={t('schedule.notes')} value={sessionEditForm.notes} error={editFieldErrors.notes} onChange={(event) => updateSessionEditForm('notes', event.target.value)} />
             </div>
-            <div className="muted">Окончание: {endTime(sessionEditForm.start, sessionEditForm.durationMinutes)}</div>
+            <div className="muted">{t('schedule.end', { time: endTime(sessionEditForm.start, sessionEditForm.durationMinutes) })}</div>
           </div>
         </FormModal>
 
@@ -983,7 +1029,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         </div>
         {displayMode === 'calendar' && (
           <ScheduleCalendar
-            sessions={visibleSessions}
+            sessions={localizedSessions}
             focusDate={focusDate}
             viewMode={viewMode}
             setFocusDate={setFocusDate}
@@ -993,7 +1039,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         )}
         {displayMode === 'list' && (
           <div className="card" data-testid="schedule-list" style={{ overflow: 'hidden' }}>
-            {visibleSessions.map((session, index) => (
+            {localizedSessions.map((session, index) => (
               <div
                 key={session.id}
                 role="button"
@@ -1008,7 +1054,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                     go('attendance', { sessionId: session.sessionId })
                   }
                 }}
-                style={{ ...scheduleColorStyle(session.colorKey), display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < visibleSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}
+                style={{ ...scheduleColorStyle(session.colorKey), display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < localizedSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}
               >
                 <span className="mono">{sessionIsoDate(session)}</span>
                 <span className="mono">{session.start}-{session.end}</span>
@@ -1016,27 +1062,27 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                 <span className="strong" style={{ flex: 1 }}>{session.group}{session.individualParticipant?.full_name ? ` · ${session.individualParticipant.full_name}` : ''}</span>
                 <span className="muted">{session.trainer}</span>
                 <span className="muted">{session.location}</span>
-                <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? 'Отменено' : 'Запланировано'}</Badge>
+                <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? t('schedule.cancelled') : t('schedule.planned')}</Badge>
                 {session.isCancelled
-                  ? <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); restoreSession(session) }}>Восстановить тренировку</Button>
+                  ? <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); restoreSession(session) }}>{t('schedule.restore')}</Button>
                   : <>
-                    <Button size="sm" variant="subtle" disabled={busy} onClick={(event) => { event.stopPropagation(); openSessionEdit(session) }}>Изменить</Button>
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); cancelSession(session) }}>Отменить</Button>
+                    <Button size="sm" variant="subtle" disabled={busy} onClick={(event) => { event.stopPropagation(); openSessionEdit(session) }}>{t('common.edit')}</Button>
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); cancelSession(session) }}>{t('schedule.cancel')}</Button>
                   </>}
-                <Button size="sm" variant="danger" disabled={busy} onClick={(event) => { event.stopPropagation(); setConfirmDelete(session) }}>Удалить</Button>
+                <Button size="sm" variant="danger" disabled={busy} onClick={(event) => { event.stopPropagation(); setConfirmDelete(session) }}>{t('common.delete')}</Button>
               </div>
             ))}
-            {!visibleSessions.length && <div className="muted" style={{ padding: 16 }}>В выбранном периоде занятий нет.</div>}
+            {!visibleSessions.length && <div className="muted" style={{ padding: 16 }}>{t('schedule.emptyPeriod')}</div>}
           </div>
         )}
         <Dialog
           open={confirmDelete != null}
           tone="danger"
           irreversible
-          title="Удалить занятие?"
-          description={confirmDelete ? `${sessionIsoDate(confirmDelete)} ${confirmDelete.start}-${confirmDelete.end} · ${confirmDelete.group}. Занятие с посещаемостью или зарплатой удалить нельзя — его нужно отменить.` : ''}
-          confirmLabel="Удалить"
-          cancelLabel="Отмена"
+          title={t('schedule.deleteTitle')}
+          description={confirmDelete ? t('schedule.deleteDescription', { session: `${sessionIsoDate(confirmDelete)} ${confirmDelete.start}-${confirmDelete.end} · ${confirmDelete.group || t('schedule.typeIndividual')}` }) : ''}
+          confirmLabel={t('common.delete')}
+          cancelLabel={t('common.cancel')}
           onClose={() => setConfirmDelete(null)}
           onConfirm={() => deleteSession(confirmDelete)}
         />

@@ -12,6 +12,16 @@ export function createPaymentAttemptKey(prefix = 'payment') {
   return `${prefix}-${randomPart}`
 }
 
+export function rebasePassiveFormUpdate(current, baseline, patch) {
+  const next = { ...current, ...patch }
+  const untouched = baseline != null
+    && JSON.stringify(current) === JSON.stringify(baseline)
+  return {
+    form: next,
+    baseline: untouched ? next : baseline,
+  }
+}
+
 export function assertPaymentReadback(mutation, readBack, expectedStatus) {
   const mutationId = String(mutation?.id ?? '')
   const readBackId = String(readBack?.id ?? '')

@@ -1,5 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
+import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
 import { api, downloadFile } from '../../api.js'
+import { useLocale } from '../../i18n.jsx'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime, mapAdminSessionRows } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { dateToIso } from '../scheduleContracts.js'
@@ -19,6 +21,9 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
   }
 
   return function ApiAdminOverview({ go }) {
+    const { locale } = useLocale()
+    const t = useMemo(() => adminTranslator(locale), [locale])
+    const localeTag = adminLocaleTag(locale)
     const data = adminData
     const [overviewLists, setOverviewLists] = useState(() => ({
       sessions: data.sessions || [],
@@ -76,33 +81,33 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
       <div className="page">
         <div className="page-head">
           <div>
-            <h1 className="page-title">Рабочий стол</h1>
-            <p className="page-desc">Быстрый вход в ежедневные действия.</p>
+            <h1 className="page-title">{t('overview.title')}</h1>
+            <p className="page-desc">{t('overview.description')}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant="secondary" iconLeft={<I.Calendar size={15} />} onClick={() => go('schedule')}>Расписание</Button>
-            <Button variant="primary" iconLeft={<I.Cash size={15} />} onClick={() => go('payments')}>Платежи</Button>
+            <Button variant="secondary" iconLeft={<I.Calendar size={15} />} onClick={() => go('schedule')}>{t('overview.schedule')}</Button>
+            <Button variant="primary" iconLeft={<I.Cash size={15} />} onClick={() => go('payments')}>{t('overview.payments')}</Button>
           </div>
         </div>
 
         {pendingCount > 0 && (
-          <Banner tone="warning" title={`${pendingCount} платежей ждут подтверждения`} style={{ marginBottom: 16 }}
-            action={<Button size="sm" variant="subtle" onClick={() => go('payments', { tab: 'review' })}>Открыть</Button>}>
-            Нажмите, чтобы подтвердить или отклонить платежи.
+          <Banner tone="warning" title={t('overview.pendingTitle', { count: pendingCount })} style={{ marginBottom: 16 }}
+            action={<Button size="sm" variant="subtle" onClick={() => go('payments', { tab: 'review' })}>{t('common.open')}</Button>}>
+            {t('overview.pendingHint')}
           </Banner>
         )}
 
-        <div className="eyebrow" style={{ marginBottom: 10 }}>Быстрые переходы</div>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>{t('overview.quickLinks')}</div>
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
-          <Kpi icon={<I.Calendar size={15} />} label="Занятия" value={sessions.length} sub="Сегодня и ближайшие" onClick={() => go('schedule', { tab: 'day' })} />
-          <Kpi icon={<I.ClientFamily size={15} />} label="Клиенты" value={(data.clients || []).length} sub="Открыть базу" onClick={() => go('clients')} />
-          <Kpi icon={<I.TrainerWhistle size={15} />} label="Тренеры" value={(data.trainers || []).filter((row) => row.active).length} sub="Открыть команду" onClick={() => go('trainers')} />
-          <Kpi icon={<I.Alert size={15} />} label="Должники" value={debtorCount} sub={`${debtTotal.toLocaleString('pl-PL')} zl`} tone="var(--money-debt)" onClick={() => go('debtors')} />
+          <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={sessions.length} sub={t('overview.todayUpcoming')} onClick={() => go('schedule', { tab: 'day' })} />
+          <Kpi icon={<I.ClientFamily size={15} />} label={t('overview.clients')} value={(data.clients || []).length} sub={t('overview.openDatabase')} onClick={() => go('clients')} />
+          <Kpi icon={<I.TrainerWhistle size={15} />} label={t('overview.trainers')} value={(data.trainers || []).filter((row) => row.active).length} sub={t('overview.openTeam')} onClick={() => go('trainers')} />
+          <Kpi icon={<I.Alert size={15} />} label={t('overview.debtors')} value={debtorCount} sub={`${debtTotal.toLocaleString(localeTag)} zł`} tone="var(--money-debt)" onClick={() => go('debtors')} />
         </div>
 
         <div className="ops-section-head" style={{ marginBottom: 10 }}>
-          <div className="eyebrow">Ближайшие занятия</div>
-          <Button size="sm" variant="secondary" onClick={() => go('schedule')}>Все занятия</Button>
+          <div className="eyebrow">{t('overview.upcoming')}</div>
+          <Button size="sm" variant="secondary" onClick={() => go('schedule')}>{t('overview.allSessions')}</Button>
         </div>
         <div className="card ops-upcoming-sessions">
           {sessions.slice(0, 5).map((session, index, list) => (
@@ -127,14 +132,14 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
                     tone={session.status === 'cancelled' ? 'danger' : 'primary'}
                     style={{ maxWidth: '100%', height: 'auto', minHeight: 20, whiteSpace: 'normal', textAlign: 'center' }}
                   >
-                    {session.status === 'cancelled' ? 'Отменено' : 'Запланировано'}
+                    {session.status === 'cancelled' ? t('overview.cancelled') : t('overview.scheduled')}
                   </Badge>
                 </span>
               </span>
             </button>
           ))}
           {sessions.length === 0 && (
-            <button type="button" className="ops-empty-action" onClick={() => go('schedule')}>Нет занятий. Открыть расписание и создать занятие</button>
+            <button type="button" className="ops-empty-action" onClick={() => go('schedule')}>{t('overview.empty')}</button>
           )}
         </div>
       </div>

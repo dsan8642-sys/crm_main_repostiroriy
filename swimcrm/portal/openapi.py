@@ -27,6 +27,7 @@ def _query_parameter(name, *, values=None, value_type="string", minimum=None):
 
 LIST_QUERY_POLICIES = {
     "/api/admin/clients/": [
+        _query_parameter("all", values=("true", "false")),
         _query_parameter("active", values=("true", "false")),
         _query_parameter("group_id", value_type="integer", minimum=1),
         _query_parameter("trainer_id", value_type="integer", minimum=1),
