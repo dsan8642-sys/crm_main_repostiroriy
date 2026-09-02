@@ -106,7 +106,7 @@ async function loadClientAccountOptions(query, requestOptions = {}) {
 
 export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
-  return function ApiAdminClients({ go, currentUser }) {
+  return function ApiAdminClients({ go, currentUser, createClient: createClientShortcut }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
     const localeTag = adminLocaleTag(locale)
@@ -170,6 +170,9 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
     const [busy, setBusy] = useState(false)
     const [quickAction, setQuickAction] = useState(null)
     const [clientAction, setClientAction] = useState(null)
+    useEffect(() => {
+      if (createClientShortcut === '1') setQuickAction('client')
+    }, [createClientShortcut])
     const filteredRows = rows
     const hasActiveFilter = Boolean(clientList.search.trim()) || clientList.filterCount > 0
     const emptyLabel = hasActiveFilter
@@ -728,8 +731,9 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               <div className="ops-client-compact-primary">
                 <button
                   type="button"
-                  className="ops-client-compact-profile"
+                  className="ops-client-compact-profile ops-compact-card-title"
                   disabled={!row.clientId}
+                  style={{ appearance: 'none', border: 0, background: 'transparent', color: 'var(--text-strong)', font: 'inherit', fontFamily: 'var(--font-sans)', textAlign: 'left' }}
                   aria-label={row.clientId ? t('clients.openProfile', { name: `${row.last} ${row.first}` }) : undefined}
                   onClick={row.clientId ? () => go?.('clientDetail', { clientId: row.clientId }) : undefined}
                 >

@@ -6,8 +6,12 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
-from billing.models import Payment, PaymentEventType, PaymentMethod, PaymentSource, PaymentStatus
+from billing.models import (
+    Charge, ChargeReversal, Payment, PaymentEventType, PaymentMethod,
+    PaymentSource, PaymentStatus,
+)
 from billing.services import confirm_payment, reject_payment, student_balance
+from subscriptions.models import Subscription
 
 from . import factories as f
 
@@ -56,6 +60,20 @@ class Wave4FinancialSafetyRule(TestCase):
             "confirm": confirm,
             "idempotency_key": key,
         })
+
+    def admin_charge(self, *, key=None, amount_minor=5000,
+                     description="Wave 4 manual charge"):
+        payload = {
+            "participant_id": self.student.id,
+            "amount_minor": amount_minor,
+            "currency": "PLN",
+            "due_date": "2026-08-15",
+            "description": description,
+        }
+        if key is not None:
+            payload["idempotency_key"] = key
+        return self.post_json(
+            f"/api/admin/participants/{self.student.id}/charges/", payload)
 
     def test_top_up_requires_key_and_creates_nothing_when_missing(self):
         self.client.force_login(self.parent.user)
@@ -113,6 +131,107 @@ class Wave4FinancialSafetyRule(TestCase):
         response = self.admin_payment(key="wave4-admin-payment-0002", amount_minor=0)
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Payment.objects.count(), 0)
+
+    def test_manual_charge_requires_key_and_exact_replay_returns_readback(self):
+        self.client.force_login(self.admin)
+        missing = self.admin_charge()
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(Charge.objects.count(), 0)
+
+        first = self.admin_charge(key="wave4-admin-charge-0001")
+        second = self.admin_charge(key="wave4-admin-charge-0001")
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertFalse(first.json()["idempotent_replay"])
+        self.assertTrue(second.json()["idempotent_replay"])
+        self.assertEqual(first.json()["balance_minor"], 5000)
+        self.assertEqual(first.json()["balance_currency"], "PLN")
+        self.assertEqual(Charge.objects.count(), 1)
+        self.assertEqual(student_balance(self.student).amount_minor, 5000)
+
+    def test_manual_charge_replay_with_changed_payload_returns_conflict(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(
+            self.admin_charge(key="wave4-admin-charge-0002").status_code,
+            201,
+        )
+        changed = self.admin_charge(
+            key="wave4-admin-charge-0002", amount_minor=5001)
+        self.assertEqual(changed.status_code, 409)
+        self.assertEqual(changed.json()["code"], "idempotency_conflict")
+        self.assertEqual(Charge.objects.count(), 1)
+        self.assertEqual(student_balance(self.student).amount_minor, 5000)
+
+    def test_manual_charge_full_reversal_is_append_only_and_idempotent(self):
+        self.client.force_login(self.admin)
+        charge = self.admin_charge(key="wave4-admin-charge-0003").json()
+        path = f"/api/admin/charges/{charge['id']}/reverse/"
+        payload = {
+            "reason": "Начисление создано ошибочно",
+            "idempotency_key": "wave4-charge-reversal-0001",
+        }
+
+        first = self.post_json(path, payload)
+        second = self.post_json(path, payload)
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(first.json()["idempotent_replay"])
+        self.assertTrue(second.json()["idempotent_replay"])
+        self.assertEqual(first.json()["status"], "reversed")
+        self.assertEqual(first.json()["balance_minor"], 0)
+        self.assertEqual(
+            first.json()["reversal"]["reason"], payload["reason"])
+        self.assertEqual(Charge.objects.count(), 1)
+        self.assertEqual(ChargeReversal.objects.count(), 1)
+        self.assertEqual(student_balance(self.student).amount_minor, 0)
+
+        changed = self.post_json(path, {**payload, "reason": "Другая причина"})
+        self.assertEqual(changed.status_code, 409)
+        self.assertEqual(ChargeReversal.objects.count(), 1)
+        self.assertEqual(student_balance(self.student).amount_minor, 0)
+
+        self.client.force_login(self.parent.user)
+        history = self.client.get(
+            f"/api/client/payments/?participant_id={self.student.id}")
+        self.assertEqual(history.status_code, 200)
+        history_charge = history.json()["charges"][0]
+        self.assertEqual(history_charge["status"], "reversed")
+        self.assertEqual(history_charge["outstanding_minor"], 0)
+        self.assertEqual(history_charge["reversal"]["reason"], payload["reason"])
+
+    def test_subscription_charge_cannot_use_manual_reversal_endpoint(self):
+        self.client.force_login(self.admin)
+        subscription_type = f.make_sub_type(name="Protected subscription charge")
+        subscription = Subscription.objects.create(
+            student=self.student,
+            subscription_type=subscription_type,
+            start_date=date(2026, 8, 15),
+            base_end_date=date(2026, 9, 14),
+        )
+        charge = Charge.objects.create(
+            student=self.student,
+            subscription=subscription,
+            description=subscription_type.name,
+            amount_minor=subscription_type.price_minor,
+            currency=subscription_type.currency,
+            due_date=subscription.start_date,
+            created_by=self.admin,
+        )
+
+        response = self.post_json(
+            f"/api/admin/charges/{charge.id}/reverse/",
+            {
+                "reason": "Недопустимая отмена",
+                "idempotency_key": "wave4-charge-reversal-0002",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["charge"][0]["code"], "manual_only")
+        self.assertEqual(ChargeReversal.objects.count(), 0)
+        self.assertEqual(student_balance(self.student).amount_minor, charge.amount_minor)
 
     def test_reject_reason_is_required_and_same_state_retry_is_harmless(self):
         self.client.force_login(self.admin)

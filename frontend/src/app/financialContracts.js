@@ -34,3 +34,15 @@ export function assertPaymentReadback(mutation, readBack, expectedStatus) {
   }
   return readBack
 }
+
+export function assertChargeReadback(mutation, clientDetail) {
+  const chargeId = String(mutation?.id ?? '')
+  const stored = (clientDetail?.charges || []).find(
+    (charge) => String(charge.id) === chargeId,
+  )
+  if (!chargeId || !stored || stored.status !== mutation?.status
+      || clientDetail?.summary?.balance_minor !== mutation?.balance_minor) {
+    throw new Error('Authoritative charge read-back did not match the requested operation.')
+  }
+  return stored
+}

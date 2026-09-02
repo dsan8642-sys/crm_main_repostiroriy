@@ -15,6 +15,7 @@ import {
 } from '../formErrors.js'
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ContextRow } from '../EntityListPrimitives.jsx'
+import { TodaySessionCard } from '../TodayPrimitives.jsx'
 import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor } from '../financialContracts.js'
 import { useLocale } from '../../i18n.jsx'
 import { uiLocaleTag } from '../../localeContracts.js'
@@ -88,7 +89,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const { locale, t } = useLocale()
     const data = parentData
     const child = data.children?.find((item) => item.id === kid) || data.children?.[0]
-    const next = child ? (data.schedule?.[child.id] || []).find((session) => session.status === 'planned') : null
+    const next = child?.nextSession || (child ? (data.schedule?.[child.id] || []).find((session) => session.status === 'planned') : null)
     return (
       <div className="page" style={{ maxWidth: 900 }}>
         <div className="page-head">
@@ -100,19 +101,28 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
             {t('client.home.amountDue', undefined, { name: child.name, amount: Math.abs(child.balance).toLocaleString(uiLocaleTag(locale)) })}
           </Banner>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <button type="button" className="card card-pad ops-action-card" onClick={() => go('schedule', { tab: next?.sessionId ? String(next.sessionId) : null })}>
-            <div className="kpi-label"><span className="kpi-ico"><I.Calendar size={15} /></span>{t('client.home.next')}</div>
-            {next ? <><div className="strong" style={{ fontSize: 'var(--fs-lg)', margin: '4px 0 2px' }}>{next.date} · {next.start}</div><div className="muted">{next.group} · {next.trainer}</div></> : <div className="muted">{t('client.home.noPlanned')}</div>}
-          </button>
+        <TodaySessionCard
+          Button={Button}
+          eyebrow={t('client.home.next')}
+          title={next?.group}
+          detail={next && `${next.date} · ${next.start}${next.end ? `-${next.end}` : ''}`}
+          meta={next && `${next.trainer}${next.location ? ` · ${next.location}` : ''}`}
+          icon={<I.Calendar size={20} />}
+          actionLabel={t('client.home.openDetails')}
+          onOpen={() => go('schedule', { tab: next?.sessionId ? String(next.sessionId) : null })}
+          emptyTitle={t('client.home.noPlanned')}
+          emptyDetail={t('client.home.noPlanned')}
+        />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
           <button type="button" className="card card-pad ops-action-card" onClick={() => go('subscription')}>
             <div className="kpi-label"><span className="kpi-ico"><I.Layers size={15} /></span>{t('runtime.client.subscription.title')}</div>
             <div className="strong" style={{ fontSize: 'var(--fs-lg)', margin: '4px 0 2px' }}>{child?.sub || '-'}</div>
             <div className="muted">{t('client.home.remaining', undefined, { count: child?.subLeft == null ? '∞' : child.subLeft, date: child?.subEnds || '-' })}</div>
           </button>
-          <button type="button" className="card card-pad ops-action-card" onClick={() => go('payments')}>
+          <button type="button" className="card card-pad ops-action-card" onClick={() => go('payments', { tab: 'topup' })}>
             <div className="kpi-label"><span className="kpi-ico"><I.Wallet size={15} /></span>{t('client.home.balance')}</div>
             <Money amount={child?.balance || 0} signed size="var(--fs-lg)" />
+            <div className="muted">{t('client.home.requestTopup')}</div>
           </button>
         </div>
       </div>
@@ -184,7 +194,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     )
   }
 
-  function Payments({ kid, setKid, currentUser }) {
+  function Payments({ kid, setKid, currentUser, initialTab }) {
     const { t } = useLocale()
     const fileInputRef = useRef(null)
     const [file, setFile] = useState(null)
@@ -220,6 +230,10 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     })
     const charges = chargeList.rows
     const payments = paymentList.rows
+
+    useEffect(() => {
+      if (['charges', 'history', 'topup'].includes(initialTab)) setMobileTab(initialTab)
+    }, [initialTab])
 
     async function createTopUpRequest() {
       let amountMinor = null

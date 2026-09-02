@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  assertChargeReadback,
   assertPaymentReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
@@ -36,6 +37,20 @@ test('authoritative read-back requires matching payment, status and audit event'
     () => assertPaymentReadback({ id: 4 }, { ...confirmed, events: [] }, 'confirmed'),
     /audit event/,
   )
+})
+
+test('authoritative charge read-back requires matching history and balance', () => {
+  const mutation = { id: 7, status: 'active', balance_minor: 5000 }
+  const detail = { summary: { balance_minor: 5000 }, charges: [{ id: 7, status: 'active' }] }
+  assert.equal(assertChargeReadback(mutation, detail), detail.charges[0])
+  assert.throws(
+    () => assertChargeReadback(mutation, { ...detail, summary: { balance_minor: 0 } }),
+    /read-back/,
+  )
+
+  const reversed = { id: 7, status: 'reversed', balance_minor: 0 }
+  const reversedDetail = { summary: { balance_minor: 0 }, charges: [{ id: 7, status: 'reversed', reversal: { reason: 'Duplicate' } }] }
+  assert.equal(assertChargeReadback(reversed, reversedDetail), reversedDetail.charges[0])
 })
 
 test('passive subscription defaults rebase only an untouched finance form', () => {

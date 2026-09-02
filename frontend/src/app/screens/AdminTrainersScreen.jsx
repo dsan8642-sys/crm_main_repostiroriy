@@ -72,6 +72,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
     const [payrollAction, setPayrollAction] = useState(null)
     const [payrollBaseline, setPayrollBaseline] = useState(null)
     const [deactivateConfirm, setDeactivateConfirm] = useState(false)
+    const [archivePreview, setArchivePreview] = useState(null)
 
     const trainerGroups = useMemo(() => groups.filter((group) => String(group.defaultTrainerId) === String(selected?.trainerId)), [groups, selected])
     const trainerSessions = useMemo(() => sessions.filter((session) => String(session.trainerId) === String(selected?.trainerId)), [sessions, selected])
@@ -247,10 +248,10 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       if (!selected?.trainerId) return
       setBusy(true); setError(null)
       try {
-        await api.delete(`/api/admin/trainers/${selected.trainerId}/`)
+        const result = await api.delete(`/api/admin/trainers/${selected.trainerId}/`)
         setSelected((current) => ({ ...current, active: false, portalAccess: 'revoked' }))
         setForm((current) => ({ ...current, isActive: false }))
-        setMessage(t('trainers.deactivated', { name: selected.name }))
+        setMessage(t('trainers.archivedResult', { name: selected.name, sessions: result.future_sessions_count, groups: result.cleared_default_groups_count }))
         setDeactivateConfirm(false)
         await reloadRoleData?.('admin')
       } catch (err) {
@@ -258,6 +259,31 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
       } finally {
         setBusy(false)
       }
+    }
+
+    async function openArchiveConfirm(row = selected) {
+      if (!row?.trainerId) return
+      setBusy(true); setError(null)
+      try {
+        const preview = await api.get(`/api/admin/trainers/${row.trainerId}/`)
+        openTrainer(row)
+        setArchivePreview(preview)
+        setDeactivateConfirm(true)
+      } catch (err) {
+        setError(apiErrorMessage(err, t('trainers.deactivateError')))
+      } finally { setBusy(false) }
+    }
+
+    async function restoreTrainer(row = selected) {
+      if (!row?.trainerId) return
+      setBusy(true); setError(null)
+      try {
+        await api.post(`/api/admin/trainers/${row.trainerId}/restore/`, {})
+        setSelected((current) => current && String(current.trainerId) === String(row.trainerId) ? { ...current, active: true, portalAccess: 'active' } : current)
+        setMessage(t('trainers.restored', { name: row.name }))
+        window.dispatchEvent(new CustomEvent('swimcrm:list-invalidate', { detail: { role: 'admin' } }))
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(apiErrorMessage(err, t('trainers.restoreError'))) } finally { setBusy(false) }
     }
 
     const editor = (
@@ -290,7 +316,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
         {selected && !creating && (
           <section className="card ops-entity-card" aria-label={t('trainers.profileAria', { name: selected.name })}>
             <ContextBackButton onClick={() => setSelected(null)}>{t('trainers.back')}</ContextBackButton>
-            <div className="ops-entity-head"><div className="ops-entity-person"><Avatar name={selected.name} size={44} /><div><h3>{selected.name}</h3><div className="muted">{selected.email || t('trainers.emailMissing')} · {selected.phone || t('trainers.phoneMissing')}</div></div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active && <AccessButtons Button={Button} portalAccess={selected.portalAccess} accessActivated={selected.accessActivated} busy={busy} onAction={accessAction} />}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button>{selected.active && <Button variant="danger" disabled={busy} onClick={() => setDeactivateConfirm(true)}>{t('trainers.deactivate')}</Button>}</div></div>
+            <div className="ops-entity-head"><div className="ops-entity-person"><Avatar name={selected.name} size={44} /><div><h3>{selected.name}</h3><div className="muted">{selected.email || t('trainers.emailMissing')} · {selected.phone || t('trainers.phoneMissing')}</div></div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active && <AccessButtons Button={Button} portalAccess={selected.portalAccess} accessActivated={selected.accessActivated} busy={busy} onAction={accessAction} />}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button>{selected.active ? <Button variant="danger" disabled={busy} onClick={() => openArchiveConfirm()}>{t('trainers.archive')}</Button> : <Button variant="primary" disabled={busy} onClick={() => restoreTrainer()}>{t('trainers.restore')}</Button>}</div></div>
             <AccessCodeCard info={accessInfo} Button={Button} />
             <div className="ops-tabs" role="tablist">{[['profile', t('trainers.overview')], ['schedule', t('trainers.scheduleCount', { count: trainerSessions.length })], ['payroll', t('trainers.payrollTab')]].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{label}</button>)}</div>
             {tab === 'profile' && <div className="ops-detail-grid"><div><div className="eyebrow">{t('common.groups')}</div>{trainerGroups.map((group) => <button key={group.id} className="ops-detail-row" type="button" onClick={() => go?.('groups', { groupId: group.groupId })}><strong>{group.name}</strong><span>{t('trainers.groupCount', { count: group.students })}</span></button>)}{!trainerGroups.length && <div className="empty">{t('trainers.noGroups')}</div>}</div><div><div className="eyebrow">{t('trainers.upcoming')}</div>{trainerSessions.slice(0, 5).map((session) => <button key={session.id} type="button" className="ops-detail-row" onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}</strong><span>{session.group} · {session.location}</span></button>)}{!trainerSessions.length && <div className="empty">{t('trainers.noSessions')}</div>}</div></div>}
@@ -338,6 +364,9 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
                 <ActionPopover label={t('common.actionsFor', { name: row.name })} actions={[
                   { key: 'profile', label: t('trainers.profile'), onSelect: () => openTrainer(row) },
                   { key: 'edit', label: t('common.edit'), onSelect: () => { openTrainer(row); setEditing(true) } },
+                  row.active
+                    ? { key: 'archive', label: t('trainers.archive'), danger: true, onSelect: () => openArchiveConfirm(row) }
+                    : { key: 'restore', label: t('trainers.restore'), onSelect: () => restoreTrainer(row) },
                 ]} />
               </div>
               <div className="ops-compact-card-line"><span>{t('common.phone')}</span><strong className="mono" title={row.phone || ''}>{row.phone || '—'}</strong></div>
@@ -346,7 +375,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           ))}
         </div>
         <ListPagination list={trainerList} />
-        {deactivateConfirm && <Dialog title={t('trainers.deactivateTitle', { name: selected?.name })} description={t('trainers.deactivateDescription')} tone="danger" confirmLabel={t('trainers.deactivate')} onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>}
+        {deactivateConfirm && <Dialog title={t('trainers.archiveTitle', { name: selected?.name })} description={t('trainers.archiveDescription', { sessions: archivePreview?.future_sessions_count ?? 0, groups: archivePreview?.default_groups_count ?? 0 })} tone="danger" confirmLabel={t('trainers.archive')} onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>}
       </div>
     )
   }

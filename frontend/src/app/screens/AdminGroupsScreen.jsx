@@ -16,7 +16,7 @@ import { formatEntityDate } from '../entityListContracts.js'
 import { dateToIso } from '../scheduleContracts.js'
 
 export function createAdminGroupsScreen(components, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money } = components
+  const { Table, StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money, Dialog } = components
 
   return function ApiAdminGroups({ go, groupId, currentUser }) {
     const { locale } = useLocale()
@@ -56,6 +56,16 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const [members, setMembers] = useState([])
     const [membersLoading, setMembersLoading] = useState(false)
     const [memberRefresh, setMemberRefresh] = useState(0)
+    const [archiveConfirm, setArchiveConfirm] = useState(false)
+    const [archivePreview, setArchivePreview] = useState(null)
+    const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
+
+    useEffect(() => {
+      const media = window.matchMedia('(max-width: 767px)')
+      const update = () => setIsMobile(media.matches)
+      media.addEventListener('change', update)
+      return () => media.removeEventListener('change', update)
+    }, [])
 
     const candidates = useMemo(() => clients.filter((client) => !(client.groupIds || []).map(String).includes(String(selected?.groupId)) && (client.groupIds || []).length < 3 && client.isActive), [clients, selected])
     const capacity = selected?.defaultCapacity ?? null
@@ -213,6 +223,42 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       setForm((current) => ({ ...current, [field]: value }))
     }
 
+    async function openArchiveConfirm(row = selected) {
+      if (!row?.groupId) return
+      setBusy(true); setError(null)
+      try {
+        const preview = await api.get(`/api/admin/groups/${row.groupId}/`)
+        openGroup(row)
+        setArchivePreview(preview)
+        setArchiveConfirm(true)
+      } catch (err) { setError(apiErrorMessage(err, t('groups.archiveError'))) } finally { setBusy(false) }
+    }
+
+    async function archiveGroup() {
+      if (!selected?.groupId) return
+      setBusy(true); setError(null)
+      try {
+        const result = await api.delete(`/api/admin/groups/${selected.groupId}/`)
+        setSelected((current) => ({ ...current, active: false }))
+        setArchiveConfirm(false)
+        setMessage(t('groups.archivedResult', { name: selected.name, sessions: result.future_sessions_count, participants: result.preserved_participants_count }))
+        window.dispatchEvent(new CustomEvent('swimcrm:list-invalidate', { detail: { role: 'admin' } }))
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(apiErrorMessage(err, t('groups.archiveError'))) } finally { setBusy(false) }
+    }
+
+    async function restoreGroup(row = selected) {
+      if (!row?.groupId) return
+      setBusy(true); setError(null)
+      try {
+        await api.post(`/api/admin/groups/${row.groupId}/restore/`, {})
+        setSelected((current) => current && String(current.groupId) === String(row.groupId) ? { ...current, active: true } : current)
+        setMessage(t('groups.restored', { name: row.name }))
+        window.dispatchEvent(new CustomEvent('swimcrm:list-invalidate', { detail: { role: 'admin' } }))
+        await reloadRoleData?.('admin')
+      } catch (err) { setError(apiErrorMessage(err, t('groups.restoreError'))) } finally { setBusy(false) }
+    }
+
     const editor = (
       <>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
@@ -220,6 +266,16 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
       </>
     )
+
+    const groupDetail = selected && !creating ? <section className="card ops-entity-card ops-inline-entity-detail" aria-label={t('groups.cardAria', { name: selected.name })}>
+      <ContextBackButton onClick={() => setSelected(null)}>{t('groups.back')}</ContextBackButton>
+      <div className="ops-entity-head"><div><div className="eyebrow">{t('groups.card')}</div><h3>{selected.name}</h3><div className="muted">{selected.description || t('groups.noDescription')}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button>{selected.active ? <Button variant="danger" disabled={busy} onClick={() => openArchiveConfirm()}>{t('groups.archive')}</Button> : <Button variant="primary" disabled={busy} onClick={() => restoreGroup()}>{t('groups.restore')}</Button>}<Button variant="subtle" onClick={() => setSelected(null)}>{t('common.close')}</Button></div></div>
+      <div className="ops-summary-grid"><div><span>{t('common.trainer')}</span><strong>{selected.trainer || t('groups.notAssigned')}</strong></div><div><span>{t('groups.participants')}</span><strong>{members.length}</strong></div><div><span>{t('groups.capacity')}</span><strong>{capacity ?? t('groups.notSet')}</strong></div><div><span>{t('groups.nextSession')}</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
+      <div className="ops-detail-grid">
+        <div><div className="ops-section-head"><div className="eyebrow">{t('groups.roster')}</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? t('common.loading') : `${members.length} / ${capacity ?? t('groups.notSet')}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading || !selected.active} onClick={() => { setCandidateId(''); setAddingMember(true) }}>{t('groups.add')}</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || t('groups.contactMissing')}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => changeParticipantMembership(client.studentId, 'remove')}>{t('groups.remove')}</Button></div>)}{membersLoading && <div className="empty">{t('groups.loadingRoster')}</div>}{!membersLoading && !members.length && <div className="empty">{t('groups.emptyRoster')}</div>}</div>
+        <div><div className="eyebrow">{t('groups.schedule')}</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>{t('groups.noSessions')}</button>}</div>
+      </div>
+    </section> : null
 
     return (
       <div className="page page-wide">
@@ -243,24 +299,14 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           {editor}
         </FormModal>
 
-        {selected && !creating && <section className="card ops-entity-card" aria-label={t('groups.cardAria', { name: selected.name })}>
-          <ContextBackButton onClick={() => setSelected(null)}>{t('groups.back')}</ContextBackButton>
-          <div className="ops-entity-head"><div><div className="eyebrow">{t('groups.card')}</div><h3>{selected.name}</h3><div className="muted">{selected.description || t('groups.noDescription')}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button><Button variant="subtle" onClick={() => setSelected(null)}>{t('common.close')}</Button></div></div>
-          <div className="ops-summary-grid"><div><span>{t('common.trainer')}</span><strong>{selected.trainer || t('groups.notAssigned')}</strong></div><div><span>{t('groups.participants')}</span><strong>{members.length}</strong></div><div><span>{t('groups.capacity')}</span><strong>{capacity ?? t('groups.notSet')}</strong></div><div><span>{t('groups.nextSession')}</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
-          <div className="ops-detail-grid">
-            <div><div className="ops-section-head"><div className="eyebrow">{t('groups.roster')}</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? t('common.loading') : `${members.length} / ${capacity ?? t('groups.notSet')}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading} onClick={() => { setCandidateId(''); setAddingMember(true) }}>{t('groups.add')}</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || t('groups.contactMissing')}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => changeParticipantMembership(client.studentId, 'remove')}>{t('groups.remove')}</Button></div>)}{membersLoading && <div className="empty">{t('groups.loadingRoster')}</div>}{!membersLoading && !members.length && <div className="empty">{t('groups.emptyRoster')}</div>}</div>
-            <div><div className="eyebrow">{t('groups.schedule')}</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>{t('groups.noSessions')}</button>}</div>
-          </div>
-        </section>}
-
         <FormModal open={addingMember} title={t('groups.addParticipantTitle')} size="sm" busy={busy} dirty={Boolean(candidateId)} onRequestClose={() => { setAddingMember(false); setCandidateId(''); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={!candidateId || busy} onClick={() => changeParticipantMembership(candidateId, 'add')}>{t('groups.add')}</Button></>}>
           {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
           <SearchableSelect inputAriaLabel={t('groups.addParticipant')} value={candidateId} onChange={setCandidateId} options={candidates.map((client) => clientSelectOption(client, { description: (row) => row.group || t('groups.noGroup') }))} loadOptions={loadCandidateOptions} />
         </FormModal>
 
         <ListFeedback list={groupList} emptyLabel={t('groups.empty')} />
-        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel={t('groups.empty')} columns={[
-          { key: 'name', header: t('common.group'), render: (row) => <button type="button" className="ops-link-button" onClick={() => openGroup(row)}><span className="strong">{row.name}</span></button> },
+        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel={t('groups.empty')} renderAfterRow={(row) => !isMobile && String(selected?.groupId) === String(row.groupId) ? React.cloneElement(groupDetail, { id: `group-detail-desktop-${row.groupId}` }) : null} columns={[
+          { key: 'name', header: t('common.group'), render: (row) => <button type="button" className="ops-link-button" aria-expanded={String(selected?.groupId) === String(row.groupId)} aria-controls={`group-detail-desktop-${row.groupId}`} onClick={() => String(selected?.groupId) === String(row.groupId) ? setSelected(null) : openGroup(row)}><span className="strong">{row.name}</span></button> },
           { key: 'description', header: t('common.description'), muted: true, render: (row) => row.description || '-' },
           { key: 'trainer', header: t('common.trainer'), muted: true },
           { key: 'price', header: t('groups.session'), align: 'right', width: 110, render: (row) => row.price == null ? <span className="muted">-</span> : <Money amount={row.price} currency={row.currency} /> },
@@ -270,21 +316,23 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         ]} /></div>
         <div className="ops-entity-mobile-list">
           {rows.map((row) => (
-            <EntityMobileCard key={row.id} className="ops-group-compact-card" labelledBy={`group-card-${row.id}`}>
+            <React.Fragment key={row.id}><EntityMobileCard className="ops-group-compact-card" labelledBy={`group-card-${row.id}`}>
               <div className="ops-compact-card-head">
-                <button type="button" className="ops-compact-card-title" onClick={() => openGroup(row)}><strong id={`group-card-${row.id}`} title={row.name}>{row.name}</strong></button>
+                <button type="button" className="ops-compact-card-title" aria-expanded={String(selected?.groupId) === String(row.groupId)} aria-controls={`group-detail-mobile-${row.groupId}`} onClick={() => String(selected?.groupId) === String(row.groupId) ? setSelected(null) : openGroup(row)}><strong id={`group-card-${row.id}`} title={row.name}>{row.name}</strong></button>
                 <ActionPopover label={t('common.actionsFor', { name: row.name })} actions={[
                   { key: 'profile', label: t('debtors.profile'), onSelect: () => openGroup(row) },
                   { key: 'edit', label: t('common.edit'), onSelect: () => { openGroup(row); setEditing(true) } },
+                  row.active ? { key: 'archive', label: t('groups.archive'), danger: true, onSelect: () => openArchiveConfirm(row) } : { key: 'restore', label: t('groups.restore'), onSelect: () => restoreGroup(row) },
                 ]} />
               </div>
               <div className="ops-compact-card-line"><span>{t('common.trainer')}</span><strong title={row.trainer}>{row.trainer || t('groups.notAssigned')}</strong></div>
               <div className="ops-compact-card-line"><span>{t('groups.nextShort')}</span><strong title={nextSessionLabel(row)}>{nextSessionLabel(row)}</strong></div>
               <div className="ops-compact-card-footer"><span>{t('groups.participantCount', { current: row.students, capacity: row.defaultCapacity ?? '—' })}</span><StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /></div>
-            </EntityMobileCard>
+            </EntityMobileCard>{isMobile && String(selected?.groupId) === String(row.groupId) && React.cloneElement(groupDetail, { id: `group-detail-mobile-${row.groupId}` })}</React.Fragment>
           ))}
         </div>
         <ListPagination list={groupList} />
+        {archiveConfirm && <Dialog title={t('groups.archiveTitle', { name: selected?.name })} description={t('groups.archiveDescription', { sessions: archivePreview?.future_sessions_count ?? 0, participants: archivePreview?.preserved_participants_count ?? 0 })} tone="danger" confirmLabel={t('groups.archive')} onClose={() => busy ? null : setArchiveConfirm(false)} onConfirm={archiveGroup}><div className="strong">{selected?.name}</div></Dialog>}
       </div>
     )
   }

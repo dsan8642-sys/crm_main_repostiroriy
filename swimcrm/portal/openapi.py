@@ -43,6 +43,15 @@ LIST_QUERY_POLICIES = {
         _query_parameter("active", values=("true", "false")),
         _query_parameter("trainer_id", value_type="integer", minimum=1),
     ],
+    "/api/admin/subscriptions/": [
+        _query_parameter("category", values=(
+            "active", "ending_soon", "depleted", "expired_remaining", "future", "history",
+        )),
+        _query_parameter("subscription_type_id", value_type="integer", minimum=1),
+        _query_parameter("group_id", value_type="integer", minimum=1),
+        _query_parameter("end_from"),
+        _query_parameter("end_to"),
+    ],
     "/api/admin/payments/": [
         _query_parameter("participant_id", value_type="integer", minimum=1),
         _query_parameter("status", values=("pending", "confirmed", "rejected")),
@@ -178,8 +187,9 @@ def build_openapi_schema():
             if method == "GET" and path in LIST_QUERY_POLICIES:
                 operation_parameters.extend(BASE_LIST_PARAMETERS)
                 operation_parameters.extend(LIST_QUERY_POLICIES[path])
-                operation_parameters.append(_query_parameter(
-                    "order", values=LIST_ORDER_POLICIES[path]))
+                if path in LIST_ORDER_POLICIES:
+                    operation_parameters.append(_query_parameter(
+                        "order", values=LIST_ORDER_POLICIES[path]))
                 operation["x-page-size-500"] = (
                     "blocked pending endpoint query and payload budgets"
                 )

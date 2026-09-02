@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const baseURL = process.env.SWIMCRM_PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5173'
-const port = new URL(baseURL).port || '5173'
+const baseURL = process.env.SWIMCRM_PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5174'
+const port = new URL(baseURL).port || '5174'
 
 export default defineConfig({
   testDir: './tests',

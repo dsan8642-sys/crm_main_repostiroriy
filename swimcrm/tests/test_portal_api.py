@@ -2259,6 +2259,7 @@ class AdminPortalApiRule(TestCase):
             f"/api/admin/participants/{self.student.id}/charges/",
             data=json.dumps({
                 "description": "Manual charge",
+                "idempotency_key": "portal-admin-charge-001",
                 "amount_minor": 5000,
                 "currency": "PLN",
                 "due_date": date.today().isoformat(),

@@ -225,8 +225,15 @@ def client_attendance(request):
 
 
 def _client_charge_payload(charge, allocation=None):
-    outstanding_minor = max(0, charge.amount_minor - (allocation.paid_minor if allocation else 0))
-    if outstanding_minor == 0:
+    reversal = getattr(charge, "reversal", None)
+    is_reversed = bool(reversal) or bool(allocation and allocation.is_reversed)
+    outstanding_minor = (
+        0 if is_reversed
+        else max(0, charge.amount_minor - (allocation.paid_minor if allocation else 0))
+    )
+    if is_reversed:
+        status = "reversed"
+    elif outstanding_minor == 0:
         status = "paid"
     elif allocation and allocation.is_overdue:
         status = "overdue"
@@ -244,6 +251,8 @@ def _client_charge_payload(charge, allocation=None):
         "status": status,
         "currency": charge.currency,
         "due_date": charge.due_date.isoformat(),
+        "reference_id": charge.reference_id or None,
+        "reversal": _charge_payload(charge)["reversal"],
     }
 
 
@@ -259,7 +268,9 @@ def _client_payment_history_payload(payment):
 def client_payments(request):
     account = _client_account_from_request(request)
     student = _participant_for_client_request(request, account)
-    charges = Charge.objects.filter(student=student).select_related("student").order_by("-due_date", "-id")
+    charges = Charge.objects.filter(student=student).select_related(
+        "student", "created_by", "reversal", "reversal__created_by"
+    ).order_by("-due_date", "-id")
     payments = Payment.objects.filter(student=student).select_related(
         "student", "student__parent__user", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
@@ -276,7 +287,8 @@ def client_payments(request):
 def client_charges(request):
     account = _client_account_from_request(request)
     student = _participant_for_client_request(request, account)
-    qs = Charge.objects.filter(student=student).select_related("student")
+    qs = Charge.objects.filter(student=student).select_related(
+        "student", "created_by", "reversal", "reversal__created_by")
     allocations = {row.charge.id: row for row in charge_statuses(student)}
     unpaid = [row for row in allocations.values() if row.paid_minor < row.charge.amount_minor]
     date_from = _parse_date(request.GET.get("date_from"), "date_from")

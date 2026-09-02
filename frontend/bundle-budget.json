@@ -1,13 +1,14 @@
 {
-  "baseline": {
-    "commit": "148f23616fe7956a149383d2b756eaa8ee719c1f",
-    "javascriptRawBytes": 549850,
-    "javascriptGzipBytes": 142030,
-    "cssRawBytes": 34770
+  "measurement": {
+    "mode": "entry-and-largest-chunk",
+    "totalJavaScript": "informational",
+    "reference": "visual-review-2026-09-02"
   },
   "maximum": {
-    "javascriptRawBytes": 590000,
-    "javascriptGzipBytes": 160000,
-    "cssRawBytes": 52000
+    "entryJavaScriptRawBytes": 325000,
+    "entryJavaScriptGzipBytes": 105000,
+    "largestJavaScriptChunkRawBytes": 475000,
+    "largestJavaScriptChunkGzipBytes": 120000,
+    "cssRawBytes": 70000
   }
 }

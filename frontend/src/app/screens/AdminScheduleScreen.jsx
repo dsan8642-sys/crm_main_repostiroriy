@@ -271,11 +271,15 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     }, [initialTab])
 
     useEffect(() => {
-      if (!['individual', 'split'].includes(createSessionMode) || !initialParticipantId) return
-      const routeKey = `${createSessionMode}:${initialParticipantId}`
+      if (!['individual', 'split'].includes(createSessionMode)) return
+      const routeKey = `${createSessionMode}:${initialParticipantId || 'none'}`
       if (createRouteHandledRef.current === routeKey) return
       createRouteHandledRef.current = routeKey
-      openSessionShortcut(createSessionMode, initialParticipantId, true)
+      openSessionShortcut(
+        createSessionMode,
+        initialParticipantId || '',
+        createSessionMode === 'split' && Boolean(initialParticipantId),
+      )
     }, [createSessionMode, initialParticipantId])
 
     const range = useMemo(
@@ -1062,6 +1066,8 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                 <span className="strong" style={{ flex: 1 }}>{session.group}{session.individualParticipant?.full_name ? ` · ${session.individualParticipant.full_name}` : ''}</span>
                 <span className="muted">{session.trainer}</span>
                 <span className="muted">{session.location}</span>
+                {session.groupArchived && <Badge tone="warning">{t('schedule.groupArchived')}</Badge>}
+                {session.trainerArchived && <Badge tone="warning">{t('schedule.trainerArchived')}</Badge>}
                 <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? t('schedule.cancelled') : t('schedule.planned')}</Badge>
                 {session.isCancelled
                   ? <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); restoreSession(session) }}>{t('schedule.restore')}</Button>

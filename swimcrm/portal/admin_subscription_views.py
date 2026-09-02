@@ -1,14 +1,152 @@
 ﻿from .support import *
 import hashlib
 import json
+from datetime import timedelta
 
 from django.db import IntegrityError
+from django.db.models import IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
+
+from subscriptions.models import SessionLedgerEntry
 
 from .admin_support import _admin_required
+from .pagination import choice_param, paginated_payload, positive_int_param, search_param
 
 
 class _IdempotencyConflict(Exception):
     pass
+
+
+SUBSCRIPTION_CATEGORIES = {
+    "active", "ending_soon", "depleted", "expired_remaining", "future", "history",
+}
+
+
+def _list_remaining(subscription):
+    if subscription.subscription_type.is_unlimited:
+        return None
+    return subscription.list_remaining_sessions or 0
+
+
+def _subscription_list_state(subscription, today):
+    remaining = _list_remaining(subscription)
+    end = subscription.effective_end_date
+    cancelled = subscription.status == SubscriptionStatus.CANCELLED
+    current_status = subscription.status in {
+        SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN,
+    }
+    active = not cancelled and current_status and subscription.start_date <= today <= end
+    return {
+        "active": active,
+        "ending_soon": active and today <= end <= today + timedelta(days=7),
+        "depleted": active and remaining is not None and remaining <= 0,
+        "expired_remaining": not cancelled and end < today and (remaining or 0) > 0,
+        "future": not cancelled and current_status and subscription.start_date > today,
+        "history": cancelled or end < today,
+    }
+
+
+def _subscription_allowed_actions(subscription, today):
+    actions = ["open_client"]
+    if subscription.status == SubscriptionStatus.CANCELLED:
+        return actions
+    actions.append("renew")
+    remaining = _list_remaining(subscription)
+    official_active = (
+        subscription.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN}
+        and subscription.start_date <= today <= subscription.effective_end_date
+    )
+    if official_active and subscription.status == SubscriptionStatus.ACTIVE:
+        actions.append("freeze")
+    if official_active or (subscription.effective_end_date < today and (remaining or 0) > 0):
+        actions.append("adjust")
+    return actions
+
+
+def _subscription_admin_list_payload(subscription, today):
+    student = subscription.student
+    groups = sorted(student.groups.all(), key=lambda group: (group.name, group.id))
+    return {
+        **_subscription_payload(subscription),
+        "client_id": student.parent_id,
+        "participant_name": student.full_name,
+        "phone": student.parent.phone,
+        "groups": [{"id": group.id, "name": group.name} for group in groups],
+        "remaining_sessions": _list_remaining(subscription),
+        "allowed_actions": _subscription_allowed_actions(subscription, today),
+    }
+
+
+@require_GET
+def admin_subscriptions(request):
+    _admin_required(request)
+    category = choice_param(
+        request, "category", SUBSCRIPTION_CATEGORIES, default="active", allow_blank=False)
+    subscription_type_id = positive_int_param(request, "subscription_type_id")
+    group_id = positive_int_param(request, "group_id")
+    end_from = _parse_date(request.GET.get("end_from"), "end_from")
+    end_to = _parse_date(request.GET.get("end_to"), "end_to")
+    if end_from and end_to and end_to < end_from:
+        raise _field_validation_error(
+            "end_to", "Дата окончания диапазона не может быть раньше начала.",
+            code="invalid_range")
+
+    remaining_subquery = SessionLedgerEntry.objects.filter(
+        subscription_id=OuterRef("pk"),
+    ).values("subscription_id").annotate(total=Sum("delta")).values("total")[:1]
+    rows = Subscription.objects.select_related(
+        "student", "student__parent", "student__parent__user", "subscription_type",
+    ).prefetch_related(
+        "freeze_periods", "student__groups",
+    ).annotate(
+        list_remaining_sessions=Coalesce(
+            Subquery(remaining_subquery, output_field=IntegerField()), Value(0)),
+    )
+    q = search_param(request)
+    if q:
+        rows = rows.filter(
+            Q(student__first_name__icontains=q)
+            | Q(student__last_name__icontains=q)
+            | Q(student__email__icontains=q)
+            | Q(student__parent__phone__icontains=q)
+            | Q(student__parent__email__icontains=q)
+            | Q(student__parent__user__first_name__icontains=q)
+            | Q(student__parent__user__last_name__icontains=q)
+            | Q(student__parent__user__email__icontains=q)
+            | Q(student__groups__name__icontains=q)
+        )
+    if subscription_type_id:
+        rows = rows.filter(subscription_type_id=subscription_type_id)
+    if group_id:
+        rows = rows.filter(student__groups__id=group_id)
+    rows = list(rows.distinct())
+    today = timezone.localdate()
+    if end_from:
+        rows = [row for row in rows if row.effective_end_date >= end_from]
+    if end_to:
+        rows = [row for row in rows if row.effective_end_date <= end_to]
+
+    states = {row.id: _subscription_list_state(row, today) for row in rows}
+    counts = {
+        key: sum(1 for row in rows if states[row.id][key])
+        for key in SUBSCRIPTION_CATEGORIES
+    }
+    selected = [row for row in rows if states[row.id][category]]
+    if category == "expired_remaining":
+        selected.sort(key=lambda row: (row.effective_end_date, row.id))
+    elif category == "history":
+        selected.sort(key=lambda row: (row.created_at, row.id), reverse=True)
+    elif category == "future":
+        selected.sort(key=lambda row: (row.start_date, row.id))
+    else:
+        selected.sort(key=lambda row: (row.effective_end_date, row.id))
+    return JsonResponse(paginated_payload(
+        request,
+        selected,
+        key="subscriptions",
+        serializer=lambda row: _subscription_admin_list_payload(row, today),
+        extra={"counts": counts},
+    ))
 
 
 def _operation_key(data):

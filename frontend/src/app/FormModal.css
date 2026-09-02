@@ -103,6 +103,10 @@
   transform: none;
 }
 
+.form-modal:has(.ops-search-select-list) .form-modal__body {
+  min-height: min(340px, calc(100dvh - 190px));
+}
+
 .form-modal__footer {
   display: flex;
   justify-content: flex-end;

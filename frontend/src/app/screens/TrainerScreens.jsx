@@ -9,6 +9,7 @@ import { scheduleColorStyle } from '../schedulePalette.js'
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { formatEntityDate, groupRowsByDate } from '../entityListContracts.js'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
+import { AttendanceSaveStatus, CompactStatusRow, TodaySessionCard } from '../TodayPrimitives.jsx'
 import { useLocale } from '../../i18n.jsx'
 import { uiLocaleTag } from '../../localeContracts.js'
 import './TrainerScreens.css'
@@ -51,6 +52,10 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
     const [busyId, setBusyId] = useState(null)
     const [loading, setLoading] = useState(false)
     const sessionId = trainerSessionId || trainerData.activeSessionId
+    const nextSession = [...(trainerData.sessions || [])]
+      .filter((session) => session.status === 'planned' && String(session.sessionId) !== String(sessionId))
+      .filter((session) => new Date(session.startAt) > new Date(initialSession?.startAt || 0))
+      .sort((left, right) => new Date(left.startAt) - new Date(right.startAt))[0]
 
     useEffect(() => {
       setRows([...(trainerData.roster || [])])
@@ -162,13 +167,17 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
             <p className="page-desc">{sessionMeta.date} · {sessionMeta.start}-{sessionMeta.end} · {sessionMeta.group || t('shared.individual')} · {sessionMeta.location || t('trainer.attendance.locationMissing')} · <StatusPill status={sessionMeta.status || 'planned'} size="sm" /></p>
             <p className="page-desc">{t('trainer.attendance.instructions')}</p>
           </div>
-          {!sessionMeta.cancelled && <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>{t('trainer.attendance.allPresent')}</Button>}
+          <div className="ops-button-row">
+            {nextSession && <Button variant="secondary" disabled={busyId != null} onClick={() => go('session', { trainerSessionId: nextSession.sessionId })}>{t('trainer.attendance.nextSession')}</Button>}
+            {!sessionMeta.cancelled && <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>{t('trainer.attendance.allPresent')}</Button>}
+          </div>
         </div>
 
         <ToastNotice id="trainer-attendance-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 14 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={loading}>{t('trainer.attendance.loading')}</BusyBanner>
         <BusyBanner Banner={Banner} show={busyId != null}>{t('trainer.attendance.saving')}</BusyBanner>
+        <AttendanceSaveStatus busy={busyId != null} savingText={t('trainer.attendance.saving')} savedText={t('trainer.attendance.saved')} />
 
         {sessionMeta.cancelled && <Banner tone="warning" title={t('trainer.attendance.cancelledTitle')} style={{ marginBottom: 14 }}>{t('trainer.attendance.readOnly')}</Banner>}
         <div className="card ops-attendance-list" style={{ overflow: 'hidden' }}>
@@ -218,25 +227,20 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
 }
 
 export function createTrainerSessionsScreen(components, icons, trainerData = {}) {
-  const { Badge, Banner } = components
+  const { Banner, Button } = components
   const I = icons
 
   return function ApiTrainerSessions({ go }) {
     const { t } = useLocale()
-    const groups = trainerData.groups || []
     const [sessions, setSessions] = useState(() => [...(trainerData.sessions || [])])
-    const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
-    const [focusDate, setFocusDate] = useState(localToday())
     const [error, setError] = useState(null)
-    const [filters, setFilters] = useState({ groupId: '', status: 'all' })
-    const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
 
     useEffect(() => {
       let active = true
+      const now = new Date()
       const query = new URLSearchParams({
-        date_from: range.dateFrom,
-        date_to: range.dateTo,
+        date_from: dateToIso(now),
+        date_to: dateToIso(new Date(now.getTime() + 30 * 86400000)),
       })
       api.get(`/api/trainer/sessions/?${query}`)
         .then((payload) => {
@@ -246,56 +250,52 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
           if (active) setError(apiErrorMessage(err, t('trainer.sessions.loadFailed')))
         })
       return () => { active = false }
-    }, [range.dateFrom, range.dateTo, t])
+    }, [t])
 
-    const visibleSessions = sessions.filter((session) => {
-      if (filters.groupId && String(session.groupId) !== String(filters.groupId)) return false
-      if (filters.status !== 'all' && session.status !== filters.status) return false
-      return true
-    })
+    const now = new Date()
+    const available = sessions
+      .filter((session) => session.status === 'planned')
+      .sort((left, right) => new Date(left.startAt) - new Date(right.startAt))
+    const current = available.find((session) => (
+      new Date(session.startAt) <= now && now < new Date(session.endAt)
+    ))
+    const primary = current || available.find((session) => new Date(session.startAt) > now)
+    const following = available.filter((session) => (
+      session.sessionId !== primary?.sessionId && new Date(session.startAt) > now
+    )).slice(0, 5)
     return (
-      <div className="page page-wide">
-        <div className="page-head ops-trainer-sessions-head">
+      <div className="page">
+        <div className="page-head">
           <div>
             <h1 className="page-title">{t('runtime.trainer.sessions.title')}</h1>
             <p className="page-desc">{t('trainer.sessions.desc')}</p>
           </div>
-          <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
         </div>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <div className="card card-pad" style={{ marginBottom: 14 }}>
-          <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} />
-          <div className="ops-form-grid" style={{ marginTop: 10 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              {t('shared.group')}
-              <select value={filters.groupId} onChange={(event) => setFilters((current) => ({ ...current, groupId: event.target.value }))} style={{ minHeight: 36 }}>
-                <option value="">{t('trainer.sessions.allGroups')}</option>
-                {groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
-              {t('shared.status')}
-              <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} style={{ minHeight: 36 }}>
-                <option value="all">{t('trainer.sessions.allStatuses')}</option>
-                <option value="planned">{t('status.planned')}</option>
-                <option value="done">{t('status.done')}</option>
-                <option value="cancelled">{t('status.cancelled')}</option>
-              </select>
-            </label>
-          </div>
+        <TodaySessionCard
+          Button={Button}
+          eyebrow={current ? t('trainer.today.current') : t('trainer.today.nearest')}
+          title={primary?.group}
+          detail={primary && `${primary.date} · ${primary.start}-${primary.end}`}
+          meta={primary && `${primary.location} · ${primary.count}/${primary.limit}`}
+          icon={<I.Calendar size={20} />}
+          actionLabel={t('trainer.today.openAttendance')}
+          onOpen={() => go('session', { trainerSessionId: primary?.sessionId })}
+          emptyTitle={t('trainer.today.emptyTitle')}
+          emptyDetail={t('trainer.today.emptyDetail')}
+        />
+        <div className="ops-section-head" style={{ margin: '20px 0 10px' }}>
+          <div className="eyebrow">{t('trainer.today.following')}</div>
         </div>
-        {displayMode === 'calendar' && (
-          <ScheduleCalendar
-            sessions={visibleSessions}
-            focusDate={focusDate}
-            viewMode={viewMode}
-            setFocusDate={setFocusDate}
-            setViewMode={setViewMode}
-            onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })}
-            ariaLabel={t('trainer.sessions.calendarLabel')}
-          />
-        )}
-        {displayMode === 'list' && <ScheduleList sessions={visibleSessions} testId="trainer-schedule-list" onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} emptyLabel={t('trainer.sessions.empty')} renderStatus={(session) => <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{t(`status.${session.status}`)}</Badge>} />}
+        <CompactStatusRow
+          items={following.map((session) => ({
+            id: session.id,
+            primary: `${session.date} · ${session.start}-${session.end} · ${session.group}`,
+            secondary: session.location,
+            onClick: () => go('session', { trainerSessionId: session.sessionId }),
+          }))}
+          emptyLabel={t('trainer.today.noFollowing')}
+        />
       </div>
     )
   }

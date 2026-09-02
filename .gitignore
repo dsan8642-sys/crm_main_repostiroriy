@@ -1,7 +1,11 @@
 # Python / Django runtime
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 *.py[cod]
 .codebase-memory/
+*.log
 *.sqlite3
 *.sqlite3-journal
 *.dump
@@ -29,6 +33,22 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 frontend/.playwright/
+.playwright/
+
+# Local agent/browser scratch files
+.tmp/
+.codex-remote-attachments/
+.agents/
+.claude/
+
+# Audit evidence and data-review outputs are local-only.
+audit/
+outputs/
+wave1-screenshots/
+*.inspect.ndjson
+*.xlsx
+*.xls
+*.csv
 
 # Local runtime and installer caches
 .npm-cache/

@@ -88,13 +88,31 @@ export function ActionPopover({ label, actions, disabled = false }) {
         visibility: 'visible',
       } : { top: 0, left: 0, visibility: 'hidden' }}
     >
-      {actions.filter(Boolean).map((action) => (
-        <button
+      {actions.filter(Boolean).map((action, index) => {
+        const primary = index === 0 && !action.disabled && !action.danger
+        const danger = Boolean(action.danger)
+        return <button
           key={action.key || action.label}
           type="button"
           role="menuitem"
-          className={action.danger ? 'is-danger' : ''}
+          className={danger ? 'is-danger' : ''}
           disabled={action.disabled}
+          style={{
+            width: '100%',
+            minHeight: 36,
+            padding: '0 11px',
+            border: `1px solid ${danger ? 'var(--red-500)' : primary ? 'var(--primary)' : 'var(--border-default)'}`,
+            borderRadius: 'var(--radius-md)',
+            background: danger ? 'var(--status-overdue-bg)' : primary ? 'var(--primary)' : 'var(--surface-card)',
+            color: danger ? 'var(--red-600)' : primary ? 'var(--text-on-solid)' : 'var(--text-body)',
+            cursor: action.disabled ? 'not-allowed' : 'pointer',
+            font: 'inherit',
+            fontFamily: 'var(--font-sans)',
+            fontSize: 'var(--fs-sm)',
+            fontWeight: 'var(--fw-medium)',
+            textAlign: 'left',
+            opacity: action.disabled ? 0.5 : 1,
+          }}
           onClick={() => {
             close(false)
             triggerRef.current?.focus({ preventScroll: true })
@@ -103,7 +121,7 @@ export function ActionPopover({ label, actions, disabled = false }) {
         >
           {action.label}
         </button>
-      ))}
+      })}
     </div>
   ) : null
 
@@ -129,7 +147,7 @@ export function ActionPopover({ label, actions, disabled = false }) {
 
 export function EntityMobileCard({ className = '', children, labelledBy, testId }) {
   return (
-    <article className={`ops-compact-entity-card ${className}`.trim()} aria-labelledby={labelledBy} data-testid={testId}>
+    <article className={`ops-compact-entity-card ${className}`.trim()} style={{ minWidth: 0 }} aria-labelledby={labelledBy} data-testid={testId}>
       {children}
     </article>
   )
@@ -140,7 +158,7 @@ export function ContextRow({ label, value, onChange, changeLabel }) {
   return (
     <div className="ops-context-row">
       <span><small>{label || t('shared.participant')}</small><strong>{value || t('shared.notSelectedCapital')}</strong></span>
-      {onChange && <button type="button" onClick={onChange}>{changeLabel || t('client.participant.change')}</button>}
+      {onChange && <button type="button" className="ops-context-change" onClick={onChange}>{changeLabel || t('client.participant.change')}</button>}
     </div>
   )
 }

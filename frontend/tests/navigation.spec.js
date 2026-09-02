@@ -56,7 +56,7 @@ test('admin mobile shell exposes a sticky header and drawer without bottom navig
   await mockPortal(page, adminRoutes)
 
   await page.goto('/?role=admin&view=overview')
-  await expect(page.getByRole('heading', { level: 1, name: 'Рабочий стол' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Сегодня' })).toBeVisible()
 
   await expect(page.locator('.ops-nav')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Открыть меню' })).toBeVisible()
@@ -86,12 +86,12 @@ test('admin mobile shell exposes a sticky header and drawer without bottom navig
   await expect(drawer.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
   await expect(drawer.getByRole('button', { name: /Занятие|Посещаемость/ })).toHaveCount(0)
   expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
-    'Главная', 'Клиенты', 'Тренеры', 'Группы', 'Расписание', 'Платежи', 'Должники', 'Настройки',
+    'Сегодня', 'Клиенты', 'Расписание', 'Группы', 'Тренеры', 'Платежи', 'Должники', 'Абонементы', 'Настройки',
   ])
   await expect(drawer.evaluate((node) => node.contains(document.activeElement))).resolves.toBe(true)
   await expect(drawer.evaluate((node) => Math.round(node.getBoundingClientRect().width / window.innerWidth * 100))).resolves.toBe(88)
-  await expect(drawer).toHaveCSS('overflow-y', 'auto')
-  await expect(drawer.locator('.ops-mobile-drawer-nav')).toHaveCSS('overflow-y', 'visible')
+  await expect(drawer).toHaveCSS('overflow-y', 'hidden')
+  await expect(drawer.locator('.ops-mobile-drawer-nav')).toHaveCSS('overflow-y', 'auto')
   await expect(drawer.locator('.ops-mobile-drawer-user-wrap')).not.toHaveCSS('position', 'sticky')
 
   await page.keyboard.press('Shift+Tab')
@@ -143,7 +143,7 @@ test('shell switches exactly at 767/768 and applies the desktop initial sidebar 
   ]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/?role=admin&view=overview')
-    await expect(page.getByRole('heading', { level: 1, name: 'Рабочий стол' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Сегодня' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Открыть меню' })).toHaveCount(mobile ? 1 : 0)
     if (mobile) await expect(page.locator('.ops-nav')).toBeHidden()
     else await expect(page.locator('.ops-nav')).toBeVisible()
@@ -245,7 +245,7 @@ test('trainer mobile shell keeps navigation in the drawer only', async ({ page }
   await expect(drawer.getByText('Анна Тренер', { exact: true })).toBeVisible()
   await expect(drawer.getByRole('button', { name: 'Посещаемость', exact: true })).toBeVisible()
   expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
-    'Мои занятия', 'Мои группы', 'Посещаемость', 'История',
+    'Сегодня', 'Посещаемость', 'Мои группы', 'История',
   ])
 })
 

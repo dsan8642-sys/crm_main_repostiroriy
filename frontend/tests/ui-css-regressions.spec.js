@@ -13,7 +13,7 @@ const emptyCollections = {
   entries: [], batches: [], users: [], logs: [], pagination,
 }
 
-async function mockAdmin(page, { clients = [], sessions = [], trainers = [] } = {}) {
+async function mockAdmin(page, { clients = [], sessions = [], trainers = [], groups = [], subscriptions = [] } = {}) {
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/health/') return json(route, { status: 'ok' })
@@ -21,7 +21,9 @@ async function mockAdmin(page, { clients = [], sessions = [], trainers = [] } = 
     if (path === '/api/admin/dashboard/') return json(route, { metrics: { clients: clients.length, active_subscriptions: 0, debtors: 0 } })
     if (path === '/api/admin/reference/') return json(route, {
       trainers: [{ id: 1, full_name: 'Audit Trainer' }],
-      groups: [{ id: 1, name: 'Audit Group', default_capacity: 8 }],
+      groups: groups.length
+        ? groups.map((group) => ({ id: group.id, name: group.name, default_capacity: group.default_capacity }))
+        : [{ id: 1, name: 'Audit Group', default_capacity: 8 }],
       subscription_types: [], locations: [{ id: 1, name: 'Pool A' }],
       session_types: [], participants: clients,
       choices: { payment_methods: [], notification_channels: [] },
@@ -35,6 +37,18 @@ async function mockAdmin(page, { clients = [], sessions = [], trainers = [] } = 
       const pageSize = Number(new URL(route.request().url()).searchParams.get('page_size') || 50)
       return json(route, { trainers, pagination: { page: 1, page_size: pageSize, total: trainers.length, pages: trainers.length ? 1 : 0, has_next: false, has_previous: false } })
     }
+    if (path === '/api/admin/groups/') {
+      const pageSize = Number(new URL(route.request().url()).searchParams.get('page_size') || 50)
+      return json(route, { groups, pagination: { page: 1, page_size: pageSize, total: groups.length, pages: groups.length ? 1 : 0, has_next: false, has_previous: false } })
+    }
+    if (path === '/api/admin/subscriptions/') {
+      const pageSize = Number(new URL(route.request().url()).searchParams.get('page_size') || 50)
+      return json(route, {
+        subscriptions,
+        counts: { active: subscriptions.length, ending_soon: 0, depleted: 0, expired_remaining: 0, future: 0, history: 0 },
+        pagination: { page: 1, page_size: pageSize, total: subscriptions.length, pages: subscriptions.length ? 1 : 0, has_next: false, has_previous: false },
+      })
+    }
     if (path === '/api/admin/schedule/sessions/') return json(route, { sessions, pagination: { page: 1, page_size: 200, total: sessions.length, pages: sessions.length ? 1 : 0, has_next: false, has_previous: false } })
     return json(route, emptyCollections)
   })
@@ -44,7 +58,7 @@ test('schedule form keeps shared control sizing and vertical rhythm', async ({ p
   test.skip(page.viewportSize()?.width !== 1440, 'one desktop style contract is sufficient')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=schedule')
-  await page.getByRole('button', { name: /Individual|Индивиду|Індивіду/ }).click()
+  await page.getByRole('button', { name: /^(Individual training|Индивидуальная тренировка|Індивідуальне тренування)$/ }).click()
 
   const dialog = page.getByRole('dialog', { name: /New session|Новое занятие|Нове заняття/ })
   await expect(dialog).toBeVisible()
@@ -278,13 +292,14 @@ test('shared controls never fall back to browser-native styling', async ({ page 
   expect(listFilterMetrics.background).not.toBe('rgb(240, 240, 240)')
 
   await page.goto('/?role=admin&view=overview')
-  await expect(page.getByRole('heading', { name: /Dashboard|Рабочий стол|Робочий стіл/ })).toBeVisible()
-  const emptyMetrics = await page.locator('.ops-empty-action').evaluate((node) => {
+  await expect(page.getByRole('heading', { name: /Dashboard|Сегодня|Сьогодні/ })).toBeVisible()
+  const quickActionMetrics = await page.locator('.ops-quick-actions__grid button').first().evaluate((node) => {
     const style = getComputedStyle(node)
-    return { background: style.backgroundColor, borderStyle: style.borderStyle }
+    return { background: style.backgroundColor, borderStyle: style.borderStyle, radius: Number.parseFloat(style.borderRadius) }
   })
-  expect(emptyMetrics.borderStyle).toBe('none')
-  expect(emptyMetrics.background).not.toBe('rgb(240, 240, 240)')
+  expect(quickActionMetrics.borderStyle).toBe('solid')
+  expect(quickActionMetrics.radius).toBeGreaterThanOrEqual(6)
+  expect(quickActionMetrics.background).not.toBe('rgb(240, 240, 240)')
 
   await page.goto('/?role=admin&view=schedule')
   await expect(page.getByRole('heading', { name: /Schedule|Расписание|Розклад/ })).toBeVisible()
@@ -317,4 +332,208 @@ test('shared controls never fall back to browser-native styling', async ({ page 
   expect(scheduleMetrics.pickerButton.background).not.toBe('rgb(240, 240, 240)')
   expect(scheduleMetrics.status.radius).toBeGreaterThanOrEqual(6)
   expect(scheduleMetrics.status.background).not.toBe('rgba(0, 0, 0, 0)')
+})
+
+test('mobile shell, entity cards and subscription page stay readable at supported widths', async ({ page }) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'one project exercises every mobile boundary')
+  const clients = [{
+    id: 1, client_id: 11, first_name: 'Sofiia', last_name: '', full_name: 'Sofiia',
+    birth_date: '2015-01-01', email: 'sofiia@example.test', client_phone: '+48111111111',
+    client_is_active: true, is_active: true, group: { id: 1, name: 'Audit Group' },
+  }]
+  const groups = [{
+    id: 1, name: 'Audit Group with a long mobile name', description: 'Detail',
+    default_trainer: { id: 1, name: 'Audit Trainer' }, participants_count: 1,
+    price_minor: 7000, currency: 'PLN', default_capacity: 8, is_active: true,
+  }]
+  const subscriptions = [{
+    id: 1, client_id: 11, participant_id: 1, participant_name: 'Sofiia',
+    phone: '+48111111111', groups: [{ id: 1, name: 'Audit Group' }], type: '8 sessions',
+    remaining_sessions: 4, effective_end_date: '2026-09-20', grace_end_date: '2026-09-27',
+    allowed_actions: ['open_client', 'renew', 'freeze', 'adjust'],
+  }]
+  await mockAdmin(page, { clients, groups, subscriptions })
+
+  for (const width of [320, 360, 390, 430, 767]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto('/?role=admin&view=clients')
+    await page.locator('.ops-mobile-menu-button').click()
+    const drawer = page.locator('.ops-mobile-drawer')
+    await expect(drawer).toBeVisible()
+    const shell = await drawer.evaluate((node) => {
+      const box = node.getBoundingClientRect()
+      const nav = node.querySelector('.ops-mobile-drawer-nav')
+      return {
+        left: box.left, right: box.right, width: box.width,
+        background: getComputedStyle(node).backgroundColor,
+        navOverflowY: getComputedStyle(nav).overflowY,
+      }
+    })
+    expect.soft(shell.left).toBeGreaterThanOrEqual(0)
+    expect.soft(shell.right).toBeLessThanOrEqual(width + 1)
+    expect.soft(shell.width).toBeLessThanOrEqual(width)
+    expect.soft(shell.background).not.toBe('rgba(0, 0, 0, 0)')
+    expect.soft(shell.navOverflowY).toBe('auto')
+    await page.locator('.ops-mobile-drawer-close').click()
+    const card = page.locator('.ops-compact-entity-card').first()
+    await expect(card).toBeVisible()
+    const cardBox = await card.boundingBox()
+    expect.soft(cardBox.x).toBeGreaterThanOrEqual(0)
+    expect.soft(cardBox.x + cardBox.width).toBeLessThanOrEqual(width + 1)
+  }
+
+  await page.goto('/?role=admin&view=groups')
+  await page.locator('.ops-group-compact-card .ops-compact-card-title').click()
+  const groupCard = page.locator('.ops-group-compact-card').first()
+  const inlineDetail = groupCard.locator('xpath=following-sibling::*[1]')
+  await expect(inlineDetail).toHaveClass(/ops-inline-entity-detail/)
+
+  await page.goto('/?role=admin&view=subscriptions')
+  await expect(page.locator('.ops-subscriptions-page')).toBeVisible()
+  await expect(page.locator('.ops-subscription-card')).toHaveCount(1)
+  await expect(page.locator('.ops-subscription-card')).toContainText('Sofiia')
+})
+
+test('overview rows, trainer tabs and searchable toggles keep integrated application styling', async ({ page }) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'one desktop style contract is sufficient')
+  const sessions = [{
+    id: 31,
+    start_at: '2026-08-27T10:15:00+02:00',
+    end_at: '2026-08-27T11:00:00+02:00',
+    session_type: 'individual',
+    trainer_id: 1,
+    trainer: 'Ihor Sosnov',
+    group: null,
+    location: 'Ciao Factory',
+    max_participants: 1,
+    participants_count: 1,
+    is_cancelled: false,
+  }]
+  const trainers = [{
+    id: 1,
+    username: 'ihor',
+    full_name: 'Ihor Sosnov',
+    email: 'ihor@example.test',
+    phone: '+48111111111',
+    is_active: true,
+    access_activated: true,
+    portal_access: true,
+    groups_count: 0,
+  }]
+  const groups = [{
+    id: 1,
+    name: 'Audit Group',
+    description: 'Styled group profile',
+    default_trainer: { id: 1, name: 'Ihor Sosnov' },
+    default_location: { id: 1, name: 'Pool A', is_active: true },
+    participants_count: 0,
+    price_minor: 7000,
+    currency: 'PLN',
+    default_capacity: 8,
+    color_key: 'ocean',
+    is_active: true,
+    next_session: null,
+  }]
+  const clients = Array.from({ length: 5 }, (_, index) => ({
+    id: index + 1,
+    client_id: index + 11,
+    first_name: `Sofiia ${index + 1}`,
+    last_name: '',
+    full_name: `Sofiia ${index + 1}`,
+    birth_date: '2015-01-01',
+    email: `sofiia-${index + 1}@example.test`,
+    client_phone: `+4822222222${index}`,
+    client_is_active: true,
+    is_active: true,
+    group: null,
+  }))
+  await mockAdmin(page, { sessions, trainers, groups, clients })
+
+  await page.goto('/?role=admin&view=schedule')
+  await page.getByRole('button', { name: /^(Individual training|Индивидуальная тренировка|Індивідуальне тренування)$/ }).click()
+  const dialog = page.getByRole('dialog', { name: /New session|Новое занятие|Нове заняття/ })
+  const toggle = dialog.locator('.ops-search-select-toggle')
+  const toggleMetrics = await toggle.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return {
+      borderTopStyle: style.borderTopStyle,
+      borderLeftStyle: style.borderLeftStyle,
+      background: style.backgroundColor,
+      rightRadius: Number.parseFloat(style.borderTopRightRadius),
+      font: style.fontFamily,
+    }
+  })
+  expect.soft(toggleMetrics.borderTopStyle).toBe('none')
+  expect.soft(toggleMetrics.borderLeftStyle).toBe('solid')
+  expect.soft(toggleMetrics.background).not.toBe('rgb(240, 240, 240)')
+  expect.soft(toggleMetrics.rightRadius).toBeGreaterThanOrEqual(6)
+  expect.soft(toggleMetrics.font).toContain('IBM Plex Sans')
+
+  await page.goto('/?role=admin&view=overview')
+  const row = page.locator('.ops-quick-actions__grid button').first()
+  await expect(row).toBeVisible()
+  const rowMetrics = await row.evaluate((node) => {
+    const style = getComputedStyle(node)
+      const parent = node.parentElement.getBoundingClientRect()
+    const box = node.getBoundingClientRect()
+    return {
+      widthRatio: box.width / parent.width,
+      borderTopStyle: style.borderTopStyle,
+      background: style.backgroundColor,
+      paddingLeft: Number.parseFloat(style.paddingLeft),
+      font: style.fontFamily,
+      cursor: style.cursor,
+    }
+  })
+  expect.soft(rowMetrics.widthRatio).toBeGreaterThan(0.2)
+  expect.soft(rowMetrics.borderTopStyle).toBe('solid')
+  expect.soft(rowMetrics.background).not.toBe('rgb(240, 240, 240)')
+  expect.soft(rowMetrics.paddingLeft).toBeGreaterThanOrEqual(10)
+  expect.soft(rowMetrics.font).toContain('IBM Plex Sans')
+  expect.soft(rowMetrics.cursor).toBe('pointer')
+
+  await page.goto('/?role=admin&view=trainers')
+  await page.locator('.ops-link-button').filter({ hasText: 'Ihor Sosnov' }).click()
+  const tabs = page.getByRole('tablist')
+  const tabMetrics = await tabs.evaluate((node) => {
+    const tabs = [...node.querySelectorAll('[role="tab"]')]
+    return tabs.map((tab) => {
+      const style = getComputedStyle(tab)
+      return {
+        borderTopStyle: style.borderTopStyle,
+        radius: Number.parseFloat(style.borderRadius),
+        background: style.backgroundColor,
+        font: style.fontFamily,
+        paddingLeft: Number.parseFloat(style.paddingLeft),
+      }
+    })
+  })
+  expect.soft(tabMetrics.every((metric) => metric.borderTopStyle === 'none')).toBe(true)
+  expect.soft(tabMetrics.every((metric) => metric.radius >= 6)).toBe(true)
+  expect.soft(tabMetrics.every((metric) => metric.background !== 'rgb(240, 240, 240)')).toBe(true)
+  expect.soft(tabMetrics.every((metric) => metric.font.includes('IBM Plex Sans'))).toBe(true)
+  expect.soft(tabMetrics.every((metric) => metric.paddingLeft >= 10)).toBe(true)
+
+  await page.goto('/?role=admin&view=groups')
+  await page.locator('.ops-link-button').filter({ hasText: 'Audit Group' }).click()
+  await page.locator('.ops-entity-card').getByRole('button', { name: /^(Add|Добавить|Додати|Dodaj)$/ }).click()
+  const memberDialog = page.getByRole('dialog', { name: /Add participant to group|Добавить участника в группу|Додати учасника до групи|Dodaj uczestnika do grupy/ })
+  const memberInput = memberDialog.getByRole('combobox')
+  await memberInput.focus()
+  const memberList = memberDialog.getByRole('listbox')
+  await expect(memberList).toBeVisible()
+  const memberModalMetrics = await memberDialog.evaluate((node) => {
+    const body = node.querySelector('.form-modal__body')
+    const list = node.querySelector('.ops-search-select-list')
+    const bodyBox = body.getBoundingClientRect()
+    const listBox = list.getBoundingClientRect()
+    return {
+      bodyHasOwnScroll: body.scrollHeight > body.clientHeight + 1,
+      listFitsBody: listBox.bottom <= bodyBox.bottom + 1,
+      listHeight: listBox.height,
+    }
+  })
+  expect.soft(memberModalMetrics.bodyHasOwnScroll).toBe(false)
+  expect.soft(memberModalMetrics.listFitsBody).toBe(true)
+  expect.soft(memberModalMetrics.listHeight).toBeGreaterThan(80)
 })

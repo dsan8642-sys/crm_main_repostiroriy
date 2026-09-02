@@ -94,6 +94,7 @@ export function useScreenList({
   const restoreScrollRef = useRef(stored.scrollY || 0)
   const restorePagesRef = useRef(mobile ? Math.max(1, stored.loadedPages) : 1)
   const rowsRef = useRef(rows)
+  const routeIsChanging = activeStorageKeyRef.current !== storageKey
   rowsRef.current = rows
   if (!controllerRef.current) {
     controllerRef.current = createListRequestController(
@@ -257,7 +258,7 @@ export function useScreenList({
     rows,
     pagination,
     payload,
-    status,
+    status: routeIsChanging ? 'loading' : status,
     error,
     nextError,
     search,

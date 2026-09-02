@@ -16,6 +16,7 @@ export const ROLE_META = {
       groups: ['runtime.admin.groups.title', 'runtime.admin.groups.desc'],
       schedule: ['runtime.admin.schedule.title', 'runtime.admin.schedule.desc'],
       attendance: ['runtime.admin.attendance.title', 'runtime.admin.attendance.desc'],
+      subscriptions: ['runtime.admin.subscriptions.title', 'runtime.admin.subscriptions.desc'],
       payments: ['runtime.admin.payments.title', 'runtime.admin.payments.desc'],
       debtors: ['runtime.admin.debtors.title', 'runtime.admin.debtors.desc'],
       settings: ['runtime.admin.settings.title', 'runtime.admin.settings.desc'],
@@ -57,9 +58,9 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
     return [
       { key: 'overview', label: t('nav.admin.overview'), icon: <icons.Home size={17} /> },
       { key: 'clients', label: t('nav.admin.clients'), icon: <icons.ClientFamily size={17} />, count: counts.clients ?? data.AdminData?.clients?.length },
-      { key: 'trainers', label: t('nav.admin.trainers'), icon: <icons.TrainerWhistle size={17} />, count: data.AdminData?.trainers?.length, section: t('shell.operationsSection') },
-      { key: 'groups', label: t('nav.admin.groups'), icon: <icons.GroupMembers size={17} />, count: data.AdminData?.groups?.length, section: t('shell.operationsSection') },
       { key: 'schedule', label: t('nav.admin.schedule'), icon: <icons.Calendar size={17} />, section: t('shell.operationsSection') },
+      { key: 'groups', label: t('nav.admin.groups'), icon: <icons.GroupMembers size={17} />, count: data.AdminData?.groups?.length, section: t('shell.operationsSection') },
+      { key: 'trainers', label: t('nav.admin.trainers'), icon: <icons.TrainerWhistle size={17} />, count: data.AdminData?.trainers?.length, section: t('shell.operationsSection') },
       {
         key: 'payments',
         label: t('nav.admin.payments'),
@@ -75,6 +76,12 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
         countTone: 'danger',
         section: t('shell.financeSection'),
       },
+      {
+        key: 'subscriptions',
+        label: t('nav.admin.subscriptions'),
+        icon: <icons.Layers size={17} />,
+        section: t('shell.financeSection'),
+      },
       { key: 'settings', label: t('nav.admin.settings'), icon: <icons.Settings size={17} />, section: t('shell.systemSection') },
     ]
   }
@@ -82,8 +89,8 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
   if (role === 'trainer') {
     return [
       { key: 'sessions', label: t('nav.trainer.sessions'), icon: <icons.Calendar size={17} /> },
-      { key: 'groups', label: t('nav.trainer.groups'), icon: <icons.Users size={17} />, section: t('shell.operationsSection') },
       { key: 'session', label: t('nav.trainer.session'), icon: <icons.Check size={17} />, section: t('shell.operationsSection') },
+      { key: 'groups', label: t('nav.trainer.groups'), icon: <icons.Users size={17} />, section: t('shell.operationsSection') },
       { key: 'history', label: t('nav.trainer.history'), icon: <icons.File size={17} />, section: t('shell.operationsSection') },
     ]
   }

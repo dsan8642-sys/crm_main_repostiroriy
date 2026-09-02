@@ -11,6 +11,7 @@ import { loadAdminParticipantOptions } from '../participantSearch.js'
 import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
 import { FormModal } from '../FormModal.jsx'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
+import { AttendanceSaveStatus } from '../TodayPrimitives.jsx'
 
 export function attendanceSessionDisplayStatus(session, now = Date.now()) {
   if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
@@ -252,6 +253,10 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const selectedStatus = selectedSession?.is_cancelled || selectedSession?.isCancelled ? 'cancelled' : selectedSession?.status
     const selectedDisplayStatus = attendanceSessionDisplayStatus(selectedSession)
     const sessionTypeLabel = { group: t('attendance.sessionTypeGroup'), individual: t('attendance.sessionTypeIndividual'), split: t('attendance.sessionTypeSplit') }[selectedSession?.session_type || selectedSession?.sessionType] || t('attendance.sessionTypeGroup')
+    const nextSession = sessions
+      .filter((session) => !session.isCancelled && String(session.sessionId) !== String(selectedSessionId))
+      .filter((session) => new Date(session.startAt) > new Date(selectedSession?.start_at || selectedSession?.startAt || 0))
+      .sort((left, right) => new Date(left.startAt) - new Date(right.startAt))[0]
 
     return (
       <div className="page page-wide">
@@ -262,6 +267,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
             <p className="page-desc">{t('attendance.description')}</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {nextSession && <Button variant="secondary" disabled={busyId != null} onClick={() => go?.('attendance', { sessionId: nextSession.sessionId })}>{t('attendance.nextSession')}</Button>}
             <Button variant="primary" disabled={selectedStatus === 'cancelled' || !rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={() => setBulkPending(true)}>{t('attendance.allPresent')}</Button>
           </div>
         </div>
@@ -270,6 +276,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         {selectedStatus === 'cancelled' && <Banner tone="warning" title={t('attendance.cancelled')} style={{ marginBottom: 12 }}>{t('attendance.readOnly')} <Button size="sm" variant="secondary" disabled={busyId != null} loading={busyId === 'restore-session'} onClick={restoreSelectedSession}>{t('attendance.restore')}</Button></Banner>}
         <BusyBanner Banner={Banner} show={loading}>{t('attendance.loadingRoster')}</BusyBanner>
         <BusyBanner Banner={Banner} show={busyId != null && !loading}>{t('attendance.saving')}</BusyBanner>
+        <AttendanceSaveStatus busy={busyId != null} savingText={t('attendance.saving')} savedText={t('attendance.saved')} />
 
         <div className="ops-session-detail-grid">
           <div className="card card-pad">
@@ -355,7 +362,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 header: t('attendance.titleColumn'),
                 width: 340,
                 render: (row) => (
-                  <div id={`admin-attendance-row-${row.id}`} role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div id={`admin-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {options.map((option) => (
                       <Button
                         key={option.value}
@@ -363,6 +370,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                         variant={row.attendance?.status === option.value ? 'primary' : 'secondary'}
                         loading={busyId === `mark-${row.id}`}
                         disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`}
+                        aria-pressed={row.attendance?.status === option.value}
                         onClick={() => mark(row, option.value)}
                       >
                         {t(option.labelKey)}{option.consumes ? ' -1' : ''}

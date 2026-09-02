@@ -76,6 +76,14 @@ def set_student_groups(student, values):
         })
     existing = set(student.group_memberships.values_list("group_id", flat=True))
     desired = set(group_ids)
+    archived_additions = [
+        group.id for group in groups
+        if not group.is_active and group.id not in existing
+    ]
+    if archived_additions:
+        raise ValidationError({
+            "participant.group_ids": "Нельзя добавить участника в архивную группу.",
+        })
     student.group_memberships.filter(group_id__in=existing - desired).delete()
     GroupMembership.objects.bulk_create([
         GroupMembership(student=student, group_id=group_id)

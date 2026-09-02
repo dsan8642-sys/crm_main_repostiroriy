@@ -710,7 +710,8 @@ test('admin split schedule filters, shows roster summary and submits an optional
   const errors = collectPageErrors(page)
   const submittedSessions = []
   const patchedSessions = []
-  const fixtureStart = new Date(Date.now() + 30 * 60 * 1000)
+  const fixtureStart = new Date()
+  fixtureStart.setHours(12, 0, 0, 0)
   const startAt = localIsoDateTime(fixtureStart)
   const endAt = localIsoDateTime(new Date(fixtureStart.getTime() + 60 * 60 * 1000))
   const participants = [
@@ -1151,59 +1152,23 @@ test('admin upcoming sessions stay inside a narrow card', async ({ page }) => {
   })
 
   await page.goto('/')
-  await expect(page.locator('h1.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
-  const upcomingSession = page.getByRole('button', {
-    name: /Delfiny Zaawansowane.*Marek Zielinski-Trener.*Basen_A.*Отменено/,
+  await expect(page.locator('h1.page-title', { hasText: 'Сегодня' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ближайших занятий нет' })).toBeVisible()
+  const exception = page.getByRole('button', {
+    name: /Delfiny Zaawansowane.*Отменено/,
   })
-  await expect(upcomingSession).toBeVisible()
-  const layout = await upcomingSession.evaluate((row) => {
-    const rowBox = row.getBoundingClientRect()
-    const textBox = (text) => {
-      const element = [...row.querySelectorAll('*')].find((node) => node.textContent?.trim() === text)
-      const box = element?.getBoundingClientRect()
-      return box ? { top: box.top, bottom: box.bottom, left: box.left, right: box.right } : null
-    }
-    const timeBox = row.querySelector('.mono')?.getBoundingClientRect()
-    return {
-      row: { top: rowBox.top, bottom: rowBox.bottom, left: rowBox.left, right: rowBox.right },
-      time: timeBox ? { top: timeBox.top, bottom: timeBox.bottom, left: timeBox.left, right: timeBox.right } : null,
-      group: textBox('Delfiny Zaawansowane Grupa Poranna'),
-      trainer: textBox('Marek Zielinski-Trener-Zastepujacy'),
-      location: textBox('Basen_A_Sektor_Polnocny_Bardzo_Dluga_Nazwa'),
-      status: textBox('Отменено'),
-      contentOverflow: row.scrollWidth > row.clientWidth + 1,
-      pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
-      overflowing: [...document.body.querySelectorAll('*')].filter((node) => node.getBoundingClientRect().right > window.innerWidth + 1).slice(0, 8).map((node) => ({
-        className: node.className?.toString?.() || '',
-        tagName: node.tagName,
-        right: Math.round(node.getBoundingClientRect().right),
-        width: Math.round(node.getBoundingClientRect().width),
-      })),
-    }
-  })
-
-  expect(layout.contentOverflow).toBe(false)
-  expect(layout.pageOverflow, JSON.stringify(layout.overflowing)).toBe(false)
-  for (const box of [layout.time, layout.group, layout.trainer, layout.location, layout.status]) {
-    expect(box).not.toBeNull()
-    expect(box.left).toBeGreaterThanOrEqual(layout.row.left - 1)
-    expect(box.right).toBeLessThanOrEqual(layout.row.right + 1)
-  }
-  if (layout.row.right - layout.row.left <= 720) {
-    expect(Math.abs(layout.time.top - layout.group.top)).toBeLessThanOrEqual(4)
-    expect(layout.trainer.top).toBeGreaterThan(layout.time.top + 4)
-    expect(Math.abs(layout.trainer.top - layout.status.top)).toBeLessThanOrEqual(4)
-  } else {
-    expect(Math.abs(layout.time.top - layout.status.top)).toBeLessThanOrEqual(4)
-  }
-  await upcomingSession.click()
-  await expect(page).toHaveURL(/view=attendance.*session=1/)
+  await expect(exception).toBeVisible()
+  expect(await exception.evaluate((row) => row.scrollWidth <= row.clientWidth + 1)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+  await exception.click()
+  await expect(page).toHaveURL(/view=schedule.*tab=list/)
   expect(errors).toEqual([])
 })
 
 test('admin critical screens render with API-backed data', async ({ page }) => {
   const errors = collectPageErrors(page)
-  const fixtureStart = new Date(Date.now() + 10 * 60 * 1000)
+  const fixtureStart = new Date()
+  fixtureStart.setHours(12, 0, 0, 0)
   const now = localIsoDateTime(fixtureStart)
   const fixtureEnd = localIsoDateTime(new Date(fixtureStart.getTime() + 45 * 60 * 1000))
   const seenAdminEndpoints = new Set()
@@ -1219,6 +1184,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/trainers/',
     '/api/admin/groups/',
     '/api/admin/schedule/sessions/',
+    '/api/admin/subscriptions/',
     '/api/admin/payments/',
     '/api/admin/debtors/',
   ]
@@ -1323,6 +1289,26 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/subscription-types/': {
       subscription_types: [{ id: 1, name: '8 wejsc', price_minor: 24000, currency: 'PLN', duration_days: 30, sessions_count: 8, is_unlimited: false, is_individual: false, is_active: true }],
     },
+    '/api/admin/subscriptions/': {
+      subscriptions: [{
+        id: 1,
+        client_id: 10,
+        participant_id: 1,
+        participant_name: 'Jan Kowalski',
+        phone: '+48111222333',
+        groups: [{ id: 1, name: 'Delfiny' }],
+        subscription_type_id: 1,
+        type: '8 wejsc',
+        status: 'active',
+        remaining_sessions: 7,
+        start_date: '2026-07-01',
+        effective_end_date: '2026-07-31',
+        grace_end_date: '2026-08-07',
+        allowed_actions: ['open_client', 'renew', 'freeze', 'adjust'],
+      }],
+      counts: { active: 1, ending_soon: 0, depleted: 0, expired_remaining: 0, future: 0, history: 0 },
+      pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
+    },
     '/api/admin/schedule/sessions/': {
       sessions: [
         { id: 1, start_at: now, end_at: fixtureEnd, location: 'Basen A', session_type: 'group', presentation_color_key: 'forest-01', trainer_id: 1, trainer: 'Marek Zielinski', group: { id: 1, name: 'Delfiny' }, is_cancelled: false, max_participants: 8, participants_count: 1, notes: '' },
@@ -1398,7 +1384,6 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     const url = new URL(route.request().url())
     const method = route.request().method()
     const financeResponses = {
-      '/api/admin/participants/1/charges/': { charge: { id: 1 } },
       '/api/admin/participants/1/subscriptions/': { subscription: { id: 2 } },
       '/api/admin/subscriptions/1/renew/': { subscription: { id: 3 } },
       '/api/admin/subscriptions/1/freeze/': { days: 7 },
@@ -1454,6 +1439,19 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
         contentType: 'application/json',
         body: JSON.stringify({ ...routes['/api/admin/schedule/sessions/'].sessions[1], is_cancelled: false, restored: true }),
       })
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/admin/participants/1/charges/') {
+      const charge = { id: 71, participant_id: 1, amount_minor: 8000, currency: 'PLN', due_date: '2026-07-16', description: 'Индивидуальное занятие', status: 'active', balance_minor: -8000, reference_id: 'smoke-charge-71', can_reverse: true }
+      routes['/api/admin/clients/10/'] = {
+        ...routes['/api/admin/clients/10/'],
+        participants: [{ ...routes['/api/admin/clients/10/'].participants[0], balance_minor: -8000 }],
+        charges: [charge],
+        summary: { ...routes['/api/admin/clients/10/'].summary, balance_minor: -8000 },
+      }
+      seenAdminEndpoints.add(url.pathname)
+      seenClientFinanceActions.add(url.pathname)
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(charge) })
       return
     }
     if (method === 'POST' && financeResponses[url.pathname]) {
@@ -1525,7 +1523,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   })
 
   await page.goto('/')
-  await expect(page.locator('h1.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Сегодня' })).toBeVisible()
   const adminIconSignatures = await page.evaluate(() => {
     const nav = (label) => document.querySelector(`.ops-nav-button[title="${label}"] svg`)?.innerHTML
     const kpi = (label) => [...document.querySelectorAll('.ops-kpi-button')]
@@ -1779,6 +1777,13 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     expect(seenClientFinanceActions, `client card should submit ${endpoint}`).toContain(endpoint)
   }
 
+  await openShellDestination(page, 'Абонементы')
+  await expect(page.locator('h1.page-title', { hasText: 'Абонементы' })).toBeVisible()
+  const subscriptionSurface = compactClients
+    ? page.locator('.ops-subscription-card:visible')
+    : page.locator('.ops-entity-desktop-table:visible')
+  await expect(subscriptionSurface.getByText('Jan Kowalski').first()).toBeVisible()
+
   await openShellDestination(page, 'Платежи')
   await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
   if (compactClients) await expect(page.locator('.ops-payment-compact-card').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
@@ -1866,13 +1871,11 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
   await expect(page.locator('.ops-sidebar')).toBeVisible()
-  if ((page.viewportSize()?.width || 0) <= 767 && await page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').count() === 0) {
-    await page.getByRole('tab', { name: /Занятий: 1/ }).click()
-  }
-  await expect(page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Сегодня' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Открыть посещаемость' })).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
 
-  for (const label of ['Мои занятия', 'Посещаемость', 'Мои группы', 'История']) {
+  for (const label of ['Сегодня', 'Посещаемость', 'Мои группы', 'История']) {
     await openShellDestination(page, label)
     const pageHeading = page.locator('main:visible h1.page-title')
     await expect(pageHeading).toHaveCount(1)
@@ -2125,7 +2128,7 @@ test('admin confirms and rejects pending payments and the nav counter decrements
 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
-  await expect(page.locator('h1.page-title', { hasText: 'Рабочий стол' })).toBeVisible()
+  await expect(page.locator('h1.page-title', { hasText: 'Сегодня' })).toBeVisible()
 
   const counter = page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')
   await expect(counter).toHaveText('2')

@@ -110,6 +110,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       dueDate: new Date().toISOString().slice(0, 10),
       chargeDescription: '',
       chargeAmount: '',
+      chargeIdempotencyKey: createPaymentAttemptKey('admin-charge'),
       paymentAmount: '',
       paymentDate: new Date().toISOString().slice(0, 10),
       paymentMethod: 'cash',
@@ -516,6 +517,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           amount_minor: minorFromMajor(financeForm.chargeAmount),
           currency: 'PLN',
           due_date: financeForm.dueDate,
+          idempotency_key: financeForm.chargeIdempotencyKey,
         })
         setMessage(t('finance.chargeCreated'))
         setFinanceAction(null)
@@ -686,8 +688,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         ? { ...financeForm, paymentIdempotencyKey: createPaymentAttemptKey('admin-payment') }
         : ['issue', 'renew'].includes(action)
           ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription') }
-          : action === 'charge' && !financeForm.chargeDescription
-            ? { ...financeForm, chargeDescription: t('finance.manualCharge') }
+        : action === 'charge'
+          ? { ...financeForm, chargeDescription: financeForm.chargeDescription || t('finance.manualCharge'), chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }
             : financeForm
       if (next !== financeForm) setFinanceForm(next)
       setFinanceAction(action)

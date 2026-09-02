@@ -28,6 +28,32 @@ def _payment_mutation_payload(payment, *, idempotent_replay=False):
     return payload
 
 
+def _charge_for_readback(charge_id):
+    return Charge.objects.select_related(
+        "student", "student__parent__user", "subscription", "attendance",
+        "created_by", "reversal", "reversal__created_by",
+    ).get(pk=charge_id)
+
+
+def _charge_mutation_payload(charge, *, idempotent_replay=False):
+    charge = _charge_for_readback(charge.pk)
+    payload = _charge_payload(charge)
+    balance = student_balance(charge.student)
+    payload.update({
+        "balance_minor": balance.amount_minor,
+        "balance_currency": balance.currency,
+        "idempotent_replay": idempotent_replay,
+    })
+    return payload
+
+
+def _charge_idempotency_conflict_response():
+    return JsonResponse({
+        "error": "Ключ идемпотентности уже использован с другими данными.",
+        "code": "idempotency_conflict",
+    }, status=409)
+
+
 def _require_client_context(participant, data):
     """Fail closed when a client-card mutation targets another account."""
     raw_client_id = data.get("client_id")
@@ -52,10 +78,44 @@ def admin_participant_charges(request, participant_id):
     if request.method == "POST":
         data = _json_body(request)
         _require_client_context(participant, _charge_data(data))
-        charge = _create_charge_for_participant(participant, data, actor=user)
-        return JsonResponse(_charge_payload(charge), status=201)
-    qs = participant.charges.select_related("student", "subscription").order_by("-due_date", "-id")
+        try:
+            charge, created = _create_manual_charge_for_participant(
+                participant, data, actor=user)
+        except IdempotencyConflict:
+            return _charge_idempotency_conflict_response()
+        return JsonResponse(
+            _charge_mutation_payload(charge, idempotent_replay=not created),
+            status=201 if created else 200,
+        )
+    qs = participant.charges.select_related(
+        "student", "subscription", "attendance", "created_by", "reversal",
+        "reversal__created_by").order_by("-due_date", "-id")
     return JsonResponse({"charges": [_charge_payload(charge) for charge in qs]})
+
+
+@require_POST
+def admin_charge_reverse(request, charge_id):
+    user = _admin_required(request)
+    charge = get_object_or_404(
+        Charge.objects.select_related("student", "student__parent__user"),
+        pk=charge_id,
+    )
+    data = _json_body(request)
+    _require_client_context(charge.student, data)
+    try:
+        reversal, created = reverse_manual_charge(
+            charge=charge,
+            actor=user,
+            reason=data.get("reason"),
+            idempotency_key=data.get("idempotency_key"),
+        )
+    except IdempotencyConflict:
+        return _charge_idempotency_conflict_response()
+    return JsonResponse(
+        _charge_mutation_payload(
+            reversal.charge, idempotent_replay=not created),
+        status=201 if created else 200,
+    )
 
 
 @require_http_methods(["GET", "POST"])

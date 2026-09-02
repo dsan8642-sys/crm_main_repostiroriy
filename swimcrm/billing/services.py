@@ -14,7 +14,7 @@ from audit.models import audit
 from common.money import Money
 
 from .models import (
-    Charge, Payment, PaymentEvent, PaymentEventType, PaymentMethod,
+    Charge, ChargeReversal, Payment, PaymentEvent, PaymentEventType, PaymentMethod,
     PaymentSource, PaymentStatus, ReceiptFile,
 )
 
@@ -22,15 +22,20 @@ from .models import (
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,79}$")
 
 
+class IdempotencyConflict(Exception):
+    """The same operation key was reused for a different immutable payload."""
+
+
 @dataclass
 class ChargeStatus:
     charge: Charge
     paid_minor: int
     is_overdue: bool
+    is_reversed: bool = False
 
     @property
     def is_paid(self):
-        return self.paid_minor >= self.charge.amount_minor
+        return self.is_reversed or self.paid_minor >= self.charge.amount_minor
 
     @property
     def is_partial(self):
@@ -38,6 +43,8 @@ class ChargeStatus:
 
     @property
     def label(self):
+        if self.is_reversed:
+            return "Отменено"
         if self.is_paid:
             return "Оплачено"
         if self.is_partial:
@@ -50,27 +57,183 @@ def student_balance(student, currency=None) -> Money:
     currency = currency or settings.DEFAULT_CURRENCY
     charged = (Charge.objects.filter(student=student, currency=currency)
                .aggregate(t=Sum("amount_minor"))["t"] or 0)
+    reversed_charges = (ChargeReversal.objects.filter(
+        charge__student=student, currency=currency,
+    ).aggregate(t=Sum("amount_minor"))["t"] or 0)
     paid = (Payment.objects.filter(student=student, currency=currency,
                                    status=PaymentStatus.CONFIRMED)
             .aggregate(t=Sum("amount_minor"))["t"] or 0)
-    return Money(charged - paid, currency)
+    return Money(charged - reversed_charges - paid, currency)
 
 
 def charge_statuses(student, currency=None):
     """FIFO-allocate confirmed payments to charges (by due date) for per-charge status."""
     currency = currency or settings.DEFAULT_CURRENCY
     today = timezone.localdate()
-    charges = list(Charge.objects.filter(student=student, currency=currency).order_by("due_date", "id"))
+    charges = list(Charge.objects.filter(
+        student=student, currency=currency,
+    ).select_related("reversal").order_by("due_date", "id"))
     pool = (Payment.objects.filter(student=student, currency=currency,
                                    status=PaymentStatus.CONFIRMED)
             .aggregate(t=Sum("amount_minor"))["t"] or 0)
     out = []
     for ch in charges:
+        if hasattr(ch, "reversal"):
+            out.append(ChargeStatus(
+                charge=ch,
+                paid_minor=ch.amount_minor,
+                is_overdue=False,
+                is_reversed=True,
+            ))
+            continue
         applied = min(pool, ch.amount_minor)
         pool -= applied
         out.append(ChargeStatus(charge=ch, paid_minor=applied,
                                 is_overdue=(ch.due_date < today and applied < ch.amount_minor)))
     return out
+
+
+def _validate_manual_charge_replay(
+        charge, *, student, amount_minor, currency, due_date, description):
+    expected = {
+        "student_id": student.pk,
+        "amount_minor": amount_minor,
+        "currency": currency,
+        "due_date": due_date,
+        "description": description,
+    }
+    if any(getattr(charge, field) != value for field, value in expected.items()):
+        raise IdempotencyConflict
+    if charge.subscription_id is not None or charge.attendance_id is not None:
+        raise IdempotencyConflict
+    return charge
+
+
+@transaction.atomic
+def create_manual_charge(
+        *, student, actor, amount_minor, currency, due_date, description,
+        idempotency_key):
+    """Create at most one manual charge for one admin UI attempt."""
+    amount_minor = _validate_payment_amount(amount_minor)
+    description = str(description or "").strip()
+    if not description:
+        raise ValidationError({
+            "description": ValidationError(
+                "Укажите описание начисления.", code="required"),
+        })
+    try:
+        Money(amount_minor, currency)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({
+            "currency": ValidationError(
+                "Укажите поддерживаемую валюту.", code="invalid_choice"),
+        }) from exc
+
+    reference_id = payment_reference_id(
+        source="admin_charge",
+        actor=actor,
+        idempotency_key=idempotency_key,
+    )
+    expected = {
+        "student": student,
+        "amount_minor": amount_minor,
+        "currency": currency,
+        "due_date": due_date,
+        "description": description,
+    }
+    existing = Charge.objects.filter(reference_id=reference_id).first()
+    if existing is not None:
+        return _validate_manual_charge_replay(existing, **expected), False
+
+    try:
+        with transaction.atomic():
+            charge = Charge.objects.create(
+                student=student,
+                description=description,
+                amount_minor=amount_minor,
+                currency=currency,
+                due_date=due_date,
+                reference_id=reference_id,
+                created_by=actor,
+            )
+    except IntegrityError:
+        existing = Charge.objects.get(reference_id=reference_id)
+        return _validate_manual_charge_replay(existing, **expected), False
+
+    audit(actor, "charge.created", charge, {
+        "participant_id": student.id,
+        "amount_minor": amount_minor,
+        "currency": currency,
+    })
+    return charge, True
+
+
+def _validate_charge_reversal_replay(reversal, *, charge, reason):
+    if reversal.charge_id != charge.pk or reversal.reason != reason:
+        raise IdempotencyConflict
+    if (reversal.amount_minor != charge.amount_minor
+            or reversal.currency != charge.currency):
+        raise IdempotencyConflict
+    return reversal
+
+
+@transaction.atomic
+def reverse_manual_charge(*, charge, actor, reason, idempotency_key):
+    """Append one full reversal for a manual charge; never mutate the charge."""
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValidationError({
+            "reason": ValidationError(
+                "Укажите причину отмены начисления.", code="required"),
+        })
+
+    locked_charge = Charge.objects.select_for_update().get(pk=charge.pk)
+    if locked_charge.subscription_id is not None or locked_charge.attendance_id is not None:
+        raise ValidationError({
+            "charge": ValidationError(
+                "Этим действием можно отменить только ручное начисление.",
+                code="manual_only",
+            ),
+        })
+
+    reference_id = payment_reference_id(
+        source="admin_charge_reversal",
+        actor=actor,
+        idempotency_key=idempotency_key,
+    )
+    existing = ChargeReversal.objects.filter(reference_id=reference_id).first()
+    if existing is not None:
+        return _validate_charge_reversal_replay(
+            existing, charge=locked_charge, reason=reason), False
+
+    if ChargeReversal.objects.filter(charge=locked_charge).exists():
+        raise IdempotencyConflict
+
+    try:
+        with transaction.atomic():
+            reversal = ChargeReversal.objects.create(
+                charge=locked_charge,
+                amount_minor=locked_charge.amount_minor,
+                currency=locked_charge.currency,
+                reason=reason,
+                reference_id=reference_id,
+                created_by=actor,
+            )
+    except IntegrityError:
+        existing = ChargeReversal.objects.filter(reference_id=reference_id).first()
+        if existing is None:
+            raise IdempotencyConflict from None
+        return _validate_charge_reversal_replay(
+            existing, charge=locked_charge, reason=reason), False
+
+    audit(actor, "charge.reversed", reversal, {
+        "charge_id": locked_charge.id,
+        "participant_id": locked_charge.student_id,
+        "amount_minor": locked_charge.amount_minor,
+        "currency": locked_charge.currency,
+        "reason": reason,
+    })
+    return reversal, True
 
 
 def _validate_payment_amount(amount_minor):

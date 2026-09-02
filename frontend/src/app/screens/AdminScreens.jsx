@@ -1,5 +1,6 @@
 ﻿export { createAdminPaymentsScreen } from './AdminPaymentsScreen.jsx'
 export { createAdminOverviewScreen } from './AdminOverviewScreen.jsx'
+export { createAdminSubscriptionsScreen } from './AdminSubscriptionsScreen.jsx'
 export { createAdminClientsScreen } from './AdminClientsScreen.jsx'
 export { createAdminClientDetailScreen } from './AdminClientDetailScreen.jsx'
 export { createAdminTrainersScreen } from './AdminTrainersScreen.jsx'

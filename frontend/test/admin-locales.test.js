@@ -52,7 +52,7 @@ test('admin catalogs have exact key parity and interpolate named values', () => 
     assert.deepEqual(Object.keys(adminCatalogs[locale]).sort(), expected)
   })
 
-  assert.equal(adminT('uk', 'overview.title'), 'Робочий стіл')
+  assert.equal(adminT('uk', 'overview.title'), 'Сьогодні')
   assert.equal(adminT('pl', 'common.save'), 'Zapisz')
   assert.equal(adminT('en', 'debtors.summary', { count: 7 }), 'Clients: 7')
 })

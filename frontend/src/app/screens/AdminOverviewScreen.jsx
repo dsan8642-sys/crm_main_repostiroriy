@@ -5,6 +5,7 @@ import { useLocale } from '../../i18n.jsx'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime, mapAdminSessionRows } from '../../mappers.js'
 import { BusyBanner } from '../runtime.jsx'
 import { dateToIso } from '../scheduleContracts.js'
+import { CompactStatusRow, QuickActions, TodaySessionCard } from '../TodayPrimitives.jsx'
 
 export function createAdminOverviewScreen(components, icons, adminData = {}) {
   const { Money, Button, Banner, Badge } = components
@@ -55,7 +56,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           const debtorPayload = debtorsResult.status === 'fulfilled' ? debtorsResult.value : null
           const debtorRows = debtorPayload?.debtors || []
           return {
-            sessions: sessionPayload ? mapAdminSessionRows(sessionPayload.sessions || []).slice(0, 5) : current.sessions,
+            sessions: sessionPayload ? mapAdminSessionRows(sessionPayload.sessions || []) : current.sessions,
             pendingCount: paymentPayload
               ? (paymentPayload.pagination?.total ?? (paymentPayload.payments || []).filter((payment) => payment.status === 'pending').length)
               : current.pendingCount,
@@ -76,6 +77,21 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
     const pendingCount = overviewLists.pendingCount
     const debtorCount = overviewLists.debtorCount
     const debtTotal = overviewLists.debtTotal
+    const now = new Date()
+    const activeSessions = sessions
+      .filter((session) => !session.isCancelled)
+      .sort((left, right) => new Date(left.startAt) - new Date(right.startAt))
+    const currentSession = activeSessions.find((session) => (
+      new Date(session.startAt) <= now && now < new Date(session.endAt)
+    ))
+    const primarySession = currentSession || activeSessions.find(
+      (session) => new Date(session.startAt) > now,
+    )
+    const todayIso = dateToIso(now)
+    const todaySessions = activeSessions.filter(
+      (session) => session.startAt?.slice(0, 10) === todayIso,
+    ).slice(0, 5)
+    const exceptions = sessions.filter((session) => session.isCancelled).slice(0, 3)
 
     return (
       <div className="page">
@@ -84,14 +100,33 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
             <h1 className="page-title">{t('overview.title')}</h1>
             <p className="page-desc">{t('overview.description')}</p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant="secondary" iconLeft={<I.Calendar size={15} />} onClick={() => go('schedule')}>{t('overview.schedule')}</Button>
-            <Button variant="primary" iconLeft={<I.Cash size={15} />} onClick={() => go('payments')}>{t('overview.payments')}</Button>
-          </div>
         </div>
 
+        <TodaySessionCard
+          Button={Button}
+          eyebrow={currentSession ? t('overview.currentSession') : t('overview.nearestSession')}
+          title={primarySession?.group}
+          detail={primarySession && `${primarySession.date} · ${primarySession.start}-${primarySession.end}`}
+          meta={primarySession && `${primarySession.trainer} · ${primarySession.location}`}
+          icon={<I.Calendar size={20} />}
+          actionLabel={t('overview.openAttendance')}
+          onOpen={() => go('attendance', { sessionId: primarySession?.sessionId })}
+          emptyTitle={t('overview.noUpcomingTitle')}
+          emptyDetail={t('overview.noUpcomingDetail')}
+        />
+
+        <QuickActions
+          label={t('overview.quickLinks')}
+          actions={[
+            { label: t('overview.findClient'), icon: <I.ClientFamily size={18} />, onClick: () => go('clients') },
+            { label: t('overview.createClient'), icon: <I.User size={18} />, onClick: () => go('clients', { createClient: '1' }) },
+            { label: t('overview.schedule'), icon: <I.Calendar size={18} />, onClick: () => go('schedule') },
+            { label: t('overview.individualSession'), icon: <I.Waves size={18} />, onClick: () => go('schedule', { createSession: 'individual' }) },
+          ]}
+        />
+
         {pendingCount > 0 && (
-          <Banner tone="warning" title={t('overview.pendingTitle', { count: pendingCount })} style={{ marginBottom: 16 }}
+          <Banner tone="warning" title={t('overview.pendingTitle', { count: pendingCount })} style={{ marginTop: 18 }}
             action={<Button size="sm" variant="subtle" onClick={() => go('payments', { tab: 'review' })}>{t('common.open')}</Button>}>
             {t('overview.pendingHint')}
           </Banner>
@@ -105,43 +140,32 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           <Kpi icon={<I.Alert size={15} />} label={t('overview.debtors')} value={debtorCount} sub={`${debtTotal.toLocaleString(localeTag)} zł`} tone="var(--money-debt)" onClick={() => go('debtors')} />
         </div>
 
-        <div className="ops-section-head" style={{ marginBottom: 10 }}>
-          <div className="eyebrow">{t('overview.upcoming')}</div>
+        <div className="ops-section-head" style={{ margin: '20px 0 10px' }}>
+          <div className="eyebrow">{t('overview.todaySessions')}</div>
           <Button size="sm" variant="secondary" onClick={() => go('schedule')}>{t('overview.allSessions')}</Button>
         </div>
-        <div className="card ops-upcoming-sessions">
-          {sessions.slice(0, 5).map((session, index, list) => (
-            <button
-              key={session.id}
-              type="button"
-              className="ops-list-click-row ops-upcoming-session-row"
-              onClick={() => go('attendance', { sessionId: session.sessionId })}
-              style={{ borderBottom: index < list.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}
-            >
-              <span className="ops-upcoming-session-primary">
-                <span className="mono ops-upcoming-session-time">{session.date} · {session.start}-{session.end}</span>
-                <span className="strong ops-upcoming-session-name">{session.group}</span>
-              </span>
-              <span className="ops-upcoming-session-secondary">
-                <span className="ops-upcoming-session-details">
-                  <span className="muted ops-upcoming-session-trainer">{session.trainer}</span>
-                  <span className="muted ops-upcoming-session-location">{session.location}</span>
-                </span>
-                <span className="ops-upcoming-session-status">
-                  <Badge
-                    tone={session.status === 'cancelled' ? 'danger' : 'primary'}
-                    style={{ maxWidth: '100%', height: 'auto', minHeight: 20, whiteSpace: 'normal', textAlign: 'center' }}
-                  >
-                    {session.status === 'cancelled' ? t('overview.cancelled') : t('overview.scheduled')}
-                  </Badge>
-                </span>
-              </span>
-            </button>
-          ))}
-          {sessions.length === 0 && (
-            <button type="button" className="ops-empty-action" onClick={() => go('schedule')}>{t('overview.empty')}</button>
-          )}
+        <CompactStatusRow
+          items={todaySessions.map((session) => ({
+            id: session.id,
+            primary: `${session.start}-${session.end} · ${session.group}`,
+            secondary: `${session.trainer} · ${session.location}`,
+            onClick: () => go('attendance', { sessionId: session.sessionId }),
+          }))}
+          emptyLabel={t('overview.empty')}
+        />
+
+        <div className="ops-section-head" style={{ margin: '20px 0 10px' }}>
+          <div className="eyebrow">{t('overview.exceptions')}</div>
         </div>
+        <CompactStatusRow
+          items={exceptions.map((session) => ({
+            id: session.id,
+            primary: `${session.date} · ${session.group}`,
+            secondary: t('overview.cancelled'),
+            onClick: () => go('schedule', { tab: 'list' }),
+          }))}
+          emptyLabel={t('overview.noExceptions')}
+        />
       </div>
     )
   }

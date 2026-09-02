@@ -56,15 +56,54 @@ def admin_group_detail(request, group_id):
         pk=group_id,
     )
     if request.method == "DELETE":
-        group.is_active = False
-        group.save(update_fields=["is_active"])
-        audit(user, "group.archived", group, {"source": "api"})
-        return JsonResponse(_group_payload(group))
+        with transaction.atomic():
+            group = Group.objects.select_for_update().select_related(
+                "default_trainer__user", "default_location").get(pk=group.pk)
+            changed = group.is_active
+            future_sessions_count = group.sessions.filter(
+                is_cancelled=False, start_at__gte=timezone.now()).count()
+            preserved_participants_count = group.students.count()
+            if changed:
+                group.is_active = False
+                group.save(update_fields=["is_active"])
+                audit(user, "group.archived", group, {
+                    "source": "api",
+                    "future_sessions_count": future_sessions_count,
+                    "preserved_participants_count": preserved_participants_count,
+                })
+        return JsonResponse({
+            **_group_payload(group),
+            "changed": changed,
+            "future_sessions_count": future_sessions_count,
+            "preserved_participants_count": preserved_participants_count,
+        })
     if request.method != "GET":
         _apply_group_data(group, _json_body(request))
         audit(user, "group.updated", group, {"source": "api"})
         return JsonResponse(_group_payload(group))
-    return JsonResponse(_group_payload(group))
+    return JsonResponse({
+        **_group_payload(group),
+        "future_sessions_count": group.sessions.filter(
+            is_cancelled=False, start_at__gte=timezone.now()).count(),
+        "preserved_participants_count": group.students.count(),
+    })
+
+
+@require_POST
+def admin_group_restore(request, group_id):
+    user = _admin_required(request)
+    with transaction.atomic():
+        group = get_object_or_404(
+            Group.objects.select_for_update().select_related(
+                "default_trainer__user", "default_location"),
+            pk=group_id,
+        )
+        changed = not group.is_active
+        if changed:
+            group.is_active = True
+            group.save(update_fields=["is_active"])
+            audit(user, "group.restored", group, {"source": "api"})
+    return JsonResponse({**_group_payload(group), "changed": changed})
 
 
 @require_http_methods(["GET", "POST"])

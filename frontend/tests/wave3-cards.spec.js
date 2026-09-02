@@ -183,19 +183,17 @@ async function mockTrainerWave3(page) {
   })
 }
 
-test('Trainer sessions stacks the page heading and view switcher at 320px', async ({ page }) => {
+test('Trainer Today keeps its next-session card inside 320px', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'single narrow-mobile contract')
   await page.setViewportSize({ width: 320, height: 844 })
   await mockTrainerWave3(page)
   await page.goto('/?role=trainer&view=sessions')
 
-  const headingCopy = page.locator('.ops-trainer-sessions-head > div').first()
-  const switcher = page.locator('.ops-trainer-sessions-head .ops-view-switcher')
-  await expect(headingCopy).toBeVisible()
-  await expect(switcher).toBeVisible()
-  const [copyBox, switcherBox] = await Promise.all([headingCopy.boundingBox(), switcher.boundingBox()])
-  expect(switcherBox.y).toBeGreaterThanOrEqual(copyBox.y + copyBox.height)
-  expect(switcherBox.x + switcherBox.width).toBeLessThanOrEqual(320)
+  const card = page.locator('.ops-today-session')
+  await expect(page.getByRole('heading', { name: 'Сегодня' })).toBeVisible()
+  await expect(card).toBeVisible()
+  expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
 })
 
 test('Wave 3 trainer history is date-grouped and contextual back returns to it', async ({ page }) => {

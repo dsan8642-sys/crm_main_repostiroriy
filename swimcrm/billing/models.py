@@ -27,6 +27,7 @@ class Charge(models.Model):
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES,
                                 default=settings.DEFAULT_CURRENCY)
     due_date = models.DateField()
+    reference_id = models.CharField(max_length=128, blank=True, db_index=True)
     created_by = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -36,6 +37,11 @@ class Charge(models.Model):
                 fields=["subscription"],
                 condition=Q(subscription__isnull=False),
                 name="billing_one_charge_per_subscription",
+            ),
+            models.UniqueConstraint(
+                fields=["reference_id"],
+                condition=~Q(reference_id=""),
+                name="billing_charge_unique_nonempty_reference_id",
             ),
         ]
 
@@ -48,6 +54,40 @@ class Charge(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Charge history is immutable and cannot be deleted.")
+
+
+class ChargeReversal(models.Model):
+    """Append-only full cancellation of one manual charge."""
+
+    charge = models.OneToOneField(
+        Charge,
+        on_delete=models.PROTECT,
+        related_name="reversal",
+    )
+    amount_minor = models.BigIntegerField(validators=[MinValueValidator(1)])
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES)
+    reason = models.TextField()
+    reference_id = models.CharField(max_length=128, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        "accounts.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_charge_reversals",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reference_id"],
+                condition=~Q(reference_id=""),
+                name="billing_charge_reversal_unique_nonempty_reference_id",
+            ),
+        ]
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Charge reversal history is immutable and cannot be deleted.")
 
 
 class PaymentMethod(models.TextChoices):
@@ -187,6 +227,11 @@ def prevent_payment_delete(sender, instance, **kwargs):
 @receiver(pre_delete, sender=Charge)
 def prevent_charge_delete(sender, instance, **kwargs):
     raise ValidationError("Charge history is immutable and cannot be deleted.")
+
+
+@receiver(pre_delete, sender=ChargeReversal)
+def prevent_charge_reversal_delete(sender, instance, **kwargs):
+    raise ValidationError("Charge reversal history is immutable and cannot be deleted.")
 
 
 @receiver(pre_delete, sender=PaymentEvent)

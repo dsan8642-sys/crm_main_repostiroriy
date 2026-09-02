@@ -22,9 +22,10 @@ from audit.models import audit
 from billing.models import (Charge, Payment, PaymentMethod, PaymentSource, PaymentStatus,
                             ReceiptFile, normalize_payment_method)
 from billing.services import (
-    charge_statuses, confirm_payment, create_admin_payment,
-    create_client_top_up_request,
-    reject_payment, student_balance,
+    IdempotencyConflict, charge_statuses, confirm_payment,
+    create_admin_payment, create_client_top_up_request,
+    create_manual_charge, reject_payment, reverse_manual_charge,
+    student_balance,
 )
 from catalog.models import Group, SubscriptionType
 from common.money import Money
@@ -470,11 +471,15 @@ def _session_payload(session, *, type_color_keys=None):
         "presentation_color_key": resolve_session_color_key(session, type_color_keys),
         "trainer_id": session.trainer_id,
         "trainer": str(session.trainer),
+        "trainer_is_active": session.trainer.is_active and session.trainer.user.is_active,
+        "trainer_is_active": session.trainer.is_active and session.trainer.user.is_active,
         "substitute_trainer_id": session.substitute_trainer_id,
         "substitute_trainer": str(session.substitute_trainer) if session.substitute_trainer_id else None,
         "effective_trainer_id": session.effective_trainer.id,
         "effective_trainer": str(session.effective_trainer),
         "group": {"id": session.group_id, "name": session.group.name} if session.group else None,
+        "group_is_active": session.group.is_active if session.group else None,
+        "group_is_active": session.group.is_active if session.group else None,
         "individual_student_id": session.individual_student_id,
         "individual_participant": individual_participant,
         "is_cancelled": session.is_cancelled,
@@ -596,6 +601,13 @@ def _trainer_payload(trainer):
 
 
 def _subscription_payload(subscription):
+    if hasattr(subscription, "list_remaining_sessions"):
+        remaining_sessions = (
+            None if subscription.subscription_type.is_unlimited
+            else subscription.list_remaining_sessions or 0
+        )
+    else:
+        remaining_sessions = subscription.remaining_sessions
     return {
         "id": subscription.id,
         "participant_id": subscription.student_id,
@@ -606,7 +618,7 @@ def _subscription_payload(subscription):
         "base_end_date": subscription.base_end_date.isoformat(),
         "effective_end_date": subscription.effective_end_date.isoformat(),
         "grace_end_date": subscription.grace_end_date.isoformat(),
-        "remaining_sessions": subscription.remaining_sessions,
+        "remaining_sessions": remaining_sessions,
         "created_at": timezone.localtime(subscription.created_at).isoformat(),
     }
 
@@ -658,17 +670,33 @@ def _subscription_type_payload(subscription_type):
 
 
 def _charge_payload(charge):
+    reversal = getattr(charge, "reversal", None)
+    is_manual = charge.subscription_id is None and charge.attendance_id is None
     return {
         "id": charge.id,
         "participant_id": charge.student_id,
         "participant": charge.student.full_name,
         "subscription_id": charge.subscription_id,
+        "attendance_id": charge.attendance_id,
         "description": charge.description,
         "amount": charge.amount.format(),
         "amount_minor": charge.amount_minor,
         "currency": charge.currency,
         "due_date": charge.due_date.isoformat(),
+        "reference_id": charge.reference_id or None,
+        "created_by": str(charge.created_by) if charge.created_by_id else None,
         "created_at": timezone.localtime(charge.created_at).isoformat(),
+        "status": "reversed" if reversal else "active",
+        "can_reverse": is_manual and reversal is None,
+        "reversal": ({
+            "id": reversal.id,
+            "amount_minor": reversal.amount_minor,
+            "currency": reversal.currency,
+            "reason": reversal.reason,
+            "reference_id": reversal.reference_id or None,
+            "created_by": str(reversal.created_by) if reversal.created_by_id else None,
+            "created_at": timezone.localtime(reversal.created_at).isoformat(),
+        } if reversal else None),
     }
 
 
@@ -833,7 +861,8 @@ def _client_detail_payload(account):
         "student__groups",
         "ledger_entries", "charges", "freeze_periods").order_by("-start_date", "-id")
     charges = Charge.objects.filter(student_id__in=participant_ids).select_related(
-        "student", "subscription").order_by("-due_date", "-id")
+        "student", "subscription", "attendance", "created_by",
+        "reversal", "reversal__created_by").order_by("-due_date", "-id")
     payments = Payment.objects.filter(student_id__in=participant_ids).select_related(
         "student", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
@@ -1365,6 +1394,33 @@ def _create_subscription_charge(subscription, *, actor=None, due_date=None):
     return charge
 
 
+def _create_manual_charge_for_participant(participant, data, *, actor=None):
+    _require_active_participant(
+        participant, "receive new charges", field="participant_id")
+    charge_data = _charge_data(data)
+    if charge_data.get("subscription_id") not in (None, ""):
+        raise _field_validation_error(
+            "subscription_id",
+            "Начисление по абонементу создаётся вместе с операцией абонемента.",
+            code="manual_only",
+        )
+    amount_minor = _positive_int(charge_data.get("amount_minor"), "amount_minor")
+    currency = charge_data.get("currency", settings.DEFAULT_CURRENCY)
+    due_date = (
+        _parse_date(charge_data.get("due_date"), "due_date")
+        or timezone.localdate()
+    )
+    return create_manual_charge(
+        student=participant,
+        actor=actor,
+        amount_minor=amount_minor,
+        currency=currency,
+        due_date=due_date,
+        description=charge_data.get("description"),
+        idempotency_key=charge_data.get("idempotency_key"),
+    )
+
+
 def _create_payment_for_participant(participant, data, *, actor=None):
     _require_active_participant(
         participant, "receive new payments", field="participant_id")
@@ -1432,11 +1488,15 @@ def _session_changes_from_data(data, *, current_session=None):
             )
     if "substitute_trainer_id" in data:
         trainer_id = data.get("substitute_trainer_id")
-        changes["substitute_trainer"] = (
-            _object_for_field(
-                Trainer.objects.all(), trainer_id,
-                "substitute_trainer_id", "замещающего тренера")
-            if trainer_id else None)
+        if (trainer_id and current_session is not None
+                and str(current_session.substitute_trainer_id) == str(trainer_id)):
+            changes["substitute_trainer"] = current_session.substitute_trainer
+        else:
+            changes["substitute_trainer"] = (
+                _object_for_field(
+                    Trainer.objects.filter(is_active=True, user__is_active=True), trainer_id,
+                    "substitute_trainer_id", "замещающего тренера")
+                if trainer_id else None)
     if "start_at" in data:
         changes["start_at"] = _parse_datetime(data.get("start_at"), "start_at")
         if changes["start_at"] is None:
@@ -1472,10 +1532,14 @@ def _session_changes_from_data(data, *, current_session=None):
         changes["is_cancelled"] = _bool_value(data.get("is_cancelled"))
     if "group_id" in data:
         group_id = data.get("group_id")
-        changes["group"] = (
-            _object_for_field(
-                Group.objects.all(), group_id, "group_id", "группу")
-            if group_id else None)
+        if (group_id and current_session is not None
+                and str(current_session.group_id) == str(group_id)):
+            changes["group"] = current_session.group
+        else:
+            changes["group"] = (
+                _object_for_field(
+                    Group.objects.filter(is_active=True), group_id, "group_id", "группу")
+                if group_id else None)
     if "individual_student_id" in data:
         student_id = data.get("individual_student_id")
         changes["individual_student"] = (
@@ -1606,7 +1670,7 @@ def _create_session_from_data(data, *, actor=None):
             field="individual_student_id")
     else:
         group = _object_for_field(
-            Group.objects.select_related(
+            Group.objects.filter(is_active=True).select_related(
                 "default_trainer__user", "default_location"
             ),
             data.get("group_id"), "group_id", "группу")

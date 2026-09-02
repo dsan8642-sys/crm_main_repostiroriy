@@ -76,7 +76,7 @@ test('the tab that logs in ignores its own auth broadcast and loads once', async
   await page.getByLabel('Пароль', { exact: true }).fill('secret-password')
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Рабочий стол' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Сегодня' })).toBeVisible()
   await page.waitForTimeout(100)
   expect(state.meRequests).toBe(initialMeRequests)
 })
@@ -119,7 +119,7 @@ test('focus revalidates /api/me and replaces data after an out-of-band role swit
   await page.bringToFront()
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Moje zajęcia' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Dzisiaj' })).toBeVisible()
   await expect(page.getByText('Private Admin', { exact: true })).toHaveCount(0)
   await expect(page.locator('html')).toHaveAttribute('lang', 'pl')
   expect(state.meRequests).toBeGreaterThan(initialMeRequests)

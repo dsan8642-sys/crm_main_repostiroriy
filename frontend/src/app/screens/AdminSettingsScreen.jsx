@@ -329,12 +329,12 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       </div>
       <div className="ops-settings-mobile-nav">
         {mobileLevel === 'categories' && <div className="ops-settings-mobile-list" aria-label={t('settings.categoriesAria')}>
-          {tabs.map(([value, label]) => <button key={value} type="button" className="ops-settings-mobile-item" onClick={() => { setTab(value); setResourceId(resources.find((item) => item.tab === value)?.id || 'subscriptionTypes'); setMobileLevel('resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
+          {tabs.map(([value, label]) => <button key={value} type="button" className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => { setTab(value); setResourceId(resources.find((item) => item.tab === value)?.id || 'subscriptionTypes'); setMobileLevel('resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
         </div>}
         {mobileLevel === 'resources' && <>
           <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</ContextBackButton>
           <div className="ops-settings-mobile-list" aria-label={t(tabs.find(([value]) => value === tab)?.[1])}>
-            {tabResources.map((item) => <button key={item.id} type="button" className="ops-settings-mobile-item" onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong><small>{t(item.readOnly ? 'settings.viewControl' : 'settings.createEdit')}</small></span><span aria-hidden="true">›</span></button>)}
+            {tabResources.map((item) => <button key={item.id} type="button" className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong><small>{t(item.readOnly ? 'settings.viewControl' : 'settings.createEdit')}</small></span><span aria-hidden="true">›</span></button>)}
           </div>
         </>}
         {mobileLevel === 'detail' && <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('resources')}>{t(tabs.find(([value]) => value === tab)?.[1])}</ContextBackButton>}

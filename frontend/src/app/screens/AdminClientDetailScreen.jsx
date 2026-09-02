@@ -6,6 +6,7 @@ import { paymentMethodLabel } from '../../contracts.js'
 import { useLocale } from '../../i18n.jsx'
 import {
   assertPaymentReadback,
+  assertChargeReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
 } from '../financialContracts.js'
@@ -71,7 +72,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
   const I = icons
 
   return function ApiAdminClientDetail({
-    go, back, clientId, initialTab, initialParticipantId, prefillAmount,
+    go, back, clientId, initialTab, initialParticipantId, initialFinanceAction,
+    initialSubscriptionId, prefillAmount,
   }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminFinanceTranslator(locale), [locale])
@@ -116,6 +118,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       description: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
+      chargeIdempotencyKey: createPaymentAttemptKey('admin-charge'),
       subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
       freezeStart: new Date().toISOString().slice(0, 10),
       freezeEnd: '',
@@ -125,7 +128,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     })
     const [financeFieldErrors, setFinanceFieldErrors] = useState({})
     const [financeBaseline, setFinanceBaseline] = useState(null)
+    const [reversalTarget, setReversalTarget] = useState(null)
+    const [reversalReason, setReversalReason] = useState('')
+    const [reversalIdempotencyKey, setReversalIdempotencyKey] = useState('')
+    const [reversalReasonError, setReversalReasonError] = useState(null)
     const debtPrefillHandledRef = React.useRef(false)
+    const financeRouteHandledRef = React.useRef(false)
 
     useEffect(() => {
       if (!fallbackClientId) return
@@ -156,11 +164,36 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const consents = detail?.consents || []
     const summary = detail?.summary || {}
     const accountArchived = account.is_active === false || (participants.length > 0 && participants.every((item) => item.is_active === false))
+    const accountDisplayName = [account.first_name, account.last_name]
+      .map((value) => String(value || '').trim().replace(/^[-–—]+|[-–—]+$/g, ''))
+      .filter(Boolean)
+      .join(' ') || String(account.full_name || account.username || t('client.title'))
+        .replace(/\s*[-–—]+\s*$/g, '').trim()
     const subscriptionTypes = adminData.subscriptionTypes || []
     const groups = adminData.groups || []
     const contactPhoneDigits = internationalPhoneDigits(account.phone)
     const contactsHidden = Boolean(account.is_anonymized)
     const phoneContactHint = t('client.phoneHint')
+    const selectedParticipant = participants.find(
+      (participant) => String(participant.id) === String(initialParticipantId),
+    ) || participants[0] || null
+    const selectedParticipantId = String(selectedParticipant?.id || '')
+    const selectedSubscriptions = useMemo(() => subscriptions.filter(
+      (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
+    ), [selectedParticipantId, subscriptions])
+    const selectedCharges = useMemo(() => charges.filter(
+      (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
+    ), [charges, selectedParticipantId])
+    const selectedPayments = useMemo(() => payments.filter(
+      (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
+    ), [payments, selectedParticipantId])
+    const selectedAttendance = useMemo(() => attendance.filter(
+      (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
+    ), [attendance, selectedParticipantId])
+    const selectedSubscription = subscriptions.find((subscription) => (
+      String(subscription.participant_id) === String(selectedParticipant?.id)
+        && subscription.status === 'active'
+    )) || subscriptions.find((subscription) => String(subscription.participant_id) === String(selectedParticipant?.id))
 
     useEffect(() => {
       if (initialTab) setTab(initialTab)
@@ -169,6 +202,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const participantName = (id) => participants.find((participant) => participant.id === id)?.full_name || '-'
     const money = (minor) => asMoneyMajor(minor || 0)
     const accountBalance = asAccountBalance(summary.balance_minor)
+    const selectedParticipantBalance = selectedParticipant
+      ? asAccountBalance(selectedParticipant.balance_minor)
+      : accountBalance
     const balanceCaption = accountBalance > 0
       ? t('client.overpayment')
       : accountBalance < 0
@@ -251,6 +287,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     }, [participants, subscriptions, subscriptionTypes])
 
     useEffect(() => {
+      if (!selectedParticipantId) return
+      setPaymentForm((current) => ({ ...current, participantId: selectedParticipantId }))
+      setFinanceForm((current) => ({
+        ...current,
+        participantId: selectedParticipantId,
+        subscriptionId: selectedSubscriptions.some((item) => String(item.id) === String(current.subscriptionId))
+          ? current.subscriptionId
+          : String(selectedSubscriptions[0]?.id || ''),
+      }))
+    }, [selectedParticipantId, selectedSubscriptions])
+
+    useEffect(() => {
       if (debtPrefillHandledRef.current || !prefillAmount || !participants.length) return
       const participantId = participants.some((participant) => String(participant.id) === String(initialParticipantId))
         ? String(initialParticipantId)
@@ -279,6 +327,56 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const selectedPaymentBalance = selectedPaymentParticipant
       ? asAccountBalance(selectedPaymentParticipant.balance_minor)
       : accountBalance
+    const selectedChargeParticipant = participants.find(
+      (participant) => String(participant.id) === String(financeForm.participantId),
+    )
+    const chargePreviewMinor = moneyMajorToMinor(financeForm.amount) || 0
+    const chargeBalanceBefore = selectedChargeParticipant
+      ? asAccountBalance(selectedChargeParticipant.balance_minor)
+      : accountBalance
+    const chargeBalanceAfter = chargeBalanceBefore - asMoneyMajor(chargePreviewMinor)
+
+    function selectParticipant(participantId) {
+      go?.('clientDetail', {
+        clientId: fallbackClientId,
+        participantId: String(participantId),
+        tab,
+      })
+    }
+
+    function openChargeReversal(charge) {
+      setReversalTarget(charge)
+      setReversalReason('')
+      setReversalReasonError(null)
+      setReversalIdempotencyKey(createPaymentAttemptKey('admin-charge-reversal'))
+    }
+
+    async function reverseCharge() {
+      const reason = reversalReason.trim()
+      if (!reason) {
+        setReversalReasonError(t('finance.reverseReasonRequired'))
+        return
+      }
+      if (!reversalTarget) return
+      setActionBusy('reverse-charge')
+      setError(null)
+      try {
+        const mutation = await api.post(`/api/admin/charges/${reversalTarget.id}/reverse/`, {
+          reason,
+          idempotency_key: reversalIdempotencyKey,
+        })
+        const clientReadback = await api.get(`/api/admin/clients/${fallbackClientId}/`)
+        assertChargeReadback(mutation, clientReadback)
+        setDetail(clientReadback)
+        setMessage(t('finance.chargeReversed', { balance: asAccountBalance(mutation.balance_minor).toFixed(2).replace('.', ',') }))
+        setReversalTarget(null)
+        setReversalReason('')
+      } catch (err) {
+        setError(apiErrorMessage(err, t('finance.reverseChargeDescription')))
+      } finally {
+        setActionBusy(null)
+      }
+    }
 
     function openPaymentPanel() {
       const next = {
@@ -317,6 +415,31 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setPaymentBaseline(null)
       setError(null)
     }
+
+    useEffect(() => {
+      if (financeRouteHandledRef.current || !initialFinanceAction || !participants.length) return
+      const selectedSubscription = subscriptions.find(
+        (item) => String(item.id) === String(initialSubscriptionId)) || null
+      const participantId = participants.some(
+        (item) => String(item.id) === String(initialParticipantId))
+        ? String(initialParticipantId)
+        : String(selectedSubscription?.participant_id || participants[0].id)
+      const next = {
+        ...financeForm,
+        participantId,
+        subscriptionId: String(selectedSubscription?.id || ''),
+        subscriptionTypeId: String(
+          selectedSubscription?.subscription_type_id || subscriptionTypes[0]?.typeId || ''),
+        subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
+      }
+      financeRouteHandledRef.current = true
+      setTab('subscriptions')
+      setFinanceForm(next)
+      setFinanceBaseline(next)
+      setFinanceFieldErrors({})
+      setFinanceAction(initialFinanceAction)
+      setPaymentPanelOpen(false)
+    }, [financeForm, initialFinanceAction, initialParticipantId, initialSubscriptionId, participants, subscriptionTypes, subscriptions])
 
     async function createManualPayment() {
       const nextErrors = {}
@@ -537,14 +660,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setActionBusy(financeAction)
       try {
         if (financeAction === 'charge') {
-          await api.post(`/api/admin/participants/${financeForm.participantId}/charges/`, {
+          const charge = await api.post(`/api/admin/participants/${financeForm.participantId}/charges/`, {
             client_id: fallbackClientId,
             description: financeForm.description,
             amount_minor: minorFromMajor(financeForm.amount),
             currency: 'PLN',
             due_date: financeForm.dueDate,
+            idempotency_key: financeForm.chargeIdempotencyKey,
           })
-          setMessage(t('finance.chargeCreated'))
+          const clientReadback = await api.get(`/api/admin/clients/${fallbackClientId}/`)
+          assertChargeReadback(charge, clientReadback)
+          setDetail(clientReadback)
+          setMessage(`${t('finance.chargeCreated')}${t('finance.checkedBalance', { balance: asAccountBalance(charge.balance_minor).toFixed(2).replace('.', ',') })}`)
         }
         if (financeAction === 'issue') {
           await api.post(`/api/admin/participants/${financeForm.participantId}/subscriptions/`, {
@@ -666,8 +793,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <div className="page-head">
           <div>
             <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('clients') : go?.('clients')}>{t('clients.title')}</ContextBackButton>
-            <h1 className="page-title">{account.full_name || account.username || t('client.title')}</h1>
-            <p className="page-desc">{account.phone || '-'} - {account.email || '-'}</p>
+            <h1 className="page-title">{accountDisplayName}</h1>
+            <p className="page-desc ops-client-contact-summary"><span>{account.phone || '—'}</span><span>{account.email || '—'}</span></p>
             {!contactsHidden && <div className="ops-contact-links" aria-label={t('client.contactAria')}>
               <ContactLink href={contactPhoneDigits ? `https://t.me/+${contactPhoneDigits}` : null} label="Telegram" disabledHint={phoneContactHint} />
               <ContactLink href={contactPhoneDigits ? `https://wa.me/${contactPhoneDigits}` : null} label="WhatsApp" disabledHint={phoneContactHint} />
@@ -688,6 +815,20 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <BusyBanner id="admin-client-detail-busy" show={loading}>{t('client.loading')}</BusyBanner>
         {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>{t('client.blacklisted')}</strong> {t('client.blacklistedDescription')}</Banner>}
 
+        {participants.length > 0 && <section className="card card-pad" style={{ display: 'grid', gap: 12, marginBottom: 16 }} aria-label={t('client.selectParticipant')}>
+          <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+            <div className="eyebrow">{t('client.selectParticipant')}</div>
+            <strong>{selectedParticipant?.full_name || '-'}</strong>
+            <div className="muted"><Money amount={selectedParticipantBalance} signed currency="zł" /> · {selectedSubscription?.type || t('client.noSubscriptions')}</div>
+          </div>
+          <div style={{ display: 'grid', gap: 8 }} role="list">
+            {participants.map((participant) => {
+              const isSelected = String(participant.id) === selectedParticipantId
+              return <Button key={participant.id} fullWidth variant={isSelected ? 'primary' : 'secondary'} aria-pressed={isSelected} style={{ justifyContent: 'space-between', gap: 8, textAlign: 'left' }} onClick={() => selectParticipant(participant.id)}><span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{participant.full_name}</span>{isSelected && <span style={{ flexShrink: 0, fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-semibold)', whiteSpace: 'nowrap' }}> · {t('client.participantSelected')}</span>}</Button>
+            })}
+          </div>
+        </section>}
+
         <FormModal open={editingAccount} title={t('client.editTitle')} description={t('client.accountOwner')} size="lg" busy={actionBusy != null} dirty={Boolean(accountBaseline) && JSON.stringify(accountForm) !== JSON.stringify(accountBaseline)} onRequestClose={() => { if (accountBaseline) setAccountForm(accountBaseline); setEditingAccount(false); setAccountBaseline(null); setAccountFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" loading={actionBusy === 'account'} disabled={actionBusy != null} onClick={saveAccount}>{t('client.saveChanges')}</Button></>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
@@ -702,29 +843,30 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             </div>
         </FormModal>
 
-        <div className="kpi-grid" style={{ marginBottom: 16 }}>
-          <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Users size={15} /></span>{t('client.participants')}</div>
-            <div className="kpi-value">{summary.participants_count ?? participants.length}</div>
-            <div className="kpi-sub">{t('client.activeCount', { count: summary.active_participants ?? participants.filter((item) => item.is_active).length })}</div>
-          </div>
-          <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Layers size={15} /></span>{t('client.subscriptions')}</div>
-            <div className="kpi-value">{summary.active_subscriptions ?? subscriptions.filter((item) => item.status === 'active').length}</div>
-            <div className="kpi-sub">{t('client.active')}</div>
-          </div>
-          <div className="kpi">
+        <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
+          <div className="kpi ops-client-balance-kpi">
             <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>{t('common.balance')}</div>
             <div className="kpi-value">
-              <Money amount={accountBalance} signed currency="zł" size="inherit" />
+              <Money amount={selectedParticipantBalance} signed currency="zł" size="inherit" />
             </div>
             <div className="kpi-sub">{balanceCaption}</div>
           </div>
-          <div className="kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Alert size={15} /></span>{t('payments.title')}</div>
-            <div className="kpi-value">{summary.pending_payments ?? payments.filter((item) => item.status === 'pending').length}</div>
-            <div className="kpi-sub">{t('client.awaitingReview')}</div>
-          </div>
+          <section className="card card-pad" aria-label={t('client.statusSummary')}>
+            <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.statusSummary')}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+              {[
+                [I.Users, t('client.participants'), summary.participants_count ?? participants.length, t('client.activeCount', { count: summary.active_participants ?? participants.filter((item) => item.is_active).length })],
+                [I.Layers, t('client.subscriptions'), selectedSubscriptions.filter((item) => item.status === 'active').length, t('client.active')],
+                [I.Alert, t('payments.title'), selectedPayments.filter((item) => item.status === 'pending').length, t('client.awaitingReview')],
+              ].map(([Icon, label, value, detail], index) => (
+                <div key={label} style={{ display: 'grid', gap: 5, minWidth: 0, padding: index ? '0 0 0 10px' : '0 10px 0 0', borderLeft: index ? '1px solid var(--border-subtle)' : undefined }}>
+                  <div className="kpi-label" style={{ gap: 5, marginBottom: 0, fontSize: 'calc(var(--fs-xs) - 2px)', whiteSpace: 'nowrap' }}><span className="kpi-ico" style={{ width: 16, height: 16, borderRadius: 0, background: 'transparent' }}><Icon size={15} /></span>{label}</div>
+                  <div className="kpi-value" style={{ fontSize: 'calc(var(--fs-3xl) - 2px)' }}>{value}</div>
+                  <div className="kpi-sub" style={{ marginTop: 0, fontSize: 'calc(var(--fs-xs) - 2px)', whiteSpace: 'nowrap' }}>{detail}</div>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
 
         <div className="ops-action-strip" aria-label={t('client.financeActionsAria')}>
@@ -741,7 +883,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               type="button"
               className={`ops-action-card${financeAction === value ? ' is-active' : ''}`}
               disabled={accountArchived}
-              onClick={() => { const next = value === 'issue' || value === 'renew' ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription') } : financeForm; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
+              onClick={() => { const next = value === 'charge' ? { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') } : value === 'issue' || value === 'renew' ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription') } : financeForm; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
             >
               <span>{label}</span>
               <small>{hint}</small>
@@ -785,7 +927,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               {subscriptionEditorOpen && (
                 <Select id={FINANCE_FIELD_IDS.subscriptionId} label={t('clients.subscription')} value={financeForm.subscriptionId} error={financeFieldErrors.subscriptionId} onChange={(event) => updateFinanceSubscription(event.target.value)}>
                     <option value="">{t('field.selectSubscription')}</option>
-                    {subscriptions.map((subscription) => (
+                    {selectedSubscriptions.map((subscription) => (
                       <option key={subscription.id} value={subscription.id}>
                         {subscription.participant?.full_name || participantName(subscription.participant_id)} · {subscription.type} · {t('field.remainingPrefix', { count: subscription.remaining_sessions ?? t('field.noLimit') })}
                       </option>
@@ -808,6 +950,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <Input id={FINANCE_FIELD_IDS.description} label={t('common.description')} value={financeForm.description} error={financeFieldErrors.description} onChange={(event) => updateFinanceForm('description', event.target.value)} />
                   <Input id={FINANCE_FIELD_IDS.amount} label={t('common.amount')} value={financeForm.amount} error={financeFieldErrors.amount} onChange={(event) => updateFinanceForm('amount', event.target.value)} placeholder="240.00" />
                   <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
+                  <div className="ops-financial-context ops-grid-full" role="status" aria-label={t('finance.chargeReview')}><div><span>{t('finance.balanceNow')}</span><strong>{chargeBalanceBefore.toFixed(2)} zł</strong></div><div><span>{t('finance.chargePreview')}</span><strong>-{asMoneyMajor(chargePreviewMinor).toFixed(2)} zł</strong></div><div><span>{t('finance.balanceAfter')}</span><strong>{chargeBalanceAfter.toFixed(2)} zł</strong></div></div>
                 </>
               )}
               {financeAction === 'freeze' && (
@@ -826,12 +969,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             </div>
         </FormModal>
 
+        <FormModal open={Boolean(reversalTarget)} title={t('finance.reverseChargeTitle')} description={t('finance.reverseChargeDescription')} size="sm" busy={actionBusy === 'reverse-charge'} dirty={Boolean(reversalReason)} onRequestClose={() => { setReversalTarget(null); setReversalReason(''); setReversalReasonError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy === 'reverse-charge'} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="danger" loading={actionBusy === 'reverse-charge'} disabled={actionBusy === 'reverse-charge'} onClick={reverseCharge}>{t('finance.reverseCharge')}</Button></>}>
+          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+          <p className="muted" style={{ marginTop: 0 }}>{reversalTarget?.description} · <Money amount={money(reversalTarget?.amount_minor)} /></p>
+          <Input id="admin-client-charge-reversal-reason" label={t('finance.reverseReason')} value={reversalReason} error={reversalReasonError} onChange={(event) => { setReversalReason(event.target.value); setReversalReasonError(null) }} />
+        </FormModal>
+
         <div className="toolbar">
           <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
             { value: 'participants', label: t('client.participants'), count: participants.length },
-            { value: 'subscriptions', label: t('client.subscriptions'), count: subscriptions.length },
-            { value: 'payments', label: t('payments.title'), count: payments.length + charges.length },
-            { value: 'attendance', label: t('client.attendance'), count: attendance.length },
+            { value: 'subscriptions', label: t('client.subscriptions'), count: selectedSubscriptions.length },
+            { value: 'payments', label: t('payments.title'), count: selectedPayments.length + selectedCharges.length },
+            { value: 'attendance', label: t('client.attendance'), count: selectedAttendance.length },
             { value: 'consents', label: t('client.consents'), count: consents.length },
             { value: 'privacy', label: t('client.privacy') },
           ]} />
@@ -868,7 +1017,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {tab === 'subscriptions' && (
           <Table
-            rows={subscriptions}
+            rows={selectedSubscriptions}
             emptyLabel={t('client.noSubscriptions')}
             onRowClick={accountArchived ? undefined : openSubscriptionEditor}
             columns={[
@@ -918,20 +1067,22 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             <div>
               <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.charges')}</div>
               <Table
-                rows={charges}
+                rows={selectedCharges}
                 emptyLabel={t('client.noCharges')}
                 columns={[
-                  { key: 'description', header: t('common.description'), render: (row) => <span className="strong">{row.description}</span> },
+                  { key: 'description', header: t('common.description'), render: (row) => <div><span className="strong">{row.description}</span>{row.reversal && <small className="muted" style={{ display: 'block', marginTop: 4 }}>{t('finance.reversedChargeDetails', { reason: row.reversal.reason, author: row.reversal.created_by || '-', time: formatLocalDate(row.reversal.created_at), reference: row.reversal.reference_id || row.reference_id || '-' })}</small>}</div> },
                   { key: 'participant', header: t('common.participant'), muted: true },
                   { key: 'due_date', header: t('field.dueDate'), muted: true },
                   { key: 'amount', header: t('common.amount'), align: 'right', width: 100, render: (row) => <Money amount={money(row.amount_minor)} /> },
+                  { key: 'status', header: t('common.status'), width: 110, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
+                  { key: 'actions', header: '', width: 150, render: (row) => row.can_reverse ? <Button size="sm" variant="danger" disabled={actionBusy != null} onClick={() => openChargeReversal(row)}>{t('finance.reverseCharge')}</Button> : null },
                 ]}
               />
             </div>
             <div>
               <div className="eyebrow" style={{ marginBottom: 10 }}>{t('payments.title')}</div>
               <Table
-                rows={payments}
+                rows={selectedPayments}
                 emptyLabel={t('client.noPayments')}
                 columns={[
                   { key: 'participant', header: t('common.participant'), render: (row) => <span className="strong">{row.participant}</span> },
@@ -948,7 +1099,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {tab === 'attendance' && (
           <Table
-            rows={attendance}
+            rows={selectedAttendance}
             emptyLabel={t('client.noAttendance')}
             columns={[
               { key: 'participant', header: t('common.participant'), render: (row) => <span className="strong">{row.participant}</span> },
