@@ -2,13 +2,16 @@ import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 
 
-const credentialsUrl = new URL('../../audit/00-environment/runtime/2026-08-12-192945-2bdf/credentials.json', import.meta.url)
-const credentials = JSON.parse((await readFile(credentialsUrl, 'utf8')).replace(/^\uFEFF/, ''))
 const liveAuditEnabled = process.env.SWIMCRM_WAVE6_LIVE === '1'
+let credentials
 
 test.skip(!liveAuditEnabled, 'Requires the isolated Wave 6 audit environment.')
 
 async function login(page, role) {
+  if (!credentials) {
+    const credentialsUrl = new URL('../../audit/00-environment/runtime/2026-08-12-192945-2bdf/credentials.json', import.meta.url)
+    credentials = JSON.parse((await readFile(credentialsUrl, 'utf8')).replace(/^\uFEFF/, ''))
+  }
   const account = credentials[role]
   await page.goto('/')
   await page.getByLabel('Логин, email или телефон').fill(account.username)
