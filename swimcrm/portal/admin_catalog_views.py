@@ -57,8 +57,7 @@ def admin_group_detail(request, group_id):
     )
     if request.method == "DELETE":
         with transaction.atomic():
-            group = Group.objects.select_for_update().select_related(
-                "default_trainer__user", "default_location").get(pk=group.pk)
+            group = Group.objects.select_for_update().get(pk=group.pk)
             changed = group.is_active
             future_sessions_count = group.sessions.filter(
                 is_cancelled=False, start_at__gte=timezone.now()).count()
@@ -94,8 +93,7 @@ def admin_group_restore(request, group_id):
     user = _admin_required(request)
     with transaction.atomic():
         group = get_object_or_404(
-            Group.objects.select_for_update().select_related(
-                "default_trainer__user", "default_location"),
+            Group.objects.select_for_update(),
             pk=group_id,
         )
         changed = not group.is_active
