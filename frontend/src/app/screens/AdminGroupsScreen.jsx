@@ -267,7 +267,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       </>
     )
 
-    const groupDetail = selected && !creating ? <section className="card ops-entity-card ops-inline-entity-detail" aria-label={t('groups.cardAria', { name: selected.name })} style={{ marginTop: 16, padding: '20px 22px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', boxSizing: 'border-box' }}>
+    const groupDetail = selected && !creating ? <section role="region" className="card ops-entity-card ops-inline-entity-detail" aria-label={t('groups.cardAria', { name: selected.name })} style={{ marginTop: 16, padding: '20px 22px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', boxSizing: 'border-box' }}>
       <ContextBackButton onClick={() => setSelected(null)}>{t('groups.back')}</ContextBackButton>
       <div className="ops-entity-head" style={{ gap: 16, marginTop: 18 }}><div style={{ minWidth: 0 }}><div className="eyebrow">{t('groups.card')}</div><h3>{selected.name}</h3><div className="muted">{selected.description || t('groups.noDescription')}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} /><Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button>{selected.active ? <Button variant="danger" disabled={busy} onClick={() => openArchiveConfirm()}>{t('groups.archive')}</Button> : <Button variant="primary" disabled={busy} onClick={() => restoreGroup()}>{t('groups.restore')}</Button>}<Button variant="subtle" onClick={() => setSelected(null)}>{t('common.close')}</Button></div></div>
       <div className="ops-summary-grid" style={{ gap: 16, marginTop: 20 }}><div><span>{t('common.trainer')}</span><strong>{selected.trainer || t('groups.notAssigned')}</strong></div><div><span>{t('groups.participants')}</span><strong>{members.length}</strong></div><div><span>{t('groups.capacity')}</span><strong>{capacity ?? t('groups.notSet')}</strong></div><div><span>{t('groups.nextSession')}</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
@@ -305,7 +305,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         </FormModal>
 
         <ListFeedback list={groupList} emptyLabel={t('groups.empty')} />
-        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel={t('groups.empty')} renderAfterRow={(row) => !isMobile && String(selected?.groupId) === String(row.groupId) ? React.cloneElement(groupDetail, { id: `group-detail-desktop-${row.groupId}` }) : null} columns={[
+        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel={t('groups.empty')} columns={[
           { key: 'name', header: t('common.group'), render: (row) => <button type="button" className="ops-link-button" aria-expanded={String(selected?.groupId) === String(row.groupId)} aria-controls={`group-detail-desktop-${row.groupId}`} onClick={() => String(selected?.groupId) === String(row.groupId) ? setSelected(null) : openGroup(row)}><span className="strong">{row.name}</span></button> },
           { key: 'description', header: t('common.description'), muted: true, render: (row) => row.description || '-' },
           { key: 'trainer', header: t('common.trainer'), muted: true },
@@ -313,7 +313,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           { key: 'students', header: t('groups.participants'), align: 'right', width: 110, render: (row) => <button type="button" className="ops-count-button" onClick={() => openGroup(row)}>{row.students}</button> },
           { key: 'active', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
           { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openGroup(row)}>{t('groups.profile')}</Button> },
-        ]} /></div>
+        ]} />{!isMobile && groupDetail}</div>
         <div className="ops-entity-mobile-list">
           {rows.map((row) => (
             <React.Fragment key={row.id}><EntityMobileCard className="ops-group-compact-card" labelledBy={`group-card-${row.id}`}>
