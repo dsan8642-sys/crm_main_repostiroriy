@@ -13,11 +13,40 @@ function ToastItem({ toast, dismiss }) {
   }, [toast, dismiss])
   const role = toast.tone === 'danger' ? 'alert' : 'status'
   return (
-    <div className={`ops-toast is-${toast.tone || 'info'}`} role={role}>
+    <div
+      className={`ops-toast is-${toast.tone || 'info'}`}
+      role={role}
+      style={{
+        background: 'var(--surface-inverse)',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--radius-md)',
+        boxShadow: 'var(--shadow-lg)',
+        color: '#fff',
+        animation: 'ops-toast-in var(--dur-normal) var(--ease-out)',
+      }}
+    >
       {toast.tone === 'loading' && <span className="ops-toast-spinner" aria-hidden="true" />}
       <span>{toast.message}</span>
       {toast.tone !== 'loading' && (
-        <button type="button" aria-label={t('toast.close')} onClick={() => dismiss(toast.id)}>×</button>
+        <button
+          type="button"
+          aria-label={t('toast.close')}
+          onClick={() => dismiss(toast.id)}
+          style={{
+            display: 'grid',
+            width: 44,
+            height: 44,
+            placeItems: 'center',
+            padding: 0,
+            border: '1px solid rgba(255,255,255,0.28)',
+            borderRadius: 8,
+            background: 'rgba(255,255,255,0.12)',
+            color: '#fff',
+            fontSize: 20,
+            lineHeight: 1,
+            cursor: 'pointer',
+          }}
+        >×</button>
       )}
     </div>
   )

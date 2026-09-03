@@ -1776,7 +1776,7 @@ class AdminPortalApiRule(TestCase):
         )
 
         for query in (
-            "Кирилл", "Żółw", "Кирилл Żółw", "Żółw Кирилл",
+            "Кирилл", "кирилл", "КИРИЛЛ", "Żółw", "Кирилл Żółw", "Żółw Кирилл",
             "+48555987654", "UNICODE.REMOTE@EXAMPLE.TEST",
         ):
             with self.subTest(query=query):

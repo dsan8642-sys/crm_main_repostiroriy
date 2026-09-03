@@ -53,6 +53,14 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const [cancelReason, setCancelReason] = useState('')
     const [bulkPending, setBulkPending] = useState(false)
     const [formAction, setFormAction] = useState(null)
+    const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
+
+    useEffect(() => {
+      const media = window.matchMedia('(max-width: 767px)')
+      const update = () => setIsMobile(media.matches)
+      media.addEventListener('change', update)
+      return () => media.removeEventListener('change', update)
+    }, [])
 
     useEffect(() => {
       let alive = true
@@ -135,6 +143,17 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       } finally {
         setBusyId(null)
       }
+    }
+
+    function attendanceActions(row, compact = false) {
+      return <div id={`admin-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: compact ? 6 : 8, flexWrap: 'wrap' }}>
+        {options.map((option) => (
+          <Button key={option.value} size="sm" variant={row.attendance?.status === option.value ? 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={row.attendance?.status === option.value} onClick={() => mark(row, option.value)} style={compact ? { minHeight: 40, padding: '0 8px' } : undefined}>
+            {t(option.labelKey)}{option.consumes ? ' -1' : ''}
+          </Button>
+        ))}
+        {rowErrors[row.id] && <small id={`admin-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
+      </div>
     }
 
     async function markAllPresent() {
@@ -330,7 +349,19 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
           <Input id="admin-attendance-cancel-reason" label={t('attendance.reason')} value={cancelReason} error={cancelReasonError} onChange={(event) => { setCancelReason(event.target.value); setCancelReasonError(null) }} placeholder={t('attendance.reasonHint')} />
         </FormModal>
 
-        <div className="card" style={{ overflow: 'hidden' }}>
+        {isMobile ? (
+          <div className="card" style={{ overflow: 'hidden' }}>
+            {rows.length ? rows.map((row, index) => (
+              <article key={row.id} style={{ display: 'grid', gap: 12, padding: 14, borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}><Avatar name={row.full_name} size={28} /><strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.full_name}</strong></div>
+                  {row.balance_minor > 0 ? <Badge tone="danger">{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success">{t('attendance.noDebt')}</Badge>}
+                </div>
+                {attendanceActions(row, true)}
+              </article>
+            )) : <div className="muted" style={{ padding: 16 }}>{selectedSessionId ? t('attendance.emptySession') : t('attendance.chooseForRoster')}</div>}
+          </div>
+        ) : <div className="card" style={{ overflow: 'hidden' }}>
           <Table
             rows={rows}
             emptyLabel={selectedSessionId ? t('attendance.emptySession') : t('attendance.chooseForRoster')}
@@ -361,24 +392,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 key: 'attendance',
                 header: t('attendance.titleColumn'),
                 width: 340,
-                render: (row) => (
-                  <div id={`admin-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {options.map((option) => (
-                      <Button
-                        key={option.value}
-                        size="sm"
-                        variant={row.attendance?.status === option.value ? 'primary' : 'secondary'}
-                        loading={busyId === `mark-${row.id}`}
-                        disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`}
-                        aria-pressed={row.attendance?.status === option.value}
-                        onClick={() => mark(row, option.value)}
-                      >
-                        {t(option.labelKey)}{option.consumes ? ' -1' : ''}
-                      </Button>
-                    ))}
-                    {rowErrors[row.id] && <small id={`admin-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
-                  </div>
-                ),
+                render: (row) => attendanceActions(row),
               },
               {
                 key: 'actions',
@@ -397,7 +411,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
               },
             ]}
           />
-        </div>
+        </div>}
         <Dialog
           open={bulkPending}
           title={t('attendance.bulkTitle')}

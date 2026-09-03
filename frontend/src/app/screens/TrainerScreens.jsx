@@ -188,7 +188,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
                 <div className="strong">{row.name}</div>
                 <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>{t('trainer.attendance.sessionScope')}</div>
               </div>
-              {!sessionMeta.cancelled ? <div id={`trainer-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `trainer-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 4 }}>
+              {!sessionMeta.cancelled ? <div id={`trainer-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `trainer-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 6 }}>
                 {options.map((status) => {
                   const on = row.status === status
                   const consumes = status === 'present' || status === 'absent'

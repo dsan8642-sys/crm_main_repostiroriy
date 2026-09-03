@@ -70,7 +70,7 @@ def admin_import_batches(request):
 def admin_security_status(request):
     _admin_required(request)
     users = User.objects.order_by("role", "username").only(
-        "id", "username", "first_name", "last_name", "email", "role", "is_active", "is_staff")
+        "id", "username", "first_name", "last_name", "email", "role", "is_active", "is_staff", "is_superuser")
     otp_by_user = {device.user_id: device for device in AdminOTPDevice.objects.all()}
     return JsonResponse({"users": [{
         "id": user.id,
@@ -80,9 +80,88 @@ def admin_security_status(request):
         "role": user.role,
         "is_active": user.is_active,
         "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
         "otp_configured": user.id in otp_by_user,
         "otp_confirmed": bool(otp_by_user.get(user.id) and otp_by_user[user.id].is_confirmed),
     } for user in users]})
+
+
+def _require_current_admin_password(actor, data):
+    current_password = str(data.get("current_password") or "")
+    if not current_password or not actor.check_password(current_password):
+        raise ValidationError({"current_password": ValidationError(
+            "Текущий пароль указан неверно.", code="invalid")})
+
+
+def _primary_admin_required(request):
+    actor = _admin_required(request)
+    if not actor.is_superuser:
+        raise PermissionDenied("Только главный администратор может управлять доступом администраторов.")
+    return actor
+
+
+@require_POST
+@transaction.atomic
+def admin_administrator_create(request):
+    actor = _primary_admin_required(request)
+    data = _json_body(request)
+    _require_current_admin_password(actor, data)
+    full_name = " ".join(str(data.get("full_name") or "").split())
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "")
+    email = str(data.get("email") or "").strip()
+    if not full_name:
+        raise ValidationError({"full_name": ValidationError("Укажите имя администратора.", code="required")})
+    if not username:
+        raise ValidationError({"username": ValidationError("Укажите логин.", code="required")})
+    try:
+        User._meta.get_field("username").run_validators(username)
+    except ValidationError as exc:
+        raise ValidationError({"username": exc}) from exc
+    try:
+        if email:
+            User._meta.get_field("email").run_validators(email)
+    except ValidationError as exc:
+        raise ValidationError({"email": exc}) from exc
+    try:
+        password_validation.validate_password(password)
+    except ValidationError as exc:
+        raise ValidationError({"password": exc}) from exc
+    if User.objects.filter(username__iexact=username).exists():
+        raise ValidationError({"username": ValidationError("Этот логин уже используется.", code="duplicate")})
+    first_name, *rest = full_name.split(" ", 1)
+    user = User.objects.create_user(
+        username=username,
+        email=email,
+        password=password,
+        first_name=first_name,
+        last_name=rest[0] if rest else "",
+        role=Role.ADMIN,
+    )
+    audit(actor, "admin.access.created", user, {"username": user.username, "full_name": full_name})
+    return JsonResponse({"id": user.id, "username": user.username, "full_name": user.get_full_name()}, status=201)
+
+
+@require_POST
+@transaction.atomic
+def admin_administrator_access(request, user_id, action):
+    actor = _primary_admin_required(request)
+    data = _json_body(request)
+    _require_current_admin_password(actor, data)
+    if action not in {"revoke", "restore"}:
+        raise ValidationError({"action": ValidationError("Неизвестное действие.", code="invalid")})
+    user = get_object_or_404(User, pk=user_id, role=Role.ADMIN)
+    if user.pk == actor.pk:
+        raise ValidationError({"user": ValidationError("Нельзя отозвать собственный доступ.", code="self")})
+    if user.is_superuser:
+        raise ValidationError({"user": ValidationError("Доступ главного администратора нельзя изменить здесь.", code="protected")})
+    is_active = action == "restore"
+    changed = user.is_active != is_active
+    if changed:
+        user.is_active = is_active
+        user.save(update_fields=["is_active"])
+        audit(actor, f"admin.access.{action}d", user, {"username": user.username})
+    return JsonResponse({"id": user.id, "is_active": user.is_active, "changed": changed})
 
 
 @require_http_methods(["GET", "PATCH"])

@@ -855,6 +855,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
           <button
             type="button"
             className="ops-schedule-event-edit"
+            style={{ borderRadius: 'var(--radius-md)' }}
             aria-label={session.isCancelled ? t('schedule.restoreAria', { time: session.start, group: session.group || t('schedule.typeIndividual') }) : t('schedule.editAria', { time: session.start, group: session.group || t('schedule.typeIndividual') })}
             disabled={busy}
             onClick={(event) => {
@@ -863,7 +864,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
               else openSessionEdit(session)
             }}
           >
-            {session.isCancelled ? <span aria-hidden="true">↺</span> : <I.Pencil size={12} />}
+            {session.isCancelled ? <span aria-hidden="true">↺</span> : <I.Pencil size={16} />}
           </button>
         </div>
       )

@@ -28,6 +28,13 @@ const CREDENTIAL_FIELD_IDS = {
   newPassword: 'admin-credentials-new-password',
   confirmPassword: 'admin-credentials-confirm-password',
 }
+const ADMINISTRATOR_FIELD_MAP = {
+  full_name: 'fullName', username: 'username', email: 'email', password: 'password', current_password: 'currentPassword',
+}
+const ADMINISTRATOR_FIELD_IDS = {
+  fullName: 'admin-access-full-name', username: 'admin-access-username', email: 'admin-access-email',
+  password: 'admin-access-password', confirmPassword: 'admin-access-confirm-password', currentPassword: 'admin-access-current-password',
+}
 
 const eventTypes = [
   ['payment_reminder', 'settings.event.paymentReminder'], ['session_reminder', 'settings.event.sessionReminder'],
@@ -57,7 +64,7 @@ const resources = [
   { tab: 'control', id: 'importExport', title: 'settings.resource.importExport', panel: true, readOnly: true },
   { tab: 'control', id: 'audit', title: 'settings.resource.audit', endpoint: '/api/admin/system/audit/', response: 'entries', readOnly: true },
   { tab: 'control', id: 'imports', title: 'settings.resource.imports', endpoint: '/api/admin/system/imports/', response: 'batches', readOnly: true },
-  { tab: 'control', id: 'security', title: 'settings.resource.security', endpoint: '/api/admin/system/security/', response: 'users', readOnly: true },
+  { tab: 'control', id: 'security', title: 'settings.resource.security', endpoint: '/api/admin/system/security/', response: 'users', panel: true, readOnly: true },
   { tab: 'control', id: 'logs', title: 'settings.resource.logs', endpoint: '/api/admin/notifications/logs/', response: 'logs', readOnly: true },
   { tab: 'reports', id: 'reports', title: 'settings.resource.reports', panel: true, readOnly: true },
 ]
@@ -101,12 +108,16 @@ function credentialValues(username = '') {
   return { username, currentPassword: '', newPassword: '', confirmPassword: '' }
 }
 
+function administratorValues() {
+  return { fullName: '', username: '', email: '', password: '', confirmPassword: '', currentPassword: '' }
+}
+
 export function createAdminSettingsScreen(components, reloadRoleData, icons, adminData = {}) {
   const ImportExportPanel = createAdminImportExportPanel(components, icons, reloadRoleData)
   const ReportsPanel = createAdminReportsPanel(components)
 
   const { Button, Badge, Banner, Tabs, Table, Input, Select, Textarea, Checkbox, StatusPill, Dialog } = components
-  return function AdminSettingsScreen() {
+  return function AdminSettingsScreen({ currentUser }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
     const [tab, setTab] = useState('catalog')
@@ -126,6 +137,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const [credentialBaseline, setCredentialBaseline] = useState(() => credentialValues())
     const [credentialErrors, setCredentialErrors] = useState({})
     const [credentialModalError, setCredentialModalError] = useState(null)
+    const [administratorOpen, setAdministratorOpen] = useState(false)
+    const [administrator, setAdministrator] = useState(administratorValues)
+    const [administratorErrors, setAdministratorErrors] = useState({})
+    const [administratorModalError, setAdministratorModalError] = useState(null)
+    const [accessAction, setAccessAction] = useState(null)
     const [mobileLevel, setMobileLevel] = useState('categories')
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
@@ -137,6 +153,8 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const credentialsDirty = useMemo(() => (
       credentialsOpen && JSON.stringify(credentials) !== JSON.stringify(credentialBaseline)
     ), [credentialBaseline, credentials, credentialsOpen])
+    const administratorDirty = useMemo(() => administratorOpen && Object.values(administrator).some(Boolean), [administrator, administratorOpen])
+    const administrators = useMemo(() => (data.security || []).filter((row) => row.role === 'admin'), [data.security])
 
     const load = async (onlyId) => {
       const loadable = resources.filter((item) => item.endpoint)
@@ -221,6 +239,24 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       setCredentialErrors((current) => clearFieldError(current, key))
     }
 
+    function openAdministrator() {
+      setAdministrator(administratorValues())
+      setAdministratorErrors({})
+      setAdministratorModalError(null)
+      setAdministratorOpen(true)
+    }
+
+    function closeAdministrator() {
+      setAdministratorOpen(false)
+      setAdministratorErrors({})
+      setAdministratorModalError(null)
+    }
+
+    function updateAdministratorField(key, value) {
+      setAdministrator((current) => ({ ...current, [key]: value }))
+      setAdministratorErrors((current) => clearFieldError(current, key))
+    }
+
     function fieldOptions(field) {
       const [, , type, source, valueKey] = field
       if (type === 'select') return source.map(([value, label]) => [value, label.startsWith('settings.') ? t(label) : label])
@@ -292,6 +328,48 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       }
     }
 
+    async function saveAdministrator() {
+      if (administrator.password !== administrator.confirmPassword) {
+        const nextErrors = { password: t('settings.passwordsMismatch'), confirmPassword: t('settings.repeatPasswordError') }
+        setAdministratorErrors(nextErrors)
+        focusFirstFieldError(nextErrors, ADMINISTRATOR_FIELD_IDS)
+        return
+      }
+      setLoading(true); setAdministratorModalError(null); setAdministratorErrors({})
+      try {
+        await api.post('/api/admin/system/administrators/', {
+          full_name: administrator.fullName,
+          username: administrator.username,
+          email: administrator.email,
+          password: administrator.password,
+          current_password: administrator.currentPassword,
+        })
+        closeAdministrator()
+        setMessage(t('settings.administratorCreated'))
+        await load('security')
+      } catch (err) {
+        const nextErrors = fieldErrorsFromApi(err, ADMINISTRATOR_FIELD_MAP)
+        setAdministratorErrors(nextErrors)
+        setAdministratorModalError(formErrorMessage(err, t('settings.administratorCreateError')))
+        focusFirstFieldError(nextErrors, ADMINISTRATOR_FIELD_IDS)
+      } finally { setLoading(false) }
+    }
+
+    async function saveAccessAction() {
+      if (!accessAction?.currentPassword) return
+      setLoading(true)
+      try {
+        await api.post(`/api/admin/system/administrators/${accessAction.row.id}/${accessAction.type}/`, {
+          current_password: accessAction.currentPassword,
+        })
+        setAccessAction(null)
+        setMessage(t('settings.accessUpdated'))
+        await load('security')
+      } catch (err) {
+        setAccessAction((current) => current && ({ ...current, error: formErrorMessage(err, t('settings.accessUpdateError')) }))
+      } finally { setLoading(false) }
+    }
+
     async function restoreSplit() {
       setLoading(true); setError(null)
       try {
@@ -344,6 +422,22 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">{t('settings.credentialsDescription')}</p>
         <Button variant="primary" disabled={loading} onClick={openCredentials}>{t('settings.editCredentials')}</Button>
+      </div>}
+      {resource.id === 'security' && <div className="card card-pad ops-edit-panel">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <p className="page-desc" style={{ margin: 0 }}>{t('settings.administratorsDescription')}</p>
+          {currentUser?.can_manage_administrators && <Button variant="primary" disabled={loading} onClick={openAdministrator}>{t('settings.addAdministrator')}</Button>}
+        </div>
+        <Table rows={administrators} emptyLabel={loading ? t('common.loading') : t('settings.empty')} columns={[
+          { key: 'full_name', header: t('settings.administrator'), render: (row) => <span className="strong">{row.full_name}</span> },
+          { key: 'username', header: t('settings.newLogin'), muted: true },
+          { key: 'status', header: t('common.status'), render: (row) => row.is_superuser ? <Badge tone="info">{t('settings.primaryAdministrator')}</Badge> : <Badge tone={row.is_active ? 'success' : 'danger'}>{t(row.is_active ? 'settings.accessEnabled' : 'settings.accessRevoked')}</Badge> },
+          { key: 'actions', header: '', width: 160, render: (row) => {
+            if (!currentUser?.can_manage_administrators || row.is_superuser || row.id === currentUser?.id) return null
+            const type = row.is_active ? 'revoke' : 'restore'
+            return <Button size="sm" variant={type === 'revoke' ? 'subtle' : 'primary'} disabled={loading} onClick={() => setAccessAction({ row, type, currentPassword: '', error: null })}>{t(type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess')}</Button>
+          } },
+        ]} />
       </div>}
       {resource.panel && resource.id === 'importExport'
         ? <ImportExportPanel />
@@ -403,6 +497,45 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
             <Input id={CREDENTIAL_FIELD_IDS.confirmPassword} label={t('settings.repeatNewPassword')} type="password" value={credentials.confirmPassword} error={credentialErrors.confirmPassword} onChange={(event) => updateCredentialField('confirmPassword', event.target.value)} autoComplete="new-password" />
           </div>
         </fieldset>
+      </FormModal>
+      <FormModal
+        open={administratorOpen}
+        title={t('settings.addAdministrator')}
+        description={t('settings.administratorsDescription')}
+        size="md"
+        busy={loading}
+        dirty={administratorDirty}
+        onRequestClose={closeAdministrator}
+        footer={({ requestClose }) => <>
+          <Button variant="primary" disabled={loading || !administrator.currentPassword} onClick={saveAdministrator}>{t('settings.addAdministrator')}</Button>
+          <Button variant="secondary" disabled={loading} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button>
+        </>}
+      >
+        {administratorModalError && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setAdministratorModalError(null)}>{administratorModalError}</Banner>}
+        <fieldset disabled={loading} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}><div className="ops-form-grid">
+          <Input id={ADMINISTRATOR_FIELD_IDS.fullName} label={t('settings.fullName')} value={administrator.fullName} error={administratorErrors.fullName} onChange={(event) => updateAdministratorField('fullName', event.target.value)} autoComplete="name" />
+          <Input id={ADMINISTRATOR_FIELD_IDS.username} label={t('settings.newLogin')} value={administrator.username} error={administratorErrors.username} onChange={(event) => updateAdministratorField('username', event.target.value)} autoComplete="username" />
+          <Input id={ADMINISTRATOR_FIELD_IDS.email} label={t('settings.emailOptional')} type="email" value={administrator.email} error={administratorErrors.email} onChange={(event) => updateAdministratorField('email', event.target.value)} autoComplete="email" />
+          <Input id={ADMINISTRATOR_FIELD_IDS.password} label={t('settings.password')} type="password" value={administrator.password} error={administratorErrors.password} onChange={(event) => updateAdministratorField('password', event.target.value)} autoComplete="new-password" />
+          <Input id={ADMINISTRATOR_FIELD_IDS.confirmPassword} label={t('settings.repeatPassword')} type="password" value={administrator.confirmPassword} error={administratorErrors.confirmPassword} onChange={(event) => updateAdministratorField('confirmPassword', event.target.value)} autoComplete="new-password" />
+          <Input id={ADMINISTRATOR_FIELD_IDS.currentPassword} label={t('settings.currentPassword')} type="password" value={administrator.currentPassword} error={administratorErrors.currentPassword} onChange={(event) => updateAdministratorField('currentPassword', event.target.value)} autoComplete="current-password" />
+        </div></fieldset>
+      </FormModal>
+      <FormModal
+        open={Boolean(accessAction)}
+        title={t('settings.accessActionTitle', { action: t(accessAction?.type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess') })}
+        description={t('settings.accessActionDescription', { name: accessAction?.row?.full_name || '' })}
+        size="sm"
+        busy={loading}
+        dirty={Boolean(accessAction?.currentPassword)}
+        onRequestClose={() => setAccessAction(null)}
+        footer={({ requestClose }) => <>
+          <Button variant={accessAction?.type === 'revoke' ? 'danger' : 'primary'} disabled={loading || !accessAction?.currentPassword} onClick={saveAccessAction}>{t(accessAction?.type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess')}</Button>
+          <Button variant="secondary" disabled={loading} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button>
+        </>}
+      >
+        {accessAction?.error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setAccessAction((current) => current && ({ ...current, error: null }))}>{accessAction.error}</Banner>}
+        <Input id="admin-access-current-password" label={t('settings.currentPassword')} type="password" value={accessAction?.currentPassword || ''} onChange={(event) => setAccessAction((current) => current && ({ ...current, currentPassword: event.target.value, error: null }))} autoComplete="current-password" />
       </FormModal>
       {pendingArchive && <Dialog
         open

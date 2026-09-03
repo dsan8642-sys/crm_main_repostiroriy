@@ -34,7 +34,7 @@ export function TodaySessionCard({
 export function QuickActions({ label, actions }) {
   return (
     <section className="ops-quick-actions" aria-label={label}>
-      <div className="eyebrow">{label}</div>
+      <div className="eyebrow" aria-hidden="true">&nbsp;</div>
       <div className="ops-quick-actions__grid">
         {actions.map((action) => (
           <button key={action.label} type="button" onClick={action.onClick}>

@@ -46,7 +46,7 @@ function routeState() {
   }
 }
 
-function LocaleSelector({ compact = false, locale, setLocale, t }) {
+function LocaleSelector({ compact = false, dark = false, locale, setLocale, t }) {
   return (
     <label style={{ display: 'grid', gap: 3, minWidth: 0 }}>
       <span className="sr-only">{t('locale.label')}</span>
@@ -54,7 +54,7 @@ function LocaleSelector({ compact = false, locale, setLocale, t }) {
         aria-label={t('locale.label')}
         value={locale}
         onChange={(event) => setLocale(event.target.value)}
-        style={{ width: '100%', minHeight: 34 }}
+        style={{ width: '100%', minHeight: 42, padding: '0 12px', border: dark ? '1px solid rgba(255,255,255,0.16)' : '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: dark ? '#18263a' : 'var(--surface-card)', color: dark ? '#f4f8ff' : 'var(--text-strong)', font: 'inherit', fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-medium)', colorScheme: dark ? 'dark' : 'normal' }}
       >
         {SUPPORTED_LOCALES.map((code) => (
           <option key={code} value={code}>{compact ? code.toUpperCase() : t(`locale.${code}`)}</option>
@@ -575,12 +575,12 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 <button
                   type="button"
                   className="ops-mobile-search-button"
-                  aria-label={t('shell.openSearch')}
+                  aria-label={mobileSearchOpen ? t('shell.closeSearch') : t('shell.openSearch')}
                   aria-controls="ops-mobile-search"
                   aria-expanded={mobileSearchOpen}
-                  onClick={() => setMobileSearchOpen(true)}
+                  onClick={() => (mobileSearchOpen ? searchLifecycle.requestClose('header-close') : setMobileSearchOpen(true))}
                 >
-                  <icons.Search size={19} />
+                  {mobileSearchOpen ? <icons.X size={19} /> : <icons.Search size={19} />}
                 </button>
               )}
               <button
@@ -604,7 +604,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             sidebarLastSection = section
             return (
               <React.Fragment key={item.key}>
-                {showSection && <div className="ops-nav-section">{section}</div>}
+                {showSection && <div className="ops-nav-section" style={{ margin: '14px 0 6px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
                 <button
                   type="button"
                   className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
@@ -612,7 +612,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                   onClick={() => navigate(item.key)}
                   title={item.label}
                 >
-                  <span>{item.icon}</span>
+                  <span style={{ display: 'grid', width: 24, height: 24, placeItems: 'center' }}>{item.icon}</span>
                   <span>{t(`nav.${role}.${item.key}`, item.label)}</span>
                   {item.count != null && (
                     <span className={`ops-nav-count${item.countTone === 'danger' ? ' is-danger' : ''}`}>{item.count}</span>
@@ -625,7 +625,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
 
         <div className="ops-user-wrap">
           <div className="ops-sidebar-locale">
-            <LocaleSelector compact={sidebarCollapsed} locale={locale} setLocale={setLocale} t={t} />
+            <LocaleSelector compact={sidebarCollapsed} dark locale={locale} setLocale={setLocale} t={t} />
           </div>
           <div className="ops-user-actions">
             <div className="ops-user">
@@ -664,29 +664,31 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             aria-modal="true"
             aria-label={t('shell.menu')}
             tabIndex={-1}
+            style={{ background: '#0f1728', color: '#fff', borderLeftColor: 'rgba(255,255,255,0.12)' }}
           >
-            <div className="ops-mobile-drawer-head">
+            <div className="ops-mobile-drawer-head" style={{ background: 'transparent', borderBottomColor: 'rgba(255,255,255,0.12)' }}>
               <strong>{t('shell.menu')}</strong>
-              <button type="button" className="ops-mobile-drawer-close" aria-label={t('shell.closeMenu')} onClick={() => drawerLifecycle.requestClose('close-button')}>
+              <button type="button" className="ops-mobile-drawer-close" aria-label={t('shell.closeMenu')} onClick={() => drawerLifecycle.requestClose('close-button')} style={{ borderColor: 'rgba(255,255,255,0.16)', background: '#18263a', color: '#fff' }}>
                 <span aria-hidden="true">×</span>
               </button>
             </div>
-            <nav className="ops-mobile-drawer-nav" aria-label={t('shell.menuNavigation')}>
+            <nav className="ops-mobile-drawer-nav" aria-label={t('shell.menuNavigation')} style={{ background: 'transparent' }}>
               {nav.map((item) => {
                 const section = item.section || t('shell.mainSection')
                 const showSection = section !== drawerLastSection
                 drawerLastSection = section
                 return (
                   <React.Fragment key={`drawer-${item.key}`}>
-                    {showSection && <div className="ops-nav-section">{section}</div>}
+                    {showSection && <div className="ops-nav-section" style={{ margin: '14px 0 6px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
                     <button
                       type="button"
                       className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
                       aria-current={navActiveKey === item.key ? 'page' : undefined}
                       onClick={() => navigate(item.key)}
                       title={item.label}
+                      style={{ color: navActiveKey === item.key ? '#fff' : '#cad5e4' }}
                     >
-                      <span>{item.icon}</span>
+                      <span style={{ display: 'grid', width: 24, height: 24, placeItems: 'center' }}>{item.icon}</span>
                       <span>{t(`nav.${role}.${item.key}`, item.label)}</span>
                       {item.count != null && (
                         <span className={`ops-nav-count${item.countTone === 'danger' ? ' is-danger' : ''}`}>{item.count}</span>
@@ -696,9 +698,9 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 )
               })}
             </nav>
-            <div className="ops-mobile-drawer-user-wrap">
+            <div className="ops-mobile-drawer-user-wrap" style={{ background: 'transparent', borderTopColor: 'rgba(255,255,255,0.12)', color: '#fff' }}>
               <div className="ops-sidebar-locale">
-                <LocaleSelector locale={locale} setLocale={setLocale} t={t} />
+                <LocaleSelector dark locale={locale} setLocale={setLocale} t={t} />
               </div>
               <div className="ops-user-actions">
                 <div className="ops-user">
@@ -723,10 +725,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             aria-labelledby="ops-mobile-search-title"
             tabIndex={-1}
           >
-            <header>
-              <h2 id="ops-mobile-search-title">{t('shell.searchTitle')}</h2>
-              <button type="button" aria-label={t('shell.closeSearch')} onClick={() => searchLifecycle.requestClose('close-button')}>×</button>
-            </header>
+            <h2 id="ops-mobile-search-title" className="sr-only">{t('shell.searchTitle')}</h2>
             <label>
               <span className="sr-only">{t('shell.globalSearch')}</span>
               <input

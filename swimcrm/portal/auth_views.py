@@ -29,6 +29,7 @@ def _user_payload(user):
         "role": "client" if user.role == Role.PARENT else user.role,
         "internal_role": user.role,
         "is_staff": user.is_staff,
+        "can_manage_administrators": user.is_superuser,
     }
 
 

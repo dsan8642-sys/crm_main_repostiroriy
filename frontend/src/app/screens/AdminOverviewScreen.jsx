@@ -132,7 +132,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           </Banner>
         )}
 
-        <div className="eyebrow" style={{ marginBottom: 10 }}>{t('overview.quickLinks')}</div>
+        <div className="eyebrow" aria-hidden="true" style={{ marginBottom: 10 }}>&nbsp;</div>
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
           <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={sessions.length} sub={t('overview.todayUpcoming')} onClick={() => go('schedule', { tab: 'day' })} />
           <Kpi icon={<I.ClientFamily size={15} />} label={t('overview.clients')} value={(data.clients || []).length} sub={t('overview.openDatabase')} onClick={() => go('clients')} />

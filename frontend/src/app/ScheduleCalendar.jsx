@@ -61,7 +61,7 @@ export function CalendarNavigation({
           </button>
         ))}
       </div>
-      <div className="ops-calendar-date-controls">
+      <div className="ops-calendar-date-controls" style={{ marginBlock: 8 }}>
         <DateField label={t('calendar.focusDate')} value={focusDate} onChange={setFocusDate} required />
         <button className="ops-calendar-today" type="button" onClick={() => setFocusDate(localToday())}>{t('calendar.today')}</button>
       </div>

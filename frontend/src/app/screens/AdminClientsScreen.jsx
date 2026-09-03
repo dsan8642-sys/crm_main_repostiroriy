@@ -206,9 +206,10 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
     const activity = (row) => {
       const value = clientActivity(row.lastPresentAt)
-      if (value.days == null || value.days > 180) return { ...value, label: t('clients.inactiveLong') }
+      const statusLabel = t(value.state === 'active' ? 'clients.activeStatus' : 'clients.inactiveStatus')
+      if (value.days == null || value.days > 180) return { ...value, label: t('clients.inactiveLong'), statusLabel, detail: t('clients.inactiveLongDetail') }
       const date = formatEntityDate(row.lastPresentAt, localeTag)
-      return { ...value, label: t(value.state === 'active' ? 'clients.activeAt' : 'clients.inactiveAt', { date }) }
+      return { ...value, label: t(value.state === 'active' ? 'clients.activeAt' : 'clients.inactiveAt', { date }), statusLabel, detail: date }
     }
 
     const updateClientForm = (field, value) => {
@@ -660,8 +661,8 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               { key: 'balance', header: t('common.balance'), align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
               { key: 'activity', header: t('clients.activity'), width: 150, render: (row) => (
                 <span className="ops-client-activity">
-                  <StatusPill status={activity(row).state} size="sm" />
-                  <small className="ops-ellipsis-value" data-full-value={activity(row).label} title={activity(row).label} tabIndex={0}><span className="ops-ellipsis-text">{activity(row).label}</span></small>
+                  <StatusPill status={activity(row).state} label={activity(row).statusLabel} size="sm" />
+                  <small className="ops-ellipsis-value" style={{ minWidth: 0, width: '100%' }} data-full-value={activity(row).detail} title={activity(row).detail} tabIndex={0}><span className="ops-ellipsis-text">{activity(row).detail}</span></small>
                 </span>
               ) },
               {
@@ -706,7 +707,7 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               { key: 'state', header: t('clients.financeActivity'), render: (row) => (
                 <div className="ops-client-tablet-stack">
                   <Money amount={row.balance} signed currency="zł" />
-                  <span className="ops-client-tablet-activity"><StatusPill status={activity(row).state} size="sm" /><small>{activity(row).label}</small></span>
+                  <span className="ops-client-tablet-activity"><StatusPill status={activity(row).state} label={activity(row).statusLabel} size="sm" /><small>{activity(row).detail}</small></span>
                 </div>
               ) },
               { key: 'actions', header: t('clients.actions'), width: 64, render: (row) => (
@@ -753,10 +754,12 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   ]}
                 />
               </div>
-              <div className="ops-client-compact-context">
+              <div
+                className="ops-client-compact-context"
+                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, paddingLeft: 0 }}
+              >
                 <span title={row.group || t('clients.individual')}>{row.group || t('clients.individual')}</span>
-                <span aria-hidden="true">·</span>
-                <span title={subscriptionUsage(row)}>{subscriptionUsage(row)}</span>
+                <span style={{ justifySelf: 'end', textAlign: 'right' }} title={subscriptionUsage(row)}>{subscriptionUsage(row)}</span>
               </div>
               <div className={`ops-client-compact-activity is-${activity(row).state}`} title={activity(row).label}>
                 <span aria-hidden="true" />{activity(row).label}

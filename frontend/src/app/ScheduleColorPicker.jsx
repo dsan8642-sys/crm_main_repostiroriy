@@ -38,10 +38,10 @@ export function ScheduleColorPicker({
         aria-label={t('scheduleColor.choose', { color: t(`scheduleColor.${selectedOption.key}`) })}
         className="ops-schedule-color-trigger"
         onClick={() => setExpanded((current) => !current)}
-        style={scheduleColorStyle(selectedKey)}
+        style={{ ...scheduleColorStyle(selectedKey), background: 'var(--schedule-color-background)', border: '1px solid var(--schedule-color-border)', borderRadius: 'var(--radius-md)', color: 'var(--schedule-color-text)' }}
         type="button"
       >
-        <span className="ops-schedule-color-swatch" aria-hidden="true"><span>✓</span></span>
+        <span className="ops-schedule-color-swatch" style={{ background: 'var(--schedule-color-border)', borderRadius: 'var(--radius-sm)' }} aria-hidden="true"><span>✓</span></span>
         <span className="ops-schedule-color-trigger-copy">
           <small>{t('scheduleColor.selected')}</small>
           <strong>{t(`scheduleColor.${selectedOption.key}`)}</strong>
@@ -59,7 +59,7 @@ export function ScheduleColorPicker({
                   className={`ops-schedule-color-option${selected ? ' is-selected' : ''}`}
                   data-color-key={option.key}
                   key={option.key}
-                  style={scheduleColorStyle(option.key)}
+                  style={{ ...scheduleColorStyle(option.key), background: 'var(--schedule-color-background)', border: `1px solid var(--schedule-color-border)`, borderRadius: 'var(--radius-md)', color: 'var(--schedule-color-text)', cursor: 'pointer' }}
                 >
                   <input
                     type="radio"
@@ -71,7 +71,7 @@ export function ScheduleColorPicker({
                       setExpanded(false)
                     }}
                   />
-                  <span className="ops-schedule-color-swatch" aria-hidden="true">
+                  <span className="ops-schedule-color-swatch" style={{ background: 'var(--schedule-color-border)', borderRadius: 'var(--radius-sm)' }} aria-hidden="true">
                     {selected && <span>✓</span>}
                   </span>
                   <span>{t(`scheduleColor.${option.key}`)}</span>

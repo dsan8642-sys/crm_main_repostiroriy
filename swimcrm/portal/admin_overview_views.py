@@ -2,7 +2,22 @@
 from .admin_support import _admin_required
 import re
 
+from django.db import connection
+
 from scheduling.models import Location, SessionTypeConfig
+
+
+def _reference_matches_tokens(participant, tokens):
+    """Unicode-aware fallback for SQLite, whose LIKE ignores only ASCII case."""
+    parent = participant.parent
+    user = parent.user
+    values = (
+        participant.first_name, participant.last_name, participant.email,
+        parent.phone, parent.email,
+        user.first_name, user.last_name, user.username,
+    )
+    folded_values = tuple(str(value or "").casefold() for value in values)
+    return all(any(token.casefold() in value for value in folded_values) for token in tokens)
 
 @require_GET
 def admin_api_contract(request):
@@ -30,8 +45,14 @@ def admin_reference(request):
     participants = Student.objects.select_related(
         "parent", "parent__user"
     ).prefetch_related("groups").filter(is_active=True, parent__user__is_active=True)
-    if q:
-        for token in q.split():
+    tokens = q.split()
+    if tokens and connection.vendor == "sqlite":
+        participants = [
+            participant for participant in participants.order_by("last_name", "first_name", "id")
+            if _reference_matches_tokens(participant, tokens)
+        ]
+    elif tokens:
+        for token in tokens:
             participants = participants.filter(
                 Q(first_name__icontains=token) | Q(last_name__icontains=token) |
                 Q(parent__phone__icontains=token) | Q(parent__email__icontains=token) |
@@ -46,6 +67,8 @@ def admin_reference(request):
          for row in session_type_configs]
         or [{"value": value, "label": label, "default_capacity": None} for value, label in SessionType.choices]
     )
+    ordered_participants = participants if isinstance(participants, list) else participants.order_by(
+        "last_name", "first_name", "id")
     return JsonResponse({
         "trainers": [_trainer_payload(trainer) for trainer in
                      Trainer.objects.select_related("user").filter(is_active=True).order_by("user__last_name", "id")],
@@ -65,8 +88,7 @@ def admin_reference(request):
             }
             for location in Location.objects.filter(is_active=True).order_by("name", "id")
         ],
-        "participants": [_student_payload(participant) for participant in
-                         participants.order_by("last_name", "first_name", "id")],
+        "participants": [_student_payload(participant) for participant in ordered_participants],
         "choices": {
             "payment_methods": [{"value": value, "label": label} for value, label in PaymentMethod.choices],
             "payment_statuses": [{"value": value, "label": label} for value, label in PaymentStatus.choices],
