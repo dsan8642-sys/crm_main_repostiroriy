@@ -357,6 +357,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}><Avatar name={row.full_name} size={28} /><strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.full_name}</strong></div>
                   {row.balance_minor > 0 ? <Badge tone="danger">{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success">{t('attendance.noDebt')}</Badge>}
                 </div>
+                <Button size="sm" variant="subtle" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>{t('attendance.profile')}</Button>
                 {attendanceActions(row, true)}
               </article>
             )) : <div className="muted" style={{ padding: 16 }}>{selectedSessionId ? t('attendance.emptySession') : t('attendance.chooseForRoster')}</div>}
