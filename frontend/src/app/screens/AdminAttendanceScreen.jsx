@@ -357,7 +357,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
             {rows.length ? rows.map((row, index) => (
               <article key={row.id} style={{ display: 'grid', gap: 12, minWidth: 0, padding: 14, borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, flex: '1 1 170px', minWidth: 0 }}><Avatar name={row.full_name} size={28} /><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }}>{row.full_name}</strong></div>
+                  <button type="button" className="ops-compact-card-title with-avatar" style={{ flex: '1 1 170px', minWidth: 0 }} onClick={() => go?.('clientDetail', { clientId: row.client_id })}><Avatar name={row.full_name} size={28} /><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }} title={row.full_name}>{row.full_name}</strong></button>
                   {row.balance_minor > 0 ? <Badge tone="danger" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.noDebt')}</Badge>}
                 </div>
                 {attendanceActions(row, true)}

@@ -1715,7 +1715,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByText('Jan Kowalski').first()).toBeVisible()
   await expect(page.getByText(/Долг:.*PLN/)).toBeVisible()
   await expect(page.getByRole('columnheader', { name: 'Телефон' })).toHaveCount(0)
-  await page.getByRole('button', { name: /Профиль/ }).click()
+  await page.getByRole('button', { name: 'Jan Kowalski' }).click()
   await expect(page.getByText('Anna Kowalska').first()).toBeVisible()
   await expect(page.getByRole('button', { name: /Продлить абонемент/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Заморозить/ })).toHaveCount(0)
