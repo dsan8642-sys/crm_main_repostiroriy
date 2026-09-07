@@ -117,7 +117,10 @@ if os.environ.get("POSTGRES_DB"):
 else:
     if ENVIRONMENT in {"prod", "production"}:
         raise ImproperlyConfigured("Production environment requires POSTGRES_DB; SQLite is development-only.")
-    sqlite_name = ":memory:" if "test" in sys.argv else BASE_DIR / "db.sqlite3"
+    sqlite_name = (
+        ":memory:" if "test" in sys.argv
+        else os.environ.get("SWIMCRM_SQLITE_PATH", BASE_DIR / "db.sqlite3")
+    )
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -185,7 +188,11 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_FAILURE_VIEW = "portal.csrf_views.csrf_failure"
-_default_csrf_trusted_origins = "http://127.0.0.1:5173,http://localhost:5173" if DEBUG else ""
+_default_csrf_trusted_origins = (
+    "http://127.0.0.1:5173,http://localhost:5173,"
+    "http://127.0.0.1:5175,http://localhost:5175"
+    if DEBUG else ""
+)
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", _default_csrf_trusted_origins).split(",")
     if origin

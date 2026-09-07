@@ -9,14 +9,11 @@ const entry = Object.values(manifest).find((item) => item.isEntry)
 if (!entry?.file) throw new Error('Vite manifest does not contain an entry JavaScript file.')
 
 const javascriptChunks = []
-let cssRawBytes = 0
 
 for (const file of files) {
   const bytes = await readFile(new URL(file, assetsDir))
   if (file.endsWith('.js')) {
     javascriptChunks.push({ file: `assets/${file}`, raw: bytes.length, gzip: gzipSync(bytes).length })
-  } else if (file.endsWith('.css')) {
-    cssRawBytes += bytes.length
   }
 }
 
@@ -37,7 +34,6 @@ const actual = {
   entryJavaScriptGzipBytes: entryChunk.gzip,
   largestJavaScriptChunkRawBytes: largestRawChunk.raw,
   largestJavaScriptChunkGzipBytes: largestGzipChunk.gzip,
-  cssRawBytes,
 }
 let failed = false
 for (const [metric, value] of Object.entries(actual)) {

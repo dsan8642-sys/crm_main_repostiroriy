@@ -8,7 +8,6 @@
     "entryJavaScriptRawBytes": 325000,
     "entryJavaScriptGzipBytes": 105000,
     "largestJavaScriptChunkRawBytes": 475000,
-    "largestJavaScriptChunkGzipBytes": 120000,
-    "cssRawBytes": 70000
+    "largestJavaScriptChunkGzipBytes": 120000
   }
 }

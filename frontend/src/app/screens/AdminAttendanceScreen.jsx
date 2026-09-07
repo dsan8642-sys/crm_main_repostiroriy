@@ -24,12 +24,11 @@ export function attendanceSessionDisplayStatus(session, now = Date.now()) {
 export function createAdminAttendanceScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, Button, Banner, Avatar, StatusPill, Input, Badge, Dialog } = components
   const I = icons
-  const options = [
-    { value: 'present', labelKey: 'attendance.present', consumes: true },
-    { value: 'absent', labelKey: 'attendance.absent', consumes: true },
-    { value: 'excused', labelKey: 'attendance.excused', consumes: false },
-    { value: 'rescheduled', labelKey: 'attendance.rescheduled', consumes: false },
-  ]
+    const options = [
+      { value: 'present', labelKey: 'attendance.present', consumes: true },
+      { value: 'absent', labelKey: 'attendance.absent', consumes: true },
+      { value: 'excused', labelKey: 'attendance.excused', consumes: false },
+    ]
 
   return function ApiAdminAttendance({ go, back, sessionId }) {
     const { locale } = useLocale()
@@ -147,11 +146,15 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
 
     function attendanceActions(row, compact = false) {
       return <div id={`admin-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `admin-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: compact ? 6 : 8, flexWrap: 'wrap' }}>
-        {options.map((option) => (
-          <Button key={option.value} size="sm" variant={row.attendance?.status === option.value ? 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={row.attendance?.status === option.value} onClick={() => mark(row, option.value)} style={compact ? { minHeight: 40, padding: '0 8px' } : undefined}>
+        {options.map((option) => {
+          const selected = row.attendance?.status === option.value
+          const presentStyle = selected && option.value === 'present'
+            ? { background: 'var(--green-500)', border: '1px solid var(--green-500)', '--primary-hover': 'var(--green-600)', '--primary-active': 'var(--green-700)' }
+            : {}
+          return <Button key={option.value} size="sm" variant={selected ? option.value === 'absent' ? 'danger' : 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={selected} onClick={() => mark(row, option.value)} style={{ ...(compact ? { minHeight: 40, padding: '0 8px' } : {}), ...presentStyle }}>
             {t(option.labelKey)}{option.consumes ? ' -1' : ''}
           </Button>
-        ))}
+        })}
         {rowErrors[row.id] && <small id={`admin-attendance-row-${row.id}-error`} className="ops-field-error" role="alert">{rowErrors[row.id]}</small>}
       </div>
     }
@@ -352,12 +355,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         {isMobile ? (
           <div className="card" style={{ overflow: 'hidden' }}>
             {rows.length ? rows.map((row, index) => (
-              <article key={row.id} style={{ display: 'grid', gap: 12, padding: 14, borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}><Avatar name={row.full_name} size={28} /><strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.full_name}</strong></div>
-                  {row.balance_minor > 0 ? <Badge tone="danger">{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success">{t('attendance.noDebt')}</Badge>}
+              <article key={row.id} style={{ display: 'grid', gap: 12, minWidth: 0, padding: 14, borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, flex: '1 1 170px', minWidth: 0 }}><Avatar name={row.full_name} size={28} /><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }}>{row.full_name}</strong></div>
+                  {row.balance_minor > 0 ? <Badge tone="danger" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.noDebt')}</Badge>}
                 </div>
-                <Button size="sm" variant="subtle" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>{t('attendance.profile')}</Button>
                 {attendanceActions(row, true)}
               </article>
             )) : <div className="muted" style={{ padding: 16 }}>{selectedSessionId ? t('attendance.emptySession') : t('attendance.chooseForRoster')}</div>}
@@ -398,10 +400,9 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
               {
                 key: 'actions',
                 header: '',
-                width: 210,
+                width: 130,
                 render: (row) => (
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                    <Button size="sm" variant="subtle" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>{t('attendance.profile')}</Button>
                     {row.can_remove_from_session ? (
                       <Button size="sm" variant="secondary" disabled={selectedStatus === 'cancelled' || busyId === `remove-${row.id}`} loading={busyId === `remove-${row.id}`} onClick={() => removeStudent(row)}>{t('groups.remove')}</Button>
                     ) : (

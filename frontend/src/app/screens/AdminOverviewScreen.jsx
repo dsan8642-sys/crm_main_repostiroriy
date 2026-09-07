@@ -90,7 +90,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
     const todayIso = dateToIso(now)
     const todaySessions = activeSessions.filter(
       (session) => session.startAt?.slice(0, 10) === todayIso,
-    ).slice(0, 5)
+    )
     const exceptions = sessions.filter((session) => session.isCancelled).slice(0, 3)
 
     return (
@@ -134,7 +134,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
 
         <div className="eyebrow" aria-hidden="true" style={{ marginBottom: 10 }}>&nbsp;</div>
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
-          <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={sessions.length} sub={t('overview.todayUpcoming')} onClick={() => go('schedule', { tab: 'day' })} />
+          <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={todaySessions.length} sub={t('overview.todaySessions')} onClick={() => go('schedule', { tab: 'day' })} />
           <Kpi icon={<I.ClientFamily size={15} />} label={t('overview.clients')} value={(data.clients || []).length} sub={t('overview.openDatabase')} onClick={() => go('clients')} />
           <Kpi icon={<I.TrainerWhistle size={15} />} label={t('overview.trainers')} value={(data.trainers || []).filter((row) => row.active).length} sub={t('overview.openTeam')} onClick={() => go('trainers')} />
           <Kpi icon={<I.Alert size={15} />} label={t('overview.debtors')} value={debtorCount} sub={`${debtTotal.toLocaleString(localeTag)} zł`} tone="var(--money-debt)" onClick={() => go('debtors')} />
@@ -145,7 +145,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           <Button size="sm" variant="secondary" onClick={() => go('schedule')}>{t('overview.allSessions')}</Button>
         </div>
         <CompactStatusRow
-          items={todaySessions.map((session) => ({
+          items={todaySessions.slice(0, 5).map((session) => ({
             id: session.id,
             primary: `${session.start}-${session.end} · ${session.group}`,
             secondary: `${session.trainer} · ${session.location}`,

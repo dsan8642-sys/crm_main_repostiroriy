@@ -190,7 +190,7 @@ textarea {
 .ops-nav-button {
   width: 100%;
   min-height: 40px;
-  margin-bottom: 4px;
+  margin-bottom: 0;
   padding: 0 9px;
   border: 0;
   border-radius: 7px;
@@ -601,7 +601,7 @@ table {
 
 .ops-user-wrap {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -638,7 +638,7 @@ table {
 .ops-sidebar-toggle {
   grid-column: 1 / -1;
   display: flex;
-  min-height: 40px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -741,6 +741,7 @@ table {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
+  margin-bottom: 8px;
 }
 
 .ops-action-card {
@@ -2534,7 +2535,7 @@ table {
 
   .ops-attendance-actions {
     display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 
   & button {
     min-height: 44px;
@@ -3184,6 +3185,7 @@ textarea[aria-invalid="true"] {
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
+  margin-block: 8px;
 }
 
 .ops-calendar-date-controls > .ops-picker-field > label,
@@ -3300,6 +3302,10 @@ textarea[aria-invalid="true"] {
 }
 
 @media (max-width: 767px) {
+  .ops-calendar-toolbar {
+    margin-top: 8px;
+  }
+
   .ops-calendar-navigation {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -3308,6 +3314,7 @@ textarea[aria-invalid="true"] {
   .ops-calendar-date-controls {
     justify-content: flex-end;
     flex-wrap: wrap;
+    margin: 2px 0 0;
   }
 
   .ops-calendar-period-header.is-week {

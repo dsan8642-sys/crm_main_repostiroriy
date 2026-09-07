@@ -604,7 +604,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             sidebarLastSection = section
             return (
               <React.Fragment key={item.key}>
-                {showSection && <div className="ops-nav-section" style={{ margin: '14px 0 6px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
+                {showSection && <div className="ops-nav-section" style={{ margin: '8px 0 2px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
                 <button
                   type="button"
                   className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
@@ -679,7 +679,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 drawerLastSection = section
                 return (
                   <React.Fragment key={`drawer-${item.key}`}>
-                    {showSection && <div className="ops-nav-section" style={{ margin: '14px 0 6px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
+                    {showSection && <div className="ops-nav-section" style={{ margin: '8px 0 2px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
                     <button
                       type="button"
                       className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}

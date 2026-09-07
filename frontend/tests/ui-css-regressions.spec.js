@@ -175,6 +175,22 @@ test('schedule navigation and training actions keep application styling', async 
   expect(metrics.actionBorder).toBeGreaterThanOrEqual(1)
 })
 
+test('schedule calendar keeps its desktop and mobile spacing', async ({ page }) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'one responsive spacing contract is sufficient')
+  await mockAdmin(page)
+  await page.goto('/?role=admin&view=schedule')
+
+  const calendarSpacing = () => page.locator('.ops-calendar-date-controls').evaluate((node) => {
+    const style = getComputedStyle(node)
+    return { top: Number.parseFloat(style.marginTop), bottom: Number.parseFloat(style.marginBottom) }
+  })
+
+  await expect.poll(calendarSpacing).toEqual({ top: 8, bottom: 8 })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(calendarSpacing).toEqual({ top: 2, bottom: 0 })
+  await expect(page.locator('.ops-calendar-toolbar')).toHaveCSS('margin-top', '8px')
+})
+
 test('sidebar shows language above the user and initials only when collapsed', async ({ page }) => {
   test.skip(![768, 1440].includes(page.viewportSize()?.width || 0), 'desktop sidebar boundaries')
   await mockAdmin(page)

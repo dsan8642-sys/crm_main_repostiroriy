@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.http import HttpResponse
 from django.test import Client, TestCase, override_settings
 
@@ -108,6 +109,20 @@ class ProductionAuthApiTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_login_accepts_the_local_vite_5175_origin(self):
+        self.assertIn("http://127.0.0.1:5175", settings.CSRF_TRUSTED_ORIGINS)
+        f.make_admin(username="vite_origin_admin")
+        csrf_client = Client(enforce_csrf_checks=True)
+        response = csrf_client.post(
+            "/api/auth/login/",
+            {"login": "vite_origin_admin", "password": "Str0ngPass!123"},
+            content_type="application/json",
+            HTTP_ORIGIN="http://127.0.0.1:5175",
+            **self._csrf_headers(csrf_client),
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_default_csrf_failure_is_safe_structured_json(self):
         f.make_admin(username="csrf_json_admin")
