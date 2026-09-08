@@ -26,6 +26,12 @@ class Group(models.Model):
         blank=True,
         help_text="Вместимость по умолчанию для новых групповых занятий",
     )
+    sort_order = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Позиция группы в навигационных списках; меньшее число выше",
+    )
     color_key = models.CharField(max_length=32, null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
@@ -47,6 +53,20 @@ class Group(models.Model):
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def navigation_ordering(cls):
+        """Put explicitly positioned groups before the alphabetical remainder."""
+        return (
+            models.Case(
+                models.When(sort_order__isnull=True, then=models.Value(1)),
+                default=models.Value(0),
+                output_field=models.IntegerField(),
+            ),
+            "sort_order",
+            "name",
+            "id",
+        )
 
 
 class SubscriptionType(models.Model):

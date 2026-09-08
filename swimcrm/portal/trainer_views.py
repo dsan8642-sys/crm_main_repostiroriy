@@ -46,7 +46,7 @@ def trainer_sessions(request):
 def trainer_groups(request):
     trainer = _trainer_from_request(request)
     today = timezone.localdate()
-    groups = Group.objects.filter(default_trainer=trainer).order_by("name", "id")
+    groups = Group.objects.filter(default_trainer=trainer).order_by(*Group.navigation_ordering())
     type_colors = session_type_color_keys()
     payload = []
     for group in groups:

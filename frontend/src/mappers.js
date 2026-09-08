@@ -337,6 +337,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       priceMinor: group.price_minor,
       currency: group.currency,
       defaultCapacity: group.default_capacity ?? null,
+      sortOrder: group.sort_order ?? null,
       colorKey: normalizeScheduleColorKey(group.color_key),
       active: group.is_active,
       nextSessionAt: group.next_session?.start_at || null,

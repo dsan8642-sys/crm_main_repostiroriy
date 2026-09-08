@@ -154,7 +154,7 @@ async function loadParticipantOptions(query, requestOptions = {}) {
 export function createAdminScheduleScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Button, Badge, Banner, Dialog, Input, Checkbox } = components
   const I = icons
-  return function ApiAdminSchedule({ go, initialTab, initialParticipantId, createSession: createSessionMode }) {
+  return function ApiAdminSchedule({ go, back, sessionId, initialTab, initialParticipantId, createSession: createSessionMode }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
     const localeTag = adminLocaleTag(locale)
@@ -237,6 +237,25 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const filterPopoverRef = useRef(null)
     const [rangeRefresh, setRangeRefresh] = useState(0)
     const createRouteHandledRef = useRef(null)
+    const editingFromAttendance = initialTab === 'edit-session' && Boolean(sessionId)
+
+    useEffect(() => {
+      if (!editingFromAttendance) return undefined
+      let active = true
+      setBusy(true)
+      api.get(`/api/admin/schedule/sessions/${sessionId}/`)
+        .then((session) => {
+          if (!active) return
+          const normalized = normalizeSession(session)
+          setFocusDate(sessionIsoDate(normalized))
+          openSessionEdit(normalized)
+        })
+        .catch((err) => {
+          if (active) setError(apiErrorMessage(err, t('schedule.updateError')))
+        })
+        .finally(() => { if (active) setBusy(false) })
+      return () => { active = false }
+    }, [editingFromAttendance, sessionId])
 
     useEffect(() => {
       if (actionPanel === 'session') setSessionFormBaseline({ ...sessionForm })
@@ -566,6 +585,14 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
       setSessionEditBaseline(null)
       setEditFieldErrors({})
       setError(null)
+      if (editingFromAttendance) returnToAttendance()
+    }
+
+    function returnToAttendance() {
+      const returnUrl = window.history.state?.swimcrmReturnUrl
+      const returnParams = returnUrl ? new URL(returnUrl, window.location.href).searchParams : null
+      if (back && returnParams?.get('view') === 'attendance' && returnParams.get('session') === String(sessionId)) back('attendance', { sessionId })
+      else go('attendance', { sessionId })
     }
 
     function validateNewSession() {
@@ -698,6 +725,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         setMessage(t('schedule.updated'))
         setRangeRefresh((current) => current + 1)
         await reloadRoleData?.('admin')
+        if (editingFromAttendance) returnToAttendance()
       } catch (err) {
         const nextErrors = fieldErrorsFromApi(err, SESSION_FIELD_MAP)
         setEditFieldErrors(nextErrors)
@@ -1061,22 +1089,28 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                 }}
                 style={{ ...scheduleColorStyle(session.colorKey), display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: index < localizedSessions.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}
               >
-                <span className="mono">{sessionIsoDate(session)}</span>
-                <span className="mono">{session.start}-{session.end}</span>
-                {session.limit > 0 && <span className="mono">{session.count}/{session.limit}</span>}
-                <span className="strong" style={{ flex: 1 }}>{session.group}{session.individualParticipant?.full_name ? ` · ${session.individualParticipant.full_name}` : ''}</span>
-                <span className="muted">{session.trainer}</span>
-                <span className="muted">{session.location}</span>
-                {session.groupArchived && <Badge tone="warning">{t('schedule.groupArchived')}</Badge>}
-                {session.trainerArchived && <Badge tone="warning">{t('schedule.trainerArchived')}</Badge>}
-                <Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? t('schedule.cancelled') : t('schedule.planned')}</Badge>
-                {session.isCancelled
-                  ? <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); restoreSession(session) }}>{t('schedule.restore')}</Button>
-                  : <>
-                    <Button size="sm" variant="subtle" disabled={busy} onClick={(event) => { event.stopPropagation(); openSessionEdit(session) }}>{t('common.edit')}</Button>
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); cancelSession(session) }}>{t('schedule.cancel')}</Button>
-                  </>}
-                <Button size="sm" variant="danger" disabled={busy} onClick={(event) => { event.stopPropagation(); setConfirmDelete(session) }}>{t('common.delete')}</Button>
+                <div className="ops-schedule-list-meta">
+                  <span className="mono">{sessionIsoDate(session)}</span>
+                  <span className="mono">{session.start}-{session.end}</span>
+                  {session.limit > 0 && <span className="mono">{session.count}/{session.limit}</span>}
+                </div>
+                <div className="ops-schedule-list-details">
+                  <span className="strong" style={{ flex: 1 }}>{session.group}{session.individualParticipant?.full_name ? ` · ${session.individualParticipant.full_name}` : ''}</span>
+                  <span className="muted">{session.trainer}</span>
+                  <span className="muted">{session.location}</span>
+                  {session.groupArchived && <Badge tone="warning">{t('schedule.groupArchived')}</Badge>}
+                  {session.trainerArchived && <Badge tone="warning">{t('schedule.trainerArchived')}</Badge>}
+                </div>
+                <span className="ops-schedule-list-session-status"><Badge tone={session.status === 'cancelled' ? 'danger' : 'primary'}>{session.status === 'cancelled' ? t('schedule.cancelled') : t('schedule.planned')}</Badge></span>
+                <div className="ops-schedule-list-actions">
+                  {session.isCancelled
+                    ? <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); restoreSession(session) }}>{t('schedule.restore')}</Button>
+                    : <>
+                      <Button size="sm" variant="subtle" disabled={busy} onClick={(event) => { event.stopPropagation(); openSessionEdit(session) }}>{t('common.edit')}</Button>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={(event) => { event.stopPropagation(); cancelSession(session) }}>{t('schedule.cancel')}</Button>
+                    </>}
+                  <Button size="sm" variant="danger" disabled={busy} onClick={(event) => { event.stopPropagation(); setConfirmDelete(session) }}>{t('common.delete')}</Button>
+                </div>
               </div>
             ))}
             {!visibleSessions.length && <div className="muted" style={{ padding: 16 }}>{t('schedule.emptyPeriod')}</div>}

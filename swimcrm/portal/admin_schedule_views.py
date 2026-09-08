@@ -10,6 +10,7 @@ from scheduling.services import (
     preview_copy_period,
     restore_session,
 )
+from students.services import add_student_group
 
 
 @require_POST
@@ -123,6 +124,14 @@ def _session_attendance_payload(session):
             status=SessionParticipantStatus.ACTIVE,
         ).select_related("student")
     }
+    current_group_student_ids = set()
+    if session.group_id:
+        current_group_student_ids = set(
+            Student.objects.filter(
+                id__in=student_ids,
+                group_memberships__group_id=session.group_id,
+            ).values_list("id", flat=True)
+        )
     history = AuditLogEntry.objects.filter(entity_type="Session", entity_id=str(session.id)).select_related("actor")[:50]
     return {
         "session": _session_payload(session),
@@ -145,7 +154,15 @@ def _session_attendance_payload(session):
                 "note": one_off_participants[student.id].note,
             } if student.id in one_off_participants else None,
             "can_remove_from_session": (
-                student.id in one_off_participants and not split_roster_locked
+                student.id in one_off_participants
+                and student.id not in current_group_student_ids
+                and not split_roster_locked
+            ),
+            "can_add_to_group": (
+                bool(session.group_id)
+                and student.id in one_off_participants
+                and student.id not in current_group_student_ids
+                and not split_roster_locked
             ),
         } for student in roster],
     }
@@ -494,6 +511,49 @@ def admin_schedule_session_participants(request, session_id):
         "created": created,
     })
     return JsonResponse(_session_attendance_payload(session), status=201 if created else 200)
+
+
+@require_POST
+@transaction.atomic
+def admin_schedule_session_participant_promote(request, session_id, student_id):
+    user = _admin_required(request)
+    session = get_object_or_404(
+        Session.objects.select_for_update(of=("self",)).select_related("group"),
+        pk=session_id,
+    )
+    if session.is_cancelled:
+        raise ValidationError("cancelled sessions cannot change group membership")
+    if not session.group_id:
+        raise _field_validation_error(
+            "group_id", "У занятия нет группы.", code="invalid_choice")
+    if not session.group.is_active:
+        raise _field_validation_error(
+            "group_id", "Нельзя добавить участника в архивную группу.",
+            code="inactive")
+    participant = SessionParticipant.objects.filter(
+        session=session,
+        student_id=student_id,
+        status=SessionParticipantStatus.ACTIVE,
+    ).select_related("student__parent__user").first()
+    if not participant:
+        raise _field_validation_error(
+            "student_id", "Разовый участник не найден в этом занятии.",
+            code="invalid_choice")
+
+    student = participant.student
+    _require_active_participant(
+        student, "be added to groups", field="student_id")
+    already_member = student.group_memberships.filter(
+        group_id=session.group_id).exists()
+    add_student_group(student, session.group_id, effective_from=timezone.now())
+    if not already_member:
+        audit(user, "participant.group_added_from_session", student, {
+            "session_id": session.id,
+            "student_id": student.id,
+            "group_id": session.group_id,
+            "source": "one_off",
+        })
+    return JsonResponse(_session_attendance_payload(session))
 
 
 @require_http_methods(["DELETE"])

@@ -94,7 +94,7 @@ LIST_QUERY_POLICIES = {
 LIST_ORDER_POLICIES = {
     "/api/admin/clients/": ("name", "-name", "id", "-id"),
     "/api/admin/trainers/": ("name", "-name", "id", "-id"),
-    "/api/admin/groups/": ("name", "-name", "id", "-id"),
+    "/api/admin/groups/": ("sort_order", "name", "-name", "id", "-id"),
     "/api/admin/payments/": ("-date", "date", "-amount", "amount", "status", "-status"),
     "/api/admin/debtors/": ("-balance", "balance", "name", "-due", "due"),
     "/api/trainer/history/": ("-date", "date", "group", "-group"),

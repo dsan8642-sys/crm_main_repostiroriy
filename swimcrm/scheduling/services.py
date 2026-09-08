@@ -52,9 +52,17 @@ def session_roster_students(session):
     if session.individual_student_id:
         condition = Q(pk=session.individual_student_id) | Q(pk__in=participant_ids)
     elif session.group_id:
-        condition = Q(groups__id=session.group_id, is_active=True) | Q(pk__in=participant_ids)
+        condition = (
+            Q(group_memberships__group_id=session.group_id,
+              group_memberships__effective_from__isnull=True)
+            | Q(group_memberships__group_id=session.group_id,
+                group_memberships__effective_from__lte=session.start_at)
+            | Q(pk__in=participant_ids)
+        )
     else:
         condition = Q(pk__in=participant_ids)
+    if session.end_at <= timezone.now():
+        condition |= Q(pk__in=session.attendance.values_list("student_id", flat=True))
     return Student.objects.filter(
         condition,
         is_active=True,

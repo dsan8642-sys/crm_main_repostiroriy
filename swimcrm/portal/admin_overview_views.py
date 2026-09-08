@@ -75,7 +75,7 @@ def admin_reference(request):
         "groups": [_group_payload(group) for group in
                    Group.objects.select_related(
                        "default_trainer__user", "default_location"
-                   ).filter(is_active=True).order_by("name", "id")],
+                   ).filter(is_active=True).order_by(*Group.navigation_ordering())],
         "subscription_types": [_subscription_type_payload(stype) for stype in
                                SubscriptionType.objects.filter(is_active=True).order_by("name", "id")],
         "locations": [

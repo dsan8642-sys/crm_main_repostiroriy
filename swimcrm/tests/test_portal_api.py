@@ -24,7 +24,7 @@ from scheduling.models import (Location, Session, SessionParticipant, SessionPar
                                SessionType, SessionTypeConfig, WaitlistEntry,
                                WaitlistStatus)
 from scheduling.services import create_session
-from students.models import Student
+from students.models import GroupMembership, Student
 from subscriptions.models import SubscriptionStatus
 from subscriptions.services import create_subscription, freeze_subscription, manual_adjust
 
@@ -1471,6 +1471,73 @@ class AdminPortalApiRule(TestCase):
             SessionParticipantStatus.CANCELLED,
         )
 
+    def test_admin_promotes_one_off_without_rewriting_past_rosters_or_finance(self):
+        trainer = f.make_trainer(username="admin_promote_one_off_coach")
+        other_group = f.make_group("Other group")
+        extra_student = f.make_student(
+            group=other_group, first="One-off", last="Participant")
+        past_session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=timezone.now() - timedelta(days=7, hours=1),
+            end_at=timezone.now() - timedelta(days=7),
+            location="Pool Admin",
+            max_participants=8,
+        )
+        target_session = create_session(
+            trainer=trainer,
+            group=self.group,
+            start_at=timezone.now() + timedelta(hours=1),
+            end_at=timezone.now() + timedelta(hours=2),
+            location="Pool Admin",
+            max_participants=8,
+        )
+        SessionParticipant.objects.create(
+            session=target_session,
+            student=extra_student,
+        )
+        balance_before = student_balance(extra_student)
+        attendance_count_before = extra_student.attendance.count()
+
+        promoted = self.client.post(
+            f"/api/admin/schedule/sessions/{target_session.id}/participants/{extra_student.id}/promote/",
+            data="{}",
+            content_type="application/json",
+        )
+        repeated = self.client.post(
+            f"/api/admin/schedule/sessions/{target_session.id}/participants/{extra_student.id}/promote/",
+            data="{}",
+            content_type="application/json",
+        )
+        old_roster = self.client.get(
+            f"/api/admin/schedule/sessions/{past_session.id}/attendance/")
+
+        self.assertEqual(promoted.status_code, 200)
+        self.assertEqual(repeated.status_code, 200)
+        promoted_row = next(
+            row for row in promoted.json()["students"]
+            if row["id"] == extra_student.id)
+        self.assertFalse(promoted_row["can_add_to_group"])
+        self.assertFalse(promoted_row["can_remove_from_session"])
+        membership = GroupMembership.objects.get(
+            student=extra_student, group=self.group)
+        self.assertIsNotNone(membership.effective_from)
+        self.assertFalse(any(
+            row["id"] == extra_student.id
+            for row in old_roster.json()["students"]
+        ))
+        self.assertEqual(student_balance(extra_student), balance_before)
+        self.assertEqual(
+            extra_student.attendance.count(), attendance_count_before)
+        self.assertEqual(
+            AuditLogEntry.objects.filter(
+                action="participant.group_added_from_session",
+                entity_id=str(extra_student.id),
+                actor=self.admin,
+            ).count(),
+            1,
+        )
+
     def test_admin_client_detail_includes_operational_history(self):
         trainer = f.make_trainer(username="detail_coach")
         stype = f.make_sub_type(name="Detail Pack", sessions=4, days=30, price_minor=12000)
@@ -1932,6 +1999,37 @@ class AdminPortalApiRule(TestCase):
                 )
                 self.assertEqual(response.status_code, 400)
                 self.assertIn("default_capacity", response.json()["errors"])
+
+    def test_admin_group_sort_order_is_optional_and_controls_navigation_order(self):
+        first = f.make_group("Position Alpha")
+        second = f.make_group("Position Beta")
+        updated = self.client.patch(
+            f"/api/admin/groups/{second.id}/",
+            data=json.dumps({"group": {"sort_order": 2}}),
+            content_type="application/json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["sort_order"], 2)
+
+        listing = self.client.get("/api/admin/groups/", {"order": "sort_order"})
+        listed_ids = [row["id"] for row in listing.json()["groups"]]
+        self.assertLess(listed_ids.index(second.id), listed_ids.index(first.id))
+
+        cleared = self.client.patch(
+            f"/api/admin/groups/{second.id}/",
+            data=json.dumps({"group": {"sort_order": None}}),
+            content_type="application/json",
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["sort_order"])
+
+        rejected = self.client.patch(
+            f"/api/admin/groups/{second.id}/",
+            data=json.dumps({"group": {"sort_order": -1}}),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("sort_order", rejected.json()["errors"])
 
     def test_admin_group_color_accepts_approved_key_or_null_only(self):
         created = self.client.post(

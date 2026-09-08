@@ -16,7 +16,7 @@ import { formatEntityDate } from '../entityListContracts.js'
 import { dateToIso } from '../scheduleContracts.js'
 
 export function createAdminGroupsScreen(components, reloadRoleData, adminData = {}) {
-  const { Table, StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money, Dialog } = components
+  const { StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money, Dialog } = components
 
   return function ApiAdminGroups({ go, groupId, currentUser }) {
     const { locale } = useLocale()
@@ -30,7 +30,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       route: 'groups',
       userKey: currentUser?.id || currentUser?.username,
       initialFilters: { active: '', trainer_id: '' },
-      defaultOrder: 'name',
+      defaultOrder: 'sort_order',
     })
     const rows = groupList.rows
     const trainers = adminData.trainers || []
@@ -39,7 +39,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     )
     const clients = adminData.clients || []
     const initial = (adminData.groups || []).find((row) => String(row.groupId) === String(groupId)) || null
-    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', defaultLocationId: initial.defaultLocationActive !== false ? initial.defaultLocationId || '' : '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }
+    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', defaultLocationId: initial.defaultLocationActive !== false ? initial.defaultLocationId || '' : '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), sortOrder: initial.sortOrder == null ? '' : String(initial.sortOrder), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', sortOrder: '', colorKey: '', isActive: true }
     const [selected, setSelected] = useState(initial)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState(false)
@@ -132,7 +132,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
       setCapacityError('')
       setFieldErrors({})
-      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', defaultLocationId: row.defaultLocationActive !== false ? row.defaultLocationId || '' : '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
+      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', defaultLocationId: row.defaultLocationActive !== false ? row.defaultLocationId || '' : '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), sortOrder: row.sortOrder == null ? '' : String(row.sortOrder), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
       setForm(next)
       setFormBaseline(next)
     }
@@ -140,9 +140,16 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     async function saveGroup(isNew = false) {
       const capacityValue = String(form.defaultCapacity).trim()
       const parsedCapacity = Number(capacityValue)
+      const sortOrderValue = String(form.sortOrder).trim()
+      const parsedSortOrder = Number(sortOrderValue)
       if (capacityValue !== '' && (!Number.isInteger(parsedCapacity) || parsedCapacity <= 0)) {
         setCapacityError(t('groups.capacityInvalid'))
         document.getElementById('admin-group-defaultCapacity')?.focus()
+        return
+      }
+      if (sortOrderValue !== '' && (!Number.isInteger(parsedSortOrder) || parsedSortOrder < 0)) {
+        setFieldErrors((current) => ({ ...current, sortOrder: t('groups.sortOrderInvalid') }))
+        document.getElementById('admin-group-sortOrder')?.focus()
         return
       }
       if (!form.name.trim()) {
@@ -162,6 +169,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           default_location_id: form.defaultLocationId || null,
           price_minor: price === '' ? null : Math.round(Number(price) * 100),
           default_capacity: capacityValue === '' ? null : parsedCapacity,
+          sort_order: sortOrderValue === '' ? null : parsedSortOrder,
           color_key: form.colorKey || null,
           is_active: form.isActive,
         }
@@ -184,6 +192,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           default_location_id: 'defaultLocationId',
           price_minor: 'price',
           default_capacity: 'defaultCapacity',
+          sort_order: 'sortOrder',
           color_key: 'colorKey',
           is_active: 'isActive',
         })
@@ -192,7 +201,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         setError(formErrorMessage(err, t('groups.saveError')))
         focusFirstFieldError(nextErrors, {
           name: 'admin-group-name', description: 'admin-group-description',
-          defaultCapacity: 'admin-group-defaultCapacity', price: 'admin-group-price',
+          defaultCapacity: 'admin-group-defaultCapacity', price: 'admin-group-price', sortOrder: 'admin-group-sortOrder',
           defaultTrainerId: 'admin-group-defaultTrainerId', defaultLocationId: 'admin-group-defaultLocationId', colorKey: 'admin-group-colorKey',
           isActive: 'admin-group-isActive',
         })
@@ -262,7 +271,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     const editor = (
       <>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-        <div className="ops-form-grid"><Input id="admin-group-name" label={t('groups.name')} value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label={t('common.description')} value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label={t('groups.capacity')} hint={t('groups.capacityHint')} inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-price" label={t('groups.price')} hint={t('groups.priceHint')} inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label={t('groups.defaultTrainer')} value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">{t('groups.noTrainer')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Select id="admin-group-defaultLocationId" label={t('groups.defaultLocation')} value={form.defaultLocationId} error={fieldErrors.defaultLocationId} onChange={(event) => updateForm('defaultLocationId', event.target.value)}><option value="">{t('groups.noLocation')}</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select><Checkbox id="admin-group-isActive" label={t('groups.isActive')} checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
+        <div className="ops-form-grid"><Input id="admin-group-name" label={t('groups.name')} value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label={t('common.description')} value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label={t('groups.capacity')} hint={t('groups.capacityHint')} inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-sortOrder" label={t('groups.sortOrder')} hint={t('groups.sortOrderHint')} inputMode="numeric" value={form.sortOrder} error={fieldErrors.sortOrder} onChange={(event) => updateForm('sortOrder', event.target.value)} /><Input id="admin-group-price" label={t('groups.price')} hint={t('groups.priceHint')} inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label={t('groups.defaultTrainer')} value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">{t('groups.noTrainer')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Select id="admin-group-defaultLocationId" label={t('groups.defaultLocation')} value={form.defaultLocationId} error={fieldErrors.defaultLocationId} onChange={(event) => updateForm('defaultLocationId', event.target.value)}><option value="">{t('groups.noLocation')}</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select><Checkbox id="admin-group-isActive" label={t('groups.isActive')} checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
         <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
       </>
     )
@@ -279,7 +288,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
 
     return (
       <div className="page page-wide" style={{ paddingInline: 'clamp(12px, 3vw, 26px)' }}>
-        <div className="page-head"><div><h1 className="page-title">{t('groups.title')}</h1><p className="page-desc">{t('groups.description')}</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('groups.new')}</Button></div>
+        <div className="page-head"><div><h1 className="page-title">{t('groups.title')}</h1><p className="page-desc">{t('groups.description')}</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', sortOrder: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('groups.new')}</Button></div>
         <ToastNotice id="admin-groups-result" message={message} />
         {error && !creating && !editing && !addingMember && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>{t('groups.updatingRoster')}</BusyBanner>
@@ -305,15 +314,10 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
         </FormModal>
 
         <ListFeedback list={groupList} emptyLabel={t('groups.empty')} />
-        <div className="ops-entity-desktop-table"><Table rows={rows} emptyLabel={t('groups.empty')} columns={[
-          { key: 'name', header: t('common.group'), render: (row) => <button type="button" className="ops-link-button" aria-expanded={String(selected?.groupId) === String(row.groupId)} aria-controls={`group-detail-desktop-${row.groupId}`} onClick={() => String(selected?.groupId) === String(row.groupId) ? setSelected(null) : openGroup(row)}><span className="strong">{row.name}</span></button> },
-          { key: 'description', header: t('common.description'), muted: true, render: (row) => row.description || '-' },
-          { key: 'trainer', header: t('common.trainer'), muted: true },
-          { key: 'price', header: t('groups.session'), align: 'right', width: 110, render: (row) => row.price == null ? <span className="muted">-</span> : <Money amount={row.price} currency={row.currency} /> },
-          { key: 'students', header: t('groups.participants'), align: 'right', width: 110, render: (row) => <button type="button" className="ops-count-button" onClick={() => openGroup(row)}>{row.students}</button> },
-          { key: 'active', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /> },
-          { key: 'act', header: '', width: 90, render: (row) => <Button size="sm" variant="subtle" onClick={() => openGroup(row)}>{t('groups.profile')}</Button> },
-        ]} />{!isMobile && groupDetail}</div>
+        <div className="ops-entity-desktop-table ops-groups-desktop-table"><table><thead><tr><th>{t('common.group')}</th><th>{t('common.description')}</th><th>{t('common.trainer')}</th><th>{t('groups.session')}</th><th>{t('groups.participants')}</th><th>{t('common.status')}</th><th aria-label={t('clients.actions')} /></tr></thead><tbody>
+          {rows.map((row) => <React.Fragment key={row.id}><tr className={String(selected?.groupId) === String(row.groupId) ? 'is-selected' : ''}><td><button type="button" className="ops-link-button" aria-expanded={String(selected?.groupId) === String(row.groupId)} aria-controls={`group-detail-desktop-${row.groupId}`} onClick={() => String(selected?.groupId) === String(row.groupId) ? setSelected(null) : openGroup(row)}><span className="strong">{row.name}</span></button></td><td className="muted">{row.description || '-'}</td><td className="muted">{row.trainer}</td><td className="ops-groups-money">{row.price == null ? <span className="muted">-</span> : <Money amount={row.price} currency={row.currency} />}</td><td className="ops-groups-count"><button type="button" className="ops-count-button" onClick={() => openGroup(row)}>{row.students}</button></td><td><StatusPill status={row.active ? 'active' : 'inactive'} size="sm" /></td><td><Button size="sm" variant="subtle" onClick={() => openGroup(row)}>{t('groups.profile')}</Button></td></tr>{String(selected?.groupId) === String(row.groupId) && groupDetail && <tr className="ops-groups-detail-row"><td colSpan="7">{React.cloneElement(groupDetail, { id: `group-detail-desktop-${row.groupId}` })}</td></tr>}</React.Fragment>)}
+          {!rows.length && <tr><td colSpan="7" className="ops-groups-empty">{t('groups.empty')}</td></tr>}
+        </tbody></table></div>
         <div className="ops-entity-mobile-list">
           {rows.map((row) => (
             <React.Fragment key={row.id}><EntityMobileCard className="ops-group-compact-card" labelledBy={`group-card-${row.id}`}>

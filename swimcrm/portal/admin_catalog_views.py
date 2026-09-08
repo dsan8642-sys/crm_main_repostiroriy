@@ -39,11 +39,12 @@ def admin_groups(request):
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
     qs = ordered_rows(request, qs, allowlist={
+        "sort_order": Group.navigation_ordering(),
         "name": ("name", "id"),
         "-name": ("-name", "-id"),
         "id": ("id",),
         "-id": ("-id",),
-    }, default="name")
+    }, default="sort_order")
     return JsonResponse(paginated_payload(
         request, qs, key="groups", serializer=_group_payload))
 

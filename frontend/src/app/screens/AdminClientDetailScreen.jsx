@@ -853,7 +853,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           </div>
           <section className="card card-pad" aria-label={t('client.statusSummary')}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.statusSummary')}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+            <div className="ops-client-status-summary-grid">
               {[
                 [I.Users, t('client.participants'), summary.participants_count ?? participants.length, t('client.activeCount', { count: summary.active_participants ?? participants.filter((item) => item.is_active).length })],
                 [I.Layers, t('client.subscriptions'), selectedSubscriptions.filter((item) => item.status === 'active').length, t('client.active')],
@@ -975,7 +975,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           <Input id="admin-client-charge-reversal-reason" label={t('finance.reverseReason')} value={reversalReason} error={reversalReasonError} onChange={(event) => { setReversalReason(event.target.value); setReversalReasonError(null) }} />
         </FormModal>
 
-        <div className="toolbar">
+        <div className="toolbar ops-client-detail-tabs">
           <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
             { value: 'participants', label: t('client.participants'), count: participants.length },
             { value: 'subscriptions', label: t('client.subscriptions'), count: selectedSubscriptions.length },
@@ -1007,7 +1007,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               { key: 'birth_date', header: t('field.birthDate'), muted: true, render: (row) => row.birth_date || '-' },
               { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
               { key: 'groups', header: t('common.groups'), render: (row) => (row.groups || []).map((group) => group.name).join(', ') || t('clients.individual') },
-              { key: 'balance', header: t('common.balance'), align: 'right', width: 110, render: (row) => <Money amount={asAccountBalance(row.balance_minor)} signed /> },
+              { key: 'balance', header: t('common.balance'), align: 'right', width: 110, render: (row) => <span className="ops-client-detail-balance"><Money amount={asAccountBalance(row.balance_minor)} signed /></span> },
               { key: 'status', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
               { key: 'training', header: t('field.training'), render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'individual', participantId: row.id })}>{t('field.individualSession')}</Button><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'split', participantId: row.id })}>{t('field.splitSession')}</Button></div> },
             ]}

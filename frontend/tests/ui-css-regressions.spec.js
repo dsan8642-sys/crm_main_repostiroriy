@@ -54,6 +54,69 @@ async function mockAdmin(page, { clients = [], sessions = [], trainers = [], gro
   })
 }
 
+test('attendance opens the selected session editor and returns after saving', async ({ page }) => {
+  const session = {
+    id: 71, start_at: '2026-09-08T07:45:00+02:00', end_at: '2026-09-08T08:30:00+02:00',
+    duration_minutes: 45, session_type: 'group', group: { id: 1, name: 'Audit Group' },
+    trainer_id: 1, trainer: 'Audit Trainer', location: 'Pool A', max_participants: 8,
+    participants_count: 1, is_cancelled: false, notes: '',
+  }
+  const trainers = [{ id: 1, full_name: 'Audit Trainer', is_active: true }]
+  const groups = [{ id: 1, name: 'Audit Group', is_active: true, default_capacity: 8 }]
+  await mockAdmin(page, { sessions: [session], trainers, groups })
+  let participant = { id: 5, client_id: 3, full_name: 'Long Participant Name', balance_minor: 0, currency: 'PLN', attendance: null, group: null, can_add_to_group: true, can_remove_from_session: true }
+  await page.route('**/api/admin/schedule/sessions/71/attendance/', (route) => json(route, {
+    session, history: [], students: [participant],
+  }))
+  let promotions = 0
+  await page.route('**/api/admin/schedule/sessions/71/participants/5/promote/', (route) => {
+    promotions += 1
+    participant = { ...participant, group: { id: 1, name: 'Audit Group' }, can_add_to_group: false, can_remove_from_session: false }
+    return json(route, { session, history: [], students: [participant] })
+  })
+  let saves = 0
+  await page.route('**/api/admin/schedule/sessions/71/', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      saves += 1
+      Object.assign(session, route.request().postDataJSON())
+    }
+    return json(route, session)
+  })
+  await page.route('**/api/admin/schedule/check-conflict/', (route) => json(route, { has_conflict: false }))
+  await page.goto('/?role=admin&view=attendance&session=71')
+  const card = page.locator('.ops-attendance-session-card')
+  await expect(page.locator('.ops-attendance-actions button')).toHaveCount(3)
+  await expect(page.locator('.ops-attendance-actions button').last()).toHaveText(/Перенос|Перенесення|Przeniesienie|Rescheduled/)
+  const oneOffButton = page.locator('.ops-one-off-action button')
+  const oneOffPadding = await oneOffButton.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingLeft))
+  expect(oneOffPadding).toBeGreaterThanOrEqual(8)
+  await oneOffButton.click()
+  const promoteDialog = page.getByRole('dialog')
+  await expect(promoteDialog).toContainText('Long Participant Name')
+  await expect(promoteDialog).toContainText('Audit Group')
+  await promoteDialog.locator('.swim-btn--primary').click()
+  await expect(oneOffButton).toHaveCount(0)
+  expect(promotions).toBe(1)
+  if (page.viewportSize().width < 768) {
+    const button = await page.locator('.ops-attendance-actions button').first().boundingBox()
+    expect(button.height).toBeLessThanOrEqual(36)
+    expect((await card.boundingBox()).height).toBeLessThan(340)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  }
+  await card.getByRole('button', { name: /Редактировать|Редагувати|Edit|Edytuj/ }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('#admin-session-edit-notes')).toHaveValue('')
+  await dialog.locator('#admin-session-edit-notes').fill('Updated from attendance')
+  await dialog.getByRole('button', { name: /Сохранить|Зберегти|Save|Zapisz/ }).click()
+  await expect(page).toHaveURL(/view=attendance.*session=71/)
+  await expect(card).toContainText('Updated from attendance')
+  expect(saves).toBe(1)
+  await card.getByRole('button', { name: /Редактировать|Редагувати|Edit|Edytuj/ }).click()
+  await dialog.getByRole('button', { name: /^(Закрыть|Закрити|Close|Zamknij)$/ }).last().click()
+  await expect(page).toHaveURL(/view=attendance.*session=71/)
+  expect(saves).toBe(1)
+})
+
 test('schedule form keeps shared control sizing and vertical rhythm', async ({ page }) => {
   test.skip(page.viewportSize()?.width !== 1440, 'one desktop style contract is sufficient')
   await mockAdmin(page)
@@ -383,6 +446,9 @@ test('mobile shell, entity cards and subscription page stay readable at supporte
         left: box.left, right: box.right, width: box.width,
         background: getComputedStyle(node).backgroundColor,
         navOverflowY: getComputedStyle(nav).overflowY,
+        navFits: nav.scrollHeight <= nav.clientHeight + 1,
+        itemFontSize: Number.parseFloat(getComputedStyle(nav.querySelector('.ops-nav-button')).fontSize),
+        sectionFontSize: Number.parseFloat(getComputedStyle(nav.querySelector('.ops-nav-section')).fontSize),
       }
     })
     expect.soft(shell.left).toBeGreaterThanOrEqual(0)
@@ -390,6 +456,9 @@ test('mobile shell, entity cards and subscription page stay readable at supporte
     expect.soft(shell.width).toBeLessThanOrEqual(width)
     expect.soft(shell.background).not.toBe('rgba(0, 0, 0, 0)')
     expect.soft(shell.navOverflowY).toBe('auto')
+    expect.soft(shell.navFits).toBeTruthy()
+    expect.soft(shell.itemFontSize).toBeGreaterThanOrEqual(14)
+    expect.soft(shell.sectionFontSize).toBeGreaterThanOrEqual(14)
     await page.locator('.ops-mobile-drawer-close').click()
     const card = page.locator('.ops-compact-entity-card').first()
     await expect(card).toBeVisible()

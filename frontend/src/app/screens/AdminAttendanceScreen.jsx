@@ -27,7 +27,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const options = [
       { value: 'present', labelKey: 'attendance.present', consumes: true },
       { value: 'absent', labelKey: 'attendance.absent', consumes: true },
-      { value: 'excused', labelKey: 'attendance.excused', consumes: false },
+      { value: 'rescheduled', labelKey: 'attendance.rescheduled', consumes: false },
     ]
 
   return function ApiAdminAttendance({ go, back, sessionId }) {
@@ -51,6 +51,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const [loading, setLoading] = useState(false)
     const [cancelReason, setCancelReason] = useState('')
     const [bulkPending, setBulkPending] = useState(false)
+    const [promotePending, setPromotePending] = useState(null)
     const [formAction, setFormAction] = useState(null)
     const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
 
@@ -151,7 +152,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
           const presentStyle = selected && option.value === 'present'
             ? { background: 'var(--green-500)', border: '1px solid var(--green-500)', '--primary-hover': 'var(--green-600)', '--primary-active': 'var(--green-700)' }
             : {}
-          return <Button key={option.value} size="sm" variant={selected ? option.value === 'absent' ? 'danger' : 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={selected} onClick={() => mark(row, option.value)} style={{ ...(compact ? { minHeight: 40, padding: '0 8px' } : {}), ...presentStyle }}>
+          return <Button key={option.value} size="sm" variant={selected ? option.value === 'absent' ? 'danger' : 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={selected} onClick={() => mark(row, option.value)} style={presentStyle}>
             {t(option.labelKey)}{option.consumes ? ' -1' : ''}
           </Button>
         })}
@@ -228,6 +229,22 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       }
     }
 
+    async function promoteToGroup(row) {
+      if (!selectedSessionId || !row) return
+      setBusyId(`promote-${row.id}`)
+      setError(null)
+      try {
+        const payload = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/participants/${row.id}/promote/`, {})
+        setDetail(payload)
+        setMessage(t('attendance.groupAdded', { name: row.full_name, group: selectedGroupName }))
+        await reloadRoleData?.('admin')
+      } catch (err) {
+        setError(apiErrorMessage(err, t('attendance.addToGroupError')))
+      } finally {
+        setBusyId(null)
+      }
+    }
+
     async function cancelSelectedSession() {
       if (!selectedSessionId) return
       setBusyId('cancel-session')
@@ -281,7 +298,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       .sort((left, right) => new Date(left.startAt) - new Date(right.startAt))[0]
 
     return (
-      <div className="page page-wide">
+      <div className="page page-wide ops-attendance-page">
         <div className="page-head">
           <div>
             <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('schedule') : go?.('schedule')}>{t('attendance.schedule')}</ContextBackButton>
@@ -301,8 +318,11 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         <AttendanceSaveStatus busy={busyId != null} savingText={t('attendance.saving')} savedText={t('attendance.saved')} />
 
         <div className="ops-session-detail-grid">
-          <div className="card card-pad">
-            <div className="eyebrow" style={{ marginBottom: 10 }}>{t('attendance.selected')}</div>
+          <div className="card card-pad ops-attendance-session-card">
+            <div className="ops-attendance-session-heading">
+              <div className="eyebrow">{t('attendance.selected')}</div>
+              <Button size="sm" variant="subtle" disabled={loading || !selectedSessionId || selectedStatus === 'cancelled' || busyId != null} onClick={() => go?.('schedule', { sessionId: selectedSessionId, tab: 'edit-session' })}>{t('groups.editAction')}</Button>
+            </div>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               {t('attendance.title')}
               <select value={selectedSessionId} onChange={(event) => setSelectedSessionId(event.target.value)} style={{ minHeight: 38 }}>
@@ -315,7 +335,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
               </select>
             </label>
 
-            <div className="ops-session-summary">
+            <div className="ops-session-summary ops-attendance-session-summary">
               <div>
                 <div className="muted">{t('attendance.groupType')}</div>
                 <strong>{selectedGroupName || sessionTypeLabel}</strong>
@@ -355,9 +375,12 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         {isMobile ? (
           <div className="card" style={{ overflow: 'hidden' }}>
             {rows.length ? rows.map((row, index) => (
-              <article key={row.id} style={{ display: 'grid', gap: 12, minWidth: 0, padding: 14, borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+              <article className="ops-attendance-member-card" key={row.id} style={{ borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
-                  <button type="button" className="ops-compact-card-title with-avatar" style={{ flex: '1 1 170px', minWidth: 0 }} onClick={() => go?.('clientDetail', { clientId: row.client_id })}><Avatar name={row.full_name} size={28} /><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }} title={row.full_name}>{row.full_name}</strong></button>
+                  <div className="ops-attendance-participant" style={{ flex: '1 1 170px' }}>
+                    <button type="button" className="ops-compact-card-title with-avatar" onClick={() => go?.('clientDetail', { clientId: row.client_id })}><Avatar name={row.full_name} size={28} /><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }} title={row.full_name}>{row.full_name}</strong></button>
+                    {row.can_add_to_group && <span className="ops-one-off-action"><Button size="sm" variant="subtle" disabled={selectedStatus === 'cancelled' || busyId != null} onClick={() => setPromotePending(row)}>{t('attendance.oneOff')}</Button></span>}
+                  </div>
                   {row.balance_minor > 0 ? <Badge tone="danger" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.noDebt')}</Badge>}
                 </div>
                 {attendanceActions(row, true)}
@@ -373,13 +396,13 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 key: 'full_name',
                 header: t('common.participant'),
                 render: (row) => (
-                  <button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>
-                    <Avatar name={row.full_name} size={28} />
-                    <span>
+                  <div className="ops-attendance-participant">
+                    <button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>
+                      <Avatar name={row.full_name} size={28} />
                       <span className="strong">{row.full_name}</span>
-                      {row.can_remove_from_session && <span className="ops-inline-note">{t('attendance.oneOff')}</span>}
-                    </span>
-                  </button>
+                    </button>
+                    {row.can_add_to_group && <span className="ops-one-off-action"><Button size="sm" variant="subtle" disabled={selectedStatus === 'cancelled' || busyId != null} onClick={() => setPromotePending(row)}>{t('attendance.oneOff')}</Button></span>}
+                  </div>
                 ),
               },
               {
@@ -414,6 +437,15 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
             ]}
           />
         </div>}
+        <Dialog
+          open={promotePending != null}
+          title={t('attendance.addToGroupTitle')}
+          description={promotePending ? t('attendance.addToGroupDescription', { name: promotePending.full_name, group: selectedGroupName }) : ''}
+          confirmLabel={t('attendance.addToGroupConfirm')}
+          cancelLabel={t('common.cancel')}
+          onClose={() => setPromotePending(null)}
+          onConfirm={async () => { const row = promotePending; setPromotePending(null); await promoteToGroup(row) }}
+        />
         <Dialog
           open={bulkPending}
           title={t('attendance.bulkTitle')}

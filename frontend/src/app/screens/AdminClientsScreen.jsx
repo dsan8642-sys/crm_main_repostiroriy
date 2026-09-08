@@ -754,12 +754,9 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
                   ]}
                 />
               </div>
-              <div
-                className="ops-client-compact-context"
-                style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, paddingLeft: 0 }}
-              >
+              <div className="ops-client-compact-context">
                 <span title={row.group || t('clients.individual')}>{row.group || t('clients.individual')}</span>
-                <span style={{ justifySelf: 'end', textAlign: 'right' }} title={subscriptionUsage(row)}>{subscriptionUsage(row)}</span>
+                <span title={subscriptionUsage(row)}>{subscriptionUsage(row)}</span>
               </div>
               <div className={`ops-client-compact-activity is-${activity(row).state}`} title={activity(row).label}>
                 <span aria-hidden="true" />{activity(row).label}

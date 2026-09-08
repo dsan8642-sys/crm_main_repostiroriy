@@ -58,7 +58,7 @@ class Student(models.Model):
             return legacy_group
         if not self.pk:
             return None
-        groups = list(self.groups.order_by("name", "id")[:2])
+        groups = list(self.groups.order_by(*self.groups.model.navigation_ordering())[:2])
         return groups[0] if len(groups) == 1 else None
 
     @group.setter
@@ -88,6 +88,7 @@ class GroupMembership(models.Model):
         Student, on_delete=models.CASCADE, related_name="group_memberships")
     group = models.ForeignKey(
         "catalog.Group", on_delete=models.CASCADE, related_name="student_memberships")
+    effective_from = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -176,7 +176,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
                 ]} />
               </div>
               <div className="ops-compact-card-line"><span>{t('debtors.debt')}</span><strong>{row.daysOverdue ? `${t('common.days', { count: row.daysOverdue })} · ${formatEntityDate(row.dueDate)}` : t('debtors.dateMissing')}</strong></div>
-              <div className="ops-compact-card-footer"><span className="mono">{row.parent || t('debtors.phoneMissing')}</span><button type="button" className="ops-inline-copy" disabled={!row.parent} onClick={() => copyPhone(row)}>{t('debtors.copy')}</button></div>
+              <div className="ops-compact-card-footer"><span className="mono">{row.parent || t('debtors.phoneMissing')}</span><Button size="sm" variant="subtle" disabled={!row.parent} onClick={() => copyPhone(row)}>{t('debtors.copy')}</Button></div>
             </EntityMobileCard>
           ))}
         </div>

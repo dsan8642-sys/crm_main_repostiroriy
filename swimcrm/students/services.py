@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from catalog.models import Group
 
@@ -62,7 +63,7 @@ def _group_ids(values):
 
 
 @transaction.atomic
-def set_student_groups(student, values):
+def set_student_groups(student, values, *, effective_from=None):
     """Replace group memberships under a participant row lock."""
     caller_student = student
     student = Student.objects.select_for_update().get(pk=student.pk)
@@ -85,8 +86,13 @@ def set_student_groups(student, values):
             "participant.group_ids": "Нельзя добавить участника в архивную группу.",
         })
     student.group_memberships.filter(group_id__in=existing - desired).delete()
+    membership_start = effective_from or timezone.now()
     GroupMembership.objects.bulk_create([
-        GroupMembership(student=student, group_id=group_id)
+        GroupMembership(
+            student=student,
+            group_id=group_id,
+            effective_from=membership_start,
+        )
         for group_id in group_ids if group_id not in existing
     ])
     # Detail endpoints commonly load the participant with ``groups`` already
@@ -97,12 +103,13 @@ def set_student_groups(student, values):
 
 
 @transaction.atomic
-def add_student_group(student, group_id):
+def add_student_group(student, group_id, *, effective_from=None):
     student = Student.objects.select_for_update().get(pk=student.pk)
     existing = list(student.group_memberships.values_list("group_id", flat=True))
     if int(group_id) in existing:
         return student
-    return set_student_groups(student, [*existing, group_id])
+    return set_student_groups(
+        student, [*existing, group_id], effective_from=effective_from)
 
 
 @transaction.atomic

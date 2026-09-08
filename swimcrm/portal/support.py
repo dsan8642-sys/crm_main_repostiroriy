@@ -341,7 +341,15 @@ def _student_group_payloads(student):
     # ``all()`` reuses Django's prefetch cache. Ordering the related manager
     # here would issue one extra query per participant and defeat the list
     # endpoint's bounded-query contract.
-    groups = sorted(student.groups.all(), key=lambda group: (group.name, group.id))
+    groups = sorted(
+        student.groups.all(),
+        key=lambda group: (
+            group.sort_order is None,
+            group.sort_order if group.sort_order is not None else 0,
+            group.name,
+            group.id,
+        ),
+    )
     return [{"id": group.id, "name": group.name} for group in groups]
 
 
@@ -640,6 +648,7 @@ def _group_payload(group):
         "price_minor": group.price_minor,
         "currency": group.currency,
         "default_capacity": group.default_capacity,
+        "sort_order": group.sort_order,
         "color_key": stored_schedule_color_key(group.color_key),
         "is_active": group.is_active,
         "participants_count": getattr(group, "participants_count", None),
@@ -1187,6 +1196,16 @@ def _nullable_positive_int(value, field):
     return parsed
 
 
+def _nullable_nonnegative_int(value, field):
+    if value in (None, ""):
+        return None
+    parsed = _required_int(value, field)
+    if parsed < 0:
+        raise _field_validation_error(
+            field, "Укажите число не меньше нуля.", code="min_value")
+    return parsed
+
+
 def _create_trainer(data):
     trainer_data = _trainer_data(data)
     email, username = _portal_identity(
@@ -1284,6 +1303,9 @@ def _apply_group_data(group, data):
     if "default_capacity" in group_data:
         group.default_capacity = _nullable_positive_int(
             group_data.get("default_capacity"), "default_capacity")
+    if "sort_order" in group_data:
+        group.sort_order = _nullable_nonnegative_int(
+            group_data.get("sort_order"), "sort_order")
     if "color_key" in group_data:
         group.color_key = validate_schedule_color_key(group_data.get("color_key"))
     if "is_active" in group_data:
