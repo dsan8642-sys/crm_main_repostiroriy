@@ -51,7 +51,9 @@ from scheduling.services import sync_split_second_student
 from students.models import Student
 from students.services import ensure_account_holder_participant, set_student_groups
 from subscriptions.models import Subscription, SubscriptionStatus
-from subscriptions.services import create_subscription, freeze_subscription, manual_adjust, renew_subscription
+from subscriptions.services import (create_subscription, freeze_subscription,
+                                    manual_adjust, renew_subscription,
+                                    update_subscription_end_date)
 
 # Admin list endpoints return the full working set; the frontend filters client
 # side. The cap only exists so a runaway table cannot exhaust memory, so it must

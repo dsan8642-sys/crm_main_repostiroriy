@@ -229,7 +229,11 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const [busy, setBusy] = useState(false)
     const [actionPanel, setActionPanel] = useState(null)
     const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
+    const [viewMode, setViewMode] = useState(() => (
+      typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+        ? 'day'
+        : DEFAULT_SCHEDULE_VIEW
+    ))
     const [focusDate, setFocusDate] = useState(localToday())
     const [filtersOpen, setFiltersOpen] = useState(false)
     const [filters, setFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
@@ -942,7 +946,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         {loadError && <Banner tone="warning" style={{ marginBottom: 12 }} onClose={() => setLoadError(null)}>{loadError}</Banner>}
         <BusyBanner id="admin-schedule-busy" show={busy}>{t('schedule.saving')}</BusyBanner>
 
-        <div className="ops-action-strip">
+        <div className="ops-action-strip ops-schedule-action-strip">
           {[
             ['group', t('schedule.newGroup')],
             ['individual', t('schedule.newIndividual')],

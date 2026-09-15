@@ -312,6 +312,8 @@ test('client profile exposes contact links and opens routed individual and split
     participant,
   ]
   let contactMode = 'valid'
+  let subscriptionEndDate = '2026-09-26'
+  let subscriptionEditPayload = null
 
   const detail = () => ({
     account: {
@@ -330,10 +332,20 @@ test('client profile exposes contact links and opens routed individual and split
     participants: [{
       ...participant,
       is_active: !['archived', 'anonymized'].includes(contactMode),
-      balance_minor: 0,
+      balance_minor: 5000,
     }],
-    subscriptions: [], charges: [], payments: [], attendance: [], consents: [],
-    summary: { participants_count: 1, active_participants: 1, balance_minor: 0, pending_payments: 0 },
+    subscriptions: [{
+      id: 77,
+      participant_id: 202,
+      subscription_type_id: 9,
+      type: 'Demo Безлимит',
+      start_date: '2026-08-26',
+      effective_end_date: subscriptionEndDate,
+      created_at: '2026-09-15T10:00:00+02:00',
+      remaining_sessions: null,
+      status: 'active',
+    }], charges: [], payments: [], attendance: [], consents: [],
+    summary: { participants_count: 1, active_participants: 1, balance_minor: 5000, pending_payments: 0 },
   })
 
   await page.route('**/api/**', async (route) => {
@@ -368,6 +380,16 @@ test('client profile exposes contact links and opens routed individual and split
       return json(route, { clients: [participant], pagination: { total: 1 } })
     }
     if (path === '/api/admin/clients/20/') return json(route, detail())
+    if (path === '/api/admin/subscriptions/77/' && request.method() === 'POST') {
+      subscriptionEditPayload = request.postDataJSON()
+      subscriptionEndDate = subscriptionEditPayload.effective_end_date
+      return json(route, {
+        ...detail().subscriptions[0],
+        base_end_date: subscriptionEndDate,
+        effective_end_date: subscriptionEndDate,
+        freezes: [], ledger: [], charges: [],
+      })
+    }
     if (path === '/api/admin/schedule/sessions/') {
       return json(route, { sessions: [], pagination: { total: 0 } })
     }
@@ -385,6 +407,66 @@ test('client profile exposes contact links and opens routed individual and split
   await expect(page.getByRole('link', { name: 'WhatsApp' })).toHaveAttribute('href', 'https://wa.me/48222333444')
   await expect(page.getByRole('link', { name: 'Instagram' })).toHaveAttribute('href', 'https://instagram.com/h2o_client')
   await expect(page.getByRole('cell', { name: 'Alpha, Beta, Gamma' })).toBeVisible()
+
+  if ((page.viewportSize()?.width || 0) === 390) {
+    const balanceKpi = page.locator('.ops-client-balance-kpi')
+    await expect(balanceKpi).toHaveCSS('height', '100px')
+    await expect(balanceKpi.locator('.kpi-value')).toHaveCSS('font-size', '27px')
+    await expect(balanceKpi).not.toContainText('Переплата')
+
+    const financeActions = page.locator('.ops-client-finance-actions')
+    const financeGeometry = await financeActions.evaluate((node) => {
+      const buttons = [...node.querySelectorAll('.ops-action-card')].map((button) => button.getBoundingClientRect())
+      return {
+        height: node.getBoundingClientRect().height,
+        columns: getComputedStyle(node).gridTemplateColumns.split(' ').length,
+        firstRowTops: buttons.slice(0, 3).map((button) => Math.round(button.top)),
+        secondRowTops: buttons.slice(3).map((button) => Math.round(button.top)),
+      }
+    })
+    expect(financeGeometry.height).toBeLessThanOrEqual(130)
+    expect(financeGeometry.columns).toBe(6)
+    expect(new Set(financeGeometry.firstRowTops).size).toBe(1)
+    expect(new Set(financeGeometry.secondRowTops).size).toBe(1)
+    await expect(financeActions.locator('.ops-action-card > span')).toHaveText([
+      'Пополнить баланс',
+      'Добавить списание',
+      'Напомнить',
+      'Редактировать абонемент',
+      'Продать абонемент',
+    ])
+    expect(await financeActions.locator('small').evaluateAll(
+      (nodes) => nodes.every((node) => getComputedStyle(node).display === 'none'),
+    )).toBeTruthy()
+
+    const tabList = page.locator('.ops-client-detail-tabs [role="tablist"]')
+    await expect(tabList).toHaveCSS('justify-content', 'center')
+    await expect(page.locator('.ops-client-detail-tabs')).toHaveCSS('justify-content', 'center')
+    const consentsTab = tabList.getByRole('tab', { name: /Согласия/ })
+    await expect(consentsTab).toHaveCSS('border-top-width', '1px')
+    await expect(consentsTab).toHaveCSS('border-top-color', 'rgb(174, 215, 245)')
+    const [actionsBox, tabsBox] = await Promise.all([financeActions.boundingBox(), tabList.boundingBox()])
+    expect(Math.abs(actionsBox.width - tabsBox.width)).toBeLessThanOrEqual(1)
+
+    const balanceCell = page.locator('td:has(> .ops-client-detail-balance)')
+    await expect(balanceCell).toHaveCSS('text-align', 'left')
+
+    await tabList.getByRole('tab', { name: /Абонементы/ }).click()
+    const remainingCell = page.locator('td:has(> .ops-client-detail-remaining)')
+    await expect(remainingCell).toHaveCSS('text-align', 'left')
+    await expect(remainingCell.locator('.ops-client-detail-remaining')).toHaveCSS('justify-self', 'start')
+    await tabList.getByRole('tab', { name: /Участники/ }).click()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  }
+
+  await page.getByRole('button', { name: /^Редактировать абонемент/ }).click()
+  const subscriptionDialog = page.getByRole('dialog', { name: 'Редактирование абонемента' })
+  await expect(subscriptionDialog.getByRole('combobox', { name: 'Действие' })).toHaveValue('edit')
+  const subscriptionEndDateInput = subscriptionDialog.getByRole('textbox', { name: 'Дата окончания абонемента' })
+  await expect(subscriptionEndDateInput).toHaveValue('2026-09-26')
+  await subscriptionEndDateInput.fill('2026-10-15')
+  await subscriptionDialog.getByRole('button', { name: 'Сохранить' }).click()
+  await expect.poll(() => subscriptionEditPayload).toEqual({ effective_end_date: '2026-10-15' })
 
   await page.getByRole('button', { name: 'Индивидуальная', exact: true }).click()
   await expect(page).toHaveURL(/view=schedule.*participant=202.*createSession=individual/)

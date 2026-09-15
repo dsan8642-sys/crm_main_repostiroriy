@@ -339,6 +339,7 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       defaultCapacity: group.default_capacity ?? null,
       sortOrder: group.sort_order ?? null,
       colorKey: normalizeScheduleColorKey(group.color_key),
+      hasScheduleColor: Boolean(group.color_key),
       active: group.is_active,
       nextSessionAt: group.next_session?.start_at || null,
       nextSessionLocation: group.next_session?.location || '',

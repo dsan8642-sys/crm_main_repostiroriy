@@ -12,6 +12,15 @@ export function createPaymentAttemptKey(prefix = 'payment') {
   return `${prefix}-${randomPart}`
 }
 
+export function subscriptionPaymentFields({ received, method, date }) {
+  if (!received) return { payment_received: false }
+  return {
+    payment_received: true,
+    payment_method: method,
+    payment_date: date,
+  }
+}
+
 export function rebasePassiveFormUpdate(current, baseline, patch) {
   const next = { ...current, ...patch }
   const untouched = baseline != null

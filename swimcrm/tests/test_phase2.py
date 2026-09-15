@@ -4,7 +4,9 @@ from datetime import date, datetime, time, timedelta
 
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.models import Consent, ConsentType
@@ -75,6 +77,37 @@ class DebtorsRule(TestCase):
         confirm_payment(p, f.make_admin())
         self.assertEqual(len(debtors()), 0)
 
+    def test_debtor_queries_do_not_grow_per_participant(self):
+        for index in range(6):
+            student = f.make_student(first=f"Debt{index}")
+            Charge.objects.create(
+                student=student,
+                description="Абонемент",
+                amount_minor=10000 + index,
+                currency="PLN",
+                due_date=date.today() - timedelta(days=5),
+            )
+        with CaptureQueriesContext(connection) as captured:
+            rows = debtors()
+            self.assertEqual(len(rows), 6)
+            self.assertTrue(all(list(row.student.groups.all()) == [] for row in rows))
+        self.assertLessEqual(len(captured), 4)
+
+    def test_oldest_due_date_is_the_oldest_still_unpaid_charge(self):
+        student = f.make_student()
+        Charge.objects.create(
+            student=student, description="Paid first", amount_minor=10000,
+            currency="PLN", due_date=date.today() - timedelta(days=20))
+        Charge.objects.create(
+            student=student, description="Still due", amount_minor=10000,
+            currency="PLN", due_date=date.today() - timedelta(days=5))
+        payment = Payment.objects.create(
+            student=student, amount_minor=10000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.PENDING)
+        confirm_payment(payment, f.make_admin())
+        row = debtors()[0]
+        self.assertEqual(row.oldest_due_date, date.today() - timedelta(days=5))
+
     def test_subscription_in_grace_period_is_not_expired_debtor(self):
         st = f.make_student()
         create_subscription(
@@ -84,16 +117,14 @@ class DebtorsRule(TestCase):
         )
         self.assertEqual(debtors(), [])
 
-    def test_subscription_after_grace_period_is_expired_debtor(self):
+    def test_expired_subscription_without_money_debt_is_not_debtor(self):
         st = f.make_student()
         create_subscription(
             student=st,
             subscription_type=f.make_sub_type(sessions=8, days=30),
             start_date=date.today() - timedelta(days=40),
         )
-        rows = debtors()
-        self.assertEqual(len(rows), 1)
-        self.assertTrue(rows[0].reasons)
+        self.assertEqual(debtors(), [])
 
     def test_upcoming_by_end_date_and_low_sessions(self):
         st = f.make_student()

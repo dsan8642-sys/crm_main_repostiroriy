@@ -71,8 +71,10 @@ test('admin group mapper preserves nullable default capacity', () => {
 
   assert.equal(withCapacity.defaultCapacity, 12)
   assert.equal(withCapacity.colorKey, 'forest-01')
+  assert.equal(withCapacity.hasScheduleColor, true)
   assert.equal(withoutCapacity.defaultCapacity, null)
   assert.equal(withoutCapacity.colorKey, 'standard')
+  assert.equal(withoutCapacity.hasScheduleColor, false)
 })
 
 test('admin client mapper exposes balance subscription and recent activity metadata', () => {

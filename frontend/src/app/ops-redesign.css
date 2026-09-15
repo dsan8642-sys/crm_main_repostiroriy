@@ -753,6 +753,164 @@ table {
   margin-bottom: 8px;
 }
 
+/* 2026-09 responsive polish: keep these rules scoped to the affected screens. */
+body {
+  background-repeat: no-repeat;
+  background-color: #f4f6f8;
+}
+
+.ops-group-multiselect-options {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.ops-group-multiselect-options label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.ops-group-multiselect-options label:last-of-type { border-bottom: 0; }
+.ops-group-multiselect-options input { flex: 0 0 auto; }
+
+.ops-groups-desktop-table tbody tr:not(.ops-groups-detail-row) > td {
+  background: var(--schedule-color-background, var(--surface-card));
+  color: var(--schedule-color-text, var(--text-strong));
+}
+
+.ops-groups-desktop-table tr.is-selected > td {
+  box-shadow: inset 0 0 0 2px var(--primary-soft-border);
+}
+
+.ops-group-compact-card {
+  background: var(--schedule-color-background, var(--surface-card));
+  color: var(--schedule-color-text, var(--text-strong));
+  border-color: var(--schedule-color-border, var(--border-subtle));
+}
+
+.ops-groups-desktop-table + .ops-entity-mobile-list + .ops-list-pagination,
+.ops-groups-desktop-table ~ .ops-list-pagination {
+  margin-top: 12px;
+  margin-bottom: 20px;
+}
+
+.ops-debtors-list-heading { margin-bottom: 10px; }
+.ops-debtors-list-heading + .ops-list-feedback + .ops-entity-desktop-table,
+.ops-debtors-list-heading + .ops-list-feedback + .ops-entity-mobile-list { margin-top: 0; }
+
+.ops-month-day-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  margin: 3px auto 0;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+@media (max-width: 767px) {
+  .ops-sidebar,
+  .ops-sidebar-head,
+  .ops-brand { border-bottom: 0; }
+
+  .ops-action-strip.ops-schedule-action-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ops-schedule-action-strip .ops-action-card {
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .ops-client-detail-tabs [role='tablist'] {
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+  }
+
+  .ops-client-detail-tabs .swim-tab {
+    min-height: 44px;
+    padding: 8px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    white-space: normal;
+    text-align: center;
+  }
+
+  .ops-client-detail-tabs .swim-tab[aria-selected='true'] {
+    border-color: var(--primary-soft-border);
+    background: var(--primary-soft);
+    color: var(--primary-hover);
+  }
+
+  .ops-inline-entity-detail .ops-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px !important;
+  }
+
+  .ops-inline-entity-detail .ops-section-head {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .ops-inline-entity-detail .ops-detail-grid > div:first-child .ops-section-head .ops-button-row {
+    display: grid;
+    grid-template-columns: auto minmax(90px, 1fr);
+    width: 100%;
+  }
+
+  .ops-inline-entity-detail .ops-member-row {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ops-trainer-profile-card {
+    padding: 14px;
+  }
+
+  .ops-trainer-profile-card .ops-entity-head,
+  .ops-trainer-profile-card .ops-entity-person {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .ops-trainer-profile-card .ops-button-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .ops-trainer-profile-card .ops-button-row > * { width: 100%; }
+  .ops-trainer-profile-card .ops-tabs { margin: 14px 0 12px; gap: 6px; }
+  .ops-trainer-profile-card .ops-tabs button { min-width: 0; padding: 9px 6px; white-space: normal; }
+  .ops-trainer-profile-card .ops-detail-grid { gap: 16px; }
+
+  .ops-mobile-week-strip button,
+  .ops-schedule-calendar.is-month .ops-schedule-day > header button {
+    border-radius: var(--radius-md);
+  }
+
+  .ops-mobile-week-dot { border-radius: 999px; }
+
+  .ops-schedule-calendar.is-month .ops-schedule-day {
+    border-radius: var(--radius-md);
+  }
+
+  .ops-schedule-calendar.is-month .ops-schedule-day > header button {
+    display: grid;
+    place-content: center;
+  }
+
+  .ops-list-pagination { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+}
+
 .ops-action-card {
   display: flex;
   min-height: 74px;
@@ -1030,6 +1188,65 @@ table {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.ops-trainer-group-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ops-trainer-group-link {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  gap: 12px;
+  padding: 9px 10px 9px 13px;
+  border: 1px solid var(--schedule-color-border, var(--border-default));
+  border-radius: var(--radius-md);
+  appearance: none;
+  background: var(--schedule-color-background, var(--surface-card));
+  box-shadow: var(--shadow-sm);
+  color: var(--schedule-color-text, var(--text-strong));
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: box-shadow var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
+}
+
+.ops-trainer-group-link strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-trainer-group-count {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--schedule-color-border, var(--border-subtle));
+  border-radius: 999px;
+  background: rgb(255 255 255 / 72%);
+  color: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ops-trainer-group-link:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.ops-trainer-group-link:active {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(0);
+}
+
+.ops-trainer-group-link:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .ops-card-list,
@@ -1981,7 +2198,11 @@ table {
   align-items: center;
   min-width: 0;
   gap: 6px;
-  padding-left: 44px;
+}
+
+.ops-client-compact-activity {
+  justify-content: center;
+  padding-left: 0;
 }
 
 .ops-client-compact-context {
@@ -3449,6 +3670,12 @@ textarea[aria-invalid="true"] {
     margin: 2px 0 0;
   }
 
+  .ops-calendar-date-controls .ops-picker-input > input,
+  .ops-calendar-date-controls .ops-picker-input > button,
+  .ops-calendar-date-controls > .ops-calendar-today {
+    margin-bottom: 8px;
+  }
+
   .ops-calendar-period-header.is-week {
     display: none;
   }
@@ -3741,4 +3968,134 @@ textarea[aria-invalid="true"] {
     white-space: normal;
     line-height: 1.2;
   }
+}
+
+/* Final scoped overrides: intentionally after legacy responsive rules. */
+.ops-group-multiselect-options { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.ops-group-multiselect-options label {
+  flex-direction: row;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.ops-group-multiselect-options label:last-of-type { border-bottom: 0; }
+.ops-compact-entity-card.ops-group-compact-card {
+  border-color: var(--schedule-color-border, var(--border-subtle));
+  background: var(--schedule-color-background, var(--surface-card));
+  color: var(--text-strong);
+}
+.ops-groups-desktop-table tbody tr:not(.ops-groups-detail-row) > td {
+  background: var(--schedule-color-background, var(--surface-card));
+  color: var(--text-strong);
+}
+.ops-debtors-list-heading { margin-bottom: 10px; }
+.ops-groups-desktop-table ~ .ops-list-pagination { margin-top: 12px; margin-bottom: 20px; }
+.ops-subscription-payment-warning {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--warning-border, #f4d58a);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft, #fff8e7);
+  color: var(--text-strong);
+}
+
+.ops-client-balance-kpi .kpi-sub { display: none; }
+
+@media (max-width: 767px) {
+  .ops-sidebar, .ops-sidebar-head, .ops-brand { border-bottom: 0; }
+  .ops-group-compact-card {
+    height: 120px;
+    grid-template-rows: 44px repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    padding: 5px 9px 5px 12px;
+    overflow: hidden;
+  }
+  .ops-group-compact-card .ops-compact-card-line,
+  .ops-group-compact-card .ops-compact-card-footer {
+    align-items: center;
+    line-height: 1.2;
+  }
+  .ops-calendar-navigation > .seg {
+    width: 180px;
+    justify-self: start;
+  }
+  .ops-mobile-week-nav { gap: 6px; }
+  .ops-action-strip.ops-schedule-action-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ops-schedule-action-strip .ops-action-card { min-height: 58px; padding: 8px 10px; }
+  .ops-client-balance-kpi {
+    box-sizing: border-box;
+    height: 100px;
+    min-height: 100px;
+    padding: 12px 16px;
+  }
+  .ops-client-balance-kpi .kpi-label { margin-bottom: 6px; }
+  .ops-client-balance-kpi .kpi-value { font-size: 27px; }
+  .ops-client-finance-actions {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .ops-client-finance-actions .ops-action-card {
+    grid-column: span 2;
+    min-height: 56px;
+    padding: 6px 8px;
+  }
+  .ops-client-finance-actions .ops-action-card:nth-child(n + 4) {
+    grid-column: span 3;
+  }
+  .ops-client-finance-actions .ops-action-card small { display: none; }
+  .ops-client-detail-tabs { justify-content: center; }
+  .ops-client-detail-tabs [role='tablist'] {
+    width: 100%;
+    flex: 1 1 100%;
+    justify-content: center;
+    justify-items: stretch;
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+  }
+  .ops-client-detail-tabs .swim-tab {
+    min-height: 44px;
+    padding: 8px;
+    border: 1px solid #aed7f5 !important;
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    white-space: normal;
+    text-align: center;
+  }
+  .ops-client-detail-tabs .swim-tab[aria-selected='true'] {
+    border-color: #aed7f5 !important;
+    background: var(--primary-soft);
+    color: var(--primary-hover);
+  }
+  .table-wrap td:has(> .ops-client-detail-balance),
+  .table-wrap td:has(> .ops-client-detail-remaining) {
+    text-align: left !important;
+  }
+  .table-wrap .ops-client-detail-remaining {
+    justify-self: start;
+    text-align: left !important;
+  }
+  .ops-inline-entity-detail .ops-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px !important; }
+  .ops-inline-entity-detail .ops-detail-grid > div:first-child .ops-section-head .ops-button-row {
+    display: grid;
+    grid-template-columns: auto minmax(90px, 1fr);
+    width: 100%;
+  }
+  .ops-trainer-profile-card { padding: 14px; }
+  .ops-trainer-profile-card .ops-entity-head { gap: 12px; }
+  .ops-trainer-profile-card .ops-button-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+  .ops-trainer-profile-card .ops-button-row > * { width: 100%; }
+  .ops-trainer-profile-card .ops-tabs { margin: 14px 0 12px; gap: 6px; }
+  .ops-trainer-profile-card .ops-tabs button { min-width: 0; padding: 9px 6px; white-space: normal; }
+  .ops-mobile-week-strip button,
+  .ops-schedule-calendar.is-month .ops-schedule-day,
+  .ops-schedule-calendar.is-month .ops-schedule-day > header button { border-radius: var(--radius-md); }
+  .ops-list-pagination { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
 }

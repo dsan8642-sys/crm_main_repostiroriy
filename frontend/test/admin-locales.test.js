@@ -54,7 +54,7 @@ test('admin catalogs have exact key parity and interpolate named values', () => 
 
   assert.equal(adminT('uk', 'overview.title'), 'Сьогодні')
   assert.equal(adminT('pl', 'common.save'), 'Zapisz')
-  assert.equal(adminT('en', 'debtors.summary', { count: 7 }), 'Clients: 7')
+  assert.equal(adminT('en', 'debtors.summary', { count: 7 }), 'Participants: 7')
 })
 
 test('admin locale selects the correct browser formatting tag', () => {

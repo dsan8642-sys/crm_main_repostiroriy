@@ -416,6 +416,7 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
 
   await page.goto('/?role=admin&view=schedule')
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Период календаря' })).toHaveCSS('width', '180px')
 
   const theme = await page.evaluate(async () => {
     await document.fonts.ready
@@ -454,6 +455,9 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
   })
   expect(shellLayout).toEqual({ sameRow: true, menuSize: 44 })
 
+  await expect(page.getByRole('button', { name: 'День', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+  await expect(page.locator('.ops-mobile-week-nav')).toHaveCSS('column-gap', '6px')
   const strip = page.locator('.ops-mobile-week-strip')
   await expect(strip.getByRole('tab')).toHaveCount(7)
   expect(await strip.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
@@ -642,6 +646,8 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
       await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
     }
   } else {
+    await expect(page.getByRole('button', { name: 'День', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
     const dot = page.locator('.ops-mobile-week-dot').first()
     await expect(dot).toBeVisible()
     await expect(dot).toHaveCSS('background-color', 'rgb(26, 125, 196)')
@@ -937,11 +943,7 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
 
   await page.goto('/')
   await openShellDestination(page, 'Группы')
-  if ((page.viewportSize()?.width || 0) <= 767) {
-    await page.locator('.ops-group-compact-card').getByRole('button', { name: 'Delfiny', exact: true }).click()
-  } else {
-    await page.getByRole('button', { name: 'Карточка', exact: true }).click()
-  }
+  await page.getByRole('button', { name: 'Delfiny', exact: true }).click()
   await page.getByRole('button', { name: 'Редактировать', exact: true }).click()
   const groupEditor = page.getByRole('dialog', { name: 'Редактирование группы' })
   const groupPicker = groupEditor.getByRole('group', { name: 'Цвет расписания' })
@@ -1643,7 +1645,8 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(cancelledCoralEvent).toHaveCSS('border-left-width', '0px')
   await expect(cancelledCoralEvent).toHaveCSS('opacity', '0.6')
   await expect(page.getByRole('button', { name: 'Календарь', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: 'Неделя', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  const mobileSchedule = (page.viewportSize()?.width || 0) <= 767
+  await expect(page.getByRole('button', { name: mobileSchedule ? 'День' : 'Неделя', exact: true })).toHaveAttribute('aria-pressed', 'true')
   if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За неделю: 2')).toBeVisible()
   await expect(page.getByText(/Шаблоны расписания|Создать из шаблона/)).toHaveCount(0)
   expect(schedulePageSizes.every((size) => size > 0 && size <= 200)).toBe(true)

@@ -7,6 +7,7 @@ from django.db import IntegrityError
 from django.db.models import IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 
+from billing.services import payment_reference_id
 from subscriptions.models import SessionLedgerEntry
 
 from .admin_support import _admin_required
@@ -50,7 +51,7 @@ def _subscription_allowed_actions(subscription, today):
     actions = ["open_client"]
     if subscription.status == SubscriptionStatus.CANCELLED:
         return actions
-    actions.append("renew")
+    actions.extend(["edit", "renew"])
     remaining = _list_remaining(subscription)
     official_active = (
         subscription.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN}
@@ -180,7 +181,9 @@ def _operation_key(data):
 
 
 def _operation_fingerprint(*, operation, student_id, source_subscription_id,
-                           subscription_type_id, start_date, due_date):
+                           subscription_type_id, start_date, due_date,
+                           payment_received=False, payment_method=None,
+                           payment_date=None):
     canonical = json.dumps({
         "operation": operation,
         "student_id": student_id,
@@ -188,6 +191,9 @@ def _operation_fingerprint(*, operation, student_id, source_subscription_id,
         "subscription_type_id": subscription_type_id,
         "start_date": str(start_date),
         "due_date": str(due_date),
+        "payment_received": bool(payment_received),
+        "payment_method": payment_method if payment_received else None,
+        "payment_date": str(payment_date) if payment_received else None,
     }, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -205,13 +211,62 @@ def _existing_operation(key, fingerprint):
     return existing
 
 
-def _operation_payload(subscription, *, replayed):
+def _subscription_payment_key(operation_key):
+    digest = hashlib.sha256(operation_key.encode("utf-8")).hexdigest()[:32]
+    return f"subscription-payment-{digest}"
+
+
+def _payment_options(data):
+    received = _bool_value(data.get("payment_received"), False)
+    if not received:
+        return False, None, None
+    method = normalize_payment_method(data.get("payment_method"))
+    if method not in PaymentMethod.values:
+        raise _field_validation_error(
+            "payment_method", "Выберите допустимый способ оплаты.",
+            code="invalid_choice")
+    payment_date = _parse_date(data.get("payment_date"), "payment_date")
+    if payment_date is None:
+        raise _field_validation_error(
+            "payment_date", "Укажите дату оплаты.", code="required")
+    return True, method, payment_date
+
+
+def _create_subscription_payment(subscription, *, actor, operation_key,
+                                 method, paid_at):
+    payment, _created = create_admin_payment(
+        student=subscription.student,
+        actor=actor,
+        amount_minor=subscription.subscription_type.price_minor,
+        currency=subscription.subscription_type.currency,
+        paid_at=paid_at,
+        method=method,
+        idempotency_key=_subscription_payment_key(operation_key),
+        comment=f"Оплата абонемента #{subscription.id}",
+        desired_status=PaymentStatus.CONFIRMED,
+    )
+    return payment
+
+
+def _operation_payload(subscription, *, replayed, actor=None,
+                       operation_key=None, payment_received=False):
     charge = subscription.charges.get()
-    return {
+    payload = {
         "subscription": _subscription_detail_payload(subscription),
         "charge": _charge_payload(charge),
+        "payment": None,
         "replayed": replayed,
     }
+    if payment_received and actor and operation_key:
+        reference_id = payment_reference_id(
+            source=PaymentSource.ADMIN,
+            actor=actor,
+            idempotency_key=_subscription_payment_key(operation_key),
+        )
+        payment = Payment.objects.filter(reference_id=reference_id).first()
+        if payment is not None:
+            payload["payment"] = _payment_payload(payment)
+    return payload
 
 
 def _idempotency_conflict_response():
@@ -233,6 +288,7 @@ def admin_participant_subscriptions(request, participant_id):
         start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
         due_date = _parse_date(data.get("due_date"), "due_date") or start_date
         key = _operation_key(data)
+        payment_received, payment_method, payment_date = _payment_options(data)
         fingerprint = _operation_fingerprint(
             operation="purchase",
             student_id=participant.id,
@@ -240,12 +296,17 @@ def admin_participant_subscriptions(request, participant_id):
             subscription_type_id=subscription_type_id,
             start_date=(data.get("start_date") or "__default__"),
             due_date=(data.get("due_date") or "__default__"),
+            payment_received=payment_received,
+            payment_method=payment_method,
+            payment_date=payment_date,
         )
         try:
             existing = _existing_operation(key, fingerprint)
             if existing is not None:
                 return JsonResponse(
-                    _operation_payload(existing, replayed=True), status=200)
+                    _operation_payload(
+                        existing, replayed=True, actor=user,
+                        operation_key=key, payment_received=payment_received), status=200)
             _require_active_participant(
                 participant, "receive new subscriptions", field="participant_id")
             subscription_type = _object_for_field(
@@ -264,16 +325,24 @@ def admin_participant_subscriptions(request, participant_id):
                             "idempotency_key", "idempotency_fingerprint"])
                     _create_subscription_charge(
                         subscription, actor=user, due_date=due_date)
+                    if payment_received:
+                        _create_subscription_payment(
+                            subscription, actor=user, operation_key=key,
+                            method=payment_method, paid_at=payment_date)
             except IntegrityError:
                 existing = _existing_operation(key, fingerprint)
                 if existing is None:
                     raise
                 return JsonResponse(
-                    _operation_payload(existing, replayed=True), status=200)
+                    _operation_payload(
+                        existing, replayed=True, actor=user,
+                        operation_key=key, payment_received=payment_received), status=200)
         except _IdempotencyConflict:
             return _idempotency_conflict_response()
         return JsonResponse(
-            _operation_payload(subscription, replayed=False), status=201)
+            _operation_payload(
+                subscription, replayed=False, actor=user,
+                operation_key=key, payment_received=payment_received), status=201)
     qs = participant.subscriptions.select_related("subscription_type").order_by("-start_date", "-id")
     return JsonResponse({"subscriptions": [_subscription_payload(subscription) for subscription in qs]})
 
@@ -287,14 +356,27 @@ def admin_subscription_detail(request, subscription_id):
     if request.method == "POST":
         _require_active_participant(subscription.student, "have subscriptions edited")
         data = _json_body(request)
-        status = data.get("status")
-        if status not in SubscriptionStatus.values:
-            raise _field_validation_error(
-                "status", "Выберите допустимый статус абонемента.",
-                code="invalid_choice")
-        subscription.status = status
-        subscription.save(update_fields=["status"])
-        audit(user, "subscription.updated", subscription, {"status": status})
+        if "effective_end_date" in data:
+            effective_end_date = _parse_date(
+                data.get("effective_end_date"), "effective_end_date")
+            if effective_end_date is None:
+                raise _field_validation_error(
+                    "effective_end_date", "Укажите дату окончания абонемента.",
+                    code="required")
+            subscription = update_subscription_end_date(
+                subscription=subscription,
+                effective_end_date=effective_end_date,
+                created_by=user,
+            )
+        else:
+            status = data.get("status")
+            if status not in SubscriptionStatus.values:
+                raise _field_validation_error(
+                    "status", "Выберите допустимый статус абонемента.",
+                    code="invalid_choice")
+            subscription.status = status
+            subscription.save(update_fields=["status"])
+            audit(user, "subscription.updated", subscription, {"status": status})
     return JsonResponse(_subscription_detail_payload(subscription))
 
 
@@ -313,6 +395,7 @@ def admin_subscription_renew(request, subscription_id):
     start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
     due_date = _parse_date(data.get("due_date"), "due_date") or start_date
     key = _operation_key(data)
+    payment_received, payment_method, payment_date = _payment_options(data)
     fingerprint = _operation_fingerprint(
         operation="renewal",
         student_id=subscription.student_id,
@@ -320,12 +403,17 @@ def admin_subscription_renew(request, subscription_id):
         subscription_type_id=subscription_type_id,
         start_date=(data.get("start_date") or "__default__"),
         due_date=(data.get("due_date") or "__default__"),
+        payment_received=payment_received,
+        payment_method=payment_method,
+        payment_date=payment_date,
     )
     try:
         existing = _existing_operation(key, fingerprint)
         if existing is not None:
             return JsonResponse(
-                _operation_payload(existing, replayed=True), status=200)
+                _operation_payload(
+                    existing, replayed=True, actor=user,
+                    operation_key=key, payment_received=payment_received), status=200)
         _require_active_participant(subscription.student, "renew subscriptions")
         subscription_type = _object_for_field(
             SubscriptionType.objects.filter(is_active=True),
@@ -343,16 +431,24 @@ def admin_subscription_renew(request, subscription_id):
                         "idempotency_key", "idempotency_fingerprint"])
                 _create_subscription_charge(
                     new_subscription, actor=user, due_date=due_date)
+                if payment_received:
+                    _create_subscription_payment(
+                        new_subscription, actor=user, operation_key=key,
+                        method=payment_method, paid_at=payment_date)
         except IntegrityError:
             existing = _existing_operation(key, fingerprint)
             if existing is None:
                 raise
             return JsonResponse(
-                _operation_payload(existing, replayed=True), status=200)
+                _operation_payload(
+                    existing, replayed=True, actor=user,
+                    operation_key=key, payment_received=payment_received), status=200)
     except _IdempotencyConflict:
         return _idempotency_conflict_response()
     return JsonResponse(
-        _operation_payload(new_subscription, replayed=False), status=201)
+        _operation_payload(
+            new_subscription, replayed=False, actor=user,
+            operation_key=key, payment_received=payment_received), status=201)
 
 
 @require_POST

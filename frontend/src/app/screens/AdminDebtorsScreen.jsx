@@ -28,9 +28,9 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
       itemKey: 'debtors',
       mapRows: mapAdminDebtorRows,
       role: 'admin',
-      route: 'debtors',
+      route: 'debtors-v2',
       userKey: currentUser?.id || currentUser?.username,
-      initialFilters: { group_id: '', min_amount: '', days_overdue_max: '30' },
+      initialFilters: { group_id: '', min_amount: '', days_overdue_max: '' },
       serializeFilters: serializeDebtorFilters,
       defaultOrder: '-balance',
     })
@@ -43,6 +43,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
     const total = -asMoneyMajor(debtorList.payload.summary?.balance_minor || 0)
     const groups = adminData.groups || []
     const visibleDebtors = debtors
+    const visibleRecipientCount = new Set(visibleDebtors.map((row) => row.clientId).filter(Boolean)).size
 
     async function loadLogs() {
       try { setLogs((await api.get('/api/admin/notifications/logs/?event_type=mass_mailing')).logs || []) } catch (err) { setError(apiErrorMessage(err, t('debtors.loadHistoryError'))) }
@@ -122,7 +123,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
             disabled={busyId != null || visibleDebtors.length === 0}
             onClick={() => sendReminders(visibleDebtors, 'all')}
           >
-            {t('debtors.sendAll', { count: visibleDebtors.length })}
+            {t('debtors.sendAll', { count: visibleRecipientCount })}
           </Button>
         </div>
 
@@ -130,11 +131,11 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError('')}>{error}</Banner>}
 
         <ListToolbar list={debtorList} searchLabel={t('debtors.search')} searchPlaceholder={t('debtors.searchPlaceholder')}>
-          <label>{t('debtors.period')}<select value={debtorList.draftFilters.days_overdue_max} onChange={(event) => debtorList.setDraftFilter('days_overdue_max', event.target.value)}><option value="1">{t('debtors.today')}</option><option value="3">{t('debtors.days3')}</option><option value="7">{t('debtors.days7')}</option><option value="14">{t('debtors.days14')}</option><option value="30">{t('debtors.days30')}</option></select></label>
+          <label>{t('debtors.period')}<select value={debtorList.draftFilters.days_overdue_max} onChange={(event) => debtorList.setDraftFilter('days_overdue_max', event.target.value)}><option value="">{t('common.all')}</option><option value="1">{t('debtors.today')}</option><option value="3">{t('debtors.days3')}</option><option value="7">{t('debtors.days7')}</option><option value="14">{t('debtors.days14')}</option><option value="30">{t('debtors.days30')}</option></select></label>
           <label>{t('common.group')}<select value={debtorList.draftFilters.group_id} onChange={(event) => debtorList.setDraftFilter('group_id', event.target.value)}><option value="">{t('common.all')}</option>{groups.map((group) => <option key={group.groupId} value={group.groupId}>{group.name}</option>)}</select></label>
           <label>{t('debtors.minDebt')}<input aria-label={t('debtors.minDebtAria')} inputMode="decimal" value={debtorList.draftFilters.min_amount} onChange={(event) => debtorList.setDraftFilter('min_amount', event.target.value)} placeholder="0" /></label>
         </ListToolbar>
-        <Badge tone="danger" dot>{t('debtors.overdueCharges')}</Badge>
+        <div className="ops-debtors-list-heading"><Badge tone="danger" dot>{t('debtors.overdueCharges')}</Badge></div>
 
         <ListFeedback list={debtorList} emptyLabel={t('debtors.empty')} />
         <div className="ops-entity-desktop-table"><Table

@@ -2,7 +2,7 @@ import re
 
 
 OPENAPI_VERSION = "3.1.0"
-API_VERSION = "2026-08-14"
+API_VERSION = "2026-09-15"
 PATH_PARAMETER = re.compile(r"<(?:(?P<converter>\w+):)?(?P<name>\w+)>")
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 
@@ -104,6 +104,15 @@ LIST_ORDER_POLICIES = {
         "-date", "date", "-amount", "amount", "status", "-status"),
 }
 
+SUBSCRIPTION_OPERATION_PATHS = {
+    "/api/admin/participants/{participant_id}/subscriptions/",
+    "/api/admin/subscriptions/{subscription_id}/renew/",
+}
+
+SUBSCRIPTION_UPDATE_PATHS = {
+    "/api/admin/subscriptions/{subscription_id}/",
+}
+
 
 def _allowed_methods(view):
     methods = set()
@@ -195,6 +204,20 @@ def build_openapi_schema():
                 )
             if operation_parameters:
                 operation["parameters"] = operation_parameters
+            if method == "POST" and path in SUBSCRIPTION_OPERATION_PATHS:
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "$ref": "#/components/schemas/SubscriptionOperation",
+                    }}},
+                }
+            if method == "POST" and path in SUBSCRIPTION_UPDATE_PATHS:
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "$ref": "#/components/schemas/SubscriptionUpdate",
+                    }}},
+                }
             paths.setdefault(path, {})[method.lower()] = operation
 
     return {
@@ -230,6 +253,44 @@ def build_openapi_schema():
                         "has_next": {"type": "boolean"},
                         "has_previous": {"type": "boolean"},
                     },
+                },
+                "SubscriptionOperation": {
+                    "type": "object",
+                    "required": ["subscription_type_id", "idempotency_key"],
+                    "properties": {
+                        "subscription_type_id": {"type": "integer", "minimum": 1},
+                        "start_date": {"type": "string", "format": "date"},
+                        "due_date": {"type": "string", "format": "date"},
+                        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "payment_received": {"type": "boolean", "default": False},
+                        "payment_method": {
+                            "type": "string",
+                            "enum": ["cash", "bank_transfer", "card", "other"],
+                            "description": "Required when payment_received is true.",
+                        },
+                        "payment_date": {
+                            "type": "string", "format": "date",
+                            "description": "Required when payment_received is true.",
+                        },
+                    },
+                },
+                "SubscriptionUpdate": {
+                    "type": "object",
+                    "description": (
+                        "Update either the subscription status or its effective end date. "
+                        "Freeze history and session ledger entries are preserved."
+                    ),
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "enum": ["active", "frozen", "expired", "cancelled"],
+                        },
+                        "effective_end_date": {"type": "string", "format": "date"},
+                    },
+                    "anyOf": [
+                        {"required": ["status"]},
+                        {"required": ["effective_end_date"]},
+                    ],
                 },
             },
         },

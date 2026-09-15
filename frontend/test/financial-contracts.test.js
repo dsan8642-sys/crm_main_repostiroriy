@@ -7,6 +7,7 @@ import {
   createPaymentAttemptKey,
   moneyMajorToMinor,
   rebasePassiveFormUpdate,
+  subscriptionPaymentFields,
 } from '../src/app/financialContracts.js'
 
 test('money conversion uses exact minor units without rounding', () => {
@@ -24,6 +25,17 @@ test('payment attempt keys are namespaced and unique', () => {
   const second = createPaymentAttemptKey('client-topup')
   assert.match(first, /^client-topup-[A-Za-z0-9-]+$/)
   assert.notEqual(first, second)
+})
+
+test('subscription payment fields are included only for a selected full payment', () => {
+  assert.deepEqual(subscriptionPaymentFields({ received: false, method: 'cash', date: '2026-09-15' }), {
+    payment_received: false,
+  })
+  assert.deepEqual(subscriptionPaymentFields({ received: true, method: 'card', date: '2026-09-15' }), {
+    payment_received: true,
+    payment_method: 'card',
+    payment_date: '2026-09-15',
+  })
 })
 
 test('authoritative read-back requires matching payment, status and audit event', () => {

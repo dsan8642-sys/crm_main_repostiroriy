@@ -145,9 +145,9 @@ export function ActionPopover({ label, actions, disabled = false }) {
   )
 }
 
-export function EntityMobileCard({ className = '', children, labelledBy, testId }) {
+export function EntityMobileCard({ className = '', children, labelledBy, testId, style }) {
   return (
-    <article className={`ops-compact-entity-card ${className}`.trim()} style={{ minWidth: 0 }} aria-labelledby={labelledBy} data-testid={testId}>
+    <article className={`ops-compact-entity-card ${className}`.trim()} style={{ minWidth: 0, ...style }} aria-labelledby={labelledBy} data-testid={testId}>
       {children}
     </article>
   )

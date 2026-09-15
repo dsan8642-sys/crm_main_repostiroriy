@@ -3,7 +3,7 @@
 Монорепозиторий:
 
 ```
-H2O_CRM_V3/
+H2O_CRM_V5/
 ├─ swimcrm/     # Django backend (модульный монолит, вся доменная логика + админка)
 └─ frontend/    # React + Vite SPA для админа, клиента и тренера
 ```
@@ -18,11 +18,12 @@ H2O_CRM_V3/
 ## Backend (Django) — порт 8000
 
 ```powershell
-cd C:\Users\clans\H2O_CRM_V3\swimcrm
+cd C:\H2O_content\H2O_CRM_V5\swimcrm
 .\.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
 ```
 
-- Админка: **http://127.0.0.1:8000/admin/** — логин `admin` / пароль `Admin!2026pass`
+- Резервная Django admin: **http://127.0.0.1:8000/admin/**. Учётные данные в
+  репозитории не хранятся; при необходимости используйте `createsuperuser`.
 - Health: **http://127.0.0.1:8000/api/health/**
 - Остановить: `Ctrl+C`
 
@@ -35,9 +36,10 @@ cd C:\Users\clans\H2O_CRM_V3\swimcrm
 .\.venv\Scripts\python.exe manage.py run_due_jobs    # уведомления + очистка старых чеков
 ```
 
-Release/smoke checks before upload:
+Release/smoke checks before upload (из корня репозитория):
 
 ```powershell
+cd C:\H2O_content\H2O_CRM_V5
 .\scripts\release-check-backend.ps1            # SQLite tests + production check --deploy
 .\scripts\release-check-backend.ps1 -Postgres  # also runs PostgreSQL tests / GIST constraint
 .\scripts\verify-release-tree.ps1              # scan for release-blocking artifacts
@@ -46,7 +48,7 @@ Release/smoke checks before upload:
 Первичная настройка venv (если папки `.venv` нет):
 
 ```powershell
-cd C:\Users\clans\H2O_CRM_V3\swimcrm
+cd C:\H2O_content\H2O_CRM_V5\swimcrm
 & "C:\Users\clans\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe manage.py migrate
@@ -56,9 +58,9 @@ cd C:\Users\clans\H2O_CRM_V3\swimcrm
 ## Frontend (React + Vite) — порт 5173
 
 ```powershell
-cd C:\Users\clans\H2O_CRM_V3\frontend
-npm install          # только при первом запуске / после изменения зависимостей
-npm run dev
+cd C:\H2O_content\H2O_CRM_V5\frontend
+npm.cmd install          # только при первом запуске / после изменения зависимостей
+npm.cmd run dev
 ```
 
 - Открывать в браузере: **http://localhost:5173/** (именно `localhost`, не `127.0.0.1` — Vite
@@ -80,7 +82,7 @@ npm run dev
 `POSTGRES_*`):
 
 ```powershell
-cd C:\Users\clans\H2O_CRM_V3\swimcrm
+cd C:\H2O_content\H2O_CRM_V5\swimcrm
 .\run-pg.ps1 runserver 127.0.0.1:8000   # dev-сервер на PostgreSQL
 .\run-pg.ps1 migrate                     # миграции
 .\run-pg.ps1 test tests                  # полный suite на PG, вкл. проверку GIST-констрейнта

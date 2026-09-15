@@ -72,7 +72,10 @@ class AdminSubscriptionListApiTest(TestCase):
         self.assertEqual(row["phone"], "+48123456789")
         self.assertEqual(row["groups"], [{"id": self.group.id, "name": self.group.name}])
         self.assertEqual(row["remaining_sessions"], 8)
-        self.assertEqual(row["allowed_actions"], ["open_client", "renew", "freeze", "adjust"])
+        self.assertEqual(
+            row["allowed_actions"],
+            ["open_client", "edit", "renew", "freeze", "adjust"],
+        )
         self.assertIn("effective_end_date", row)
         self.assertEqual(payload["pagination"]["total"], 3)
         self.assertNotIn(future.id, [row["id"] for row in payload["subscriptions"]])

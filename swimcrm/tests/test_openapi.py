@@ -42,6 +42,29 @@ class OpenApiContractTest(TestCase):
             client_parameters["all"]["schema"]["enum"],
             ["true", "false"],
         )
+        purchase = schema["paths"][
+            "/api/admin/participants/{participant_id}/subscriptions/"
+        ]["post"]
+        self.assertEqual(
+            purchase["requestBody"]["content"]["application/json"]["schema"],
+            {"$ref": "#/components/schemas/SubscriptionOperation"},
+        )
+        operation = schema["components"]["schemas"]["SubscriptionOperation"]
+        self.assertIn("payment_received", operation["properties"])
+        self.assertIn("payment_method", operation["properties"])
+        self.assertIn("payment_date", operation["properties"])
+        subscription_update = schema["paths"][
+            "/api/admin/subscriptions/{subscription_id}/"
+        ]["post"]
+        self.assertEqual(
+            subscription_update["requestBody"]["content"]["application/json"]["schema"],
+            {"$ref": "#/components/schemas/SubscriptionUpdate"},
+        )
+        self.assertEqual(
+            schema["components"]["schemas"]["SubscriptionUpdate"]["properties"]
+            ["effective_end_date"],
+            {"type": "string", "format": "date"},
+        )
 
     def test_operation_ids_are_unique(self):
         schema = build_openapi_schema()

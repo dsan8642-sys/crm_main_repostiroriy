@@ -155,11 +155,22 @@ test('issuing a subscription always creates its charge through one idempotent op
 
   const modal = page.getByRole('dialog', { name: 'Выдать абонемент' })
   await expect(modal.getByRole('checkbox', { name: 'Создать начисление' })).toHaveCount(0)
+  const paid = modal.getByRole('checkbox', { name: 'Оплата получена — зачислить полную стоимость' })
+  await expect(paid).not.toBeChecked()
+  await paid.check()
+  await modal.getByLabel('Способ оплаты').selectOption('bank_transfer')
+  await modal.getByLabel('Дата платежа').fill('2026-09-15')
+  await expect(modal.getByText('Будут созданы начисление и оплата: 240 PLN.')).toBeVisible()
   await modal.getByRole('button', { name: 'Выдать абонемент', exact: true }).click()
 
   await expect.poll(() => mock.requests).toHaveLength(1)
   expect(mock.requests[0].path).toBe('/api/admin/participants/1/subscriptions/')
   expect(mock.requests[0].body).not.toHaveProperty('create_charge')
+  expect(mock.requests[0].body).toMatchObject({
+    payment_received: true,
+    payment_method: 'bank_transfer',
+    payment_date: '2026-09-15',
+  })
   expect(mock.requests[0].body.idempotency_key).toMatch(/^admin-subscription-/)
 })
 

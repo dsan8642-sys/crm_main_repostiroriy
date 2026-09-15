@@ -83,16 +83,14 @@ def _xlsx_response(content, filename):
 
 def _debtor_payload(row):
     today = timezone.localdate()
-    overdue = Charge.objects.filter(student=row.student, due_date__lt=today).order_by("due_date").first()
-    last_payment = Payment.objects.filter(student=row.student, status=PaymentStatus.CONFIRMED).order_by("-paid_at", "-id").first()
     return {
         "student": _student_payload(row.student),
         "reasons": row.reasons,
         "balance_minor": row.balance_minor,
         "currency": row.currency,
-        "oldest_due_date": overdue.due_date.isoformat() if overdue else None,
-        "days_overdue": (today - overdue.due_date).days if overdue else 0,
-        "last_payment_at": last_payment.paid_at.isoformat() if last_payment else None,
+        "oldest_due_date": row.oldest_due_date.isoformat() if row.oldest_due_date else None,
+        "days_overdue": (today - row.oldest_due_date).days if row.oldest_due_date else 0,
+        "last_payment_at": row.last_payment_at.isoformat() if row.last_payment_at else None,
     }
 
 @require_GET

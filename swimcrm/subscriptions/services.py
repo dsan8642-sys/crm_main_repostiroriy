@@ -91,6 +91,32 @@ def freeze_subscription(*, subscription, start_date, end_date, created_by=None, 
 
 
 @transaction.atomic
+def update_subscription_end_date(*, subscription, effective_end_date, created_by=None):
+    """Correct the displayed end date without rewriting freeze history or the ledger."""
+    locked = Subscription.objects.select_for_update().get(pk=subscription.pk)
+    if effective_end_date < locked.start_date:
+        raise ValidationError({
+            "effective_end_date": ValidationError(
+                "Дата окончания не может быть раньше даты начала абонемента.",
+                code="invalid_range",
+            ),
+        })
+
+    previous_base_end_date = locked.base_end_date
+    previous_effective_end_date = locked.effective_end_date
+    locked.base_end_date = effective_end_date - timedelta(days=locked.total_frozen_days)
+    locked.full_clean()
+    locked.save(update_fields=["base_end_date"])
+    audit(created_by, "subscription.end_date_updated", locked, {
+        "previous_base_end_date": previous_base_end_date.isoformat(),
+        "base_end_date": locked.base_end_date.isoformat(),
+        "previous_effective_end_date": previous_effective_end_date.isoformat(),
+        "effective_end_date": locked.effective_end_date.isoformat(),
+    })
+    return locked
+
+
+@transaction.atomic
 def manual_adjust(*, subscription, delta, created_by=None, note=""):
     """Rule 1: admin correction is a separate ledger row, not an edit."""
     if delta == 0:

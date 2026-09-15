@@ -54,7 +54,7 @@ function LocaleSelector({ compact = false, dark = false, locale, setLocale, t })
         aria-label={t('locale.label')}
         value={locale}
         onChange={(event) => setLocale(event.target.value)}
-        style={{ width: '100%', minHeight: 42, padding: '0 12px', border: dark ? '1px solid rgba(255,255,255,0.16)' : '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: dark ? '#18263a' : 'var(--surface-card)', color: dark ? '#f4f8ff' : 'var(--text-strong)', font: 'inherit', fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-medium)', colorScheme: dark ? 'dark' : 'normal' }}
+        style={{ width: '100%', minHeight: 42, padding: compact ? '0 4px' : '0 12px', border: dark ? '1px solid rgba(255,255,255,0.16)' : '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: dark ? '#18263a' : 'var(--surface-card)', color: dark ? '#f4f8ff' : 'var(--text-strong)', fontSize: compact ? 12 : undefined, fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-medium)', colorScheme: dark ? 'dark' : 'normal' }}
       >
         {SUPPORTED_LOCALES.map((code) => (
           <option key={code} value={code}>{compact ? code.toUpperCase() : t(`locale.${code}`)}</option>

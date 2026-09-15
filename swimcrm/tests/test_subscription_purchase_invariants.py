@@ -4,7 +4,7 @@ from datetime import date
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
-from billing.models import Charge
+from billing.models import Charge, Payment, PaymentStatus
 from subscriptions.models import Subscription
 
 from . import factories as f
@@ -77,6 +77,69 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
         self.assertEqual(replay.json()["charge"]["id"], first.json()["charge"]["id"])
         self.assertEqual(Subscription.objects.filter(student=self.student).count(), 1)
         self.assertEqual(Charge.objects.filter(student=self.student).count(), 1)
+
+    def test_purchase_can_record_matching_confirmed_payment_once(self):
+        request_data = {
+            "subscription_type_id": self.subscription_type.id,
+            "start_date": "2026-08-26",
+            "due_date": "2026-08-29",
+            "payment_received": True,
+            "payment_method": "bank_transfer",
+            "payment_date": "2026-08-26",
+            "idempotency_key": "subscription-paid-sale-001",
+        }
+        url = f"/api/admin/participants/{self.student.id}/subscriptions/"
+
+        first = self.client.post(
+            url, data=json.dumps(request_data), content_type="application/json")
+        replay = self.client.post(
+            url, data=json.dumps(request_data), content_type="application/json")
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(first.json()["charge"]["amount_minor"], 28000)
+        self.assertEqual(first.json()["payment"]["amount_minor"], 28000)
+        self.assertEqual(first.json()["payment"]["status"], PaymentStatus.CONFIRMED)
+        self.assertEqual(first.json()["payment"]["method"], "bank_transfer")
+        self.assertEqual(replay.json()["payment"]["id"], first.json()["payment"]["id"])
+        self.assertEqual(Payment.objects.filter(student=self.student).count(), 1)
+
+    def test_payment_fields_are_part_of_subscription_idempotency(self):
+        request_data = {
+            "subscription_type_id": self.subscription_type.id,
+            "payment_received": True,
+            "payment_method": "cash",
+            "payment_date": "2026-08-26",
+            "idempotency_key": "subscription-paid-conflict-001",
+        }
+        url = f"/api/admin/participants/{self.student.id}/subscriptions/"
+        first = self.client.post(
+            url, data=json.dumps(request_data), content_type="application/json")
+        conflict = self.client.post(
+            url,
+            data=json.dumps({**request_data, "payment_method": "card"}),
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(Payment.objects.filter(student=self.student).count(), 1)
+
+    def test_paid_purchase_requires_valid_payment_details_without_partial_write(self):
+        response = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({
+                "subscription_type_id": self.subscription_type.id,
+                "payment_received": True,
+                "payment_method": "wire",
+                "payment_date": "2026-08-26",
+                "idempotency_key": "subscription-paid-invalid-001",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Subscription.objects.filter(student=self.student).exists())
+        self.assertFalse(Charge.objects.filter(student=self.student).exists())
+        self.assertFalse(Payment.objects.filter(student=self.student).exists())
 
     def test_reusing_idempotency_key_with_different_purchase_data_is_conflict(self):
         url = f"/api/admin/participants/{self.student.id}/subscriptions/"
@@ -172,6 +235,26 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
         self.assertEqual(replay.json()["charge"]["id"], first.json()["charge"]["id"])
         self.assertEqual(Subscription.objects.filter(student=self.student).count(), 2)
         self.assertEqual(Charge.objects.filter(student=self.student).count(), 2)
+
+    def test_renewal_can_record_matching_payment(self):
+        original = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({
+                "subscription_type_id": self.subscription_type.id,
+                "idempotency_key": "subscription-paid-renew-original",
+            }), content_type="application/json").json()
+        response = self.client.post(
+            f"/api/admin/subscriptions/{original['subscription']['id']}/renew/",
+            data=json.dumps({
+                "subscription_type_id": self.subscription_type.id,
+                "payment_received": True,
+                "payment_method": "card",
+                "payment_date": "2026-09-26",
+                "idempotency_key": "subscription-paid-renewal-001",
+            }), content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["payment"]["amount_minor"], 28000)
+        self.assertEqual(response.json()["payment"]["method"], "card")
 
     def test_database_rejects_a_second_charge_for_one_subscription(self):
         purchased = self.client.post(

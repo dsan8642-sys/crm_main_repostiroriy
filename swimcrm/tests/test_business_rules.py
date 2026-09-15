@@ -19,7 +19,7 @@ from scheduling.models import Session
 from scheduling.services import ScheduleConflict, create_session
 from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription
 from subscriptions.services import (create_subscription, freeze_subscription,
-                                    manual_adjust)
+                                    manual_adjust, update_subscription_end_date)
 
 from . import factories as f
 
@@ -256,6 +256,34 @@ class FreezeRule(TestCase):
         self.assertEqual(sub.total_frozen_days, 8)
         self.assertEqual(sub.freeze_periods.count(), 2)  # history kept
         self.assertTrue(all(fp.created_by == admin for fp in sub.freeze_periods.all()))
+
+    def test_end_date_correction_preserves_freezes_and_sets_exact_effective_date(self):
+        st = f.make_student()
+        sub = create_subscription(student=st, subscription_type=f.make_sub_type(days=30),
+                                  start_date=date(2026, 1, 1))
+        freeze_subscription(subscription=sub, start_date=date(2026, 1, 10),
+                            end_date=date(2026, 1, 12))
+
+        updated = update_subscription_end_date(
+            subscription=sub, effective_end_date=date(2026, 2, 20))
+
+        self.assertEqual(updated.effective_end_date, date(2026, 2, 20))
+        self.assertEqual(updated.base_end_date, date(2026, 2, 17))
+        self.assertEqual(updated.freeze_periods.count(), 1)
+        self.assertEqual(updated.ledger_entries.count(), 1)
+
+    def test_end_date_correction_rejects_date_before_subscription_start(self):
+        sub = create_subscription(
+            student=f.make_student(), subscription_type=f.make_sub_type(days=30),
+            start_date=date(2026, 1, 10))
+        original_end_date = sub.effective_end_date
+
+        with self.assertRaises(ValidationError):
+            update_subscription_end_date(
+                subscription=sub, effective_end_date=date(2026, 1, 9))
+
+        sub.refresh_from_db()
+        self.assertEqual(sub.effective_end_date, original_end_date)
 
     def test_freeze_history_is_immutable(self):
         st = f.make_student()

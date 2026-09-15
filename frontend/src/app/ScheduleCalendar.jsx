@@ -307,6 +307,7 @@ export function ScheduleCalendar({
                     onClick={() => chooseDate(date)}
                   >
                     {parsed.getDate()}
+                    {daySessions.length > 0 && <span className="ops-month-day-dot" aria-hidden="true" />}
                   </button>
                 )}
               </header>

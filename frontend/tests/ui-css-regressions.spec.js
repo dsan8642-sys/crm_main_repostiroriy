@@ -252,6 +252,9 @@ test('schedule calendar keeps its desktop and mobile spacing', async ({ page }) 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect.poll(calendarSpacing).toEqual({ top: 2, bottom: 0 })
   await expect(page.locator('.ops-calendar-toolbar')).toHaveCSS('margin-top', '8px')
+  await expect(page.locator('.ops-calendar-date-controls input')).toHaveCSS('margin-bottom', '8px')
+  await expect(page.locator('.ops-calendar-date-controls .ops-picker-input button')).toHaveCSS('margin-bottom', '8px')
+  await expect(page.locator('.ops-calendar-today')).toHaveCSS('margin-bottom', '8px')
 })
 
 test('sidebar shows language above the user and initials only when collapsed', async ({ page }) => {
@@ -423,7 +426,7 @@ test('mobile shell, entity cards and subscription page stay readable at supporte
   const groups = [{
     id: 1, name: 'Audit Group with a long mobile name', description: 'Detail',
     default_trainer: { id: 1, name: 'Audit Trainer' }, participants_count: 1,
-    price_minor: 7000, currency: 'PLN', default_capacity: 8, is_active: true,
+    price_minor: 7000, currency: 'PLN', default_capacity: 8, color_key: 'forest-01', is_active: true,
   }]
   const subscriptions = [{
     id: 1, client_id: 11, participant_id: 1, participant_name: 'Sofiia',
@@ -468,8 +471,10 @@ test('mobile shell, entity cards and subscription page stay readable at supporte
   }
 
   await page.goto('/?role=admin&view=groups')
-  await page.locator('.ops-group-compact-card .ops-compact-card-title').click()
   const groupCard = page.locator('.ops-group-compact-card').first()
+  await expect(groupCard).toHaveCSS('background-color', 'rgb(232, 245, 233)')
+  await expect(groupCard.locator('.ops-compact-card-line strong').first()).toHaveCSS('color', 'rgb(26, 33, 41)')
+  await groupCard.locator('.ops-compact-card-title').click()
   const inlineDetail = groupCard.locator('xpath=following-sibling::*[1]')
   await expect(inlineDetail).toHaveClass(/ops-inline-entity-detail/)
 

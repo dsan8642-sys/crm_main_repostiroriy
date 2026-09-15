@@ -19,7 +19,7 @@ import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
-import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor, rebasePassiveFormUpdate } from '../financialContracts.js'
+import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor, rebasePassiveFormUpdate, subscriptionPaymentFields } from '../financialContracts.js'
 
 const TYPE_FIELD_MAP = {
   name: 'name', price_minor: 'price', currency: 'currency',
@@ -40,6 +40,9 @@ const FINANCE_FIELD_IDS = {
   subscriptionTypeId: 'admin-finance-subscription-type',
   subscriptionId: 'admin-finance-subscription',
   startDate: 'admin-finance-start-date', dueDate: 'admin-finance-due-date',
+  subscriptionPaymentReceived: 'admin-finance-subscription-payment-received',
+  subscriptionPaymentMethod: 'admin-finance-subscription-payment-method',
+  subscriptionPaymentDate: 'admin-finance-subscription-payment-date',
   chargeDescription: 'admin-finance-charge-description',
   chargeAmount: 'admin-finance-charge-amount',
   paymentAmount: 'admin-finance-payment-amount',
@@ -108,6 +111,9 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       subscriptionId: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
+      subscriptionPaymentReceived: false,
+      subscriptionPaymentMethod: 'cash',
+      subscriptionPaymentDate: new Date().toISOString().slice(0, 10),
       chargeDescription: '',
       chargeAmount: '',
       chargeIdempotencyKey: createPaymentAttemptKey('admin-charge'),
@@ -476,6 +482,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       if (!financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = t('finance.selectTypeError')
       if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
       if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
+      if (financeForm.subscriptionPaymentReceived && !financeForm.subscriptionPaymentMethod) nextErrors.subscriptionPaymentMethod = t('finance.paymentMethodError')
+      if (financeForm.subscriptionPaymentReceived && !validIsoDate(financeForm.subscriptionPaymentDate)) nextErrors.subscriptionPaymentDate = t('finance.paymentDateError')
       if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('subscription')
       setError(null); setFinanceErrors({})
@@ -485,8 +493,9 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           start_date: financeForm.startDate,
           due_date: financeForm.dueDate,
           idempotency_key: financeForm.subscriptionIdempotencyKey,
+          ...subscriptionPaymentFields({ received: financeForm.subscriptionPaymentReceived, method: financeForm.subscriptionPaymentMethod, date: financeForm.subscriptionPaymentDate }),
         })
-        setMessage(t('finance.subscriptionCreated'))
+        setMessage(t(financeForm.subscriptionPaymentReceived ? 'finance.subscriptionCreatedPaid' : 'finance.subscriptionCreated'))
         setFinanceAction(null)
         setFinanceBaseline(null)
         setFinanceForm((current) => ({ ...current, subscriptionId: result.subscription?.id || current.subscriptionId }))
@@ -496,6 +505,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         showApiFieldErrors(err, {
           participant_id: 'participantId', subscription_type_id: 'subscriptionTypeId',
           start_date: 'startDate', due_date: 'dueDate', idempotency_key: 'subscriptionTypeId',
+          payment_method: 'subscriptionPaymentMethod', payment_date: 'subscriptionPaymentDate',
         }, setFinanceErrors, FINANCE_FIELD_IDS, t('finance.issueError'))
       } finally {
         setBusyId(null)
@@ -650,6 +660,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       if (!financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = t('finance.selectRenewTypeError')
       if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
       if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
+      if (financeForm.subscriptionPaymentReceived && !financeForm.subscriptionPaymentMethod) nextErrors.subscriptionPaymentMethod = t('finance.paymentMethodError')
+      if (financeForm.subscriptionPaymentReceived && !validIsoDate(financeForm.subscriptionPaymentDate)) nextErrors.subscriptionPaymentDate = t('finance.paymentDateError')
       if (Object.keys(nextErrors).length && !showFinanceErrors(nextErrors)) return
       setBusyId('renew')
       setError(null); setFinanceErrors({})
@@ -659,8 +671,9 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           start_date: financeForm.startDate,
           due_date: financeForm.dueDate,
           idempotency_key: financeForm.subscriptionIdempotencyKey,
+          ...subscriptionPaymentFields({ received: financeForm.subscriptionPaymentReceived, method: financeForm.subscriptionPaymentMethod, date: financeForm.subscriptionPaymentDate }),
         })
-        setMessage(t('finance.subscriptionRenewed'))
+        setMessage(t(financeForm.subscriptionPaymentReceived ? 'finance.subscriptionRenewedPaid' : 'finance.subscriptionRenewed'))
         setFinanceAction(null)
         setFinanceBaseline(null)
         setFinanceForm((current) => ({ ...current, subscriptionId: result.subscription?.id || current.subscriptionId }))
@@ -670,6 +683,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         showApiFieldErrors(err, {
           subscription_id: 'subscriptionId', subscription_type_id: 'subscriptionTypeId',
           start_date: 'startDate', due_date: 'dueDate', idempotency_key: 'subscriptionTypeId',
+          payment_method: 'subscriptionPaymentMethod', payment_date: 'subscriptionPaymentDate',
         }, setFinanceErrors, FINANCE_FIELD_IDS, t('finance.renewError'))
       } finally {
         setBusyId(null)
@@ -687,7 +701,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       const next = action === 'payment'
         ? { ...financeForm, paymentIdempotencyKey: createPaymentAttemptKey('admin-payment') }
         : ['issue', 'renew'].includes(action)
-          ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription') }
+          ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), subscriptionPaymentReceived: false, subscriptionPaymentMethod: 'cash', subscriptionPaymentDate: new Date().toISOString().slice(0, 10) }
         : action === 'charge'
           ? { ...financeForm, chargeDescription: financeForm.chargeDescription || t('finance.manualCharge'), chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }
             : financeForm
@@ -886,7 +900,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             <SearchableSelect inputId={FINANCE_FIELD_IDS.participantId} label={t('common.participant')} value={financeForm.participantId} error={financeErrors.participantId} onChange={(value) => updateFinanceForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant, { description: (row) => row.phone || row.email || row.group }))} loadOptions={loadAdminParticipantOptions} />
             {(financeAction === 'issue' || financeAction === 'renew') && <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label={t('field.subscriptionType')} value={financeForm.subscriptionTypeId} error={financeErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}><option value="">{t('field.selectType')}</option>{subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price.toLocaleString(localeTag)} {type.currency}</option>)}</Select>}
             {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && <Select id={FINANCE_FIELD_IDS.subscriptionId} label={t('field.participantSubscription')} value={financeForm.subscriptionId} error={financeErrors.subscriptionId} disabled={subscriptionsLoading} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}><option value="">{subscriptionsLoading ? t('field.loadingSubscriptions') : t('field.selectSubscription')}</option>{subscriptions.map((subscription) => <option key={subscription.id} value={subscription.id}>#{subscription.id} · {subscription.type} · {subscriptionStatusLabel(subscription.status)} · {subscription.remaining_sessions ?? t('field.unlimitedLower')}</option>)}</Select>}
-            {(financeAction === 'issue' || financeAction === 'renew') && <><Input id={FINANCE_FIELD_IDS.startDate} label={t('field.subscriptionStart')} value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p></>}
+            {(financeAction === 'issue' || financeAction === 'renew') && <><Input id={FINANCE_FIELD_IDS.startDate} label={t('field.subscriptionStart')} value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p><Checkbox id={FINANCE_FIELD_IDS.subscriptionPaymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.subscriptionPaymentReceived} onChange={(event) => updateFinanceForm('subscriptionPaymentReceived', event.target.checked)} />{financeForm.subscriptionPaymentReceived && <><Select id={FINANCE_FIELD_IDS.subscriptionPaymentMethod} label={t('field.paymentMethod')} value={financeForm.subscriptionPaymentMethod} error={financeErrors.subscriptionPaymentMethod} onChange={(event) => updateFinanceForm('subscriptionPaymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select><Input id={FINANCE_FIELD_IDS.subscriptionPaymentDate} label={t('field.paymentDate')} value={financeForm.subscriptionPaymentDate} error={financeErrors.subscriptionPaymentDate} onChange={(event) => updateFinanceForm('subscriptionPaymentDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full strong" style={{ margin: 0 }}>{t('finance.subscriptionPaymentAmount', { amount: selectedType?.price ?? '—', currency: selectedType?.currency ?? '' })}</p><p className="ops-grid-full ops-subscription-payment-warning">{t('finance.subscriptionPaymentWarning')}</p></>}</>}
             {financeAction === 'charge' && <><Input id={FINANCE_FIELD_IDS.chargeDescription} label={t('field.chargeDescription')} value={financeForm.chargeDescription} error={financeErrors.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} /><Input id={FINANCE_FIELD_IDS.chargeAmount} label={t('field.chargeAmount')} value={financeForm.chargeAmount} error={financeErrors.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /></>}
             {financeAction === 'payment' && <><Input id={FINANCE_FIELD_IDS.paymentAmount} label={t('field.paymentAmount')} value={financeForm.paymentAmount} error={financeErrors.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240,00'} inputMode="decimal" /><Input id={FINANCE_FIELD_IDS.paymentDate} label={t('field.paymentDate')} value={financeForm.paymentDate} error={financeErrors.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder={t('field.dateFormat')} /><Select id={FINANCE_FIELD_IDS.paymentMethod} label={t('field.paymentMethod')} value={financeForm.paymentMethod} error={financeErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select><Input id={FINANCE_FIELD_IDS.paymentComment} label={t('field.comment')} value={financeForm.paymentComment} error={financeErrors.paymentComment} onChange={(event) => updateFinanceForm('paymentComment', event.target.value)} placeholder={t('common.optional')} /></>}
             {financeAction === 'freeze' && <><Input id={FINANCE_FIELD_IDS.freezeStart} label={t('field.freezeFrom')} value={financeForm.freezeStart} error={financeErrors.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.freezeEnd} label={t('field.freezeTo')} value={financeForm.freezeEnd} error={financeErrors.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.freezeReason} label={t('field.freezeReason')} value={financeForm.freezeReason} error={financeErrors.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} /></>}

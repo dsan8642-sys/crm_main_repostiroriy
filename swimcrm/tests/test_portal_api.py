@@ -506,6 +506,46 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["full_name"], "Тестова Ада")
 
+    def test_admin_can_edit_subscription_effective_end_date(self):
+        subscription = create_subscription(
+            student=self.student,
+            subscription_type=f.make_sub_type(name="Editable end date", days=30),
+            start_date=date(2026, 1, 1),
+            created_by=self.admin,
+        )
+        freeze_subscription(
+            subscription=subscription,
+            start_date=date(2026, 1, 10),
+            end_date=date(2026, 1, 12),
+            created_by=self.admin,
+        )
+
+        response = self.client.post(
+            f"/api/admin/subscriptions/{subscription.id}/",
+            data=json.dumps({"effective_end_date": "2026-02-20"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["effective_end_date"], "2026-02-20")
+        self.assertEqual(response.json()["base_end_date"], "2026-02-17")
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.freeze_periods.count(), 1)
+        self.assertEqual(subscription.ledger_entries.count(), 1)
+
+        invalid = self.client.post(
+            f"/api/admin/subscriptions/{subscription.id}/",
+            data=json.dumps({"effective_end_date": "2025-12-31"}),
+            content_type="application/json",
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(
+            invalid.json()["errors"]["effective_end_date"][0]["code"],
+            "invalid_range",
+        )
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.effective_end_date, date(2026, 2, 20))
+
     def test_group_roster_counts_lists_and_can_remove_inactive_participant(self):
         inactive = f.make_student(
             group=self.group, first="Inactive", last="Reserved")

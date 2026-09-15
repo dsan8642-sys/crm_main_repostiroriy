@@ -181,7 +181,7 @@ Creates a client account and an account-holder participant with `is_account_hold
 }
 ```
 
-### Create Subscription With Charge
+### Create Subscription With Charge And Optional Payment
 
 `POST /api/admin/participants/<id>/subscriptions/`
 
@@ -189,12 +189,37 @@ Creates a client account and an account-holder participant with `is_account_hold
 {
   "subscription_type_id": 1,
   "start_date": "2026-07-06",
-  "create_charge": true,
-  "due_date": "2026-07-06"
+  "due_date": "2026-07-06",
+  "idempotency_key": "subscription-sale-unique-attempt",
+  "payment_received": true,
+  "payment_method": "cash",
+  "payment_date": "2026-07-06"
 }
 ```
 
-Creates the subscription, posts the initial ledger entry, and optionally creates a charge.
+Always creates the subscription charge. When `payment_received` is true, the
+server also creates one immediately confirmed payment for exactly the pass
+price and currency. `payment_method` and `payment_date` are then required. The
+same optional fields are accepted by
+`POST /api/admin/subscriptions/<id>/renew/`. Replaying an identical request with
+the same idempotency key returns the original subscription, charge and payment;
+changing payment details produces an idempotency conflict.
+
+### Edit Subscription End Date
+
+`POST /api/admin/subscriptions/<id>/`
+
+```json
+{
+  "effective_end_date": "2026-10-15"
+}
+```
+
+`effective_end_date` is the final date shown to the administrator, including
+any existing freeze extensions. The server adjusts `base_end_date` so the
+requested final date is retained; freeze history and session ledger entries
+are not rewritten. The date cannot precede the subscription start date. The
+same endpoint continues to accept the existing `{ "status": "..." }` update.
 
 ### Create Payment
 

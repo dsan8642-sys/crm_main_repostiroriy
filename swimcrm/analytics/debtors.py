@@ -3,9 +3,10 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.conf import settings
+from django.db.models import Prefetch
 from django.utils import timezone
 
-from billing.services import charge_statuses, student_balance
+from billing.models import Charge, Payment, PaymentStatus
 from students.models import Student
 from subscriptions.models import Subscription, SubscriptionStatus
 
@@ -18,30 +19,72 @@ class DebtorRow:
     reasons: list = field(default_factory=list)
     balance_minor: int = 0
     currency: str = "PLN"
+    oldest_due_date: object = None
+    last_payment_at: object = None
 
 
 def debtors(currency=None):
-    """A student is a debtor if any of: overdue charge, expired subscription,
-    or negative balance (charges exceed confirmed payments)."""
+    """Return active participants whose monetary balance is owed to the club.
+
+    Charges and confirmed payments are prefetched in batches.  This keeps the
+    result identical for the dashboard badge and the debtors page without the
+    previous per-participant balance/status/subscription queries.
+    """
     currency = currency or settings.DEFAULT_CURRENCY
     today = timezone.localdate()
     out = []
-    for st in Student.objects.filter(
+    students = Student.objects.filter(
             is_active=True, parent__user__is_active=True,
-    ).select_related("parent", "parent__user").prefetch_related("groups"):
+    ).select_related("parent", "parent__user").prefetch_related(
+        "groups",
+        Prefetch(
+            "charges",
+            queryset=Charge.objects.filter(currency=currency)
+            .select_related("reversal").order_by("due_date", "id"),
+            to_attr="debtor_charges",
+        ),
+        Prefetch(
+            "payments",
+            queryset=Payment.objects.filter(
+                currency=currency, status=PaymentStatus.CONFIRMED,
+            ).order_by("-paid_at", "-id"),
+            to_attr="debtor_payments",
+        ),
+    )
+    for st in students:
         reasons = []
-        bal = student_balance(st, currency)
-        if any(cs.is_overdue for cs in charge_statuses(st, currency)):
+        charged = sum(charge.amount_minor for charge in st.debtor_charges)
+        reversed_minor = sum(
+            charge.reversal.amount_minor
+            for charge in st.debtor_charges if hasattr(charge, "reversal")
+        )
+        paid_minor = sum(payment.amount_minor for payment in st.debtor_payments)
+        balance_minor = charged - reversed_minor - paid_minor
+        if balance_minor <= 0:
+            continue
+
+        payment_pool = paid_minor
+        oldest_due_date = None
+        for charge in st.debtor_charges:
+            if hasattr(charge, "reversal"):
+                continue
+            applied = min(payment_pool, charge.amount_minor)
+            payment_pool -= applied
+            if applied < charge.amount_minor and charge.due_date < today:
+                oldest_due_date = oldest_due_date or charge.due_date
+
+        if oldest_due_date is not None:
             reasons.append("Просроченная оплата")
-        if bal.amount_minor > 0:
-            reasons.append("Отрицательный баланс")
-        expired = Subscription.objects.filter(student=st).exclude(
-            status=SubscriptionStatus.CANCELLED)
-        if expired and all(s.grace_end_date < today for s in expired):
-            reasons.append("Истёкший абонемент")
-        if reasons:
-            out.append(DebtorRow(student=st, reasons=reasons,
-                                 balance_minor=bal.amount_minor, currency=currency))
+        reasons.append("Отрицательный баланс")
+        out.append(DebtorRow(
+            student=st,
+            reasons=reasons,
+            balance_minor=balance_minor,
+            currency=currency,
+            oldest_due_date=oldest_due_date,
+            last_payment_at=(st.debtor_payments[0].paid_at
+                             if st.debtor_payments else None),
+        ))
     return out
 
 

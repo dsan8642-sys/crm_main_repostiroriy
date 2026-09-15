@@ -94,6 +94,10 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
 
   const trigger = page.getByRole('button', { name: /Фильтры/ })
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+  if ((page.viewportSize()?.width || 0) === 390) {
+    await expect(page.getByRole('button', { name: 'День', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+  }
   const lessonStyle = await page.locator('.ops-schedule-event:visible').first().evaluate((node) => {
     const style = getComputedStyle(node)
     return {

@@ -9,6 +9,7 @@ import {
   assertChargeReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
+  subscriptionPaymentFields,
 } from '../financialContracts.js'
 import { asAccountBalance, asMoneyMajor, formatTime } from '../../mappers.js'
 import {
@@ -47,6 +48,10 @@ const FINANCE_FIELD_IDS = {
   subscriptionTypeId: 'admin-client-finance-subscription-type',
   amount: 'admin-client-finance-amount', description: 'admin-client-finance-description',
   startDate: 'admin-client-finance-start-date', dueDate: 'admin-client-finance-due-date',
+  subscriptionEndDate: 'admin-client-finance-subscription-end-date',
+  paymentReceived: 'admin-client-finance-payment-received',
+  paymentMethod: 'admin-client-finance-payment-method',
+  paymentDate: 'admin-client-finance-payment-date',
   freezeStart: 'admin-client-finance-freeze-start',
   freezeEnd: 'admin-client-finance-freeze-end',
   freezeReason: 'admin-client-finance-freeze-reason',
@@ -54,7 +59,7 @@ const FINANCE_FIELD_IDS = {
   adjustNote: 'admin-client-finance-adjust-note',
 }
 
-const SUBSCRIPTION_EDIT_ACTIONS = ['renew', 'freeze', 'adjust']
+const SUBSCRIPTION_EDIT_ACTIONS = ['edit', 'renew', 'freeze', 'adjust']
 
 function internationalPhoneDigits(value) {
   const compact = String(value || '').replace(/[\s().-]/g, '')
@@ -118,6 +123,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       description: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
+      subscriptionEndDate: '',
+      paymentReceived: false,
+      paymentMethod: 'cash',
+      paymentDate: new Date().toISOString().slice(0, 10),
       chargeIdempotencyKey: createPaymentAttemptKey('admin-charge'),
       subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
       freezeStart: new Date().toISOString().slice(0, 10),
@@ -205,11 +214,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const selectedParticipantBalance = selectedParticipant
       ? asAccountBalance(selectedParticipant.balance_minor)
       : accountBalance
-    const balanceCaption = accountBalance > 0
-      ? t('client.overpayment')
-      : accountBalance < 0
-        ? t('client.amountDue')
-        : t('client.balanceSettled')
     const status = (value) => {
       if (value === 'active') return 'active'
       if (value === 'confirmed') return 'paid'
@@ -238,6 +242,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         subscriptionTypeId: subscription?.subscription_type_id
           ? String(subscription.subscription_type_id)
           : current.subscriptionTypeId,
+        subscriptionEndDate: subscription?.effective_end_date || '',
       }))
       setFinanceFieldErrors((current) => clearFieldError(current, 'subscriptionId'))
     }
@@ -406,11 +411,13 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           || '',
         ),
         subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
+        paymentReceived: false,
+        subscriptionEndDate: selectedSubscription?.effective_end_date || '',
       }
       setFinanceForm(next)
       setFinanceBaseline(next)
       setFinanceFieldErrors({})
-      setFinanceAction('renew')
+      setFinanceAction('edit')
       setPaymentPanelOpen(false)
       setPaymentBaseline(null)
       setError(null)
@@ -430,7 +437,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         subscriptionId: String(selectedSubscription?.id || ''),
         subscriptionTypeId: String(
           selectedSubscription?.subscription_type_id || subscriptionTypes[0]?.typeId || ''),
+        subscriptionEndDate: selectedSubscription?.effective_end_date || '',
         subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
+        paymentReceived: false,
       }
       financeRouteHandledRef.current = true
       setTab('subscriptions')
@@ -622,7 +631,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
     async function executeFinanceAction() {
       const participantRequired = financeAction === 'charge' || financeAction === 'issue'
-      const subscriptionRequired = financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust'
+      const subscriptionRequired = SUBSCRIPTION_EDIT_ACTIONS.includes(financeAction)
       const typeRequired = financeAction === 'issue' || financeAction === 'renew'
       const nextErrors = {}
       if (participantRequired && !financeForm.participantId) nextErrors.participantId = t('finance.selectParticipantError')
@@ -637,11 +646,23 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       if (financeAction === 'issue' || financeAction === 'renew') {
         if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
         if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
+        if (financeForm.paymentReceived && !financeForm.paymentMethod) nextErrors.paymentMethod = t('finance.paymentMethodError')
+        if (financeForm.paymentReceived && !validIsoDate(financeForm.paymentDate)) nextErrors.paymentDate = t('finance.paymentDateError')
       }
       if (financeAction === 'freeze') {
         if (!validIsoDate(financeForm.freezeStart)) nextErrors.freezeStart = t('finance.freezeStartShortError')
         if (!validIsoDate(financeForm.freezeEnd)) nextErrors.freezeEnd = t('finance.freezeEndShortError')
         if (validIsoDate(financeForm.freezeStart) && validIsoDate(financeForm.freezeEnd) && financeForm.freezeEnd < financeForm.freezeStart) nextErrors.freezeEnd = t('finance.freezeOrderError')
+      }
+      if (financeAction === 'edit') {
+        const selectedSubscription = subscriptions.find(
+          (item) => String(item.id) === String(financeForm.subscriptionId),
+        )
+        if (!validIsoDate(financeForm.subscriptionEndDate)) {
+          nextErrors.subscriptionEndDate = t('finance.subscriptionEndDateError')
+        } else if (selectedSubscription?.start_date && financeForm.subscriptionEndDate < selectedSubscription.start_date) {
+          nextErrors.subscriptionEndDate = t('finance.subscriptionEndBeforeStartError')
+        }
       }
       if (financeAction === 'adjust') {
         const delta = Number(financeForm.adjustDelta)
@@ -679,8 +700,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             start_date: financeForm.startDate,
             due_date: financeForm.dueDate,
             idempotency_key: financeForm.subscriptionIdempotencyKey,
+            ...subscriptionPaymentFields({ received: financeForm.paymentReceived, method: financeForm.paymentMethod, date: financeForm.paymentDate }),
           })
-          setMessage(t('finance.subscriptionCreated'))
+          setMessage(t(financeForm.paymentReceived ? 'finance.subscriptionCreatedPaid' : 'finance.subscriptionCreated'))
         }
         if (financeAction === 'renew') {
           await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/renew/`, {
@@ -688,8 +710,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             start_date: financeForm.startDate,
             due_date: financeForm.dueDate,
             idempotency_key: financeForm.subscriptionIdempotencyKey,
+            ...subscriptionPaymentFields({ received: financeForm.paymentReceived, method: financeForm.paymentMethod, date: financeForm.paymentDate }),
           })
-          setMessage(t('finance.subscriptionRenewed'))
+          setMessage(t(financeForm.paymentReceived ? 'finance.subscriptionRenewedPaid' : 'finance.subscriptionRenewed'))
         }
         if (financeAction === 'freeze') {
           const result = await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/freeze/`, {
@@ -698,6 +721,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             reason: financeForm.freezeReason,
           })
           setMessage(t('finance.frozenDays', { count: result.days }))
+        }
+        if (financeAction === 'edit') {
+          await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/`, {
+            effective_end_date: financeForm.subscriptionEndDate,
+          })
+          setMessage(t('finance.subscriptionEndDateUpdated'))
         }
         if (financeAction === 'adjust') {
           await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/adjust/`, {
@@ -715,6 +744,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           subscription_type_id: 'subscriptionTypeId', amount_minor: 'amount',
           description: 'description', start_date: financeAction === 'freeze' ? 'freezeStart' : 'startDate',
           due_date: 'dueDate', end_date: 'freezeEnd', reason: 'freezeReason',
+          effective_end_date: 'subscriptionEndDate',
+          payment_method: 'paymentMethod', payment_date: 'paymentDate',
           delta: 'adjustDelta', note: 'adjustNote', idempotency_key: 'subscriptionTypeId',
           currency: 'amount',
         })
@@ -849,7 +880,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             <div className="kpi-value">
               <Money amount={selectedParticipantBalance} signed currency="zł" size="inherit" />
             </div>
-            <div className="kpi-sub">{balanceCaption}</div>
           </div>
           <section className="card card-pad" aria-label={t('client.statusSummary')}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.statusSummary')}</div>
@@ -869,26 +899,29 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           </section>
         </div>
 
-        <div className="ops-action-strip" aria-label={t('client.financeActionsAria')}>
+        <div className="ops-action-strip ops-client-finance-actions" aria-label={t('client.financeActionsAria')}>
           <button type="button" className="ops-action-card" disabled={accountArchived} onClick={openPaymentPanel}>
             <span>{t('client.topUp')}</span>
             <small>{t('client.topUpHint')}</small>
           </button>
           {[
             ['charge', t('client.addCharge'), t('client.amountPayable')],
-            ['issue', t('client.sellPass'), t('client.newPassHint')],
           ].map(([value, label, hint]) => (
             <button
               key={value}
               type="button"
               className={`ops-action-card${financeAction === value ? ' is-active' : ''}`}
               disabled={accountArchived}
-              onClick={() => { const next = value === 'charge' ? { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') } : value === 'issue' || value === 'renew' ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription') } : financeForm; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
+              onClick={() => { const next = { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
             >
               <span>{label}</span>
               <small>{hint}</small>
             </button>
           ))}
+          <button type="button" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
+            <span>{t('client.remind')}</span>
+            <small>{t('client.remindHint')}</small>
+          </button>
           <button
             type="button"
             className={`ops-action-card${subscriptionEditorOpen ? ' is-active' : ''}`}
@@ -898,9 +931,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             <span>{t('client.editPass')}</span>
             <small>{t('client.editPassHint')}</small>
           </button>
-          <button type="button" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
-            <span>{t('client.remind')}</span>
-            <small>{t('client.remindHint')}</small>
+          <button
+            type="button"
+            className={`ops-action-card${financeAction === 'issue' ? ' is-active' : ''}`}
+            disabled={accountArchived}
+            onClick={() => { const next = { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), paymentReceived: false, paymentMethod: 'cash', paymentDate: new Date().toISOString().slice(0, 10) }; setFinanceForm(next); setFinanceAction('issue'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
+          >
+            <span>{t('client.sellPass')}</span>
+            <small>{t('client.newPassHint')}</small>
           </button>
         </div>
 
@@ -919,6 +957,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               )}
               {subscriptionEditorOpen && (
                 <Select id={FINANCE_FIELD_IDS.subscriptionAction} label={t('field.action')} value={financeAction} onChange={(event) => { setFinanceAction(event.target.value); setFinanceFieldErrors({}); setError(null) }}>
+                    <option value="edit">{t('finance.editPass')}</option>
                     <option value="renew">{t('finance.renewPass')}</option>
                     <option value="freeze">{t('finance.freezePass')}</option>
                     <option value="adjust">{t('client.adjustRemaining')}</option>
@@ -934,6 +973,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                     ))}
                 </Select>
               )}
+              {financeAction === 'edit' && (
+                <DateField id={FINANCE_FIELD_IDS.subscriptionEndDate} label={t('field.subscriptionEndDate')} value={financeForm.subscriptionEndDate} error={financeFieldErrors.subscriptionEndDate} onChange={(value) => updateFinanceForm('subscriptionEndDate', value)} />
+              )}
               {(financeAction === 'issue' || financeAction === 'renew') && (
                 <>
                   <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label={t('field.subscriptionType')} value={financeForm.subscriptionTypeId} error={financeFieldErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}>
@@ -943,6 +985,13 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <DateField id={FINANCE_FIELD_IDS.startDate} label={t('field.startDate')} value={financeForm.startDate} error={financeFieldErrors.startDate} onChange={(value) => updateFinanceForm('startDate', value)} />
                   <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                   <p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p>
+                  <Checkbox id={FINANCE_FIELD_IDS.paymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.paymentReceived} onChange={(event) => updateFinanceForm('paymentReceived', event.target.checked)} />
+                  {financeForm.paymentReceived && <>
+                    <Select id={FINANCE_FIELD_IDS.paymentMethod} label={t('field.paymentMethod')} value={financeForm.paymentMethod} error={financeFieldErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select>
+                    <DateField id={FINANCE_FIELD_IDS.paymentDate} label={t('field.paymentDate')} value={financeForm.paymentDate} error={financeFieldErrors.paymentDate} onChange={(value) => updateFinanceForm('paymentDate', value)} />
+                    <p className="ops-grid-full strong" style={{ margin: 0 }}>{t('finance.subscriptionPaymentAmount', { amount: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.price ?? '—', currency: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.currency ?? '' })}</p>
+                    <p className="ops-grid-full ops-subscription-payment-warning">{t('finance.subscriptionPaymentWarning')}</p>
+                  </>}
                 </>
               )}
               {financeAction === 'charge' && (
@@ -1026,7 +1075,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               { key: 'start_date', header: t('field.start'), muted: true },
               { key: 'effective_end_date', header: t('field.end'), muted: true },
               { key: 'created_at', header: t('field.issued'), muted: true, render: (row) => row.created_at ? formatLocalDate(row.created_at) : '-' },
-              { key: 'remaining_sessions', header: t('field.remaining'), align: 'right', width: 90, render: (row) => row.remaining_sessions ?? t('field.noLimit') },
+              { key: 'remaining_sessions', header: t('field.remaining'), align: 'right', width: 90, render: (row) => <span className="ops-client-detail-remaining">{row.remaining_sessions ?? t('field.noLimit')}</span> },
               { key: 'status', header: t('common.status'), width: 120, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
             ]}
           />

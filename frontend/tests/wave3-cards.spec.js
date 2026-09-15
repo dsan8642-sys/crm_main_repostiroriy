@@ -118,6 +118,11 @@ test('Wave 3 admin mobile cards, clamped menu, named action and return state', a
   expect(box.height).toBeLessThanOrEqual(120)
   expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
   await expect(card).toContainText('3 из 10')
+  const activityAlignment = await card.locator('.ops-client-compact-activity').evaluate((node) => {
+    const style = getComputedStyle(node)
+    return { justifyContent: style.justifyContent, paddingLeft: style.paddingLeft }
+  })
+  expect(activityAlignment).toEqual({ justifyContent: 'center', paddingLeft: '0px' })
 
   const trigger = page.getByRole('button', { name: `Действия: Чрезвычайно Длинная Фамилия-Клиента Александра-Мария` })
   await trigger.click()
