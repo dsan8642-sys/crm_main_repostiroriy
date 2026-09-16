@@ -119,8 +119,7 @@ test('admin stages, fixes, reassigns and commits a CRM payment export', async ({
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(payload) })
   })
 
-  await page.goto('/')
-  await page.locator('.ops-nav-button[title="Настройки"]').click()
+  await page.goto('/?role=admin&view=settings')
   await page.getByRole('tab', { name: 'Контроль', exact: true }).click()
   await page.getByRole('button', { name: /Импорт и экспорт/ }).click()
   await page.getByRole('tab', { name: 'Оплаты', exact: true }).click()
@@ -149,12 +148,12 @@ test('admin stages, fixes, reassigns and commits a CRM payment export', async ({
   await page.getByRole('button', { name: 'Подтвердить импорт выбранных строк' }).click()
   await expect(page.getByText(/Создано: 1/)).toBeVisible()
 
-  await page.locator('.ops-nav-button[title="Платежи"]').click()
+  await page.goto('/?role=admin&view=payments')
   await page.getByRole('tab', { name: /Подтверждённые 1/ }).click()
   await expect(page.locator('.ops-entity-desktop-table').getByRole('row').filter({ hasText: 'Ручной Клиент' })).toBeVisible()
   await expect(page.getByText(/76[,.]25|7 625|7625/).first()).toBeVisible()
 
-  await page.locator('.ops-nav-button[title="Настройки"]').click()
+  await page.goto('/?role=admin&view=settings')
   await page.getByRole('tab', { name: 'Контроль', exact: true }).click()
   await page.getByRole('button', { name: /Импорт и экспорт/ }).click()
   await page.getByRole('tab', { name: 'Оплаты', exact: true }).click()
