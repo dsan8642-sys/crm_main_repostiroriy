@@ -1727,7 +1727,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('row', { name: /4 wejsc.*Jan Kowalski/ }).click()
   const rowSubscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
   await expect(rowSubscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('2')
-  await expect(rowSubscriptionEditor.getByLabel('Действие')).toHaveValue('renew')
+  await expect(rowSubscriptionEditor.getByLabel('Действие')).toHaveValue('edit')
   await rowSubscriptionEditor.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
 
   await page.getByRole('tab', { name: /Платежи/ }).click()
@@ -1751,6 +1751,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
   let subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
   await expect(subscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('1')
+  await subscriptionEditor.getByLabel('Действие').selectOption('renew')
   await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Абонемент продлён, начисление создано.')).toBeVisible()
 
