@@ -1,5 +1,9 @@
 ﻿from datetime import timedelta
 
+from django.db.models import CharField
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast
+
 from .support import *
 from .admin_support import _admin_required
 from .pagination import paginated_payload
@@ -173,8 +177,11 @@ def admin_schedule_sessions(request):
         "group", "trainer__user", "substitute_trainer__user",
         "individual_student__parent__user", "template", "session_type_config"
     ).annotate(notification_delivery_issue=Exists(
-        NotificationLog.objects.filter(
-            payload__session_id=OuterRef("pk"), error__gt="",
+        NotificationLog.objects.annotate(
+            payload_session_id=KeyTextTransform("session_id", "payload"),
+        ).filter(
+            payload_session_id=Cast(OuterRef("pk"), CharField()),
+            error__gt="",
             created_at__gte=timezone.now() - timedelta(days=7),
         )
     )).prefetch_related(

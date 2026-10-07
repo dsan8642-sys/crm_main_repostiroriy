@@ -11,6 +11,11 @@ class UnifiedAccountAccessMigrationTest(TransactionTestCase):
     migrate_from = [("accounts", "0005_accountactivation")]
     migrate_to = [("accounts", "0006_unified_account_access")]
 
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
     def test_forward_backfills_clients_and_reverse_removes_trainer_only_tokens(self):
         executor = MigrationExecutor(connection)
         executor.migrate(self.migrate_from)

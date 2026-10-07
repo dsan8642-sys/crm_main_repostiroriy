@@ -303,6 +303,8 @@ class SelfBookingTest(TestCase):
         self.assertEqual(len(set(logs.values_list('dedup_key', flat=True))), 2)
         admin_session = self.admin_client.get(f"/api/admin/schedule/sessions/{self.session.id}/").json()
         self.assertTrue(admin_session['notification_delivery_issue'])
+        listed = self.admin_client.get('/api/admin/schedule/sessions/').json()['sessions']
+        self.assertTrue(next(row for row in listed if row['id'] == self.session.id)['notification_delivery_issue'])
 
     def test_restore_after_cutoff_expires_waitlist_without_new_booking(self):
         self.post(self.admin_client, f"/api/admin/groups/{self.group.id}/", {
