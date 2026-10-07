@@ -318,7 +318,10 @@ test('client attendance history shows compact mobile rows without trainer', asyn
   if (page.viewportSize()?.width === 390) {
     const rows = page.locator('.ops-client-history-mobile .ops-client-history-row')
     await expect(rows).toHaveCount(4)
-    await expect(rows.first()).toContainText('09:00')
+    const expectedTime = await page.evaluate(() => new Intl.DateTimeFormat(
+      document.documentElement.lang || 'uk', { hour: '2-digit', minute: '2-digit' },
+    ).format(new Date('2026-09-29T09:00:00+02:00')))
+    await expect(rows.first()).toContainText(expectedTime)
     await expect(rows.first()).toContainText('Masters')
     await expect(rows.first()).not.toContainText('Trainer')
     expect((await rows.first().boundingBox()).height).toBeLessThan(90)
