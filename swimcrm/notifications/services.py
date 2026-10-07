@@ -2,7 +2,9 @@
 template). Respects consent/unsubscribe, logs delivery with retries. No hardcoded offsets."""
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import logging
 import unicodedata
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from django.db.models import Q
@@ -13,7 +15,8 @@ from accounts.models import ConsentType
 from billing.services import charge_statuses
 from billing.models import Charge
 from localization.services import default_language_code
-from scheduling.models import Session
+from scheduling.models import Session, WaitlistEntry, WaitlistStatus
+from scheduling.services import session_roster_students
 from students.models import Student
 from subscriptions.models import Subscription, SubscriptionStatus
 
@@ -105,7 +108,7 @@ def _collect_session_reminder(now):
     horizon = now + timedelta(days=14)
     for sess in Session.objects.filter(is_cancelled=False, start_at__gte=now,
                                         start_at__lte=horizon, group__isnull=False):
-        for st in Student.objects.filter(groups=sess.group, is_active=True).select_related("parent"):
+        for st in session_roster_students(sess):
             yield Candidate(
                 parent=st.parent, reference=sess.start_at,
                 context={"student": st.full_name, "location": sess.location,
@@ -154,7 +157,10 @@ def deliver(log: NotificationLog, template: NotificationTemplate):
         log.last_attempt_at = timezone.now()
         log.save(update_fields=["status", "last_attempt_at", "error", "retries"])
         return log
-    if log.event_type == EventType.MASS_MAILING and "body" in log.payload:
+    if "_message_body" in log.payload:
+        subject = log.payload.get("_message_subject", "")
+        body = log.payload["_message_body"]
+    elif log.event_type == EventType.MASS_MAILING and "body" in log.payload:
         subject = log.payload.get("subject", "")
         body = log.payload["body"]
     else:
@@ -164,6 +170,12 @@ def deliver(log: NotificationLog, template: NotificationTemplate):
     log.subject = subject or ""
     log.body = body or ""
     log.last_attempt_at = timezone.now()
+    if not channel_allowed(log.recipient, log.channel):
+        log.status = DeliveryStatus.FAILED
+        log.error = "Consent inactive before delivery"
+        log.save(update_fields=["status", "last_attempt_at", "error", "subject",
+                                "body", "language_code"])
+        return log
     try:
         result = backend.send(parent=log.recipient, subject=subject, body=body) or {}
         log.status = DeliveryStatus.SENT
@@ -326,21 +338,66 @@ def run_scheduler(now=None):
     return {"enqueued": enqueued, **delivered}
 
 
-def notify_schedule_change(session, *, changed_by=None):
-    """Event-driven (not polled): notify affected group's parents about a change.
-    Uses the SCHEDULE_CHANGE templates/rules per channel that are active."""
-    rules = NotificationRule.objects.filter(event_type=EventType.SCHEDULE_CHANGE,
-                                             is_active=True).select_related("template")
-    students = Student.objects.filter(groups=session.group, is_active=True).select_related("parent")
+def notify_schedule_change(session, *, changed_by=None, restored=False):
+    """Send one change event per save; failed/no-channel rows remain visible to admins."""
+    try:
+        if session.requires_booking:
+            students = list(session_roster_students(session))
+            waiting = Student.objects.filter(waitlist_entries__session=session,
+                waitlist_entries__status__in=[WaitlistStatus.ACTIVE, WaitlistStatus.SUSPENDED])
+            students.extend(waiting.select_related("parent").distinct())
+        else:
+            students = list(session_roster_students(session))
+        return _notify_session_students(session, students,
+            "cancelled" if session.is_cancelled else "restored" if restored else "changed")
+    except Exception:
+        logging.exception("Schedule notification failed for session %s", session.pk)
+        return 0
+
+
+def notify_waitlist_promotions(entry_ids):
+    try:
+        for entry in WaitlistEntry.objects.filter(pk__in=entry_ids).select_related(
+                "session", "student__parent"):
+            _notify_session_students(entry.session, [entry.student], "promoted")
+    except Exception:
+        logging.exception("Waitlist promotion notification failed for entries %s", entry_ids)
+
+
+def _notify_session_students(session, students, kind):
+    rules = list(NotificationRule.objects.filter(
+        event_type=EventType.SCHEDULE_CHANGE, is_active=True).select_related("template"))
+    event_id = uuid4().hex
     count = 0
-    for rule in rules:
-        for st in students:
-            ctx = {"student": st.full_name, "location": session.location,
-                   "date": timezone.localtime(session.start_at).strftime("%d.%m.%Y %H:%M")}
-            dedup = f"schedule_change|{rule.channel}|sess{session.id}s{st.id}|{timezone.now().date()}"
-            if enqueue(parent=st.parent, event_type=EventType.SCHEDULE_CHANGE,
-                       channel=rule.channel, template=rule.template, context=ctx,
-                       dedup_key=dedup):
+    for student in {student.id: student for student in students}.values():
+        context = {"student": student.full_name, "location": session.location,
+                   "date": timezone.localtime(session.start_at).strftime("%d.%m.%Y %H:%M"),
+                   "trainer": str(session.effective_trainer),
+                   "session_id": session.id, "change": kind}
+        if kind in {"cancelled", "restored", "promoted"}:
+            language = (student.parent.preferred_language or default_language_code()).lower()
+            messages = {
+                "ru": {"cancelled": "Занятие отменено", "restored": "Занятие восстановлено", "promoted": "Вы записаны на занятие"},
+                "uk": {"cancelled": "Заняття скасовано", "restored": "Заняття відновлено", "promoted": "Вас записано на заняття"},
+                "pl": {"cancelled": "Zajęcia odwołane", "restored": "Zajęcia przywrócone", "promoted": "Zapisano Cię na zajęcia"},
+                "en": {"cancelled": "Session cancelled", "restored": "Session restored", "promoted": "You are booked for a session"},
+            }
+            title = messages.get(language, messages[default_language_code()])[kind]
+            context["_message_subject"] = title
+            context["_message_body"] = f"{title}: {context['date']}, {session.location}."
+        accepted = False
+        for rule in rules:
+            log = enqueue(parent=student.parent, event_type=EventType.SCHEDULE_CHANGE,
+                channel=rule.channel, template=rule.template, context=context,
+                dedup_key=f"schedule_change|{event_id}|{rule.channel}|s{student.id}")
+            if log:
                 count += 1
-    deliver_pending()
+                accepted = True
+        if not accepted:
+            NotificationLog.objects.create(recipient=student.parent,
+                event_type=EventType.SCHEDULE_CHANGE, channel="", status=DeliveryStatus.FAILED,
+                error="Нет активного канала с согласием для уведомления об изменении занятия",
+                payload=context, dedup_key=f"schedule_change|{event_id}|none|s{student.id}")
+    if count:
+        deliver_pending()
     return count

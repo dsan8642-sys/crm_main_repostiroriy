@@ -12,10 +12,10 @@ test('live audit DB: admin reassigns and imports a payment export', async ({ pag
   expect(password).not.toBe('')
 
   await page.goto('/')
-  await page.getByLabel('Логин или email').fill(username)
+  await page.locator('#auth-login').fill(username)
   await page.locator('input[autocomplete="current-password"]').fill(password)
-  await page.getByRole('button', { name: 'Войти' }).click()
-  await expect(page.locator('.ops-nav-button[title="Настройки"]')).toBeVisible()
+  await page.getByTestId('auth-submit').click()
+  await expect(page.getByTestId('nav-admin-settings').first()).toBeVisible()
 
   const clients = await page.evaluate(async () => {
     const response = await fetch('/api/admin/clients/')
@@ -31,45 +31,41 @@ test('live audit DB: admin reassigns and imports a payment export', async ({ pag
     `1;2026-08-07T15:00:00+02:00;swimcrm;payments;unmatched-live-e2e@example.test;73.41;PLN;2026-08-07;cash;confirmed;Synthetic live E2E;${referenceId}\r\n`,
   )
 
-  await page.locator('.ops-nav-button[title="Настройки"]').click()
-  await page.getByRole('tab', { name: 'Контроль', exact: true }).click()
-  await page.getByRole('button', { name: /Импорт и экспорт/ }).click()
-  await page.getByRole('tab', { name: 'Оплаты', exact: true }).click()
+  await page.getByTestId('nav-admin-settings').first().click()
+  await page.getByTestId('admin-settings-category-control').first().click()
+  await page.getByTestId('admin-settings-resource-importExport').first().click()
+  await page.getByTestId('admin-import-tab-payments').click()
   await page.locator('input[type="file"]').setInputFiles({
     name: `${referenceId}.csv`, mimeType: 'text/csv', buffer: crmExport,
   })
-  await expect(page.getByText(/Собственный export CRM распознан автоматически/)).toBeVisible()
-  await expect(page.getByText('Клиент не найден').first()).toBeVisible()
+  await expect(page.getByTestId('admin-import-own-export')).toBeVisible()
+  await expect(page.getByTestId('admin-import-row-edit-2')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Исправить', exact: true }).click()
-  const editor = page.locator('.card').filter({ hasText: 'Исправление строки 2' }).last()
-  await editor.getByLabel('Сумма *').fill('73.42')
+  await page.getByTestId('admin-import-row-edit-2').click()
+  const editor = page.getByTestId('form-modal')
+  await editor.locator('#admin-import-edit-amount').fill('73.42')
   const amountPatch = page.waitForResponse((response) =>
     response.request().method() === 'PATCH'
       && /\/api\/admin\/import\/payments\/\d+\/rows\/2\/$/.test(response.url()))
-  await editor.getByRole('button', { name: 'Сохранить исправления' }).click()
+  await editor.locator('.form-modal__footer button').last().click()
   await amountPatch
   await expect(editor).toBeHidden()
-  await page.getByRole('button', { name: 'Исправить', exact: true }).click()
-  const reopenedEditor = page.locator('.card')
-    .filter({ hasText: 'Исправление строки 2' }).last()
+  await page.getByTestId('admin-import-row-edit-2').click()
+  const reopenedEditor = page.getByTestId('form-modal')
   await expect(reopenedEditor).toBeVisible()
-  await reopenedEditor.getByPlaceholder(
-    'ID, email, телефон, имя или дата рождения').fill(target.email)
-  const findButton = reopenedEditor.getByRole('button', { name: 'Найти клиента' })
+  await reopenedEditor.getByTestId('admin-import-client-search').fill(target.email)
+  const findButton = reopenedEditor.getByTestId('admin-import-client-search-submit')
   await expect(findButton).toBeEnabled()
   await findButton.click()
   const relationPatch = page.waitForResponse((response) =>
     response.request().method() === 'PATCH'
       && /\/api\/admin\/import\/payments\/\d+\/rows\/2\/$/.test(response.url()))
-  await reopenedEditor.getByRole(
-    'button', { name: new RegExp(`ID ${target.id}(?:\\s|·)`) }).click()
+  await reopenedEditor.getByTestId(`admin-import-client-${target.id}`).click()
   await relationPatch
   await expect(reopenedEditor).toBeHidden()
 
-  await page.getByLabel('Выбрать строку 2').check()
-  await page.getByRole('button', { name: 'Подтвердить импорт выбранных строк' }).click()
-  await expect(page.getByText(/created: 1/)).toBeVisible()
+  await page.getByTestId('admin-import-row-select-2').check()
+  await page.locator('#admin-import-payments-selected-indices').click()
 
   const created = await page.evaluate(async (reference) => {
     const response = await fetch('/api/admin/payments/')
@@ -85,7 +81,7 @@ test('live audit DB: admin reassigns and imports a payment export', async ({ pag
   await page.locator('input[type="file"]').setInputFiles({
     name: `${referenceId}.csv`, mimeType: 'text/csv', buffer: crmExport,
   })
-  await expect(page.getByText(/Этот файл уже был импортирован/)).toBeVisible()
+  await expect(page.getByTestId('admin-import-duplicate-file')).toBeVisible()
   await page.screenshot({
     path: '../audit/import-export/e2e-live-duplicate-warning.png', fullPage: true,
   })

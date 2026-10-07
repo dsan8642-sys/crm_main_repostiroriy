@@ -1,4 +1,4 @@
-export const DEFAULT_UI_LOCALE = 'ru'
+export const DEFAULT_UI_LOCALE = 'uk'
 export const SUPPORTED_UI_LOCALES = Object.freeze(['ru', 'uk', 'pl', 'en'])
 
 const LOCALE_ALIASES = Object.freeze({ ua: 'uk' })

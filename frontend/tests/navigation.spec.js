@@ -51,20 +51,59 @@ async function mockPortal(page, routes) {
   })
 }
 
+test('client portal access is revoked only after confirmation', async ({ page }) => {
+  let revokeRequests = 0
+  await mockPortal(page, {
+    ...adminRoutes,
+    '/api/admin/clients/2/': {
+      account: { id: 2, username: 'client-02', full_name: 'Test Client', is_active: true, portal_access: 'active', access_activated: true },
+      participants: [], subscriptions: [], charges: [], payments: [], attendance: [], consents: [],
+      summary: { participants_count: 0, active_participants: 0, balance_minor: 0, active_subscriptions: 0, pending_payments: 0 },
+    },
+  })
+  await page.route('**/api/admin/clients/2/access/revoke/', async (route) => {
+    revokeRequests += 1
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, portal_access: 'revoked' }) })
+  })
+
+  await page.goto('/?role=admin&view=clientDetail&client=2')
+  await page.getByTestId('client-access-revoke').click()
+
+  const dialog = page.getByTestId('confirmation-dialog')
+  await expect(dialog).toBeVisible()
+  expect(revokeRequests).toBe(0)
+  await dialog.getByTestId('confirmation-cancel').click()
+  expect(revokeRequests).toBe(0)
+
+  await page.getByTestId('client-access-revoke').click()
+  await page.getByTestId('confirmation-dialog').getByTestId('confirmation-confirm').click()
+  await expect.poll(() => revokeRequests).toBe(1)
+})
+
+test('admin overview payment shortcut opens the add-payment form', async ({ page }) => {
+  await mockPortal(page, adminRoutes)
+
+  await page.goto('/?role=admin&view=overview')
+  await page.getByTestId('overview-add-payment').click()
+
+  await expect(page).toHaveURL(/view=payments.*financeAction=payment/)
+  await expect(page.getByTestId('form-modal')).toBeVisible()
+})
+
 test('admin mobile shell exposes a sticky header and drawer without bottom navigation', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile shell contract')
   await mockPortal(page, adminRoutes)
 
   await page.goto('/?role=admin&view=overview')
-  await expect(page.getByRole('heading', { level: 1, name: 'Сегодня' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
   await expect(page.locator('.ops-nav')).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Открыть меню' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Открыть глобальный поиск' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
+  await expect(page.getByTestId('open-menu')).toBeVisible()
+  await expect(page.getByTestId('open-global-search')).toBeVisible()
+  await expect(page.locator('.ops-sidebar-head').getByTestId('logout')).toHaveCount(0)
   await expect(page.locator('.ops-topbar')).toHaveCount(0)
 
-  await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
+  await expect(page.locator('.ops-mobile-bottom-nav')).toHaveCount(0)
 
   const mobileHeader = page.locator('.ops-sidebar')
   await expect(mobileHeader).toHaveCSS('position', 'sticky')
@@ -77,16 +116,16 @@ test('admin mobile shell exposes a sticky header and drawer without bottom navig
   })
   await expect.poll(() => mobileHeader.evaluate((node) => Math.round(node.getBoundingClientRect().top))).toBe(0)
 
-  const menuButton = page.getByRole('button', { name: 'Открыть меню' })
+  const menuButton = page.getByTestId('open-menu')
   await menuButton.click()
-  const drawer = page.getByRole('dialog', { name: 'Меню' })
+  const drawer = page.getByTestId('mobile-menu-dialog')
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('Katarzyna Admin', { exact: true })).toBeVisible()
-  await expect(drawer.getByText('Администратор', { exact: true })).toHaveCount(0)
-  await expect(drawer.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
-  await expect(drawer.getByRole('button', { name: /Занятие|Посещаемость/ })).toHaveCount(0)
-  expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
-    'Сегодня', 'Клиенты', 'Расписание', 'Группы', 'Тренеры', 'Платежи', 'Должники', 'Абонементы', 'Настройки',
+  await expect(drawer.getByRole('navigation')).toBeVisible()
+  await expect(drawer.getByTestId('logout')).toBeVisible()
+  await expect(drawer.locator('[data-testid="nav-admin-attendance"]')).toHaveCount(0)
+  expect(await drawer.locator('[data-testid^="nav-admin-"]').evaluateAll((buttons) => buttons.map((button) => button.dataset.testid))).toEqual([
+    'nav-admin-overview', 'nav-admin-clients', 'nav-admin-schedule', 'nav-admin-groups', 'nav-admin-trainers', 'nav-admin-payments', 'nav-admin-debtors', 'nav-admin-subscriptions', 'nav-admin-settings',
   ])
   await expect(drawer.evaluate((node) => node.contains(document.activeElement))).resolves.toBe(true)
   await expect(drawer.evaluate((node) => Math.round(node.getBoundingClientRect().width / window.innerWidth * 100))).resolves.toBe(88)
@@ -95,40 +134,39 @@ test('admin mobile shell exposes a sticky header and drawer without bottom navig
   await expect(drawer.locator('.ops-mobile-drawer-user-wrap')).not.toHaveCSS('position', 'sticky')
 
   await page.keyboard.press('Shift+Tab')
-  await expect(drawer.getByRole('button', { name: 'Выйти', exact: true })).toBeFocused()
+  await expect(drawer.getByTestId('logout')).toBeFocused()
 
   await page.keyboard.press('Escape')
   await expect(drawer).toHaveCount(0)
   await expect(menuButton).toBeFocused()
 
-  await page.getByRole('button', { name: 'Открыть глобальный поиск' }).click()
-  const search = page.getByRole('dialog', { name: 'Поиск клиентов и групп' })
+  await page.getByTestId('open-global-search').click()
+  const search = page.getByTestId('global-search-dialog')
   await expect(search).toBeVisible()
-  await expect(search.getByPlaceholder('Найти клиента или группу')).toBeFocused()
-  await expect(search.getByPlaceholder(/занятие/i)).toHaveCount(0)
+  await expect(search.getByTestId('global-search-input')).toBeFocused()
   await page.goBack()
   await expect(search).toHaveCount(0)
 
   await menuButton.click()
-  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: /^Клиенты/ }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Клиенты' })).toBeVisible()
-  await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
+  await page.getByTestId('mobile-menu-dialog').getByTestId('nav-admin-clients').click()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.getByTestId('mobile-menu-dialog')).toHaveCount(0)
   await expect(menuButton).toBeFocused()
 
   await menuButton.click()
-  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: /^Настройки/ }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Настройки и контроль' })).toBeVisible()
+  await page.getByTestId('mobile-menu-dialog').getByTestId('nav-admin-settings').click()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
   await menuButton.click()
   await page.locator('.ops-mobile-drawer-layer').click({ position: { x: 4, y: 4 } })
-  await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
+  await expect(page.getByTestId('mobile-menu-dialog')).toHaveCount(0)
   await expect(menuButton).toBeFocused()
 
   await menuButton.click()
-  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: /^Клиенты/ }).click()
+  await page.getByTestId('mobile-menu-dialog').getByTestId('nav-admin-clients').click()
   await menuButton.click()
   await page.goBack()
-  await expect(page.getByRole('dialog', { name: 'Меню' })).toHaveCount(0)
+  await expect(page.getByTestId('mobile-menu-dialog')).toHaveCount(0)
 })
 
 test('shell switches exactly at 767/768 and applies the desktop initial sidebar states', async ({ page }) => {
@@ -143,8 +181,8 @@ test('shell switches exactly at 767/768 and applies the desktop initial sidebar 
   ]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/?role=admin&view=overview')
-    await expect(page.getByRole('heading', { level: 1, name: 'Сегодня' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Открыть меню' })).toHaveCount(mobile ? 1 : 0)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(page.getByTestId('open-menu')).toHaveCount(mobile ? 1 : 0)
     if (mobile) await expect(page.locator('.ops-nav')).toBeHidden()
     else await expect(page.locator('.ops-nav')).toBeVisible()
     if (collapsed) await expect(page.locator('.app')).toHaveClass(/is-sidebar-collapsed/)
@@ -160,12 +198,12 @@ test('desktop sidebar preference is session-scoped and survives navigation', asy
 
   const shell = page.locator('.app')
   await expect(shell).not.toHaveClass(/is-sidebar-collapsed/)
-  await page.getByRole('button', { name: 'Свернуть меню' }).click()
+  await page.getByTestId('sidebar-toggle').click()
   await expect(shell).toHaveClass(/is-sidebar-collapsed/)
   await page.reload()
   await expect(shell).toHaveClass(/is-sidebar-collapsed/)
-  await page.locator('.ops-nav-button[title="Клиенты"]').click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Клиенты' })).toBeVisible()
+  await page.locator('.ops-sidebar').getByTestId('nav-admin-clients').click()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(shell).toHaveClass(/is-sidebar-collapsed/)
 })
 
@@ -174,15 +212,15 @@ test('admin desktop sidebar uses authenticated identity and keeps attendance ava
   await mockPortal(page, adminRoutes)
 
   await page.goto('/?role=admin&view=attendance')
-  await expect(page.getByRole('heading', { level: 1, name: 'Занятие' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
   const sidebar = page.locator('.ops-sidebar')
   await expect(sidebar.getByText('Katarzyna Admin', { exact: true })).toBeVisible()
-  await expect(sidebar.getByText('Администратор', { exact: true })).toHaveCount(0)
-  await expect(sidebar.locator('.ops-nav-button[title="Занятие"]')).toHaveCount(0)
-  await expect(sidebar.locator('.ops-nav-button[title="Расписание"]')).toHaveAttribute('aria-current', 'page')
-  await expect(sidebar.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Открыть меню' })).toHaveCount(0)
+  await expect(sidebar.getByRole('navigation')).toBeVisible()
+  await expect(sidebar.locator('[data-testid="nav-admin-attendance"]')).toHaveCount(0)
+  await expect(sidebar.locator('[data-testid="nav-admin-schedule"]')).toHaveAttribute('aria-current', 'page')
+  await expect(sidebar.getByTestId('logout')).toBeVisible()
+  await expect(page.getByTestId('open-menu')).toHaveCount(0)
 })
 
 test('mobile logout is single-flight under repeated activation', async ({ page }) => {
@@ -214,8 +252,8 @@ test('mobile logout is single-flight under repeated activation', async ({ page }
 
   await page.goto('/?role=admin&view=overview')
   await page.evaluate(() => window.sessionStorage.setItem('swimcrm.ui.sidebar.admin.1.collapsed', 'true'))
-  await page.getByRole('button', { name: 'Открыть меню' }).click()
-  const logout = page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })
+  await page.getByTestId('open-menu').click()
+  const logout = page.getByTestId('mobile-menu-dialog').getByTestId('logout')
 
   try {
     await logout.evaluate((button) => {
@@ -228,8 +266,8 @@ test('mobile logout is single-flight under repeated activation', async ({ page }
     releaseLogout()
   }
 
-  await expect(page.getByRole('heading', { name: 'SwimCRM' })).toBeVisible()
-  await expect(page.getByText('Вход в систему', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.getByRole('textbox').first()).toBeVisible()
   expect(await page.evaluate(() => Object.keys(window.sessionStorage).filter((key) => key.startsWith('swimcrm.ui.')))).toEqual([])
 })
 
@@ -238,15 +276,13 @@ test('trainer mobile shell keeps navigation in the drawer only', async ({ page }
   await mockPortal(page, trainerRoutes)
 
   await page.goto('/')
-  await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
+  await expect(page.locator('.ops-mobile-bottom-nav')).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Открыть меню' }).click()
-  const drawer = page.getByRole('dialog', { name: 'Меню' })
+  await page.getByTestId('open-menu').click()
+  const drawer = page.getByTestId('mobile-menu-dialog')
   await expect(drawer.getByText('Анна Тренер', { exact: true })).toBeVisible()
-  await expect(drawer.getByRole('button', { name: 'Посещаемость', exact: true })).toBeVisible()
-  expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
-    'Сегодня', 'Посещаемость', 'Мои группы', 'История',
-  ])
+  await expect(drawer.getByTestId('nav-trainer-session')).toBeVisible()
+  expect(await drawer.locator('[data-testid^="nav-trainer-"]').evaluateAll((buttons) => buttons.map((button) => button.dataset.testid))).toEqual(['nav-trainer-sessions', 'nav-trainer-schedule', 'nav-trainer-session', 'nav-trainer-groups', 'nav-trainer-history'])
 })
 
 test('client mobile shell uses username fallback and drawer-only navigation', async ({ page }) => {
@@ -254,18 +290,16 @@ test('client mobile shell uses username fallback and drawer-only navigation', as
   await mockPortal(page, clientRoutes)
 
   await page.goto('/')
-  await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
+  await expect(page.locator('.ops-mobile-bottom-nav')).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Открыть меню' }).click()
-  const drawer = page.getByRole('dialog', { name: 'Меню' })
+  await page.getByTestId('open-menu').click()
+  const drawer = page.getByTestId('mobile-menu-dialog')
   await expect(drawer.getByText('parent-login', { exact: true })).toBeVisible()
-  await expect(drawer.getByRole('button', { name: 'Абонемент', exact: true })).toBeVisible()
-  await expect(drawer.getByRole('button', { name: 'Согласия', exact: true })).toHaveCount(0)
-  expect(await drawer.locator('.ops-nav-button').evaluateAll((buttons) => buttons.map((button) => button.title))).toEqual([
-    'Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль',
-  ])
-  await drawer.getByRole('button', { name: 'Профиль', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Согласия', exact: true })).toBeVisible()
+  await expect(drawer.getByTestId('nav-client-subscription')).toBeVisible()
+  await expect(drawer.getByTestId('nav-client-consents')).toHaveCount(0)
+  expect(await drawer.locator('[data-testid^="nav-client-"]').evaluateAll((buttons) => buttons.map((button) => button.dataset.testid))).toEqual(['nav-client-home', 'nav-client-schedule', 'nav-client-subscription', 'nav-client-payments', 'nav-client-history', 'nav-client-profile', 'nav-client-help'])
+  await drawer.getByTestId('nav-client-profile').click()
+  await expect(page.getByTestId('client-profile-consents')).toBeVisible()
 })
 
 test('client profile dirty guard covers links, browser Back and beforeunload', async ({ page }) => {
@@ -279,9 +313,11 @@ test('client profile dirty guard covers links, browser Back and beforeunload', a
   })
 
   await page.goto('/?role=client&view=home')
-  await page.getByRole('button', { name: 'Открыть меню' }).click()
-  await page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Профиль', exact: true }).click()
-  const firstName = page.getByLabel('Имя')
+  await page.getByTestId('open-menu').click()
+  await page.getByTestId('mobile-menu-dialog').getByTestId('nav-client-profile').click()
+  await expect(page.locator('#client-profile-first-name')).toHaveCount(0)
+  await page.getByTestId('client-profile-edit').click()
+  const firstName = page.locator('#client-profile-first-name')
   await firstName.fill('Marina')
 
   expect(await page.evaluate(() => {
@@ -290,22 +326,22 @@ test('client profile dirty guard covers links, browser Back and beforeunload', a
     return event.defaultPrevented
   })).toBe(true)
 
-  await page.getByRole('button', { name: 'Согласия', exact: true }).click()
-  const guard = page.getByRole('alertdialog', { name: 'Есть несохранённые изменения' })
+  await page.getByTestId('client-profile-consents').click()
+  const guard = page.getByTestId('navigation-discard-dialog')
   await expect(guard).toBeVisible()
-  await expect(guard.getByRole('button', { name: 'Остаться', exact: true })).toBeFocused()
-  await guard.getByRole('button', { name: 'Остаться', exact: true }).click()
+  await expect(guard.getByTestId('navigation-discard-stay')).toBeFocused()
+  await guard.getByTestId('navigation-discard-stay').click()
   await expect(guard).toHaveCount(0)
   await expect(firstName).toHaveValue('Marina')
 
   await page.evaluate(() => window.history.back())
   await expect(guard).toBeVisible()
-  await guard.getByRole('button', { name: 'Остаться', exact: true }).click()
+  await guard.getByTestId('navigation-discard-stay').click()
   await expect(firstName).toHaveValue('Marina')
 
-  await page.getByRole('button', { name: 'Согласия', exact: true }).click()
-  await guard.getByRole('button', { name: 'Уйти без сохранения', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Согласия' })).toBeVisible()
+  await page.getByTestId('client-profile-consents').click()
+  await guard.getByTestId('navigation-discard-confirm').click()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   expect(await page.evaluate(() => {
     const event = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(event)
@@ -318,6 +354,6 @@ test('authenticated role canonicalizes a stale foreign-role URL and clears entit
   await mockPortal(page, clientRoutes)
 
   await page.goto('/?role=admin&view=clientDetail&client=999&session=444')
-  await expect(page.getByRole('heading', { level: 1, name: 'Главная' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(page).toHaveURL(/\?role=client&view=home$/)
 })

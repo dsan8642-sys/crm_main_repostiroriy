@@ -42,12 +42,26 @@ const eventTypes = [
   ['schedule_change', 'settings.event.scheduleChange'], ['mass_mailing', 'settings.event.massMailing'],
 ]
 const channels = [['email', 'Email'], ['telegram', 'Telegram'], ['sms', 'SMS']]
+const ukNotificationExamples = {
+  payment_reminder: ['Нагадування про оплату', '{student}, оплатіть {amount} до {date}.'],
+  session_reminder: ['Нагадування про заняття', '{student}, заняття {date}, {location}.'],
+  subscription_end: ['Завершення абонемента', '{student}, абонемент завершується {date}.'],
+  renewal_needed: ['Поновлення абонемента', '{student}, поновіть абонемент до {date}.'],
+  schedule_change: ['Зміна заняття', '{student}, заняття змінено: {date}, {location}, тренер {trainer}.'],
+}
+const ukSmsExamples = {
+  payment_reminder: 'Оплатіть {amount} до {date}.',
+  session_reminder: 'Заняття {date}, {location}.',
+  subscription_end: 'Абонемент завершується {date}.',
+  renewal_needed: 'Поновіть абонемент до {date}.',
+  schedule_change: 'Зміна заняття: {date}.',
+}
 const sessionTypes = [['group', 'settings.session.group'], ['individual', 'settings.session.individual'], ['split', 'settings.session.split']]
 
 const resources = [
   { tab: 'catalog', id: 'subscriptionTypes', title: 'settings.resource.subscriptionTypes', endpoint: '/api/admin/subscription-types/', response: 'subscription_types', detail: (id) => `/api/admin/subscription-types/${id}/`, fields: [['name', 'settings.field.name'], ['price_minor', 'settings.field.priceMinor', 'number'], ['currency', 'settings.field.currency'], ['duration_days', 'settings.field.durationDays', 'number'], ['sessions_count', 'settings.field.sessionsCount', 'number'], ['is_individual', 'settings.field.individual', 'boolean'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'catalog', id: 'locations', title: 'settings.resource.locations', endpoint: '/api/admin/settings/locations/', response: 'locations', detail: (id) => `/api/admin/settings/locations/${id}/`, fields: [['code', 'settings.field.code'], ['name', 'settings.field.name'], ['address', 'settings.field.address'], ['timezone', 'settings.field.timezone'], ['is_active', 'settings.field.active', 'boolean']] },
-  { tab: 'catalog', id: 'sessionTypes', title: 'settings.resource.sessionTypes', endpoint: '/api/admin/settings/session-types/', response: 'session_types', detail: (id) => `/api/admin/settings/session-types/${id}/`, fields: [['code', 'settings.field.type', 'select', sessionTypes], ['label', 'settings.field.name'], ['default_capacity', 'settings.field.defaultCapacity', 'number'], ['default_price_minor', 'settings.field.defaultPriceMinor', 'number'], ['default_currency', 'settings.field.currency'], ['default_duration_minutes', 'settings.field.durationMinutes', 'number'], ['color_key', 'settings.field.scheduleColor', 'schedule-color'], ['is_active', 'settings.field.active', 'boolean']] },
+  { tab: 'catalog', id: 'sessionTypes', title: 'settings.resource.sessionTypes', endpoint: '/api/admin/settings/session-types/', response: 'session_types', detail: (id) => `/api/admin/settings/session-types/${id}/`, fields: [['code', 'settings.typeCode'], ['base_type', 'settings.baseFormat', 'select', sessionTypes], ['label', 'settings.field.name'], ['default_capacity', 'settings.field.defaultCapacity', 'number'], ['default_price_minor', 'settings.field.defaultPriceMinor', 'number'], ['default_currency', 'settings.field.currency'], ['default_duration_minutes', 'settings.field.durationMinutes', 'number'], ['color_key', 'settings.field.scheduleColor', 'schedule-color'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'notifications', id: 'templates', title: 'settings.resource.templates', endpoint: '/api/admin/notifications/templates/', response: 'templates', detail: (id) => `/api/admin/notifications/templates/${id}/`, fields: [['event_type', 'settings.field.event', 'select', eventTypes], ['channel', 'settings.field.channel', 'select', channels], ['subject', 'settings.field.subject'], ['body', 'settings.field.body', 'textarea']] },
   { tab: 'notifications', id: 'rules', title: 'settings.resource.rules', endpoint: '/api/admin/notifications/rules/', response: 'rules', detail: (id) => `/api/admin/notifications/rules/${id}/`, fields: [['event_type', 'settings.field.event', 'select', eventTypes], ['channel', 'settings.field.channel', 'select', channels], ['template_id', 'settings.field.template', 'select-ref', 'templates'], ['offset_minutes', 'settings.field.offsetMinutes', 'number'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'notifications', id: 'quietHours', title: 'settings.resource.quietHours', endpoint: '/api/admin/notifications/quiet-hours/', response: 'policies', detail: (id) => `/api/admin/notifications/quiet-hours/${id}/`, fields: [['channel', 'settings.field.channel', 'select', channels], ['starts_at', 'settings.field.from', 'time'], ['ends_at', 'settings.field.to', 'time'], ['timezone', 'settings.field.timezone'], ['is_active', 'settings.field.active', 'boolean']] },
@@ -88,6 +102,7 @@ function displayValue(value, t) {
 
 function readOnlyDetails(row, t) {
   if (row.rows_imported != null) return t('settings.rowsCount', { imported: row.rows_imported, total: row.rows_total ?? 0 })
+  if (row.error) return `${displayValue(row.status, t)}: ${row.error}`
   return displayValue(row.entity_type || row.role || row.status || row.channel || row.method || '-', t)
 }
 
@@ -116,7 +131,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
   const ImportExportPanel = createAdminImportExportPanel(components, icons, reloadRoleData)
   const ReportsPanel = createAdminReportsPanel(components)
 
-  const { Button, Badge, Banner, Tabs, Table, Input, Select, Textarea, Checkbox, StatusPill, Dialog } = components
+  const { Button, Badge, Banner, Table, Input, Select, Textarea, Checkbox, StatusPill, Dialog } = components
   return function AdminSettingsScreen({ currentUser }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
@@ -182,6 +197,10 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     function startEdit(row = null) {
       const initial = {}
       ;(resource.fields || []).forEach(([key, , type]) => { initial[key] = row?.[key] ?? (type === 'boolean' ? true : '') })
+      if (resource.id === 'sessionTypes' && !row) {
+        initial.base_type = 'group'
+        initial.default_duration_minutes = 60
+      }
       setForm(initial)
       setFormBaseline(initial)
       setFieldErrors({})
@@ -227,6 +246,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       setResourceId(item.id)
       setMobileLevel('detail')
       if (item.id === 'credentials') openCredentials()
+    }
+
+    function selectTab(value) {
+      setTab(value)
+      setResourceId(resources.find((item) => item.tab === value)?.id || 'subscriptionTypes')
     }
 
     function updateFormField(key, value) {
@@ -370,15 +394,15 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       } finally { setLoading(false) }
     }
 
-    async function restoreSplit() {
+    async function restoreSystemType(code) {
       setLoading(true); setError(null)
       try {
-        const payload = await api.post('/api/admin/settings/session-types/split/restore/')
-        setMessage(t(payload.created ? 'settings.splitRestored' : 'settings.splitAlreadyConfigured'))
+        const payload = await api.post(`/api/admin/settings/session-types/${code}/restore/`)
+        setMessage(t(payload.created ? 'settings.typeRestored' : 'settings.typeAlreadyConfigured', { type: code }))
         await load('sessionTypes')
         await reloadRoleData?.('admin')
       } catch (err) {
-        setError(apiErrorMessage(err, t('settings.splitRestoreError')))
+        setError(apiErrorMessage(err, t('settings.typeRestoreError')))
       } finally {
         setLoading(false)
       }
@@ -386,39 +410,47 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
 
     const columns = resource.id === 'sessionTypes'
       ? [
-          { key: 'label', header: t('settings.systemType'), render: (row) => <span className="strong">{row.label} <small className="muted">({row.code})</small></span> },
+          { key: 'label', header: t('settings.resource.sessionTypes'), render: (row) => <span className="strong">{row.label} <small className="muted">({row.code} · {row.base_type})</small></span> },
           { key: 'details', header: t('settings.defaults'), muted: true, render: (row) => t('settings.sessionDefaults', { minutes: row.default_duration_minutes || 60, capacity: row.default_capacity ?? '—' }) },
           { key: 'active', header: t('common.status'), render: (row) => row.configured === false ? <Badge tone="warning">{t('settings.notConfigured')}</Badge> : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
-          { key: 'actions', header: '', width: 210, render: (row) => row.configured === false
-            ? <Button size="sm" variant="primary" disabled={loading || row.code !== 'split'} onClick={restoreSplit}>{t('settings.restoreSystemType')}</Button>
-            : <Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>{t('common.edit')}</Button> },
+          { key: 'actions', header: '', width: 210, render: (row) => row.is_system && !row.is_active
+            ? <Button size="sm" variant="primary" disabled={loading} onClick={() => restoreSystemType(row.code)}>{t('settings.restoreSystemType')}</Button>
+            : <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>{t('common.edit')}</Button>{!row.is_system && <Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>{t('settings.remove')}</Button>}</div> },
         ]
       : resource.readOnly
       ? [{ key: 'created_at', header: t('settings.when'), render: (row) => displayValue(row.created_at, t) }, { key: 'name', header: t('settings.record'), render: (row) => <span className="strong">{displayValue(row.full_name || row.source_name || row.action || row.recipient || row.date_from || row.username, t)}</span> }, { key: 'details', header: t('settings.details'), muted: true, render: (row) => readOnlyDetails(row, t) }]
-      : [{ key: 'name', header: t(resource.title), render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain, t)}</span> }, { key: 'details', header: t('settings.details'), muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from, t) }, { key: 'active', header: t('common.status'), render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>{t('common.edit')}</Button>{resource.id !== 'sessionTypes' && <Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>{t('settings.remove')}</Button>}</div> }]
+      : [{ key: 'name', header: t(resource.title), render: (row) => <span className="strong">{displayValue(row.name || row.label || row.code || row.event_type || row.trainer || row.domain, t)} {row.missing_uk_translation && <Badge tone="warning">{t('settings.missingUkTranslation')}</Badge>}</span> }, { key: 'details', header: t('settings.details'), muted: true, render: (row) => displayValue(row.address || row.scheme || row.channel || row.value || row.location || row.effective_from, t) }, { key: 'active', header: t('common.status'), render: (row) => row.is_active == null ? '-' : <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> }, { key: 'actions', header: '', width: 180, render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={loading} onClick={() => startEdit(row)}>{t('common.edit')}</Button>{resource.id !== 'sessionTypes' && <Button size="sm" variant="subtle" disabled={loading} onClick={() => setPendingArchive(row)}>{t('settings.remove')}</Button>}</div> }]
 
     return <div className={`page page-wide ops-settings-page is-mobile-${mobileLevel}`}>
       <div className="page-head"><div><h1 className="page-title">{t('settings.title')}</h1><p className="page-desc">{t('settings.description')}</p></div>{!resource.panel && <span className="ops-settings-page-refresh"><Button variant="secondary" disabled={loading} onClick={() => load(resource.id)}>{t('settings.refresh')}</Button></span>}</div>
       {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
       <ToastNotice id="admin-settings-result" message={message} tone="success" />
-      <div className="ops-settings-desktop-nav">
-        <Tabs value={tab} onChange={setTab} items={tabs.map(([value, label]) => ({ value, label: t(label) }))} />
-        {tab !== 'reports' && <div className="ops-action-strip ops-settings-resources">{tabResources.map((item) => <button type="button" key={item.id} className={`ops-action-card${resource.id === item.id ? ' is-active' : ''}`} onClick={() => selectResource(item)}><span>{t(item.title)}</span><small>{t(item.readOnly ? 'settings.viewControl' : 'settings.createEdit')}</small></button>)}</div>}
-      </div>
+      <div className="ops-settings-workspace">
+      <nav className="ops-settings-desktop-nav" aria-label={t('settings.categories')}>
+        <div className="ops-settings-categories" role="tablist" aria-orientation="vertical">
+          {tabs.map(([value, label]) => <button key={value} type="button" role="tab" data-testid={`admin-settings-category-${value}`} aria-selected={tab === value} className={`ops-settings-category${tab === value ? ' is-active' : ''}`} onClick={() => selectTab(value)}>{t(label)}</button>)}
+        </div>
+        {tab !== 'reports' && <div className="ops-settings-resources" aria-label={t(tabs.find(([value]) => value === tab)?.[1])}>
+          {tabResources.map((item) => <button type="button" key={item.id} data-testid={`admin-settings-resource-${item.id}`} className={`ops-settings-resource${resource.id === item.id ? ' is-active' : ''}`} aria-current={resource.id === item.id ? 'true' : undefined} onClick={() => selectResource(item)}>{t(item.title)}</button>)}
+        </div>}
+      </nav>
       <div className="ops-settings-mobile-nav">
         {mobileLevel === 'categories' && <div className="ops-settings-mobile-list" aria-label={t('settings.categoriesAria')}>
-          {tabs.map(([value, label]) => <button key={value} type="button" className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => { setTab(value); setResourceId(resources.find((item) => item.tab === value)?.id || 'subscriptionTypes'); setMobileLevel('resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
+          {tabs.map(([value, label]) => <button key={value} type="button" data-testid={`admin-settings-category-${value}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => { selectTab(value); setMobileLevel('resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
         </div>}
         {mobileLevel === 'resources' && <>
           <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</ContextBackButton>
           <div className="ops-settings-mobile-list" aria-label={t(tabs.find(([value]) => value === tab)?.[1])}>
-            {tabResources.map((item) => <button key={item.id} type="button" className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong><small>{t(item.readOnly ? 'settings.viewControl' : 'settings.createEdit')}</small></span><span aria-hidden="true">›</span></button>)}
+            {tabResources.map((item) => <button key={item.id} type="button" data-testid={`admin-settings-resource-${item.id}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong><small>{t(item.readOnly ? 'settings.viewControl' : 'settings.createEdit')}</small></span><span aria-hidden="true">›</span></button>)}
           </div>
         </>}
-        {mobileLevel === 'detail' && <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('resources')}>{t(tabs.find(([value]) => value === tab)?.[1])}</ContextBackButton>}
+        {mobileLevel === 'detail' && <div className="ops-settings-mobile-back">
+          <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('resources')}>{t(tabs.find(([value]) => value === tab)?.[1])}</ContextBackButton>
+          <button type="button" onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</button>
+        </div>}
       </div>
       <div className={`ops-settings-detail${mobileLevel === 'detail' ? ' is-mobile-visible' : ''}`}>
-      {tab !== 'reports' && <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{t(tabs.find(([value]) => value === tab)?.[1])}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{t(resource.title)}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{t(resourceHelp[resource.id])}</p>}</div>{!resource.readOnly && resource.id !== 'sessionTypes' && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>{t('settings.add')}</Button>}</div>}
+      {tab !== 'reports' && <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{t(tabs.find(([value]) => value === tab)?.[1])}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{t(resource.title)}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{t(resourceHelp[resource.id])}</p>}</div>{!resource.readOnly && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>{t('settings.add')}</Button>}</div>}
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">{t('settings.credentialsDescription')}</p>
         <Button variant="primary" disabled={loading} onClick={openCredentials}>{t('settings.editCredentials')}</Button>
@@ -445,6 +477,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
           ? <ReportsPanel />
           : !resource.panel && <Table rows={rows} emptyLabel={loading ? t('common.loading') : t('settings.empty')} columns={columns} />}
       </div>
+      </div>
       <FormModal
         open={Boolean(editing)}
         title={t('settings.editTitle', { action: t(editing?.id ? 'settings.editing' : 'settings.newRecord'), resource: t(resource.title) })}
@@ -459,6 +492,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         </>}
       >
         {modalError && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setModalError(null)}>{modalError}</Banner>}
+        {resource.id === 'notificationTranslations' && form.language_code === 'uk' && (() => {
+          const template = (data.templates || []).find((row) => String(row.id) === String(form.template_id))
+          const example = ukNotificationExamples[template?.event_type]
+          return example && <Button variant="secondary" onClick={() => setForm((current) => ({ ...current, subject: template.channel === 'sms' ? '' : example[0], body: template.channel === 'sms' ? ukSmsExamples[template.event_type] : example[1] }))}>{t('settings.fillUkExample')}</Button>
+        })()}
         <fieldset disabled={loading} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div className="ops-form-grid">{(resource.fields || []).map((field) => {
             const [key, label, type = 'text'] = field
@@ -467,11 +505,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
             const shared = { id, label: t(label), error: fieldErrors[key] }
             if (type === 'boolean') return <Checkbox key={key} {...shared} checked={Boolean(value)} onChange={(event) => updateFormField(key, event.target.checked)} />
             if (type === 'textarea') return <Textarea key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} rows="4" containerStyle={{ gridColumn: '1 / -1' }} />
-            if (type === 'select' || type === 'select-ref') return <Select key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)}><option value="">{t('settings.select')}</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</Select>
+            if (type === 'select' || type === 'select-ref') return <Select key={key} {...shared} value={value} disabled={resource.id === 'sessionTypes' && Boolean(editing?.id) && key === 'base_type'} onChange={(event) => updateFormField(key, event.target.value)}><option value="">{t('settings.select')}</option>{fieldOptions(field).map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</Select>
             if (type === 'date') return <DateField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
             if (type === 'time') return <TimeField key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} />
             if (type === 'schedule-color') return <ScheduleColorPicker key={key} {...shared} value={value} onChange={(next) => updateFormField(key, next)} disabled={loading} />
-            return <Input key={key} {...shared} value={value} onChange={(event) => updateFormField(key, event.target.value)} type={type} />
+            return <Input key={key} {...shared} value={value} readOnly={resource.id === 'sessionTypes' && Boolean(editing?.id) && key === 'code'} onChange={(event) => updateFormField(key, event.target.value)} type={type} />
           })}</div>
         </fieldset>
       </FormModal>

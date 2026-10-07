@@ -292,6 +292,7 @@ export function ListToolbar({ list, searchLabel, searchPlaceholder, children }) 
         <span>{searchLabel || t('list.search')}</span>
         <input
           type="search"
+          data-testid="list-search-input"
           value={list.search}
           onChange={(event) => list.setSearch(event.target.value)}
           placeholder={searchPlaceholder || t('list.minChars')}
@@ -299,15 +300,15 @@ export function ListToolbar({ list, searchLabel, searchPlaceholder, children }) 
       </label>
       {children && (
         <>
-          <button type="button" className="ops-list-filter-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          <button type="button" data-testid="list-filter-toggle" className="ops-list-filter-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
             {t('list.filters', undefined, { count: list.filterCount })}
           </button>
           {open && (
             <div className="ops-list-filter-panel">
               <div className="ops-list-filter-fields">{children}</div>
               <div className="ops-list-filter-actions">
-                <button type="button" onClick={list.resetFilters}>{t('list.reset')}</button>
-                <button type="button" className="primary" onClick={list.applyFilters}>{t('list.apply')}</button>
+                <button type="button" data-testid="list-filter-reset" onClick={list.resetFilters}>{t('list.reset')}</button>
+                <button type="button" data-testid="list-filter-apply" className="primary" onClick={list.applyFilters}>{t('list.apply')}</button>
               </div>
             </div>
           )}
@@ -328,9 +329,9 @@ export function ListFeedback({ list, emptyLabel, noResultsLabel }) {
   if (!list.rows.length) {
     const filtered = Boolean(list.search.trim()) || list.filterCount > 0
     return (
-      <div className="empty ops-list-empty">
+      <div className="empty ops-list-empty" data-testid="list-empty">
         <span>{filtered ? (noResultsLabel || t('list.noResults')) : (emptyLabel || t('list.empty'))}</span>
-        {filtered && <button type="button" onClick={list.resetFilters}>{t('list.resetSearch')}</button>}
+        {filtered && <button type="button" data-testid="list-empty-reset" onClick={list.resetFilters}>{t('list.resetSearch')}</button>}
       </div>
     )
   }

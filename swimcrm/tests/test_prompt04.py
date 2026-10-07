@@ -62,13 +62,18 @@ class Prompt04ParticipantPrivacyRule(TestCase):
         self.client.force_login(self.parent.user)
 
     def test_multi_participant_resources_require_owned_target_and_scope_records(self):
-        for path in ("schedule", "attendance", "payments"):
+        for path in ("schedule", "attendance"):
             with self.subTest(path=path):
                 missing = self.client.get(f"/api/client/{path}/")
                 foreign = self.client.get(
                     f"/api/client/{path}/", {"student_id": self.foreign_student.id})
                 self.assertEqual(missing.status_code, 400)
                 self.assertEqual(foreign.status_code, 404)
+
+        self.assertEqual(self.client.get("/api/client/payments/").status_code, 200)
+        self.assertEqual(self.client.get(
+            "/api/client/payments/", {"student_id": self.foreign_student.id}
+        ).status_code, 404)
 
         response = self.client.get(
             "/api/client/schedule/", {"student_id": self.student_a.id})
@@ -120,12 +125,19 @@ class Prompt04ParticipantPrivacyRule(TestCase):
             recipient=self.parent,
             event_type=EventType.PAYMENT_REMINDER,
             channel=Channel.TELEGRAM,
-            status=DeliveryStatus.FAILED,
+            status=DeliveryStatus.SENT,
             subject="Payment",
             body="Delivery body",
             provider_message_id="provider-secret",
             error="raw provider failure",
             payload={"chat_id": "raw-id"},
+        )
+        NotificationLog.objects.create(
+            recipient=self.parent,
+            event_type=EventType.PAYMENT_REMINDER,
+            channel=Channel.EMAIL,
+            status=DeliveryStatus.FAILED,
+            body="Failed delivery must stay with admin",
         )
         NotificationLog.objects.create(
             recipient=self.other_parent,

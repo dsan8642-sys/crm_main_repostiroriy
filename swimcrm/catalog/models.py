@@ -26,6 +26,8 @@ class Group(models.Model):
         blank=True,
         help_text="Вместимость по умолчанию для новых групповых занятий",
     )
+    self_booking_enabled = models.BooleanField(default=False)
+    booking_cutoff_hours = models.PositiveSmallIntegerField(default=8)
     sort_order = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -37,6 +39,10 @@ class Group(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(booking_cutoff_hours__gte=1),
+                name="catalog_group_booking_cutoff_positive",
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(default_capacity__isnull=True)

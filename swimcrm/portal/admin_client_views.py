@@ -20,26 +20,8 @@ from .client_lifecycle import (
 
 
 def _client_list_balances(students):
-    student_ids = [student.id for student in students]
-    charged = {
-        row["student_id"]: row["total"] or 0
-        for row in Charge.objects.filter(
-            student_id__in=student_ids,
-            currency=settings.DEFAULT_CURRENCY,
-        ).values("student_id").annotate(total=Sum("amount_minor"))
-    }
-    paid = {
-        row["student_id"]: row["total"] or 0
-        for row in Payment.objects.filter(
-            student_id__in=student_ids,
-            currency=settings.DEFAULT_CURRENCY,
-            status=PaymentStatus.CONFIRMED,
-        ).values("student_id").annotate(total=Sum("amount_minor"))
-    }
-    return {
-        student_id: charged.get(student_id, 0) - paid.get(student_id, 0)
-        for student_id in student_ids
-    }
+    balances = family_balances({student.parent_id for student in students})
+    return {student.id: balances[student.parent_id] for student in students}
 
 
 def _client_current_subscriptions(students):
@@ -195,7 +177,7 @@ def admin_clients(request):
     if debt in {"yes", "no"}:
         filtered = []
         for student in students:
-            has_debt = student_balance(student).amount_minor > 0 or any(cs.is_overdue for cs in charge_statuses(student))
+            has_debt = family_balance(student.parent).amount_minor > 0
             if (debt == "yes" and has_debt) or (debt == "no" and not has_debt):
                 filtered.append(student)
         students = filtered

@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from audit.mixins import AuditAdminMixin
-from billing.services import charge_statuses, student_balance
+from billing.services import family_balance
 
 from .models import GroupMembership, Student
 
@@ -29,10 +29,7 @@ class DebtFilter(admin.SimpleListFilter):
 
         matched_ids = []
         for student in queryset:
-            has_debt = (
-                student_balance(student).amount_minor > 0
-                or any(status.is_overdue for status in charge_statuses(student))
-            )
+            has_debt = family_balance(student.parent).amount_minor > 0
             if (self.value() == "yes" and has_debt) or (self.value() == "no" and not has_debt):
                 matched_ids.append(student.pk)
         return queryset.filter(pk__in=matched_ids)

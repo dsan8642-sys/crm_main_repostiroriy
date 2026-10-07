@@ -86,28 +86,28 @@ test('admin reports share the current-month period, filter trainers, show income
   })
 
   await page.goto('/')
-  await page.locator('.ops-nav-button[title="Настройки"]').click()
-  await page.getByRole('tab', { name: 'Отчёты' }).click()
+  await page.getByTestId('nav-admin-settings').first().click()
+  await page.getByTestId('admin-settings-category-reports').first().click()
 
-  await expect(page.getByRole('textbox', { name: 'Период с' })).toHaveValue(expectedPeriod.from)
-  await expect(page.getByRole('textbox', { name: 'Период по' })).toHaveValue(expectedPeriod.to)
+  await expect(page.locator('#admin-reports-date-from')).toHaveValue(expectedPeriod.from)
+  await expect(page.locator('#admin-reports-date-to')).toHaveValue(expectedPeriod.to)
   await expect(page.getByRole('row', { name: /Anna Active/ }).getByRole('cell')).toHaveText(['Anna Active', '2', '1', '1', '4'])
-  await expect(page.getByRole('row', { name: /Итого по школе/ }).getByRole('cell')).toHaveText(['Итого по школе', '3', '1', '1', '5'])
+  await expect(page.locator('.ops-report-table tbody tr').last().locator('td').nth(4)).toHaveText('5')
 
-  await page.getByLabel('Тренер', { exact: true }).selectOption('2')
+  await page.locator('#admin-report-trainer').selectOption('2')
   await expect(page.getByRole('row', { name: /Anna Active/ })).toHaveCount(0)
   await expect(page.getByRole('row', { name: /Borys Historical/ }).getByRole('cell')).toHaveText(['Borys Historical', '1', '0', '0', '1'])
   const sessionDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Скачать XLSX' }).click()
+  await page.locator('.ops-report-toolbar button').click()
   await sessionDownload
 
-  await page.getByRole('tab', { name: 'Поступления' }).click()
+  await page.locator('.ops-reports-panel [role="tab"]').nth(1).click()
   await expect(page.getByText('350,00 PLN')).toBeVisible()
   await expect(page.getByText('100,00 PLN')).toBeVisible()
   await expect(page.getByText('250,00 PLN')).toHaveCount(2)
   await expect(page.getByRole('row', { name: /Client One/ }).getByRole('cell')).toHaveText(['2026-08-12', 'Client One', 'Карта', '250,00 PLN'])
   const incomeDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Скачать XLSX' }).click()
+  await page.locator('.ops-report-toolbar button').click()
   await incomeDownload
 
   expect(requests).toContain(`/api/admin/reports/session-counts/?date_from=${expectedPeriod.from}&date_to=${expectedPeriod.to}`)

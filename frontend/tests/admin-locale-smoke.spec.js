@@ -63,6 +63,7 @@ test('admin settings switches RU, UK, PL and EN while entity names stay unchange
   await page.goto('/?role=admin&view=settings')
   const localeSelector = page.locator('select').filter({ has: page.locator('option[value="uk"]') }).first()
 
+  await localeSelector.selectOption('ru')
   await expect(page.getByRole('heading', { level: 1, name: 'Настройки и контроль' })).toBeVisible()
   await expect(page.getByText('Karnet Flex', { exact: true })).toBeVisible()
 

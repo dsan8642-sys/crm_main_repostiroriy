@@ -21,6 +21,19 @@ import { toastReducer } from '../src/app/toastContracts.js'
 const ru = adminTranslator('ru')
 const validateAdminSessionForm = (form) => rawValidateAdminSessionForm(form, ru)
 const periodCountLabel = (count, viewMode) => rawPeriodCountLabel(count, viewMode, ru)
+
+test('client participant switch keeps the account money balance', () => {
+  const data = mapClientPortalData({
+    overview: {
+      account: { balance_minor: -30000 },
+      participants: [
+        { id: 1, full_name: 'First', balance_minor: 20000 },
+        { id: 2, full_name: 'Second', balance_minor: -50000 },
+      ],
+    },
+  })
+  assert.deepEqual(data.children.map((child) => child.balance), [300, 300])
+})
 const accessCodeClipboardText = (info) => rawAccessCodeClipboardText(info, ru)
 
 test('date and time contracts accept only real ISO and 24-hour values', () => {

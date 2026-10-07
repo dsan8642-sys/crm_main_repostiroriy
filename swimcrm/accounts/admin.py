@@ -59,5 +59,5 @@ class AdminOTPDeviceAdmin(admin.ModelAdmin):
     list_display = ("user", "is_confirmed", "created_at", "confirmed_at", "last_used_at")
     list_filter = ("is_confirmed",)
     search_fields = ("user__username", "user__first_name", "user__last_name", "user__email")
-    readonly_fields = ("created_at", "confirmed_at", "last_used_at")
+    readonly_fields = ("created_at", "confirmed_at", "last_used_at", "last_used_counter")
     autocomplete_fields = ("user",)

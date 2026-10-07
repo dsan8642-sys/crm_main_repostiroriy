@@ -152,6 +152,53 @@ class Prompt05SchedulePrivacyTest(TestCase):
             403,
         )
 
+    def test_restore_missing_system_types_and_create_custom_group_type(self):
+        admin_client = Client()
+        admin_client.force_login(self.admin)
+        for code in (SessionType.GROUP, SessionType.INDIVIDUAL):
+            SessionTypeConfig.objects.filter(code=code).delete()
+            response = admin_client.post(f"/api/admin/settings/session-types/{code}/restore/")
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.json()["base_type"], code)
+            self.assertEqual(
+                admin_client.post(f"/api/admin/settings/session-types/{code}/restore/").status_code,
+                200,
+            )
+
+        custom = admin_client.post(
+            "/api/admin/settings/session-types/",
+            data=json.dumps({
+                "code": "masters", "base_type": "group", "label": "Masters",
+                "default_capacity": 15, "default_duration_minutes": 75,
+                "default_currency": "PLN", "is_active": True,
+            }), content_type="application/json",
+        )
+        self.assertEqual(custom.status_code, 201, custom.content)
+        config_id = custom.json()["id"]
+        self.assertEqual(custom.json()["base_type"], "group")
+
+        created = admin_client.post(
+            "/api/admin/schedule/sessions/",
+            data=json.dumps({
+                "session_type": "group", "session_type_config_id": config_id,
+                "group_id": self.group.id, "trainer_id": self.trainer.id,
+                "start_at": (self.start + timedelta(hours=4)).isoformat(),
+                "location": "Pool A", "max_participants": 15,
+            }), content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(created.json()["session_type_config_code"], "masters")
+        self.assertEqual(created.json()["presentation_type_label"], "Masters")
+        self.assertEqual(created.json()["duration_minutes"], 75)
+
+        archived = admin_client.delete(f"/api/admin/settings/session-types/{config_id}/")
+        self.assertEqual(archived.status_code, 200)
+        self.assertEqual(created.json()["max_participants"], 15)
+        self.assertEqual(
+            admin_client.get(f"/api/admin/schedule/sessions/{created.json()['id']}/")
+            .json()["presentation_type_label"], "Masters",
+        )
+
 
 class Prompt05AccessLifecycleTest(TestCase):
     password = "Q7!vL2#pN9$xR4@m"

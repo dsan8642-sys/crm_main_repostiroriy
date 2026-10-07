@@ -341,6 +341,17 @@ def commit(preview_rows, *, actor=None, mode=ImportEffectMode.HISTORY_ONLY):
     created_ids = []
     errors = []
 
+    if apply_financial_effects:
+        preview_rows = list(preview_rows)
+        applicable = [pr.resolved for pr in preview_rows
+                      if pr.status in (MATCHED, WILL_CREATE_SESSION)]
+        # Lock known sessions before participants, in stable order for batches.
+        list(Session.objects.filter(pk__in=[r["session_id"] for r in applicable
+                                           if r.get("session_id")])
+             .order_by("pk").select_for_update())
+        list(Student.objects.filter(pk__in=[r["student_id"] for r in applicable])
+             .order_by("pk").select_for_update(no_key=True))
+
     for pr in preview_rows:
         if pr.status not in (MATCHED, WILL_CREATE_SESSION):
             skipped += 1

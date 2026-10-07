@@ -124,17 +124,17 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         return next
       })
       try {
-        const record = await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, {
-          student_id: row.id,
-          status,
-        })
+        const clearing = row.attendance?.status === status
+        const record = clearing
+          ? await api.delete(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, { student_id: row.id })
+          : await api.post(`/api/admin/schedule/sessions/${selectedSessionId}/attendance/`, { student_id: row.id, status })
         setDetail((current) => ({
           ...current,
           students: (current?.students || []).map((student) => student.id === row.id
-            ? { ...student, attendance: record }
+            ? { ...student, attendance: clearing ? null : record }
             : student),
         }))
-        setMessage(t('attendance.saved'))
+        setMessage(t(clearing ? 'attendance.cleared' : 'attendance.saved'))
         reloadRoleData?.('admin')
       } catch (err) {
         const message = apiErrorMessage(err, t('attendance.saveError'))
@@ -152,7 +152,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
           const presentStyle = selected && option.value === 'present'
             ? { background: 'var(--green-500)', border: '1px solid var(--green-500)', '--primary-hover': 'var(--green-600)', '--primary-active': 'var(--green-700)' }
             : {}
-          return <Button key={option.value} size="sm" variant={selected ? option.value === 'absent' ? 'danger' : 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={selected} onClick={() => mark(row, option.value)} style={presentStyle}>
+          return <Button key={option.value} data-testid={`admin-attendance-${row.id}-${option.value}`} size="sm" variant={selected ? option.value === 'absent' ? 'danger' : 'primary' : 'secondary'} loading={busyId === `mark-${row.id}`} disabled={selectedStatus === 'cancelled' || busyId === `mark-${row.id}`} aria-pressed={selected} onClick={() => mark(row, option.value)} style={presentStyle}>
             {t(option.labelKey)}{option.consumes ? ' -1' : ''}
           </Button>
         })}
@@ -354,7 +354,9 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
               </div>
               <div>
                 <div className="muted">{t('common.status')}</div>
-                <StatusPill status={selectedDisplayStatus} tone={selectedDisplayStatus === 'done' ? 'present' : undefined} size="sm" />
+                <span data-testid="admin-attendance-session-status" data-status={selectedDisplayStatus}>
+                  <StatusPill status={selectedDisplayStatus} tone={selectedDisplayStatus === 'done' ? 'present' : undefined} size="sm" />
+                </span>
               </div>
             </div>
             <div className="ops-button-row" style={{ marginTop: 12 }}><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setSelectedStudentId(''); setStudentError(null); setFormAction('add') }}>{t('attendance.addParticipant')}</Button><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setCancelReason(''); setCancelReasonError(null); setFormAction('cancel') }}>{t('attendance.cancelSession')}</Button></div>

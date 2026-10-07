@@ -6,6 +6,8 @@ from .pagination import (
     paginated_payload,
     search_param,
 )
+from scheduling.services import booking_deadline, change_client_booking, change_client_waitlist
+from attendance.services import _deductible_subscription
 
 
 @require_http_methods(["GET", "POST"])
@@ -111,17 +113,33 @@ def client_overview(request):
     today = timezone.localdate()
     payload = []
     type_colors = session_type_color_keys()
+    balance = family_balance(account)
+    latest_payment = Payment.objects.filter(student__parent=account).order_by("-paid_at", "-id").first()
     for student in students:
         subscriptions = list(student.subscriptions.select_related("subscription_type").exclude(
             status=SubscriptionStatus.CANCELLED).order_by("-start_date", "-id"))
-        next_session = _visible_client_sessions([student], date_from=today).first()
-        latest_payment = student.payments.order_by("-paid_at", "-id").first()
-        balance = student_balance(student)
+        unlimited = next((sub for sub in subscriptions
+            if sub.subscription_type.is_unlimited and sub.is_active_on(today)), None)
+        current = unlimited or _deductible_subscription(student, today)
+        shown = current or (subscriptions[0] if subscriptions else None)
+        next_session = _visible_client_sessions([student], date_from=today).filter(
+            is_cancelled=False, end_at__gt=timezone.now()).filter(
+                Q(requires_booking=False) |
+                Q(participants__student=student, participants__status=SessionParticipantStatus.ACTIVE)
+            ).order_by("start_at", "id").first()
         payload.append({
             **_client_student_payload(student),
             "balance": balance.format(),
             "balance_minor": balance.amount_minor,
-            "current_subscription": _subscription_payload(subscriptions[0]) if subscriptions else None,
+            "current_subscription": {
+                **_subscription_payload(shown),
+                "sessions_available_now": bool(current),
+                "ledger": [{
+                    "delta": entry.delta,
+                    "reason": entry.reason,
+                    "created_at": timezone.localtime(entry.created_at).isoformat(),
+                } for entry in shown.ledger_entries.order_by("created_at", "id")],
+            } if shown else None,
             "next_session": _role_session_payload(
                 next_session,
                 participant=student,
@@ -135,7 +153,7 @@ def client_overview(request):
             } if latest_payment else None,
         })
     return JsonResponse({
-        "account": _client_safe_account_payload(account),
+        "account": {**_client_safe_account_payload(account), "balance_minor": balance.amount_minor},
         "participants": payload,
         "students": payload,
     })
@@ -151,21 +169,81 @@ def client_schedule(request):
     return JsonResponse({
         **_participant_context(account, student),
         "sessions": [
-            _role_session_payload(
-                session,
-                participant=student,
-                type_color_keys=type_colors,
-            )
+            _client_schedule_session_payload(session, student, type_colors)
             for session in _visible_client_sessions([student], date_from, date_to)
         ],
     })
+
+
+def _client_schedule_session_payload(session, student, type_colors=None):
+    payload = _role_session_payload(session, participant=student, type_color_keys=type_colors)
+    if not session.requires_booking:
+        return payload
+    booked = any(
+        row.student_id == student.id and row.status == SessionParticipantStatus.ACTIVE
+        for row in session.participants.all()
+    )
+    own_waitlist = session.waitlist_entries.filter(student=student, status__in=[
+        WaitlistStatus.ACTIVE, WaitlistStatus.SUSPENDED]).first()
+    waitlist_position = None
+    if own_waitlist and own_waitlist.status == WaitlistStatus.ACTIVE:
+        waitlist_position = session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).filter(
+            Q(priority__lt=own_waitlist.priority) |
+            Q(priority=own_waitlist.priority, created_at__lt=own_waitlist.created_at) |
+            Q(priority=own_waitlist.priority, created_at=own_waitlist.created_at,
+              id__lte=own_waitlist.id)
+        ).count()
+    deadline = booking_deadline(session)
+    free_places = max(0, session.max_participants - payload["participants_count"])
+    open_for_client = (
+        not session.is_cancelled and session.group.is_active and session.group.self_booking_enabled
+        and timezone.now() < deadline and not session.attendance.exists()
+    )
+    payload.update({
+        "requires_booking": True,
+        "booking_status": (
+            "cancelled" if session.is_cancelled else "booked" if booked else
+            "waitlisted" if own_waitlist else "closed" if not open_for_client
+            else "full" if free_places == 0 else "available"
+        ),
+        "booking_deadline": timezone.localtime(deadline).isoformat(),
+        "free_places": free_places,
+        "can_cancel_booking": booked and open_for_client,
+        "waitlist_position": waitlist_position,
+        "can_leave_waitlist": bool(own_waitlist),
+        "booking_timezone": settings.TIME_ZONE,
+    })
+    return payload
+
+
+@require_http_methods(["POST", "DELETE"])
+def client_session_booking(request, session_id):
+    account = _client_account_from_request(request)
+    data = _json_body(request)
+    student = _student_owned_by_client(account, data.get("student_id"))
+    session = change_client_booking(
+        session_id=session_id, student=student,
+        book=request.method == "POST", actor=request.user,
+    )
+    return JsonResponse(_client_schedule_session_payload(session, student))
+
+
+@require_http_methods(["POST", "DELETE"])
+def client_session_waitlist(request, session_id):
+    account = _client_account_from_request(request)
+    student = _student_owned_by_client(account, _json_body(request).get("student_id"))
+    session = change_client_waitlist(
+        session_id=session_id, student=student,
+        join=request.method == "POST", actor=request.user,
+    )
+    return JsonResponse(_client_schedule_session_payload(session, student))
 
 
 @require_GET
 def client_attendance(request):
     account = _client_account_from_request(request)
     student = _participant_for_client_request(request, account)
-    qs = AttendanceRecord.objects.filter(student=student).select_related(
+    qs = AttendanceRecord.objects.filter(student=student, status__isnull=False).select_related(
         "student", "session", "session__group", "session__trainer__user")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
@@ -267,16 +345,18 @@ def _client_payment_history_payload(payment):
 @require_GET
 def client_payments(request):
     account = _client_account_from_request(request)
-    student = _participant_for_client_request(request, account)
-    charges = Charge.objects.filter(student=student).select_related(
+    student = _financial_participant_for_client_request(request, account)
+    charges = Charge.objects.filter(student__parent=account).select_related(
         "student", "created_by", "reversal", "reversal__created_by"
     ).order_by("-due_date", "-id")
-    payments = Payment.objects.filter(student=student).select_related(
+    allocations = {row.charge.id: row for row in family_charge_statuses(account)}
+    payments = Payment.objects.filter(student__parent=account).select_related(
         "student", "student__parent__user", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     return JsonResponse({
         **_participant_context(account, student),
-        "charges": [_client_charge_payload(charge) for charge in charges],
+        "charges": [_client_charge_payload(charge, allocations.get(charge.id))
+                    for charge in charges],
         "payments": [
             _client_payment_history_payload(payment) for payment in payments
         ],
@@ -286,10 +366,10 @@ def client_payments(request):
 @require_GET
 def client_charges(request):
     account = _client_account_from_request(request)
-    student = _participant_for_client_request(request, account)
-    qs = Charge.objects.filter(student=student).select_related(
+    student = _financial_participant_for_client_request(request, account)
+    qs = Charge.objects.filter(student__parent=account).select_related(
         "student", "created_by", "reversal", "reversal__created_by")
-    allocations = {row.charge.id: row for row in charge_statuses(student)}
+    allocations = {row.charge.id: row for row in family_charge_statuses(account)}
     unpaid = [row for row in allocations.values() if row.paid_minor < row.charge.amount_minor]
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
@@ -330,8 +410,8 @@ def client_charges(request):
 @require_GET
 def client_payment_history(request):
     account = _client_account_from_request(request)
-    student = _participant_for_client_request(request, account)
-    qs = Payment.objects.filter(student=student).select_related(
+    student = _financial_participant_for_client_request(request, account)
+    qs = Payment.objects.filter(student__parent=account).select_related(
         "student", "student__parent__user", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
@@ -372,7 +452,9 @@ def client_payment_history(request):
 @require_GET
 def client_notifications(request):
     account = _client_account_from_request(request)
-    rows = NotificationLog.objects.filter(recipient=account).order_by("-created_at", "-id")
+    rows = NotificationLog.objects.filter(
+        recipient=account, status__in=[DeliveryStatus.SENT, DeliveryStatus.DELIVERED]
+    ).order_by("-created_at", "-id")
 
     def serialize(log):
         return {
@@ -419,7 +501,7 @@ def client_create_top_up_request(request):
         "student", "student__parent__user", "confirmed_by"
     ).prefetch_related("receipts", "events", "events__actor").get(pk=payment.pk)
     payload = _payment_payload(payment)
-    balance = student_balance(student)
+    balance = family_balance(account)
     payload.update({
         "balance_minor": balance.amount_minor,
         "balance_currency": balance.currency,

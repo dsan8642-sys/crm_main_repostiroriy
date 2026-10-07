@@ -23,6 +23,7 @@ export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
         type="button"
         className={displayMode === 'calendar' ? 'on' : ''}
         aria-pressed={displayMode === 'calendar'}
+        data-testid="schedule-view-calendar"
         onClick={() => setDisplayMode('calendar')}
       >
         {CalendarIcon && <CalendarIcon size={15} />}<span>{t('calendar.calendar')}</span>
@@ -31,6 +32,7 @@ export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
         type="button"
         className={displayMode === 'list' ? 'on' : ''}
         aria-pressed={displayMode === 'list'}
+        data-testid="schedule-view-list"
         onClick={() => setDisplayMode('list')}
       >
         {ListIcon && <ListIcon size={15} />}<span>{t('calendar.list')}</span>
@@ -44,25 +46,45 @@ export function CalendarNavigation({
   setFocusDate,
   viewMode,
   setViewMode,
+  mobileArrows = false,
 }) {
   const { t } = useLocale()
   return (
     <div className="ops-calendar-navigation">
-      <div className="seg" role="group" aria-label={t('calendar.period')}>
+      <div className="seg" role="group" aria-label={t('calendar.period')} data-testid="schedule-calendar-view-switch">
         {Object.entries(VIEW_KEYS).map(([value, key]) => (
           <button
             key={value}
             type="button"
             className={viewMode === value ? 'on' : ''}
             aria-pressed={viewMode === value}
+            data-testid={`schedule-period-${value}`}
             onClick={() => setViewMode(value)}
           >
             {t(key)}
           </button>
         ))}
       </div>
-      <div className="ops-calendar-date-controls">
-        <DateField label={t('calendar.focusDate')} value={focusDate} onChange={setFocusDate} required />
+      <div className={`ops-calendar-date-controls${mobileArrows ? ' has-mobile-arrows' : ''}`}>
+        {mobileArrows && (
+          <button
+            className="ops-calendar-period-arrow ops-mobile-calendar-arrow is-previous"
+            data-testid="schedule-previous-period"
+            type="button"
+            aria-label={t('calendar.previousPeriod', undefined, { period: t(VIEW_KEYS[viewMode]) })}
+            onClick={() => setFocusDate(moveCalendarFocus(focusDate, viewMode, -1))}
+          >‹</button>
+        )}
+        <DateField id="schedule-focus-date" label={t('calendar.focusDate')} value={focusDate} onChange={setFocusDate} required />
+        {mobileArrows && (
+          <button
+            className="ops-calendar-period-arrow ops-mobile-calendar-arrow is-next"
+            data-testid="schedule-next-period"
+            type="button"
+            aria-label={t('calendar.nextPeriod', undefined, { period: t(VIEW_KEYS[viewMode]) })}
+            onClick={() => setFocusDate(moveCalendarFocus(focusDate, viewMode, 1))}
+          >›</button>
+        )}
         <button className="ops-calendar-today" type="button" onClick={() => setFocusDate(localToday())}>{t('calendar.today')}</button>
       </div>
       <span className="ops-calendar-announcement" role="status" aria-live="polite">
@@ -329,28 +351,61 @@ export function ScheduleList({
   renderStatus,
   testId,
   emptyLabel,
+  groupByDate = false,
 }) {
-  const { t } = useLocale()
+  const { locale, t } = useLocale()
+  const localeTag = uiLocaleTag(locale)
+  const groups = groupByDate
+    ? Object.entries((sessions || []).reduce((dates, session) => {
+      const date = sessionIsoDate(session)
+      dates[date] = [...(dates[date] || []), session]
+      return dates
+    }, {})).sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, rows]) => [date, rows.sort((left, right) => String(left.startAt || left.start_at).localeCompare(String(right.startAt || right.start_at)))])
+    : []
+  const formatDate = (date) => dateFromIso(date).toLocaleDateString(localeTag, {
+    weekday: 'long', day: 'numeric', month: 'long',
+  })
+  const renderSession = (session, date) => {
+    const day = date || sessionIsoDate(session)
+    const dateLabel = formatDate(day)
+    const occupancy = scheduleOccupancy(session)
+    const details = [
+      session.group,
+      session.individualParticipant?.full_name,
+      session.trainer,
+      session.location,
+    ].filter(Boolean).join(' · ')
+    return (
+      <button
+        type="button"
+        className={`ops-session-tile${session.isCancelled || session.status === 'cancelled' ? ' is-cancelled' : ''}`}
+        aria-label={`${groupByDate ? `${dateLabel}. ` : ''}${eventAccessibleLabel(session, t)}`}
+        data-testid={`schedule-session-${session.id}`}
+        data-color-key={session.colorKey || 'standard'}
+        key={session.id}
+        onClick={() => onOpenSession(session)}
+        style={scheduleColorStyle(session.colorKey)}
+      >
+        <span>
+          <strong>{groupByDate ? `${session.start}-${session.end}` : `${session.date || day} · ${session.start}-${session.end}`}{occupancy ? ` · ${occupancy}` : ''}</strong>
+          <small>{details}</small>
+        </span>
+        {renderStatus?.(session)}
+      </button>
+    )
+  }
   return (
-    <div className="ops-card-list" data-testid={testId}>
-      {sessions.map((session) => (
-        <button
-          type="button"
-          className={`ops-session-tile${session.isCancelled || session.status === 'cancelled' ? ' is-cancelled' : ''}`}
-          aria-label={eventAccessibleLabel(session, t)}
-          data-color-key={session.colorKey || 'standard'}
-          key={session.id}
-          onClick={() => onOpenSession(session)}
-          style={scheduleColorStyle(session.colorKey)}
-        >
-          <span>
-            <strong>{session.date || sessionIsoDate(session)} · {session.start}-{session.end}{scheduleOccupancy(session) ? ` · ${scheduleOccupancy(session)}` : ''}</strong>
-            <small>{session.group}{session.individualParticipant?.full_name ? ` · ${session.individualParticipant.full_name}` : ''}{session.trainer ? ` · ${session.trainer}` : ''}{session.location ? ` · ${session.location}` : ''}</small>
-          </span>
-          {renderStatus?.(session)}
-        </button>
-      ))}
-      {!sessions.length && <div className="empty">{emptyLabel || t('calendar.empty')}</div>}
+    <div className={groupByDate ? 'ops-agenda-list' : 'ops-card-list'} data-testid={testId}>
+      {groupByDate
+        ? groups.map(([date, rows]) => (
+          <section className="ops-agenda-day" key={date}>
+            <h2 className="ops-agenda-day-title">{formatDate(date)}</h2>
+            <div className="ops-agenda-day-sessions">{rows.map((session) => renderSession(session, date))}</div>
+          </section>
+        ))
+        : (sessions || []).map((session) => renderSession(session))}
+      {!(sessions || []).length && <div className="empty">{emptyLabel || t('calendar.empty')}</div>}
     </div>
   )
 }

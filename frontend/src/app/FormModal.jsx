@@ -59,6 +59,7 @@ export function FormModal({
       <section
         ref={panelRef}
         className={`form-modal form-modal--${size}`}
+        data-testid="form-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -75,6 +76,7 @@ export function FormModal({
           <button
             type="button"
             className="form-modal__close"
+            data-testid="form-modal-close"
             aria-label={t('modal.close')}
             disabled={busy}
             onClick={() => modalLifecycle.requestClose('close-button')}
@@ -91,14 +93,15 @@ export function FormModal({
       </section>
       {confirmDiscard && (
         <div className="form-modal-confirm-layer">
-          <section ref={confirmRef} className="form-modal-confirm" role="alertdialog" aria-modal="true" aria-labelledby={`${titleId}-discard`} tabIndex={-1}>
+          <section ref={confirmRef} className="form-modal-confirm" data-testid="discard-dialog" role="alertdialog" aria-modal="true" aria-labelledby={`${titleId}-discard`} tabIndex={-1}>
             <h3 id={`${titleId}-discard`}>{t('modal.discardTitle')}</h3>
             <p>{t('modal.discardDescription')}</p>
             <div>
-              <button type="button" onClick={() => confirmLifecycle.requestClose('stay')}>{t('modal.continueEditing')}</button>
+              <button type="button" data-testid="discard-keep-editing" onClick={() => confirmLifecycle.requestClose('stay')}>{t('modal.continueEditing')}</button>
               <button
                 type="button"
                 className="is-danger"
+                data-testid="discard-confirm"
                 onClick={() => {
                   confirmLifecycle.requestClose('discard', () => onRequestClose?.('discard'))
                 }}

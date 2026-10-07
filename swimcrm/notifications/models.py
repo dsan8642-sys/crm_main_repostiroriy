@@ -4,12 +4,10 @@ from django.utils import timezone as dj_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 def validate_sms_template(body: str):
-    """SMS must stay within one 160-character GSM-like segment."""
-    bad = sorted({c for c in body if ord(c) > 127})
-    if bad:
-        raise ValidationError(f"SMS template contains Polish diacritics: {' '.join(bad)}")
-    if len(body) >= 160:
-        raise ValidationError(f"SMS template is longer than 160 characters ({len(body)})")
+    """Keep SMS within one GSM or Unicode segment."""
+    limit = 70 if any(ord(c) > 127 for c in body) else 160
+    if len(body) >= limit:
+        raise ValidationError(f"SMS template is longer than {limit - 1} characters ({len(body)})")
 
 
 class EventType(models.TextChoices):

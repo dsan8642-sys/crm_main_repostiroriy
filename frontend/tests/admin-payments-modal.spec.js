@@ -115,19 +115,19 @@ test('subscription operations can target a client other than the first', async (
   })
 
   await page.goto('/?role=admin&view=payments')
-  await page.getByRole('button', { name: /Баланс клиента/ }).click()
+  await page.getByTestId('admin-payments-finance-panel').click()
 
-  const renewLauncher = page.getByRole('button', { name: 'Продлить', exact: true })
+  const renewLauncher = page.getByTestId('admin-finance-open-renew')
   await expect(renewLauncher).toBeEnabled()
   await renewLauncher.click()
 
-  const modal = page.getByRole('dialog', { name: 'Продлить абонемент' })
+  const modal = page.getByTestId('form-modal')
   await expect(modal).toBeVisible()
-  await modal.getByRole('combobox', { name: 'Участник', exact: true }).fill('Borys')
+  await modal.locator('#admin-finance-participant').fill('Borys')
   await modal.getByRole('option', { name: /HasSub Borys/ }).click()
 
-  const subscriptionSelect = modal.getByLabel('Абонемент участника')
-  const submit = modal.getByRole('button', { name: 'Продлить', exact: true })
+  const subscriptionSelect = modal.locator('#admin-finance-subscription')
+  const submit = modal.locator('.form-modal__footer button').last()
   await expect(subscriptionSelect).toHaveValue('')
   await expect(subscriptionSelect).toBeDisabled()
   await expect(submit).toBeDisabled()
@@ -150,18 +150,18 @@ test('issuing a subscription always creates its charge through one idempotent op
   const mock = await mockPayments(page)
 
   await page.goto('/?role=admin&view=payments')
-  await page.getByRole('button', { name: /Баланс клиента/ }).click()
-  await page.getByRole('button', { name: 'Выдать абонемент', exact: true }).click()
+  await page.getByTestId('admin-payments-finance-panel').click()
+  await page.getByTestId('admin-finance-open-issue').click()
 
-  const modal = page.getByRole('dialog', { name: 'Выдать абонемент' })
-  await expect(modal.getByRole('checkbox', { name: 'Создать начисление' })).toHaveCount(0)
-  const paid = modal.getByRole('checkbox', { name: 'Оплата получена — зачислить полную стоимость' })
+  const modal = page.getByTestId('form-modal')
+  await expect(modal.locator('#admin-finance-create-charge')).toHaveCount(0)
+  const paid = modal.locator('#admin-finance-subscription-payment-received')
   await expect(paid).not.toBeChecked()
   await paid.check()
-  await modal.getByLabel('Способ оплаты').selectOption('bank_transfer')
-  await modal.getByLabel('Дата платежа').fill('2026-09-15')
-  await expect(modal.getByText('Будут созданы начисление и оплата: 240 PLN.')).toBeVisible()
-  await modal.getByRole('button', { name: 'Выдать абонемент', exact: true }).click()
+  await modal.locator('#admin-finance-subscription-payment-method').selectOption('bank_transfer')
+  await modal.locator('#admin-finance-subscription-payment-date').fill('2026-09-15')
+  await expect(modal.locator('.ops-subscription-payment-warning')).toBeVisible()
+  await modal.locator('.form-modal__footer button').last().click()
 
   await expect.poll(() => mock.requests).toHaveLength(1)
   expect(mock.requests[0].path).toBe('/api/admin/participants/1/subscriptions/')
@@ -184,31 +184,31 @@ test('switching the finance participant clears the previous subscription before 
   })
 
   await page.goto('/?role=admin&view=payments')
-  await page.getByRole('button', { name: /Баланс клиента/ }).click()
-  await page.getByRole('button', { name: 'Продлить', exact: true }).click()
-  const modal = page.getByRole('dialog', { name: 'Продлить абонемент' })
-  const subscriptionSelect = modal.getByLabel('Абонемент участника')
+  await page.getByTestId('admin-payments-finance-panel').click()
+  await page.getByTestId('admin-finance-open-renew').click()
+  const modal = page.getByTestId('form-modal')
+  const subscriptionSelect = modal.locator('#admin-finance-subscription')
   await expect(subscriptionSelect).toHaveValue('11')
 
-  await modal.getByRole('combobox', { name: 'Участник', exact: true }).fill('Borys')
+  await modal.locator('#admin-finance-participant').fill('Borys')
   await modal.getByRole('option', { name: /HasSub Borys/ }).click()
   try {
     await expect(subscriptionSelect).toHaveValue('')
     await expect(subscriptionSelect).toBeDisabled()
-    await expect(modal.getByRole('button', { name: 'Продлить', exact: true })).toBeDisabled()
+    await expect(modal.locator('.form-modal__footer button').last()).toBeDisabled()
     expect(mock.requests).toEqual([])
   } finally {
     mock.releaseDelayed()
   }
 
   await expect(subscriptionSelect).toHaveValue('22')
-  await modal.getByRole('button', { name: 'Продлить', exact: true }).click()
+  await modal.locator('.form-modal__footer button').last().click()
   await expect.poll(() => mock.requests).toHaveLength(1)
   expect(mock.requests[0].path).toBe('/api/admin/subscriptions/22/renew/')
 })
 
 test('payment editor keeps the comment separate from the receipt filename', async ({ page }) => {
-  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop payment-edit contract check is sufficient')
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'phone and desktop payment-edit contract')
   const mock = await mockPayments(page, {
     payments: [{
       id: 55,
@@ -227,18 +227,23 @@ test('payment editor keeps the comment separate from the receipt filename', asyn
   })
 
   await page.goto('/?role=admin&view=payments')
-  await expect(page.getByRole('link', { name: /proof\.pdf/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await expect(page.getByRole('button', { name: /proof\.pdf/ })).toBeVisible()
+  if ((page.viewportSize()?.width || 0) === 390) {
+    await page.locator('.ops-payment-compact-card').filter({ hasText: 'proof.pdf' }).locator('.ops-entity-actions-trigger').click()
+    await page.getByRole('menu').getByRole('menuitem').last().click()
+  } else {
+    await page.getByTestId('admin-payment-edit-55').click()
+  }
 
-  const modal = page.getByRole('dialog', { name: 'Изменить реквизиты платежа' })
-  await expect(modal.getByLabel('Комментарий')).toHaveValue('bank note')
-  await modal.getByLabel('Способ оплаты').selectOption('card')
-  await modal.getByRole('button', { name: 'Сохранить изменение' }).click()
+  const modal = page.getByTestId('form-modal')
+  await expect(modal.locator('#admin-payment-edit-comment')).toHaveValue('bank note')
+  await modal.locator('#admin-payment-edit-method').selectOption('card')
+  await modal.locator('.form-modal__footer .swim-btn--primary').click()
 
   await expect.poll(() => mock.paymentEdits).toHaveLength(1)
   expect(mock.paymentEdits[0]).toEqual({
     path: '/api/admin/payments/55/',
     body: { method: 'card', comment: 'bank note' },
   })
-  await expect(page.getByRole('link', { name: /proof\.pdf/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /proof\.pdf/ })).toBeVisible()
 })

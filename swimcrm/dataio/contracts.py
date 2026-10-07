@@ -220,7 +220,7 @@ def normalize_mapping_target(entity, value):
 
 
 def prepare_rows(entity, headers, rows, mapping=None):
-    """Map own exports or external aliases to canonical keys and validate metadata."""
+    """Map exports or external aliases to canonical keys and validate own metadata."""
     if entity not in CONTRACTS:
         raise ValidationError(f"Неизвестный тип импорта: {entity}")
     proposed = suggest_mapping(entity, headers)
@@ -234,14 +234,15 @@ def prepare_rows(entity, headers, rows, mapping=None):
 
     prepared = []
     metadata = {}
-    own_export = all(key in headers for key in METADATA_KEYS)
+    metadata_consistent = True
+    has_metadata = all(key in headers for key in METADATA_KEYS)
     for raw_row in rows:
-        if own_export:
+        if has_metadata:
             row_metadata = {key: str(raw_row.get(key, "")).strip() for key in METADATA_KEYS}
             if not metadata:
                 metadata = row_metadata
             elif row_metadata != metadata:
-                raise ValidationError("Метаданные собственного export различаются между строками")
+                metadata_consistent = False
         canonical = {}
         for source, target in effective.items():
             value = raw_row.get(source, "")
@@ -257,7 +258,10 @@ def prepare_rows(entity, headers, rows, mapping=None):
                 raw_row["_manual_client_override"])
         prepared.append(canonical)
 
-    if own_export and rows:
+    own_export = bool(metadata) and metadata.get("source_system") == SOURCE_SYSTEM
+    if own_export:
+        if not metadata_consistent:
+            raise ValidationError("Метаданные собственного export различаются между строками")
         if metadata.get("entity_type") != entity:
             raise ValidationError(
                 f"Файл содержит entity_type={metadata.get('entity_type') or 'пусто'}, ожидался {entity}")

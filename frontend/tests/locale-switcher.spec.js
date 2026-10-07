@@ -10,19 +10,18 @@ test.beforeEach(async ({ page }) => {
   }))
 })
 
-test('login language selector cycles RU to UK, PL and EN without mixing auth labels', async ({ page }) => {
+test('login defaults to Ukrainian and supports Russian, Polish and English', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop locale contract')
   await page.goto('/')
 
   const selector = page.locator('form select').first()
-  await expect(selector).toHaveAccessibleName('Язык интерфейса')
-  await expect(selector).toHaveValue('ru')
-  await expect(page.getByText('Вход в систему')).toBeVisible()
-
-  await selector.selectOption('uk')
-  await expect(page.locator('html')).toHaveAttribute('lang', 'uk')
+  await expect(selector).toHaveAccessibleName('Мова інтерфейсу')
+  await expect(selector).toHaveValue('uk')
   await expect(page.getByText('Вхід до системи')).toBeVisible()
-  await expect(page.getByText('Вход в систему')).toHaveCount(0)
+
+  await selector.selectOption('ru')
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ru')
+  await expect(page.getByText('Вход в систему')).toBeVisible()
 
   await selector.selectOption('pl')
   await expect(page.locator('html')).toHaveAttribute('lang', 'pl')

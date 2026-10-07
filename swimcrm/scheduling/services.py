@@ -52,13 +52,14 @@ def session_roster_students(session):
     if session.individual_student_id:
         condition = Q(pk=session.individual_student_id) | Q(pk__in=participant_ids)
     elif session.group_id:
-        condition = (
-            Q(group_memberships__group_id=session.group_id,
-              group_memberships__effective_from__isnull=True)
-            | Q(group_memberships__group_id=session.group_id,
-                group_memberships__effective_from__lte=session.start_at)
-            | Q(pk__in=participant_ids)
-        )
+        condition = Q(pk__in=participant_ids)
+        if not session.requires_booking:
+            condition |= (
+                Q(group_memberships__group_id=session.group_id,
+                  group_memberships__effective_from__isnull=True)
+                | Q(group_memberships__group_id=session.group_id,
+                    group_memberships__effective_from__lte=session.start_at)
+            )
     else:
         condition = Q(pk__in=participant_ids)
     if session.end_at <= timezone.now():
@@ -68,6 +69,136 @@ def session_roster_students(session):
         is_active=True,
         parent__user__is_active=True,
     ).select_related("parent", "parent__user").prefetch_related("groups").distinct()
+
+
+def booking_deadline(session):
+    return session.start_at - timedelta(hours=session.group.booking_cutoff_hours)
+
+
+def promote_open_waitlist(session, *, actor=None):
+    """Fill available places while the session row is locked by the caller."""
+    if (not session.requires_booking or session.is_cancelled or
+            timezone.now() >= booking_deadline(session) or session.attendance.exists()):
+        return []
+    promoted = []
+    for entry in session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).select_related(
+            "student__parent__user").order_by("priority", "created_at", "id"):
+        if session_roster_students(session).count() >= session.max_participants:
+            break
+        student = entry.student
+        if session.participants.filter(student=student, status=SessionParticipantStatus.ACTIVE).exists():
+            entry.status = WaitlistStatus.PROMOTED
+            entry.save(update_fields=["status", "updated_at"])
+            continue
+        if (not student.is_active or not student.parent.user.is_active or
+                not student.group_memberships.filter(group_id=session.group_id).filter(
+                    Q(effective_from__isnull=True) | Q(effective_from__lte=session.start_at)).exists()):
+            entry.status = WaitlistStatus.EXPIRED
+            entry.save(update_fields=["status", "updated_at"])
+            continue
+        participant, _ = SessionParticipant.objects.get_or_create(
+            session=session, student=student,
+            defaults={"source": SessionParticipantSource.WAITLIST, "status": SessionParticipantStatus.ACTIVE},
+        )
+        participant.source = SessionParticipantSource.WAITLIST
+        participant.status = SessionParticipantStatus.ACTIVE
+        participant.full_clean()
+        participant.save()
+        entry.status = WaitlistStatus.PROMOTED
+        entry.save(update_fields=["status", "updated_at"])
+        promoted.append(entry)
+        audit(actor, "waitlist.promoted", entry, {"session_id": session.id, "student_id": student.id})
+    if promoted:
+        from notifications.services import notify_waitlist_promotions
+        ids = [entry.id for entry in promoted]
+        transaction.on_commit(lambda: notify_waitlist_promotions(ids))
+    return promoted
+
+
+@transaction.atomic
+def change_client_waitlist(*, session_id, student, join, actor):
+    session = Session.objects.select_for_update(of=("self",)).select_related("group").get(pk=session_id)
+    entry = WaitlistEntry.objects.filter(session=session, student=student).first()
+    if not join:
+        if entry and entry.status in (WaitlistStatus.ACTIVE, WaitlistStatus.SUSPENDED):
+            entry.status = WaitlistStatus.CANCELLED
+            entry.save(update_fields=["status", "updated_at"])
+            audit(actor, "waitlist.cancelled", entry, {"session_id": session.id})
+        return session
+    if not session.requires_booking or not session.group_id:
+        raise ValidationError("Лист ожидания недоступен для этого занятия.")
+    if not session.group.self_booking_enabled:
+        raise ValidationError("Лист ожидания недоступен для этого занятия.")
+    if not student.group_memberships.filter(group_id=session.group_id).filter(
+            Q(effective_from__isnull=True) | Q(effective_from__lte=session.start_at)).exists():
+        raise ValidationError("Участник не состоит в этой группе.")
+    if (session.is_cancelled or timezone.now() >= booking_deadline(session) or
+            session.attendance.exists() or not session.group.is_active or
+            not student.is_active or not student.parent.user.is_active):
+        raise ValidationError("Запись в очередь закрыта.")
+    if session.participants.filter(student=student, status=SessionParticipantStatus.ACTIVE).exists():
+        raise ValidationError("Участник уже записан.")
+    if session_roster_students(session).count() < session.max_participants:
+        raise ValidationError("Есть свободное место: запишитесь на занятие.")
+    if entry is None:
+        entry = WaitlistEntry(session=session, student=student)
+    elif entry.status == WaitlistStatus.ACTIVE:
+        return session
+    elif entry.status == WaitlistStatus.PROMOTED:
+        raise ValidationError("Участник уже был переведён из очереди.")
+    else:
+        entry.created_at = timezone.now()
+    entry.priority = 0
+    entry.status = WaitlistStatus.ACTIVE
+    entry.full_clean()
+    entry.save()
+    audit(actor, "waitlist.created", entry, {"session_id": session.id})
+    return session
+
+
+@transaction.atomic
+def change_client_booking(*, session_id, student, book, actor):
+    session = Session.objects.select_for_update(of=("self",)).select_related("group").get(pk=session_id)
+    now = timezone.now()
+    if not session.requires_booking or not session.group_id or not session.group.is_active or not session.group.self_booking_enabled:
+        raise ValidationError("Для этого занятия самозапись недоступна.")
+    if session.is_cancelled or now >= booking_deadline(session):
+        raise ValidationError("Время записи или отмены уже истекло.")
+    if not student.is_active or not student.parent.user.is_active:
+        raise ValidationError("Участник или клиент неактивен.")
+    if not student.group_memberships.filter(group_id=session.group_id).filter(
+            Q(effective_from__isnull=True) | Q(effective_from__lte=session.start_at)).exists():
+        raise ValidationError("Участник не состоит в этой группе.")
+    if session.attendance.exists():
+        raise ValidationError("После отметки посещения состав менять нельзя.")
+    participant = SessionParticipant.objects.filter(session=session, student=student).first()
+    if book:
+        if session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).exists():
+            promote_open_waitlist(session, actor=actor)
+            participant = SessionParticipant.objects.filter(session=session, student=student).first()
+        if participant is not None and participant.status == SessionParticipantStatus.ACTIVE:
+            return session
+        if session_roster_students(session).count() >= session.max_participants:
+            raise ValidationError("Свободных мест нет.")
+        if participant is None:
+            participant = SessionParticipant(session=session, student=student)
+        participant.status = SessionParticipantStatus.ACTIVE
+        participant.source = SessionParticipantSource.CLIENT
+    else:
+        if participant is None or participant.status != SessionParticipantStatus.ACTIVE:
+            return session
+        participant.status = SessionParticipantStatus.CANCELLED
+    participant.full_clean()
+    participant.save()
+    if book:
+        session.waitlist_entries.filter(student=student, status=WaitlistStatus.ACTIVE).update(
+            status=WaitlistStatus.PROMOTED, updated_at=timezone.now())
+    audit(actor, "session.booking_added" if book else "session.booking_cancelled", participant, {
+        "session_id": session.id, "student_id": student.id,
+    })
+    if not book:
+        promote_open_waitlist(session, actor=actor)
+    return session
 
 
 def split_roster_student_ids(session):
@@ -189,9 +320,9 @@ def sync_split_second_student(session, second_student, *, actor=None):
 @transaction.atomic
 def promote_waitlist_entry(entry, *, actor=None):
     """Promote an active waitlist row into the concrete session roster."""
+    session = Session.objects.select_for_update().get(pk=entry.session_id)
     entry = WaitlistEntry.objects.select_for_update().select_related(
         "session", "student", "student__parent__user").get(pk=entry.pk)
-    session = Session.objects.select_for_update().get(pk=entry.session_id)
     if session.is_cancelled:
         raise ValidationError("cancelled sessions cannot promote waitlist entries")
     require_mutable_split_roster(session)
@@ -237,6 +368,8 @@ def promote_waitlist_entry(entry, *, actor=None):
             "student_id": entry.student_id,
             "participant_id": participant.id,
         })
+    from notifications.services import notify_waitlist_promotions
+    transaction.on_commit(lambda: notify_waitlist_promotions([entry.id]))
     return entry, participant
 
 
@@ -285,10 +418,11 @@ def _duration_minutes(*, start_at, end_at=None, duration_minutes=None):
     return duration_minutes
 
 
-def _tariff_snapshot(session_type, group):
+def _tariff_snapshot(session_type, group, session_type_config=None):
     if group is not None:
         return group.price_minor, group.currency
-    config = SessionTypeConfig.objects.filter(code=session_type, is_active=True).first()
+    config = session_type_config or SessionTypeConfig.objects.filter(
+        code=session_type, is_active=True).first()
     if config is None:
         return None, settings.DEFAULT_CURRENCY
     return config.default_price_minor, config.default_currency
@@ -301,16 +435,17 @@ def _session_type_defaults(session_type):
 @transaction.atomic
 def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, location, max_participants,
                    group=None, session_type=SessionType.GROUP,
+                   session_type_config=None,
                    individual_student=None, manually_modified=False, actor=None,
                    weekly_plan_slot=None, notes="", price_minor=None, currency=None):
-    defaults = _session_type_defaults(session_type)
+    defaults = session_type_config or _session_type_defaults(session_type)
     if duration_minutes is None and end_at is None:
         duration_minutes = defaults.default_duration_minutes if defaults else 60
     duration_minutes = _duration_minutes(
         start_at=start_at, end_at=end_at, duration_minutes=duration_minutes)
     end_at = start_at + timedelta(minutes=duration_minutes)
     check_trainer_conflict(trainer, start_at, end_at)
-    default_price_minor, default_currency = _tariff_snapshot(session_type, group)
+    default_price_minor, default_currency = _tariff_snapshot(session_type, group, defaults)
     if price_minor is None:
         price_minor = default_price_minor
     else:
@@ -330,8 +465,10 @@ def create_session(*, trainer, start_at, end_at=None, duration_minutes=None, loc
     session = Session(
         trainer=trainer, start_at=start_at, end_at=end_at, location=location,
         max_participants=max_participants, group=group,
+        requires_booking=bool(group and group.self_booking_enabled),
         weekly_plan_slot=weekly_plan_slot,
-        session_type=session_type, individual_student=individual_student,
+        session_type=session_type, session_type_config=defaults,
+        individual_student=individual_student,
         is_manually_modified=manually_modified,
         price_minor=price_minor, currency=currency, duration_minutes=duration_minutes,
         notes=notes,
@@ -381,6 +518,7 @@ def _copy_period_rows(params):
         duplicate = Session.objects.filter(
             start_at=target_start,
             session_type=source.session_type,
+            session_type_config=source.session_type_config,
             group_id=source.group_id,
             individual_student_id=source.individual_student_id,
         ).exists()
@@ -480,6 +618,7 @@ def commit_copy_period(*, batch_id, actor, selected_indices):
             max_participants=source.max_participants,
             group=source.group,
             session_type=source.session_type,
+            session_type_config=source.session_type_config,
             individual_student=source.individual_student,
             notes=source.notes,
         )
@@ -556,9 +695,12 @@ def delete_session(session: Session, *, actor=None, force=False):
     return session_id
 
 
+@transaction.atomic
 def edit_single_session(session: Session, *, actor=None, **changes):
     """Rule 4: edit ONE class of a series without touching the rest.
     Marks the session as manually modified so future series edits skip it."""
+    caller_session = session
+    session = Session.objects.select_for_update(of=("self",)).select_related("group").get(pk=session.pk)
     new_trainer = changes.get("substitute_trainer") or changes.get("trainer", session.trainer)
     new_start = changes.get("start_at", session.start_at)
     duration_minutes = _duration_minutes(
@@ -581,19 +723,38 @@ def edit_single_session(session: Session, *, actor=None, **changes):
         default_price, default_currency = _tariff_snapshot(
             changes.get("session_type", session.session_type),
             changes.get("group", session.group),
+            changes.get("session_type_config", session.session_type_config),
         )
         changes["price_minor"] = default_price
         changes.setdefault("currency", default_currency)
     if new_trainer is not None:
         check_trainer_conflict(new_trainer, new_start, new_end, exclude_session_id=session.pk)
+    before = (session.start_at, session.location, session.trainer_id,
+              session.substitute_trainer_id, session.is_cancelled)
+    previous_capacity = session.max_participants
     for field, value in changes.items():
         setattr(session, field, value)
     session.is_manually_modified = True
     session.full_clean(exclude=["template", "group", "individual_student"])
     session.save()
+    after = (session.start_at, session.location, session.trainer_id,
+             session.substitute_trainer_id, session.is_cancelled)
+    if session.requires_booking and before[-1] != session.is_cancelled:
+        status = (WaitlistStatus.SUSPENDED if session.is_cancelled else
+                  WaitlistStatus.ACTIVE if timezone.now() < booking_deadline(session)
+                  else WaitlistStatus.EXPIRED)
+        session.waitlist_entries.filter(status=(
+            WaitlistStatus.ACTIVE if session.is_cancelled else WaitlistStatus.SUSPENDED
+        )).update(status=status, updated_at=timezone.now())
+    if session.max_participants > previous_capacity or (before[-1] and not session.is_cancelled):
+        promote_open_waitlist(session, actor=actor)
+    if before != after:
+        from notifications.services import notify_schedule_change
+        transaction.on_commit(lambda: notify_schedule_change(session, restored=before[-1] and not session.is_cancelled))
     if actor is not None:
         audit(actor, "session.edited", session, {"fields": list(changes.keys())})
-    return session
+    caller_session.refresh_from_db()
+    return caller_session
 
 
 @transaction.atomic
@@ -615,6 +776,14 @@ def restore_session(session: Session, *, actor=None):
     session.is_manually_modified = True
     session.full_clean(exclude=["template", "group", "individual_student"])
     session.save(update_fields=["is_cancelled", "is_manually_modified"])
+    if session.requires_booking:
+        status = (WaitlistStatus.ACTIVE if timezone.now() < booking_deadline(session)
+                  else WaitlistStatus.EXPIRED)
+        session.waitlist_entries.filter(status=WaitlistStatus.SUSPENDED).update(
+            status=status, updated_at=timezone.now())
+        promote_open_waitlist(session, actor=actor)
+    from notifications.services import notify_schedule_change
+    transaction.on_commit(lambda: notify_schedule_change(session, restored=True))
     if actor is not None:
         audit(actor, "session.restored", session, {"is_cancelled": False})
     return session, True

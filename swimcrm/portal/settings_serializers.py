@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from localization.models import DictionaryKey
 from notifications.models import NotificationTemplate
+from scheduling.models import SessionType
 from common.schedule_palette import stored_schedule_color_key, validate_schedule_color_key
 
 from .support import (
@@ -47,6 +48,8 @@ def session_type_payload(session_type):
     return {
         "id": session_type.id,
         "code": session_type.code,
+        "base_type": session_type.base_type,
+        "is_system": session_type.code in SessionType.values,
         "label": session_type.label,
         "default_capacity": session_type.default_capacity,
         "default_price_minor": session_type.default_price_minor,
@@ -62,7 +65,14 @@ def session_type_payload(session_type):
 def apply_session_type(session_type, data):
     data = data.get("session_type") or data
     if "code" in data:
-        session_type.code = data.get("code", "") or ""
+        code = (data.get("code") or "").strip().lower()
+        if session_type.pk and code != session_type.code:
+            raise _field_validation_error("code", "Код типа нельзя изменять после создания.")
+        session_type.code = code
+    if "base_type" in data:
+        if session_type.pk and data["base_type"] != session_type.base_type:
+            raise _field_validation_error("base_type", "Базовый формат нельзя изменять после создания.")
+        session_type.base_type = data["base_type"]
     if "label" in data:
         session_type.label = data.get("label", "") or ""
     if "default_capacity" in data:

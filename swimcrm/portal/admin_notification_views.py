@@ -16,6 +16,10 @@ def _template_payload(template):
         "channel": template.channel,
         "subject": template.subject,
         "body": template.body,
+        "missing_uk_translation": (
+            NotificationRule.objects.filter(template=template, is_active=True).exists()
+            and not template.translations.filter(language_code="uk").exists()
+        ),
     }
 
 

@@ -43,7 +43,7 @@ const runtimeComponents = publicComponents.filter(([name]) => !new Set([
 const runtimeIconNames = new Set([
   'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'ChevronL',
   'ChevronR', 'ClientFamily', 'Download', 'File', 'GroupMembers', 'Home',
-  'Layers', 'Location', 'Logout', 'Pencil', 'Search', 'Settings',
+  'Layers', 'Location', 'Logout', 'Pencil', 'Search', 'Settings', 'Ticket',
   'TrainerWhistle', 'Upload', 'User', 'Users', 'Wallet', 'Waves', 'X',
 ])
 

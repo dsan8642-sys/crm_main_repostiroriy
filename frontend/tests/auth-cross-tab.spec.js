@@ -69,14 +69,14 @@ test('the tab that logs in ignores its own auth broadcast and loads once', async
   const state = { authenticated: false, role: null, meRequests: 0 }
   await installAuthRoutes(context, state)
   await page.goto('/')
-  await expect(page.getByText('Вход в систему')).toBeVisible()
+  await expect(page.locator('#auth-login')).toBeVisible()
   const initialMeRequests = state.meRequests
 
-  await page.getByLabel('Логин, email или телефон').fill('admin')
-  await page.getByLabel('Пароль', { exact: true }).fill('secret-password')
-  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await page.locator('#auth-login').fill('admin')
+  await page.locator('#auth-password').fill('secret-password')
+  await page.getByTestId('auth-submit').click()
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Сегодня' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   await page.waitForTimeout(100)
   expect(state.meRequests).toBe(initialMeRequests)
 })
@@ -93,9 +93,9 @@ test('logout broadcasts an auth generation and clears private data in another ta
   ])
   await expect(secondPage.getByText('Private Admin', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByTestId('logout').first().click()
 
-  await expect(secondPage.getByText('Вход в систему')).toBeVisible()
+  await expect(secondPage.locator('#auth-login')).toBeVisible()
   await expect(secondPage.getByText('Private Admin', { exact: true })).toHaveCount(0)
   await secondPage.close()
 })
@@ -119,7 +119,7 @@ test('focus revalidates /api/me and replaces data after an out-of-band role swit
   await page.bringToFront()
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Dzisiaj' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   await expect(page.getByText('Private Admin', { exact: true })).toHaveCount(0)
   await expect(page.locator('html')).toHaveAttribute('lang', 'pl')
   expect(state.meRequests).toBeGreaterThan(initialMeRequests)
@@ -149,12 +149,12 @@ test('a late private bootstrap response cannot restore data after cross-tab logo
   await secondPage.goto('/?role=admin&view=overview')
   await referenceStarted
 
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
-  await expect(secondPage.getByText('Вход в систему')).toBeVisible()
+  await page.getByTestId('logout').first().click()
+  await expect(secondPage.locator('#auth-login')).toBeVisible()
   releaseReference()
 
   await expect(secondPage.getByText('Private Admin', { exact: true })).toHaveCount(0)
   await secondPage.waitForTimeout(100)
-  await expect(secondPage.getByText('Вход в систему')).toBeVisible()
+  await expect(secondPage.locator('#auth-login')).toBeVisible()
   await secondPage.close()
 })

@@ -147,7 +147,7 @@ DATASETS = {
     "clients": lambda: (Student.objects.select_related("parent__user").prefetch_related(
         "groups", "subscriptions__subscription_type"), _client_row),
     "payments": lambda: (Payment.objects.select_related("student__parent"), _payment_row),
-    "attendance": lambda: (AttendanceRecord.objects.select_related(
+    "attendance": lambda: (AttendanceRecord.objects.filter(status__isnull=False).select_related(
         "session__group", "session__trainer__user", "student__parent"), _attendance_row),
     "groups": lambda: (Group.objects.select_related("default_trainer__user"), _group_row),
     "trainers": lambda: (Trainer.objects.select_related("user"), _trainer_row),

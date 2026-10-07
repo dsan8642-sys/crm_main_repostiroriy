@@ -66,18 +66,61 @@ def student_balance(student, currency=None) -> Money:
     return Money(charged - reversed_charges - paid, currency)
 
 
-def charge_statuses(student, currency=None):
-    """FIFO-allocate confirmed payments to charges (by due date) for per-charge status."""
+def family_balances(parent_ids, currency=None):
+    """One monetary balance per account; include archived participants' history."""
     currency = currency or settings.DEFAULT_CURRENCY
-    today = timezone.localdate()
+    parent_ids = list(parent_ids)
+    totals = {parent_id: 0 for parent_id in parent_ids}
+    for model, parent_field, sign, extra in (
+        (Charge, "student__parent_id", 1, {}),
+        (ChargeReversal, "charge__student__parent_id", -1, {}),
+        (Payment, "student__parent_id", -1, {"status": PaymentStatus.CONFIRMED}),
+    ):
+        for row in model.objects.filter(
+            **{f"{parent_field}__in": parent_ids}, currency=currency, **extra,
+        ).values(parent_field).annotate(total=Sum("amount_minor")):
+            totals[row[parent_field]] += sign * (row["total"] or 0)
+    return totals
+
+
+def family_balance(parent, currency=None) -> Money:
+    currency = currency or settings.DEFAULT_CURRENCY
+    return Money(family_balances([parent.pk], currency)[parent.pk], currency)
+
+
+def family_charge_statuses(parent, currency=None):
+    """Allocate the shared payment pool across all family charges in FIFO order."""
+    currency = currency or settings.DEFAULT_CURRENCY
     charges = list(Charge.objects.filter(
-        student=student, currency=currency,
+        student__parent=parent, currency=currency,
     ).select_related("reversal").order_by("due_date", "id"))
-    pool = (Payment.objects.filter(student=student, currency=currency,
-                                   status=PaymentStatus.CONFIRMED)
-            .aggregate(t=Sum("amount_minor"))["t"] or 0)
+    pool = (Payment.objects.filter(
+        student__parent=parent, currency=currency, status=PaymentStatus.CONFIRMED,
+    ).aggregate(t=Sum("amount_minor"))["t"] or 0)
+    return allocate_charge_statuses(charges, pool, timezone.localdate())
+
+
+def charge_statuses(student, currency=None):
+    """Statuses of one participant's charges, using the shared family pool."""
+    return [row for row in family_charge_statuses(student.parent, currency)
+            if row.charge.student_id == student.pk]
+
+
+def allocate_charge_statuses(charges, pool, today):
+    """Apply visit compensation before allocating real payments in FIFO order."""
+    visit_credits = {}
+    for ch in charges:
+        if ch.amount_minor < 0:
+            if ch.attendance_id is not None:
+                visit_credits[ch.attendance_id] = (
+                    visit_credits.get(ch.attendance_id, 0) - ch.amount_minor)
+            else:
+                pool -= ch.amount_minor
     out = []
     for ch in charges:
+        if ch.amount_minor <= 0:
+            out.append(ChargeStatus(charge=ch, paid_minor=0, is_overdue=False))
+            continue
         if hasattr(ch, "reversal"):
             out.append(ChargeStatus(
                 charge=ch,
@@ -86,10 +129,17 @@ def charge_statuses(student, currency=None):
                 is_reversed=True,
             ))
             continue
-        applied = min(pool, ch.amount_minor)
+        credited = min(visit_credits.get(ch.attendance_id, 0), ch.amount_minor)
+        if credited:
+            visit_credits[ch.attendance_id] -= credited
+        applied = min(pool, ch.amount_minor - credited)
         pool -= applied
-        out.append(ChargeStatus(charge=ch, paid_minor=applied,
-                                is_overdue=(ch.due_date < today and applied < ch.amount_minor)))
+        covered = credited + applied
+        out.append(ChargeStatus(
+            charge=ch, paid_minor=covered,
+            is_overdue=(ch.due_date < today and covered < ch.amount_minor),
+            is_reversed=(credited == ch.amount_minor),
+        ))
     return out
 
 

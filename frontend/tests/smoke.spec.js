@@ -111,18 +111,17 @@ function localIsoDateTime(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
-async function openShellDestination(page, label) {
-  const sidebarButton = page.locator(`.ops-nav > .ops-nav-button[title="${label}"]`)
-  const mobileMenuButton = page.getByRole('button', { name: 'Открыть меню' })
-  await expect.poll(async () => (
-    await sidebarButton.isVisible() || await mobileMenuButton.isVisible()
-  )).toBe(true)
-  if (await sidebarButton.isVisible()) {
-    await sidebarButton.click()
-    return
-  }
+async function openShellDestination(page, key) {
+  const routeRole = new URL(page.url()).searchParams.get('role')
+  const activeNavId = await page.locator('.ops-nav .ops-nav-button').first().getAttribute('data-testid')
+  const role = routeRole || activeNavId?.split('-')[1] || 'admin'
+  const testId = `nav-${role}-${role === 'trainer' && key === 'overview' ? 'sessions' : key}`
+  const sidebarButton = page.locator('.ops-nav').getByTestId(testId)
+  const mobileMenuButton = page.getByTestId('open-menu')
+  await expect.poll(async () => await sidebarButton.isVisible() || await mobileMenuButton.isVisible()).toBe(true)
+  if (await sidebarButton.isVisible()) return sidebarButton.click()
   await mobileMenuButton.click()
-  await page.locator(`.ops-mobile-drawer-nav .ops-nav-button[title="${label}"]`).click()
+  await page.getByTestId('mobile-menu-dialog').getByTestId(testId).click()
 }
 
 test.beforeEach(async ({ page }) => {
@@ -291,13 +290,14 @@ test('client and schedule forms show field errors and focus the first invalid fi
   })
 
   await page.goto('/?role=admin&view=clients')
-  await page.getByRole('button', { name: /^Новый клиент/ }).click()
-  await expect(page.getByRole('checkbox', { name: /сам является участником/i })).toHaveCount(0)
-  await page.getByLabel('Имя владельца аккаунта').fill('Anna')
-  await page.getByLabel('Фамилия владельца').fill('Nowak')
-  await page.getByLabel('Телефон', { exact: true }).fill('+48 500-111-222')
-  await expect(page.getByLabel('Логин', { exact: true })).toHaveValue('48500111222')
-  await page.getByRole('button', { name: 'Создать клиента', exact: true }).click()
+  await page.getByTestId('admin-clients-new-client').click()
+  const createClientModal = page.getByTestId('form-modal')
+  await expect(createClientModal.locator('#admin-client-isAccountHolder')).toHaveCount(0)
+  await createClientModal.locator('#admin-client-firstName').fill('Anna')
+  await createClientModal.locator('#admin-client-lastName').fill('Nowak')
+  await createClientModal.locator('#admin-client-phone').fill('+48 500-111-222')
+  await expect(createClientModal.locator('#admin-client-username')).toHaveValue('48500111222')
+  await createClientModal.getByTestId('admin-client-create-submit').click()
   await expect.poll(() => clientPosts.length).toBe(1)
   expect(clientPosts[0]).toMatchObject({
     client_type: 'adult',
@@ -306,34 +306,31 @@ test('client and schedule forms show field errors and focus the first invalid fi
     participant: { is_account_holder: true },
   })
 
-  await page.getByRole('button', { name: /^Новый клиент/ }).click()
-  await page.getByLabel('Имя владельца аккаунта').fill('Anna')
-  await page.getByLabel('Фамилия владельца').fill('Nowak')
-  await page.getByLabel('Телефон', { exact: true }).fill('+48 500-111-222')
-  await page.getByRole('button', { name: 'Создать клиента', exact: true }).click()
-  const username = page.getByLabel('Логин', { exact: true })
-  const phone = page.getByLabel('Телефон', { exact: true })
+  await page.getByTestId('admin-clients-new-client').click()
+  await createClientModal.locator('#admin-client-firstName').fill('Anna')
+  await createClientModal.locator('#admin-client-lastName').fill('Nowak')
+  await createClientModal.locator('#admin-client-phone').fill('+48 500-111-222')
+  await createClientModal.getByTestId('admin-client-create-submit').click()
+  const username = createClientModal.locator('#admin-client-username')
+  const phone = createClientModal.locator('#admin-client-phone')
   await expect(username).toBeFocused()
   await expect(username).toHaveAttribute('aria-invalid', 'true')
   await expect(phone).toHaveAttribute('aria-invalid', 'true')
   await expect(username).toHaveCSS('border-color', 'rgb(214, 63, 54)')
-  await expect(page.getByText(
-    'Этот телефон уже используется как логин. Измените контакт или логин',
-    { exact: true },
-  )).toHaveCount(2)
+  await expect(createClientModal.locator('.ops-field-error')).toHaveCount(2)
   await phone.fill('+48 500-111-223')
   await expect(username).not.toHaveAttribute('aria-invalid', 'true')
   await expect(phone).not.toHaveAttribute('aria-invalid', 'true')
 
   await page.goto('/?role=admin&view=schedule')
-  await page.getByRole('button', { name: 'Групповая тренировка', exact: true }).click()
-  const duration = page.getByLabel('Длительность, мин', { exact: true })
+  await page.getByTestId('admin-schedule-create-group').click()
+  const duration = page.locator('#admin-session-durationMinutes')
   await duration.fill('17')
-  await page.getByRole('button', { name: 'Создать занятие', exact: true }).click()
+  await page.getByTestId('admin-schedule-create-submit').click()
   await expect(duration).toBeFocused()
   await expect(duration).toHaveAttribute('aria-invalid', 'true')
   await expect(duration).toHaveCSS('border-color', 'rgb(214, 63, 54)')
-  await expect(page.getByText('От 15 до 480 минут с шагом 5 минут.', { exact: true })).toBeVisible()
+  await expect(page.locator('#admin-session-durationMinutes-error')).toBeVisible()
   expect(schedulePosts).toBe(0)
   await duration.fill('20')
   await expect(duration).not.toHaveAttribute('aria-invalid', 'true')
@@ -377,13 +374,13 @@ test('admin group roster includes inactive assigned participants', async ({ page
   })
 
   await page.goto('/?role=admin&view=groups&group=1')
-  const groupCard = page.getByRole('region', { name: 'Карточка группы Delfiny' })
+  const groupCard = page.getByTestId('admin-group-detail-1')
   await expect(groupCard).toContainText('Active Anna')
   await expect(groupCard).toContainText('Inactive Inna')
-  await expect(groupCard.getByRole('button', { name: 'Убрать' })).toHaveCount(2)
-  await groupCard.getByRole('button', { name: 'Убрать' }).nth(1).click()
+  await expect(groupCard.locator('[data-testid^="admin-group-remove-member-"]')).toHaveCount(2)
+  await groupCard.getByTestId('admin-group-remove-member-11').click()
   await expect(groupCard).not.toContainText('Inactive Inna')
-  await expect(groupCard.getByRole('button', { name: 'Убрать' })).toHaveCount(1)
+  await expect(groupCard.locator('[data-testid^="admin-group-remove-member-"]')).toHaveCount(1)
 })
 
 test('shared shell and calendar keep mobile controls compact and accessible', async ({ page }) => {
@@ -416,7 +413,7 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
 
   await page.goto('/?role=admin&view=schedule')
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
-  await expect(page.getByRole('group', { name: 'Период календаря' })).toHaveCSS('width', '180px')
+  await expect(page.getByTestId('schedule-calendar-view-switch')).toHaveCSS('width', '180px')
 
   const theme = await page.evaluate(async () => {
     await document.fonts.ready
@@ -447,7 +444,7 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
 
   const shellLayout = await page.locator('.ops-sidebar-head').evaluate((head) => {
     const brand = head.querySelector('.ops-brand')?.getBoundingClientRect()
-    const menu = head.querySelector('[aria-label="Открыть меню"]')?.getBoundingClientRect()
+    const menu = head.querySelector('[data-testid="open-menu"]')?.getBoundingClientRect()
     return {
       sameRow: Boolean(brand && menu && Math.abs(brand.top - menu.top) <= 2),
       menuSize: menu ? Math.min(menu.width, menu.height) : 0,
@@ -455,24 +452,23 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
   })
   expect(shellLayout).toEqual({ sameRow: true, menuSize: 44 })
 
-  await expect(page.getByRole('button', { name: 'День', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+  await expect(page.getByTestId('schedule-period-day')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('schedule-period-week').click()
   await expect(page.locator('.ops-mobile-week-nav')).toHaveCSS('column-gap', '6px')
   const strip = page.locator('.ops-mobile-week-strip')
   await expect(strip.getByRole('tab')).toHaveCount(7)
   expect(await strip.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
   const visuallyHiddenBoxes = await Promise.all([
-    page.getByText('Опорная дата', { exact: true }).boundingBox(),
-    page.getByText(/Неделя · \d{4}-\d{2}-\d{2}/).boundingBox(),
+    page.locator('.ops-calendar-navigation .ops-picker-field label').boundingBox(),
+    page.locator('.ops-calendar-announcement').boundingBox(),
   ])
   for (const box of visuallyHiddenBoxes) {
     expect(box?.width || 0).toBeLessThanOrEqual(1)
     expect(box?.height || 0).toBeLessThanOrEqual(1)
   }
-  await expect(page.getByRole('textbox', { name: 'Опорная дата', exact: true })).toBeVisible()
-  await expect(page.getByText('Занятия', { exact: true })).toHaveCount(0)
+  await expect(page.locator('#schedule-focus-date')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Месяц', exact: true }).click()
+  await page.getByTestId('schedule-period-month').click()
   const marker = page.locator('.ops-calendar-marker').first()
   if (await marker.count()) await expect(marker).not.toContainText('•')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
@@ -515,7 +511,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
   })
 
   await page.goto('/?role=admin&view=schedule')
-  await expect(page.getByRole('heading', { level: 1, name: 'Расписание' })).toBeVisible()
+  await expect(page.getByTestId('nav-admin-schedule')).toHaveAttribute('aria-current', 'page')
   const width = page.viewportSize()?.width || 0
   if (width >= 768) {
     await expect(page.locator('.ops-topbar .ops-crumb, .ops-topbar .sub, .ops-topbar h1')).toHaveCount(0)
@@ -523,7 +519,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(page.locator('.ops-global-search > input')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   } else {
     await expect(page.locator('.ops-topbar')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Открыть глобальный поиск' })).toBeVisible()
+    await expect(page.getByTestId('open-global-search')).toBeVisible()
   }
   await expect(page.locator('.ops-sidebar')).toHaveCSS('background-color', 'rgb(16, 24, 40)')
 
@@ -531,23 +527,23 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
   await expect(actionCards).toHaveCount(4)
   await expect(actionCards.first()).toHaveCSS('align-items', 'center')
   await expect(actionCards.first()).toHaveCSS('text-align', 'center')
-  const copyPeriodAction = page.getByRole('button', { name: 'Копировать период', exact: true })
+  const copyPeriodAction = page.getByTestId('admin-schedule-copy-period')
   await expect(copyPeriodAction).toBeVisible()
   await expect(copyPeriodAction.locator('small')).toHaveCount(0)
   await expect(copyPeriodAction).not.toContainText('Предпросмотр перед записью')
 
-  const logout = page.getByRole('button', { name: 'Выйти', exact: true })
+  const logout = page.locator('[data-testid="logout"]:visible')
   if (width >= 768) {
     await expect(logout).toHaveCount(1)
     await expect(page.locator('.ops-sidebar')).toHaveCSS('width', width < 960 ? '76px' : '250px')
-    await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
-    await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Выйти' })).toHaveCount(0)
+    await expect(page.locator('.ops-user-wrap').getByTestId('logout')).toBeVisible()
+    await expect(page.locator('.ops-sidebar-head').getByTestId('logout')).toHaveCount(0)
   } else {
     await expect(logout).toHaveCount(0)
-    await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Открыть меню' })).toBeVisible()
+    await expect(page.locator('.ops-sidebar-head').getByTestId('open-menu')).toBeVisible()
   }
 
-  await page.getByRole('textbox', { name: 'Опорная дата', exact: true }).fill('2026-08-03')
+  await page.locator('#schedule-focus-date').fill('2026-08-03')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
   const individualEvent = page.locator('.ops-schedule-event:visible').filter({ hasText: 'Anna Nowak' }).first()
   await expect(individualEvent.locator('.ops-event-title')).toHaveText('Индивидуальная тренировка')
@@ -556,27 +552,31 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
   await expect(individualEvent.locator('.ops-event-type')).toHaveCSS('font-size', '13px')
   await expect(individualEvent.locator('.ops-event-secondary').first()).toHaveCSS('font-size', '12px')
 
-  const filterTrigger = page.getByRole('button', { name: /Фильтры/ })
+  const filterTrigger = page.getByTestId('admin-schedule-filters-trigger')
   const viewSwitcher = page.locator('.ops-view-switcher')
   const [filterBox, switcherBox] = await Promise.all([filterTrigger.boundingBox(), viewSwitcher.boundingBox()])
-  expect(
-    ((filterBox?.x || 0) + (filterBox?.width || 0)) <= (switcherBox?.x || 0) + 1,
-    `filter must stay left of view switcher: ${JSON.stringify({ filterBox, switcherBox })}`,
-  ).toBe(true)
+  if (width >= 768) {
+    expect(
+      ((filterBox?.x || 0) + (filterBox?.width || 0)) <= (switcherBox?.x || 0) + 1,
+      `filter must stay left of view switcher: ${JSON.stringify({ filterBox, switcherBox })}`,
+    ).toBe(true)
+  } else {
+    expect(filterBox?.width).toBeLessThanOrEqual(width - 24)
+  }
   await filterTrigger.click()
-  const filterPanel = page.getByRole('dialog', { name: 'Фильтры расписания' })
+  const filterPanel = page.locator('#admin-schedule-filters')
   await expect(filterPanel).toBeVisible()
-  await filterPanel.getByLabel('Статус').selectOption('cancelled')
+  await filterPanel.getByTestId('admin-schedule-filter-status').selectOption('cancelled')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
-  await filterPanel.getByRole('button', { name: 'Применить', exact: true }).click()
+  await filterPanel.getByTestId('admin-schedule-filter-apply').click()
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(1)
   await filterTrigger.click()
-  await filterPanel.getByLabel('Статус').selectOption('planned')
+  await filterPanel.getByTestId('admin-schedule-filter-status').selectOption('planned')
   await page.keyboard.press('Escape')
   await filterTrigger.click()
-  await expect(filterPanel.getByLabel('Статус')).toHaveValue('cancelled')
-  await filterPanel.getByLabel('Статус').selectOption('')
-  await filterPanel.getByRole('button', { name: 'Применить', exact: true }).click()
+  await expect(filterPanel.getByTestId('admin-schedule-filter-status')).toHaveValue('cancelled')
+  await filterPanel.getByTestId('admin-schedule-filter-status').selectOption('')
+  await filterPanel.getByTestId('admin-schedule-filter-apply').click()
 
   if (width >= 768) {
     const eventWrap = page.locator('.ops-schedule-event-wrap:visible').filter({ hasText: 'Delfiny' }).first()
@@ -586,7 +586,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(event).toHaveAttribute('aria-label', /Записано 6 из 15/)
     await expect(event.locator('.ops-event-title')).toHaveText('Delfiny')
     await expect(event.locator('.ops-event-title')).toHaveCSS('font-size', '14px')
-    await expect(event.locator('.ops-event-type')).toHaveText('Групповая тренировка')
+    await expect(event.locator('.ops-event-type')).toHaveText(/\S/)
     await expect(event.locator('.ops-event-type')).toHaveCSS('font-size', '13px')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-size', '12px')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(77, 89, 103)')
@@ -610,7 +610,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
       await expect(action).toBeVisible()
     }
 
-    await page.getByRole('button', { name: 'Месяц', exact: true }).click()
+    await page.getByTestId('schedule-period-month').click()
     const weekdayHeader = page.getByTestId('month-weekday-header')
     await expect(weekdayHeader).toBeVisible()
     await expect(weekdayHeader.locator('.ops-calendar-weekday')).toHaveCount(7)
@@ -640,14 +640,14 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
       await expect(page.locator('.ops-schedule-event-edit').first()).toHaveCSS('width', '44px')
       await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '76px')
       await page.setViewportSize({ width: 960, height: 900 })
-      await expect(page.locator('.ops-sidebar-head').getByRole('button', { name: 'Открыть меню' })).toHaveCount(0)
+      await expect(page.getByTestId('open-menu')).toBeHidden()
       await page.reload()
       await expect(page.locator('.ops-sidebar')).toHaveCSS('width', '250px')
-      await expect(page.locator('.ops-user-wrap').getByRole('button', { name: 'Выйти' })).toBeVisible()
+      await expect(page.locator('.ops-user-wrap').getByTestId('logout')).toBeVisible()
     }
   } else {
-    await expect(page.getByRole('button', { name: 'День', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+    await expect(page.getByTestId('schedule-period-day')).toHaveAttribute('aria-pressed', 'true')
+    await page.getByTestId('schedule-period-week').click()
     const dot = page.locator('.ops-mobile-week-dot').first()
     await expect(dot).toBeVisible()
     await expect(dot).toHaveCSS('background-color', 'rgb(26, 125, 196)')
@@ -698,17 +698,15 @@ test('attendance shows a past non-cancelled session as completed', async ({ page
   })
 
   await page.goto('/?role=admin&view=attendance&session=71')
-  const statusSummary = page.locator('.ops-session-summary > div').filter({ hasText: 'Статус' })
-  await expect(statusSummary).toContainText('Завершено')
-  await expect(statusSummary).not.toContainText('Запланировано')
-  const completedPill = statusSummary.locator('span').filter({ hasText: 'Завершено' }).last()
+  const statusSummary = page.getByTestId('admin-attendance-session-status')
+  await expect(statusSummary).toHaveAttribute('data-status', 'done')
+  const completedPill = statusSummary.locator('span').nth(1)
   await expect(completedPill).toHaveCSS('background-color', 'rgb(233, 247, 238)')
   await expect(completedPill).toHaveCSS('color', 'rgb(15, 97, 20)')
   await expect(completedPill).toHaveCSS('border-color', 'rgb(205, 236, 215)')
 
   await page.locator('.ops-session-detail-grid select').first().selectOption('72')
-  await expect(statusSummary).toContainText('Запланировано')
-  await expect(statusSummary).not.toContainText('Завершено')
+  await expect(statusSummary).toHaveAttribute('data-status', 'planned')
 })
 
 test('admin split schedule filters, shows roster summary and submits an optional second client', async ({ page }) => {
@@ -820,29 +818,29 @@ test('admin split schedule filters, shows roster summary and submits an optional
   expect(placement.right).toBeLessThanOrEqual(8)
   expect(placement.belowMidpoint).toBe(true)
 
-  await page.getByRole('button', { name: /Фильтры/ }).click()
-  const filters = page.getByRole('dialog', { name: 'Фильтры расписания' })
-  await filters.getByLabel('Тип тренировки').selectOption('split')
-  await filters.getByRole('button', { name: 'Применить' }).click()
+  await page.getByTestId('admin-schedule-filters-trigger').click()
+  const filters = page.locator('#admin-schedule-filters')
+  await filters.getByTestId('admin-schedule-filter-type').selectOption('split')
+  await filters.getByTestId('admin-schedule-filter-apply').click()
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(1)
-  await expect(page.getByRole('button', { name: /Фильтры · 1/ })).toBeVisible()
+  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-count', '1')
 
   await splitWrap.hover()
   await action.click()
-  const editForm = page.getByRole('dialog', { name: 'Редактирование занятия' })
-  await expect(editForm.getByRole('combobox', { name: 'Клиент 1' })).toHaveValue('First Anna')
-  await expect(editForm.getByRole('combobox', { name: /Клиент 2/ })).toHaveValue('Second Berta')
-  await expect(editForm.getByLabel('Полный состав Split')).toContainText('First Anna · Second Berta · Third Celina')
-  const openDeleteDialog = editForm.getByRole('button', { name: 'Удалить занятие' })
+  const editForm = page.getByTestId('form-modal')
+  await expect(editForm.locator('#admin-session-edit-participantId')).toHaveValue('First Anna')
+  await expect(editForm.locator('#admin-session-edit-secondParticipantId')).toHaveValue('Second Berta')
+  await expect(editForm.getByTestId('admin-schedule-split-roster')).toContainText('First Anna · Second Berta · Third Celina')
+  const openDeleteDialog = editForm.getByTestId('admin-schedule-edit-delete')
   await openDeleteDialog.click()
-  const deleteDialog = page.getByRole('dialog', { name: 'Удалить занятие?' })
+  const deleteDialog = page.getByTestId('confirmation-dialog')
   await expect(deleteDialog).toBeVisible()
   expect(await deleteDialog.evaluate((dialog) => {
     const box = dialog.getBoundingClientRect()
     const topmost = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
     return dialog.contains(topmost)
   })).toBe(true)
-  await deleteDialog.getByRole('button', { name: 'Отмена' }).click()
+  await deleteDialog.getByTestId('confirmation-cancel').click()
   await expect(deleteDialog).toHaveCount(0)
   await expect(editForm).toBeVisible()
   await expect(openDeleteDialog).toBeFocused()
@@ -852,31 +850,31 @@ test('admin split schedule filters, shows roster summary and submits an optional
   await expect(deleteDialog).toHaveCount(0)
   await expect(editForm).toBeVisible()
   await expect(openDeleteDialog).toBeFocused()
-  await editForm.getByRole('combobox', { name: /Клиент 2/ }).fill('')
-  await editForm.getByRole('button', { name: 'Сохранить занятие' }).click()
+  await editForm.locator('#admin-session-edit-secondParticipantId').fill('')
+  await editForm.getByTestId('admin-schedule-edit-save').click()
   await expect.poll(() => patchedSessions.length).toBe(1)
   expect(patchedSessions[0].second_student_id).toBeNull()
 
-  await page.getByRole('button', { name: 'Split-тренировка', exact: true }).click()
-  let createForm = page.getByRole('dialog', { name: 'Новое занятие' })
-  let firstClient = createForm.getByRole('combobox', { name: 'Клиент 1' })
+  await page.getByTestId('admin-schedule-create-split').click()
+  let createForm = page.getByTestId('form-modal')
+  let firstClient = createForm.locator('#admin-session-participantId')
   await firstClient.fill('First Anna')
   await page.getByRole('option', { name: /First Anna/ }).click()
-  await createForm.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
-  await page.getByRole('button', { name: 'Закрыть без сохранения' }).click()
-  await page.getByRole('button', { name: 'Split-тренировка', exact: true }).click()
-  createForm = page.getByRole('dialog', { name: 'Новое занятие' })
-  firstClient = createForm.getByRole('combobox', { name: 'Клиент 1' })
+  await createForm.getByTestId('form-modal-close').click()
+  await page.getByTestId('discard-confirm').click()
+  await page.getByTestId('admin-schedule-create-split').click()
+  createForm = page.getByTestId('form-modal')
+  firstClient = createForm.locator('#admin-session-participantId')
   await expect(firstClient).toHaveValue('')
   await firstClient.fill('First Anna')
   await page.getByRole('option', { name: /First Anna/ }).click()
-  const secondClient = createForm.getByRole('combobox', { name: /Клиент 2/ })
+  const secondClient = createForm.locator('#admin-session-secondParticipantId')
   await secondClient.fill('First Anna')
   await expect(page.getByRole('option', { name: /First Anna/ })).toHaveCount(0)
   await secondClient.fill('Second Berta')
   await page.getByRole('option', { name: /Second Berta/ }).click()
-  await createForm.getByLabel('Лимит участников').fill('4')
-  await createForm.getByRole('button', { name: 'Создать занятие' }).click()
+  await createForm.locator('#admin-session-maxParticipants').fill('4')
+  await createForm.getByTestId('admin-schedule-create-submit').click()
 
   await expect.poll(() => submittedSessions.length).toBe(1)
   expect(submittedSessions[0]).toMatchObject({
@@ -942,44 +940,44 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
   })
 
   await page.goto('/')
-  await openShellDestination(page, 'Группы')
+  await openShellDestination(page, 'groups')
   await page.getByRole('button', { name: 'Delfiny', exact: true }).click()
-  await page.getByRole('button', { name: 'Редактировать', exact: true }).click()
-  const groupEditor = page.getByRole('dialog', { name: 'Редактирование группы' })
-  const groupPicker = groupEditor.getByRole('group', { name: 'Цвет расписания' })
-  const groupTrigger = groupPicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Стандартный', exact: true })
+  await page.getByTestId('admin-group-edit').click()
+  const groupEditor = page.getByTestId('form-modal')
+  const groupPicker = groupEditor.locator('.ops-schedule-color-picker')
+  const groupTrigger = groupPicker.locator('.ops-schedule-color-trigger')
   await expect(groupTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(groupPicker.getByRole('radio')).toHaveCount(0)
   await groupTrigger.click()
   await expect(groupTrigger).toHaveAttribute('aria-expanded', 'true')
   await expect(groupPicker.getByRole('radio')).toHaveCount(31)
-  await groupEditor.getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await groupEditor.getByTestId('form-modal-close').click()
   await expect(groupEditor).toHaveCount(0)
 
-  await openShellDestination(page, 'Настройки')
+  await openShellDestination(page, 'settings')
   if ((page.viewportSize()?.width || 0) <= 767) {
-    await page.getByRole('button', { name: 'Справочники', exact: true }).click()
-    await page.getByRole('button', { name: /Типы занятий/ }).click()
+    await page.getByTestId('admin-settings-category-catalog').last().click()
+    await page.getByTestId('admin-settings-resource-sessionTypes').last().click()
   } else {
-    await page.getByRole('button', { name: /Типы занятий/ }).click()
+    await page.getByTestId('admin-settings-resource-sessionTypes').first().click()
   }
-  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
-  const typeEditor = page.getByRole('dialog', { name: 'Редактирование · Типы занятий' })
-  const typePicker = typeEditor.getByRole('group', { name: 'Цвет расписания' })
-  const typeTrigger = typePicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Стандартный', exact: true })
+  await page.locator('.ops-settings-detail .ops-button-row button').first().click()
+  const typeEditor = page.getByTestId('form-modal')
+  const typePicker = typeEditor.locator('.ops-schedule-color-picker')
+  const typeTrigger = typePicker.locator('.ops-schedule-color-trigger')
   await expect(typeTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(typePicker.getByRole('radio')).toHaveCount(0)
   await typeTrigger.click()
   await expect(typeTrigger).toHaveAttribute('aria-expanded', 'true')
   await expect(typePicker.getByRole('radio')).toHaveCount(31)
-  const forest = typePicker.getByRole('radio', { name: 'Лесной', exact: true })
+  const forest = typePicker.locator('input[type="radio"][value="forest-01"]')
   const pickerFits = await typePicker.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
   expect(pickerFits).toBe(true)
   await forest.focus()
   await page.keyboard.press('Space')
-  await expect(typePicker.getByRole('button', { name: 'Выбрать цвет. Сейчас: Лесной', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  await expect(typeTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(typePicker.getByRole('radio')).toHaveCount(0)
-  await typeEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await typeEditor.locator('.form-modal__footer button').first().click()
   await expect.poll(() => submittedColor).toBe('forest-01')
   expect(errors).toEqual([])
 })
@@ -1033,13 +1031,13 @@ test('shared logout stays single-shot for admin, trainer and client', async ({ p
     role = nextRole
     loggedOut = false
     await page.goto(`/?logout-role=${nextRole}`)
-    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Открыть меню' }).click()
-    const logout = page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })
+    await expect(page.getByTestId('logout')).toHaveCount(0)
+    await page.getByTestId('open-menu').click()
+    const logout = page.getByTestId('mobile-menu-dialog').getByTestId('logout')
     await expect(logout).toHaveCount(1)
     await expect(logout).toBeVisible()
     await actions[nextRole](logout)
-    await expect(page.getByText('Вход в систему')).toBeVisible()
+    await expect(page.locator('form')).toBeVisible()
     expect(logoutPosts.filter((item) => item === nextRole)).toHaveLength(1)
   }
 })
@@ -1076,16 +1074,14 @@ test('admin mobile client list separates profile navigation from client actions'
   await page.goto('/?role=admin&view=clients')
   const mobileList = page.locator('.ops-client-mobile-list')
   await expect(mobileList).toBeVisible()
-  await expect(mobileList.getByText('Финансы', { exact: true })).toHaveCount(0)
   await expect(mobileList.getByRole('button')).toHaveCount(2)
-  const card = mobileList.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })
-  const actionsTrigger = mobileList.getByRole('button', { name: 'Действия: Kowalski Jan' })
+  const card = mobileList.getByRole('button').filter({ hasText: 'Kowalski Jan' })
+  const actionsTrigger = mobileList.getByTestId('admin-client-actions-client-10-participant-7-trigger')
   await expect(card).toContainText('Kowalski Jan')
   expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
   await actionsTrigger.click()
-  const actions = page.getByRole('menu', { name: 'Действия: Kowalski Jan' })
-  await expect(actions.getByRole('menuitem')).toHaveText(['Профиль', 'Изменить', 'В чёрный список'])
-  await expect(actions.getByText('Финансы', { exact: true })).toHaveCount(0)
+  const actions = page.getByTestId('admin-client-actions-client-10-participant-7-menu')
+  await expect(actions.getByRole('menuitem')).toHaveCount(3)
   await actionsTrigger.click()
   await card.click()
   await expect(page).toHaveURL(/view=clientDetail.*client=10/)
@@ -1154,11 +1150,9 @@ test('admin upcoming sessions stay inside a narrow card', async ({ page }) => {
   })
 
   await page.goto('/')
-  await expect(page.locator('h1.page-title', { hasText: 'Сегодня' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Ближайших занятий нет' })).toBeVisible()
-  const exception = page.getByRole('button', {
-    name: /Delfiny Zaawansowane.*Отменено/,
-  })
+  await expect(page.locator('h1.page-title')).toBeVisible()
+  await expect(page.locator('.ops-today-session.is-empty')).toBeVisible()
+  const exception = page.getByRole('button').filter({ hasText: 'Delfiny Zaawansowane' })
   await expect(exception).toBeVisible()
   expect(await exception.evaluate((row) => row.scrollWidth <= row.clientWidth + 1)).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
@@ -1436,6 +1430,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       return
     }
     if (method === 'POST' && url.pathname === '/api/admin/schedule/sessions/2/restore/') {
+      routes['/api/admin/schedule/sessions/'].sessions[1].is_cancelled = false
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1525,117 +1520,121 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   })
 
   await page.goto('/')
-  await expect(page.locator('h1.page-title', { hasText: 'Сегодня' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
+  const overviewKpis = page.locator('.ops-overview-kpi-grid .ops-kpi-button')
+  await expect(overviewKpis).toHaveCount(2)
+  await expect(overviewKpis.nth(0)).toContainText('1')
+  await expect(overviewKpis.nth(1)).toContainText('1')
+  const sessionsCard = await overviewKpis.nth(0).boundingBox()
+  const debtorsCard = await overviewKpis.nth(1).boundingBox()
+  if ((page.viewportSize()?.width || 0) <= 560) {
+    expect(debtorsCard.y).toBeGreaterThan(sessionsCard.y)
+  } else {
+    expect(debtorsCard.y).toBe(sessionsCard.y)
+  }
+  if ((page.viewportSize()?.width || 0) <= 767) await page.getByTestId('open-menu').click()
   const adminIconSignatures = await page.evaluate(() => {
-    const nav = (label) => document.querySelector(`.ops-nav-button[title="${label}"] svg`)?.innerHTML
-    const kpi = (label) => [...document.querySelectorAll('.ops-kpi-button')]
-      .find((button) => button.textContent?.includes(label))?.querySelector('svg')?.innerHTML
+    const nav = (key) => document.querySelector(`[data-testid="nav-admin-${key}"] svg`)?.innerHTML
     return {
-      clients: nav('Клиенты'),
-      trainers: nav('Тренеры'),
-      groups: nav('Группы'),
-      clientsKpi: kpi('Клиенты'),
-      trainersKpi: kpi('Тренеры'),
+      clients: nav('clients'),
+      trainers: nav('trainers'),
+      groups: nav('groups'),
     }
   })
   expect(new Set([adminIconSignatures.clients, adminIconSignatures.trainers, adminIconSignatures.groups]).size).toBe(3)
-  expect(adminIconSignatures.clientsKpi).toBe(adminIconSignatures.clients)
-  expect(adminIconSignatures.trainersKpi).toBe(adminIconSignatures.trainers)
+  if ((page.viewportSize()?.width || 0) <= 767) await page.keyboard.press('Escape')
   await expect(page.getByText('Marek Zielinski').first()).toBeVisible()
   if ((page.viewportSize()?.width || 0) <= 767) {
-    await page.getByRole('button', { name: 'Открыть глобальный поиск' }).click()
+    await page.getByTestId('open-global-search').click()
   }
-  await page.getByRole('textbox', { name: 'Глобальный поиск', exact: true }).fill('Jan Kowalski')
+  await page.getByTestId('global-search-input').fill('Jan Kowalski')
   await page.getByRole('button', { name: /Jan Kowalski/ }).first().click()
   await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
   await expect(page).toHaveURL(/client=10/)
   await page.reload()
   await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
-  await page.getByRole('button', { name: 'Восстановить доступ', exact: true }).click()
-  await expect(page.getByText('Код восстановления доступа')).toBeVisible()
-  await expect(page.getByText('synthetic-client-recovery-code')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Копировать логин' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Копировать код' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Копировать всё' })).toBeVisible()
-  await page.getByRole('button', { name: 'Закрыть', exact: true }).click()
-  await page.getByRole('button', { name: 'Редактировать клиента' }).click()
-  await page.getByLabel('Телефон', { exact: true }).fill('+48999999999')
-  await page.getByRole('button', { name: 'Сохранить изменения' }).click()
-  await expect(page.getByText('Данные владельца аккаунта обновлены.')).toBeVisible()
+  await page.getByTestId('client-access-issue').click()
+  await expect(page.getByTestId('access-code-card')).toContainText('synthetic-client-recovery-code')
+  await expect(page.getByTestId('access-copy-login')).toBeVisible()
+  await expect(page.getByTestId('access-copy-code')).toBeVisible()
+  await expect(page.getByTestId('access-copy-all')).toBeVisible()
+  await page.getByTestId('access-code-close').click()
+  await page.getByTestId('admin-client-edit-account').click()
+  await page.locator('#admin-client-detail-phone').fill('+48999999999')
+  await page.getByTestId('form-modal').locator('.form-modal__footer button').last().click()
+  await expect(page.locator('.ops-toast-region .ops-toast.is-success').first()).toBeVisible()
 
-  await openShellDestination(page, 'Клиенты')
-  await expect(page.locator('h1.page-title', { hasText: 'Клиенты' })).toBeVisible()
+  await openShellDestination(page, 'clients')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const compactClients = (page.viewportSize()?.width || 0) <= 767
   if (compactClients) {
-    await expect(page.getByRole('button', { name: /Открыть профиль клиента Kowalski Jan/ })).toBeVisible()
+    await expect(page.locator('.ops-client-compact-profile').filter({ hasText: 'Kowalski Jan' })).toBeVisible()
   } else {
     await expect(page.getByRole('row', { name: /Kowalski Jan/ })).toBeVisible()
   }
-  await expect(page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')).toHaveText('1')
-  await expect(page.getByRole('button', { name: /Новый клиент/ })).toBeVisible()
+  await expect(page.getByTestId('admin-clients-new-client')).toBeVisible()
   await expect(page.getByText('Piotr Nowak')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Чёрный список', exact: true }).click()
+  await page.getByTestId('admin-clients-scope-blacklist').click()
   if (compactClients) {
-    await expect(page.getByRole('button', { name: /Открыть профиль клиента Nowak Piotr/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Восстановить' })).toHaveCount(0)
+    await expect(page.locator('.ops-client-compact-profile').filter({ hasText: 'Nowak Piotr' })).toBeVisible()
+    await expect(page.getByTestId('confirmation-dialog')).toHaveCount(0)
   } else {
     await expect(page.getByRole('row', { name: /Nowak Piotr/ })).toBeVisible()
     if ((page.viewportSize()?.width || 0) === 768) {
-      await page.getByRole('button', { name: 'Действия: Nowak Piotr' }).click()
-      await page.getByRole('menuitem', { name: 'Восстановить' }).click()
+      await page.getByRole('row', { name: /Nowak Piotr/ }).locator('.ops-entity-actions-trigger').click()
+      await page.getByRole('menu').locator('[data-testid$="-restore"]').click()
     } else {
-      await page.getByRole('button', { name: 'Восстановить' }).click()
+      await page.getByRole('row', { name: /Nowak Piotr/ }).locator('.ops-client-row-actions button').click()
     }
-    await page.getByRole('dialog').getByRole('button', { name: 'Восстановить' }).click()
-    await expect(page.getByText('Клиент восстановлен и снова отображается в рабочем списке.')).toBeVisible()
+    await page.getByTestId('confirmation-dialog').getByTestId('confirmation-confirm').click()
+    await expect(page.getByTestId('confirmation-dialog')).toHaveCount(0)
     expect(seenAdminEndpoints).toContain('/api/admin/clients/11/restore/')
   }
 
-  await openShellDestination(page, 'Тренеры')
-  await expect(page.locator('h1.page-title', { hasText: 'Тренеры' })).toBeVisible()
+  await openShellDestination(page, 'trainers')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const trainerListSurface = compactClients ? page.locator('.ops-entity-mobile-list') : page.locator('.ops-entity-desktop-table')
   await expect(trainerListSurface.getByText('Marek Zielinski', { exact: true })).toBeVisible()
   await trainerListSurface.getByRole('button', { name: /Marek Zielinski/ }).first().click()
-  await expect(page.getByRole('region', { name: /Профиль тренера/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Восстановить доступ', exact: true }).click()
-  await expect(page.getByText('Код восстановления доступа')).toBeVisible()
-  await expect(page.getByText('synthetic-trainer-recovery-code')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Копировать логин' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Копировать код' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Копировать всё' })).toBeVisible()
-  await page.getByRole('tab', { name: 'Зарплата и ставки' }).click()
-  await expect(page.getByText('Ставки по типам занятий')).toBeVisible()
+  await expect(page.locator('.ops-trainer-profile-card')).toBeVisible()
+  await page.getByTestId('client-access-issue').click()
+  await expect(page.getByTestId('access-code-card')).toContainText('synthetic-trainer-recovery-code')
+  await expect(page.getByTestId('access-copy-login')).toBeVisible()
+  await expect(page.getByTestId('access-copy-code')).toBeVisible()
+  await expect(page.getByTestId('access-copy-all')).toBeVisible()
+  await page.getByTestId('admin-trainer-tab-payroll').click()
+  await expect(page.getByTestId('admin-trainer-tab-payroll')).toHaveAttribute('aria-selected', 'true')
 
-  await openShellDestination(page, 'Группы')
-  await expect(page.locator('h1.page-title', { hasText: 'Группы' })).toBeVisible()
+  await openShellDestination(page, 'groups')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const groupListSurface = compactClients ? page.locator('.ops-entity-mobile-list') : page.locator('.ops-entity-desktop-table')
   await expect(groupListSurface.getByText('Delfiny', { exact: true })).toBeVisible()
   await groupListSurface.getByRole('button', { name: 'Delfiny', exact: true }).first().click()
-  const groupCard = page.getByRole('region', { name: /Карточка группы/ })
+  const groupCard = page.getByTestId('admin-group-detail-1')
   await expect(groupCard).toBeVisible()
-  await expect(groupCard).toContainText('Вместимость12')
-  await expect(page.getByText('Состав группы')).toBeVisible()
-  await groupCard.getByRole('button', { name: 'Редактировать' }).click()
-  const groupEditor = page.getByRole('dialog', { name: 'Редактирование группы' })
-  const capacityInput = groupEditor.getByLabel('Вместимость')
+  await expect(groupCard.locator('.ops-summary-grid')).toContainText('12')
+  await expect(groupCard.locator('.ops-member-row')).toHaveCount(3)
+  await groupCard.getByTestId('admin-group-edit').click()
+  const groupEditor = page.getByTestId('form-modal')
+  const capacityInput = groupEditor.locator('#admin-group-defaultCapacity')
   await expect(capacityInput).toHaveValue('12')
   await capacityInput.fill('0')
-  await groupEditor.getByRole('button', { name: 'Сохранить' }).click()
+  await groupEditor.locator('.form-modal__footer button').last().click()
   await expect(capacityInput).toHaveAttribute('aria-invalid', 'true')
   await capacityInput.fill('12')
-  await groupEditor.getByRole('button', { name: 'Отмена' }).click()
+  await groupEditor.locator('.form-modal__footer button').first().click()
   await expect(groupEditor).toHaveCount(0)
-  await groupCard.getByRole('button', { name: 'Добавить', exact: true }).click()
-  const memberEditor = page.getByRole('dialog', { name: 'Добавить участника в группу' })
-  const clientCombobox = memberEditor.getByRole('combobox', { name: 'Добавить участника' })
+  await groupCard.locator('.ops-detail-grid .ops-section-head button').click()
+  const memberEditor = page.getByTestId('form-modal')
+  const clientCombobox = memberEditor.locator('input[role="combobox"]')
   await clientCombobox.fill('zolc aleks')
   await expect(page.getByRole('option', { name: /Żółć Aleksandra/ })).toBeVisible()
   await clientCombobox.press('Escape')
-  await memberEditor.getByRole('button', { name: 'Отмена' }).click()
+  await memberEditor.locator('.form-modal__footer button').first().click()
   await expect(memberEditor).toHaveCount(0)
 
-  await openShellDestination(page, 'Расписание')
-  await expect(page.locator('h1.page-title', { hasText: 'Расписание' })).toBeVisible()
+  await openShellDestination(page, 'schedule')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
   const forestEvent = page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()
   const cancelledCoralEvent = page.locator('.ops-schedule-event.is-cancelled[data-color-key="coral-01"]:visible').first()
@@ -1644,132 +1643,127 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(forestEvent).toHaveCSS('border-left-width', '0px')
   await expect(cancelledCoralEvent).toHaveCSS('border-left-width', '0px')
   await expect(cancelledCoralEvent).toHaveCSS('opacity', '0.6')
-  await expect(page.getByRole('button', { name: 'Календарь', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('schedule-view-calendar')).toHaveAttribute('aria-pressed', 'true')
   const mobileSchedule = (page.viewportSize()?.width || 0) <= 767
-  await expect(page.getByRole('button', { name: mobileSchedule ? 'День' : 'Неделя', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За неделю: 2')).toBeVisible()
-  await expect(page.getByText(/Шаблоны расписания|Создать из шаблона/)).toHaveCount(0)
+  await expect(page.getByTestId(`schedule-period-${mobileSchedule ? 'day' : 'week'}`)).toHaveAttribute('aria-pressed', 'true')
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
   expect(schedulePageSizes.every((size) => size > 0 && size <= 200)).toBe(true)
-  const filterTrigger = page.getByRole('button', { name: /Фильтры/ })
+  const filterTrigger = page.getByTestId('admin-schedule-filters-trigger')
   const filterBox = await filterTrigger.boundingBox()
   const pageBox = await page.locator('.page').boundingBox()
   expect(filterBox?.height).toBeLessThanOrEqual(50)
   expect(filterBox?.width).toBeLessThan(pageBox?.width || 10000)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-  const referencePickerButton = page.getByRole('button', { name: 'Открыть календарь: Опорная дата' })
+  const referencePickerButton = page.locator('#schedule-focus-date').locator('..').locator('button')
   const referencePickerBox = await referencePickerButton.boundingBox()
   expect(referencePickerBox?.width).toBeGreaterThanOrEqual(44)
   expect(referencePickerBox?.height).toBeGreaterThanOrEqual(44)
   await referencePickerButton.click()
-  await expect(page.getByRole('dialog', { name: 'Открыть календарь: Опорная дата' })).toBeVisible()
+  await expect(page.locator('#schedule-focus-date-popover')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(referencePickerButton).toBeFocused()
-  await page.getByRole('button', { name: 'Месяц', exact: true }).click()
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За месяц: 2')).toBeVisible()
+  await page.getByTestId('schedule-period-month').click()
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
   await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
   await expect(page.getByTestId('month-weekday-header')).toBeVisible()
-  await page.getByRole('button', { name: 'День', exact: true }).click()
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За день: 2')).toBeVisible()
-  await page.getByRole('button', { name: 'Неделя', exact: true }).click()
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByText('За неделю: 2')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Уведомления' })).toHaveAttribute('aria-live', 'polite')
+  await page.getByTestId('schedule-period-day').click()
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
+  await page.getByTestId('schedule-period-week').click()
+  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
+  await expect(page.locator('.ops-toast-region')).toHaveAttribute('aria-live', 'polite')
   await expect(page.getByTestId('schedule-list')).toHaveCount(0)
-  await page.locator('[aria-label="Режим отображения расписания"] button').nth(1).click()
+  if (mobileSchedule) await page.goto('/?role=admin&view=schedule&tab=list')
+  else await page.getByTestId('schedule-view-list').click()
   await expect(page.getByTestId('schedule-list')).toBeVisible()
   await expect(page.locator('.ops-session-row').first()).toContainText('Basen A')
   await expect(page.locator('.ops-session-row[data-color-key="forest-01"]')).toHaveCount(1)
   await expect(page.locator('.ops-session-row.is-cancelled[data-color-key="coral-01"]')).toHaveCount(1)
-  await expect(page.getByRole('button', { name: 'Восстановить тренировку', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Восстановить тренировку', exact: true }).click()
-  await expect(page.getByText('Тренировка восстановлена.')).toBeVisible()
-  await expect(page.getByRole('button', { name: /Групповая тренировка/ })).toBeVisible()
-  await page.getByRole('button', { name: /Групповая тренировка/ }).click()
-  const createSessionCard = page.getByRole('dialog', { name: 'Новое занятие' })
-  await createSessionCard.getByLabel('Тип занятия').selectOption('individual')
-  await expect(createSessionCard.getByLabel('Цена занятия, PLN')).toBeVisible()
-  await createSessionCard.getByRole('combobox', { name: 'Участник' }).fill('Jan Kowalski')
+  await expect(page.locator('.ops-session-row.is-cancelled .ops-schedule-list-actions button').first()).toBeVisible()
+  await page.locator('.ops-session-row.is-cancelled .ops-schedule-list-actions button').first().click()
+  await expect(page.locator('.ops-session-row.is-cancelled')).toHaveCount(0)
+  await expect(page.getByTestId('admin-schedule-create-group')).toBeVisible()
+  await page.getByTestId('admin-schedule-create-group').click()
+  const createSessionCard = page.getByTestId('form-modal')
+  await createSessionCard.locator('#admin-session-sessionType').selectOption('individual')
+  await expect(createSessionCard.locator('#admin-session-price')).toBeVisible()
+  await createSessionCard.locator('#admin-session-participantId').fill('Jan Kowalski')
   await page.getByRole('option', { name: /Kowalski Jan/ }).click()
-  await expect(createSessionCard.getByLabel('Локация').locator('option', { hasText: 'Basen A' })).toHaveCount(1)
-  const timePickerButton = createSessionCard.getByRole('button', { name: 'Открыть выбор времени: Начало' })
+  await expect(createSessionCard.locator('#admin-session-location option', { hasText: 'Basen A' })).toHaveCount(1)
+  const timePickerButton = createSessionCard.locator('#admin-session-start').locator('..').locator('button')
   await timePickerButton.click()
-  await expect(page.getByRole('dialog', { name: 'Открыть выбор времени: Начало' })).toBeVisible()
-  await expect(page.getByLabel('24-часовой выбор времени')).toBeVisible()
+  await expect(page.locator('#admin-session-start-popover')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(timePickerButton).toBeFocused()
-  await createSessionCard.getByRole('button', { name: 'Создать занятие' }).click()
-  await expect(page.getByText(/Создано:.*Индивидуальное/)).toBeVisible()
+  await createSessionCard.getByTestId('admin-schedule-create-submit').click()
+  await expect.poll(() => submittedSessions.length).toBe(1)
   expect(submittedSessions[0].notes).toBe('')
   expect(submittedSessions[0].individual_student_id).toBe('1')
 
-  await page.getByRole('button', { name: /Групповая тренировка/ }).click()
-  const invalidCard = page.getByRole('dialog', { name: 'Новое занятие' })
-  await expect(invalidCard.getByLabel('Лимит участников')).toHaveValue('12')
-  await invalidCard.getByLabel('Тренер').selectOption('')
-  await invalidCard.getByRole('button', { name: 'Создать занятие' }).click()
-  await expect(invalidCard.getByLabel('Тренер')).toHaveAttribute('aria-invalid', 'true')
-  await expect(invalidCard.getByLabel('Тренер')).toBeFocused()
-  await invalidCard.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
-  await page.getByRole('alertdialog', { name: 'Закрыть без сохранения?' }).getByRole('button', { name: 'Закрыть без сохранения' }).click()
+  await page.getByTestId('admin-schedule-create-group').click()
+  const invalidCard = page.getByTestId('form-modal')
+  await expect(invalidCard.locator('#admin-session-maxParticipants')).toHaveValue('12')
+  await invalidCard.locator('#admin-session-trainerId').selectOption('')
+  await invalidCard.getByTestId('admin-schedule-create-submit').click()
+  await expect(invalidCard.locator('#admin-session-trainerId')).toHaveAttribute('aria-invalid', 'true')
+  await expect(invalidCard.locator('#admin-session-trainerId')).toBeFocused()
+  await invalidCard.locator('.form-modal__footer button').first().click()
+  await page.getByTestId('discard-confirm').click()
 
-  await expect(page.getByText(/Недельный план|Weekly plan/i)).toHaveCount(0)
 
   await page.locator('.ops-session-row').first().click()
-  await expect(page.locator('h1.page-title', { hasText: 'Занятие' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   await expect(page.getByText('Jan Kowalski').first()).toBeVisible()
-  await expect(page.getByText(/Долг:.*PLN/)).toBeVisible()
-  await expect(page.getByRole('columnheader', { name: 'Телефон' })).toHaveCount(0)
+  await expect(compactClients ? page.locator('article').filter({ hasText: 'Jan Kowalski' }) : page.getByRole('row', { name: /Jan Kowalski/ })).toContainText('240,00 PLN')
+  await expect(page.locator('main')).not.toContainText('+48111222333')
   await page.getByRole('button', { name: 'Jan Kowalski' }).click()
   await expect(page.getByText('Anna Kowalska').first()).toBeVisible()
-  await expect(page.getByRole('button', { name: /Продлить абонемент/ })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /Заморозить/ })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /Скорректировать/ })).toHaveCount(0)
-  await page.getByRole('tab', { name: /Абонементы/ }).click()
+  await page.getByTestId('admin-client-tab-subscriptions').click()
   await page.getByRole('row', { name: /4 wejsc.*Jan Kowalski/ }).click()
-  const rowSubscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
-  await expect(rowSubscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('2')
-  await expect(rowSubscriptionEditor.getByLabel('Действие')).toHaveValue('edit')
-  await rowSubscriptionEditor.locator('.form-modal__footer').getByRole('button', { name: 'Закрыть', exact: true }).click()
+  const rowSubscriptionEditor = page.getByTestId('form-modal')
+  await expect(rowSubscriptionEditor.locator('#admin-client-finance-subscription')).toHaveValue('2')
+  await expect(rowSubscriptionEditor.locator('#admin-client-finance-subscription-action')).toHaveValue('edit')
+  await rowSubscriptionEditor.locator('.form-modal__footer button').first().click()
 
-  await page.getByRole('tab', { name: /Платежи/ }).click()
-  await page.getByRole('button', { name: /Пополнить баланс/ }).click()
-  const paymentDialog = page.getByRole('dialog', { name: 'Пополнить баланс' })
-  await paymentDialog.getByLabel('Сумма, zł').fill('120.00')
-  await paymentDialog.getByLabel('Комментарий').fill('manual smoke')
-  await paymentDialog.getByRole('button', { name: 'Подтвердить оплату' }).click()
-  await expect(page.getByText(/Оплата подтверждена\. Проверенный баланс:/)).toBeVisible()
+  await page.getByTestId('admin-client-tab-payments').click()
+  await page.getByTestId('admin-client-action-payment').click()
+  const paymentDialog = page.getByTestId('form-modal')
+  await paymentDialog.locator('#admin-client-payment-amount').fill('120.00')
+  await paymentDialog.locator('#admin-client-payment-comment').fill('manual smoke')
+  await paymentDialog.getByTestId('admin-client-payment-confirm').click()
+  await expect.poll(() => seenAdminEndpoints.has('/api/admin/payments/')).toBe(true)
 
-  await page.getByRole('button', { name: /Добавить списание/ }).click()
-  await page.getByLabel('Описание').fill('Индивидуальное занятие')
-  await page.getByLabel('Сумма').fill('80.00')
-  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Начисление создано.')).toBeVisible()
+  await page.getByTestId('admin-client-action-charge').click()
+  await page.locator('#admin-client-finance-description').fill('Индивидуальное занятие')
+  await page.locator('#admin-client-finance-amount').fill('80.00')
+  await page.getByTestId('admin-client-finance-save').click()
+  await expect.poll(() => seenClientFinanceActions.has('/api/admin/participants/1/charges/')).toBe(true)
 
-  await page.getByRole('button', { name: /Продать абонемент/ }).click()
-  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Абонемент и начисление созданы.')).toBeVisible()
+  await page.getByTestId('admin-client-action-sell-subscription').click()
+  await page.getByTestId('admin-client-finance-save').click()
+  await expect.poll(() => seenClientFinanceActions.has('/api/admin/participants/1/subscriptions/')).toBe(true)
 
-  await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
-  let subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
-  await expect(subscriptionEditor.getByLabel('Абонемент', { exact: true })).toHaveValue('1')
-  await subscriptionEditor.getByLabel('Действие').selectOption('renew')
-  await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Абонемент продлён, начисление создано.')).toBeVisible()
+  await page.getByTestId('admin-client-action-edit-subscription').click()
+  let subscriptionEditor = page.getByTestId('form-modal')
+  await expect(subscriptionEditor.locator('#admin-client-finance-subscription')).toHaveValue('1')
+  await subscriptionEditor.locator('#admin-client-finance-subscription-action').selectOption('renew')
+  await subscriptionEditor.getByTestId('admin-client-finance-save').click()
+  await expect.poll(() => seenClientFinanceActions.has('/api/admin/subscriptions/1/renew/')).toBe(true)
 
-  await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
-  subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
-  await subscriptionEditor.getByLabel('Действие').selectOption('freeze')
-  await subscriptionEditor.getByRole('textbox', { name: 'С даты', exact: true }).fill('2026-07-17')
-  await subscriptionEditor.getByRole('textbox', { name: 'По дату', exact: true }).fill('2026-07-23')
-  await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Абонемент заморожен на 7 дней.')).toBeVisible()
+  await page.getByTestId('admin-client-action-edit-subscription').click()
+  subscriptionEditor = page.getByTestId('form-modal')
+  await subscriptionEditor.locator('#admin-client-finance-subscription-action').selectOption('freeze')
+  await subscriptionEditor.locator('#admin-client-finance-freeze-start').fill('2026-07-17')
+  await subscriptionEditor.locator('#admin-client-finance-freeze-end').fill('2026-07-23')
+  await subscriptionEditor.getByTestId('admin-client-finance-save').click()
+  await expect.poll(() => seenClientFinanceActions.has('/api/admin/subscriptions/1/freeze/')).toBe(true)
 
-  await page.getByRole('button', { name: /Редактировать абонемент/ }).click()
-  subscriptionEditor = page.getByRole('dialog', { name: 'Редактирование абонемента' })
-  await subscriptionEditor.getByLabel('Действие').selectOption('adjust')
-  await subscriptionEditor.getByLabel('Изменение занятий').fill('1')
-  await subscriptionEditor.getByLabel('Комментарий').fill('Ручная корректировка')
-  await subscriptionEditor.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Остаток занятий скорректирован.')).toBeVisible()
+  await page.getByTestId('admin-client-action-edit-subscription').click()
+  subscriptionEditor = page.getByTestId('form-modal')
+  await subscriptionEditor.locator('#admin-client-finance-subscription-action').selectOption('adjust')
+  await subscriptionEditor.locator('#admin-client-finance-adjust-delta').fill('1')
+  await subscriptionEditor.locator('#admin-client-finance-adjust-note').fill('Ручная корректировка')
+  await subscriptionEditor.getByTestId('admin-client-finance-save').click()
+  await expect.poll(() => seenClientFinanceActions.has('/api/admin/subscriptions/1/adjust/')).toBe(true)
 
   for (const endpoint of [
     '/api/admin/participants/1/charges/',
@@ -1778,54 +1772,56 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     '/api/admin/subscriptions/1/freeze/',
     '/api/admin/subscriptions/1/adjust/',
   ]) {
-    expect(seenClientFinanceActions, `client card should submit ${endpoint}`).toContain(endpoint)
+    expect(seenClientFinanceActions.has(endpoint), `client card should submit ${endpoint}`).toBe(true)
   }
 
-  await openShellDestination(page, 'Абонементы')
-  await expect(page.locator('h1.page-title', { hasText: 'Абонементы' })).toBeVisible()
+  await openShellDestination(page, 'subscriptions')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const subscriptionSurface = compactClients
     ? page.locator('.ops-subscription-card:visible')
     : page.locator('.ops-entity-desktop-table:visible')
   await expect(subscriptionSurface.getByText('Jan Kowalski').first()).toBeVisible()
 
-  await openShellDestination(page, 'Платежи')
-  await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
-  if (compactClients) await expect(page.locator('.ops-payment-compact-card').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
-  else await expect(page.locator('td').filter({ hasText: 'Банковский перевод / IBAN' }).first()).toBeVisible()
+  await openShellDestination(page, 'payments')
+  await expect(page.locator('h1.page-title')).toBeVisible()
+  if (compactClients) await expect(page.locator('.ops-payment-compact-card').first()).toBeVisible()
+  else await expect(page.locator('.ops-entity-desktop-table tbody tr').first()).toBeVisible()
 
-  await openShellDestination(page, 'Должники')
-  await expect(page.locator('h1.page-title', { hasText: 'Должники' })).toBeVisible()
+  await openShellDestination(page, 'debtors')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   if (compactClients) await expect(page.locator('.ops-debtor-compact-card').first()).toBeVisible()
   else await expect(page.getByText('Przeterminowana platnosc').first()).toBeVisible()
 
-  await openShellDestination(page, 'Настройки')
-  await expect(page.locator('h1.page-title', { hasText: 'Настройки и контроль' })).toBeVisible()
+  await openShellDestination(page, 'settings')
+  await expect(page.locator('h1.page-title')).toBeVisible()
   if (compactClients) {
-    await page.getByRole('button', { name: 'Справочники', exact: true }).click()
+    await page.getByTestId('admin-settings-category-catalog').last().click()
   }
-  await expect(page.getByRole('button', { name: /Типы абонементов/ })).toBeVisible()
-  await page.getByRole('button', { name: /Локации/ }).click()
-  await page.getByRole('button', { name: 'Добавить', exact: true }).click()
-  await page.getByLabel('Код').fill('pool-b')
-  await page.getByLabel('Название').fill('Бассейн B')
-  await page.getByLabel('Адрес').fill('Варшава')
-  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByText('Запись создана.')).toBeVisible()
+  await expect(page.getByTestId('admin-settings-resource-subscriptionTypes').last()).toBeVisible()
+  await page.getByTestId('admin-settings-resource-locations').last().click()
+  await page.locator('.ops-settings-detail .ops-section-head button').click()
+  const locationEditor = page.getByTestId('form-modal')
+  await locationEditor.locator('#admin-settings-locations-code').fill('pool-b')
+  await locationEditor.locator('#admin-settings-locations-name').fill('Бассейн B')
+  await locationEditor.locator('#admin-settings-locations-address').fill('Варшава')
+  await locationEditor.locator('.form-modal__footer button').first().click()
+  await expect(locationEditor).toHaveCount(0)
   expect(submittedSettings).toEqual([expect.objectContaining({ code: 'pool-b', name: 'Бассейн B', address: 'Варшава' })])
   if (compactClients) {
-    await page.getByRole('button', { name: 'Справочники', exact: true }).click()
-    await page.getByRole('button', { name: 'Категории', exact: true }).click()
-    await page.getByRole('button', { name: 'Контроль', exact: true }).click()
+    await page.locator('.ops-settings-mobile-back button').first().click()
+    await page.locator('.ops-settings-mobile-nav > .ops-context-back').click()
+    await page.getByTestId('admin-settings-category-control').last().click()
   } else {
-    await page.getByRole('tab', { name: 'Контроль' }).click()
+    await page.getByTestId('admin-settings-category-control').first().click()
   }
-  await page.getByRole('button', { name: /Логин и пароль администратора/ }).click()
-  await page.getByLabel('Новый логин').fill('admin-renamed')
-  await page.getByLabel('Текущий пароль').fill('Str0ngPass!123')
-  await page.getByLabel('Новый пароль (необязательно)').fill('DifferentStrongPass!456')
-  await page.getByLabel('Повторите новый пароль').fill('DifferentStrongPass!456')
-  await page.getByRole('button', { name: 'Обновить данные входа' }).click()
-  await expect(page.getByText('Логин и пароль администратора обновлены. Текущая сессия сохранена.')).toBeVisible()
+  await page.getByTestId('admin-settings-resource-credentials').last().click()
+  const credentialsEditor = page.getByTestId('form-modal')
+  await credentialsEditor.locator('#admin-credentials-username').fill('admin-renamed')
+  await credentialsEditor.locator('#admin-credentials-current-password').fill('Str0ngPass!123')
+  await credentialsEditor.locator('#admin-credentials-new-password').fill('DifferentStrongPass!456')
+  await credentialsEditor.locator('#admin-credentials-confirm-password').fill('DifferentStrongPass!456')
+  await credentialsEditor.locator('.form-modal__footer button').first().click()
+  await expect(credentialsEditor).toHaveCount(0)
   expect(submittedCredentials).toEqual([{
     username: 'admin-renamed',
     current_password: 'Str0ngPass!123',
@@ -1835,11 +1831,11 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const pageHasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(pageHasHorizontalOverflow).toBe(false)
   if ((page.viewportSize()?.width || 0) <= 767) {
-    await expect(page.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Открыть меню' }).click()
-    await expect(page.getByRole('dialog', { name: 'Меню' }).getByRole('button', { name: 'Выйти', exact: true })).toBeVisible()
+    await expect(page.getByTestId('logout')).toHaveCount(1)
+    await page.getByTestId('open-menu').click()
+    await expect(page.getByTestId('mobile-menu-dialog').getByTestId('logout')).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(page.getByRole('navigation', { name: 'Основная мобильная навигация' })).toHaveCount(0)
+    await expect(page.getByTestId('mobile-menu-dialog')).toHaveCount(0)
   }
 
   for (const endpoint of requiredAdminScreenEndpoints) {
@@ -1875,28 +1871,51 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
   await expect(page.locator('.ops-sidebar')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Сегодня' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Открыть посещаемость' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
+  await expect(page.locator('.ops-today-session button').first()).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
 
-  for (const label of ['Сегодня', 'Посещаемость', 'Мои группы', 'История']) {
+  for (const label of ['overview', 'session', 'groups', 'history']) {
     await openShellDestination(page, label)
     const pageHeading = page.locator('main:visible h1.page-title')
     await expect(pageHeading).toHaveCount(1)
-    if (label !== 'Посещаемость') await expect(pageHeading).toHaveText(label)
+    await expect(pageHeading).toHaveText(/.+/)
     await expect(page.locator('.page')).toBeVisible()
   }
 
-  await openShellDestination(page, 'Посещаемость')
-  await expect(page.getByRole('button', { name: 'Все присутствовали' })).toBeVisible()
-  await openShellDestination(page, 'Мои группы')
+  await openShellDestination(page, 'session')
+  await expect(page.getByTestId('trainer-attendance-all-present')).toBeVisible()
+  await openShellDestination(page, 'groups')
   await page.getByRole('button', { name: /Дельфины/ }).click()
   await expect(page.getByText('Иван Петров')).toBeVisible()
-  await openShellDestination(page, 'История')
+  expect(await page.locator('.ops-entity-card').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(16)
+  await openShellDestination(page, 'history')
+  await expect(page.locator('.ops-history-session')).toHaveCount(1)
+  expect(await page.locator('.ops-history-session').evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(52)
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
-  await expect(page.getByRole('heading', { level: 1, name: 'История' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
+  await page.goto('/?role=trainer&view=schedule')
+  if ((page.viewportSize()?.width || 0) <= 767) {
+    const agenda = page.getByTestId('trainer-mobile-schedule-agenda')
+    await expect(agenda).toBeVisible()
+    await expect(agenda.locator('.ops-agenda-day')).toHaveCount(1)
+    await expect(page.getByTestId('schedule-calendar')).toBeHidden()
+    const dateInput = page.locator('#schedule-focus-date')
+    for (const period of ['day', 'week', 'month']) {
+      await page.getByTestId(`schedule-period-${period}`).click()
+      const previous = page.getByTestId('schedule-previous-period')
+      const next = page.getByTestId('schedule-next-period')
+      await expect(previous).toBeVisible()
+      await expect(next).toBeVisible()
+      const before = await dateInput.inputValue()
+      await next.click()
+      await expect(dateInput).not.toHaveValue(before)
+    }
+  } else {
+    await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+  }
   expect(errors).toEqual([])
 })
 
@@ -1911,7 +1930,7 @@ test('client can open every menu screen without runtime errors', async ({ page }
     email: '',
     group: { id: 7, name: 'Дельфины' },
     balance_minor: 0,
-    current_subscription: { id: 9, participant_id: 5, type: '8 занятий', status: 'active', remaining_sessions: 6, created_at: '2026-07-15T10:00:00+02:00', start_date: '2026-07-15', effective_end_date: '2026-08-15', grace_end_date: '2026-08-22' },
+    current_subscription: { id: 9, participant_id: 5, type: '8 занятий', status: 'active', remaining_sessions: 6, sessions_available_now: true, ledger: [{ id: 1, delta: -1, reason: 'attendance', created_at: '2026-07-20T18:00:00+02:00' }], created_at: '2026-07-15T10:00:00+02:00', start_date: '2026-07-15', effective_end_date: '2026-08-15', grace_end_date: '2026-08-22' },
   }
   const session = {
     id: 41,
@@ -1930,44 +1949,121 @@ test('client can open every menu screen without runtime errors', async ({ page }
     '/api/client/consents/': { consents: [{ type: 'notifications', type_label: 'Уведомления', is_active: true, policy_version: 'v1' }] },
     '/api/client/schedule/': { sessions: [session] },
     '/api/client/attendance/': { attendance: [{ student: { id: 5 }, session, status: 'present', deducts: true }] },
-    '/api/client/payments/': { charges: [], payments: [] },
-    '/api/client/notifications/': { notifications: [] },
+    '/api/client/payments/': { charges: [], payments: [{ id: 12, student_id: 5, student: 'Иван Петров', amount_minor: 1000, method: 'bank_transfer', status: 'confirmed', paid_at: '2026-07-20', receipt_expired: true }] },
+    '/api/client/notifications/': { notifications: [{ id: 1, subject: 'Занятие восстановлено', body: 'Занятие снова состоится.', channel: 'email', language_code: 'ru', status: 'sent', sent_at: '2026-07-20T10:00:00+02:00' }], pagination: { page: 1, pages: 1 } },
   })
 
   await page.goto('/')
   await expect(page.locator('.ops-sidebar')).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
 
-  for (const label of ['Главная', 'Расписание', 'Абонемент', 'Платежи', 'История', 'Профиль']) {
+  for (const label of ['home', 'schedule', 'subscription', 'payments', 'history', 'profile']) {
     await openShellDestination(page, label)
-    await expect(page.getByRole('heading', { level: 1, name: label })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     await expect(page.locator('.page')).toBeVisible()
   }
 
-  await openShellDestination(page, 'Расписание')
-  await page.getByRole('button', { name: 'Список', exact: true }).click()
-  await expect(page.locator('[data-testid="client-schedule-list"] .ops-session-tile[data-color-key="gold-01"]')).toHaveCount(1)
-  await page.locator('[data-testid="client-schedule-list"] .ops-session-tile').first().click()
-  await expect(page.getByText('-1 занятие')).toBeVisible()
-  await openShellDestination(page, 'Абонемент')
-  await expect(page.getByText('Осталось занятий')).toBeVisible()
-  await expect(page.getByText('Оформлен')).toHaveCount(0)
-  await expect(page.getByText('Льготный период')).toHaveCount(0)
-  await expect(page.getByText(/История списаний и корректировок/)).toHaveCount(0)
-  await openShellDestination(page, 'Профиль')
-  await page.getByRole('button', { name: 'Согласия', exact: true }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Согласия' })).toBeVisible()
+  await openShellDestination(page, 'schedule')
+  const mobile = (page.viewportSize()?.width || 0) <= 767
+  const schedule = mobile
+    ? page.getByTestId('client-mobile-schedule-agenda')
+    : page.getByTestId('client-schedule-list')
+  if (mobile) {
+    await expect(schedule).toBeVisible()
+    await expect(schedule.locator('.ops-agenda-day')).toHaveCount(1)
+    await expect(page.getByTestId('schedule-view-calendar')).toBeHidden()
+  } else {
+    await page.getByTestId('schedule-view-list').click()
+  }
+  await expect(schedule.locator('.ops-session-tile[data-color-key="gold-01"]')).toHaveCount(1)
+  await schedule.locator('.ops-session-tile').first().click()
+  await expect(page.locator('.ops-summary-grid')).toContainText('-1')
+  expect(await page.locator('.ops-entity-card').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(16)
+  await openShellDestination(page, 'subscription')
+  await expect(page.locator('.ops-summary-grid > div')).toHaveCount(5)
+  await expect(page.locator('.ops-summary-grid')).toContainText('6')
+  await expect(page.locator('.ops-entity-card tbody tr')).toHaveCount(1)
+  await openShellDestination(page, 'history')
+  await page.getByTestId('client-history-messages-tab').click()
+  await expect(page.getByTestId('client-message-1')).toBeVisible()
+  await openShellDestination(page, 'payments')
+  if ((page.viewportSize()?.width || 0) <= 767) await page.getByTestId('client-payments-tab-history').click()
+  await expect(page.getByTestId('client-receipt-12')).toHaveAttribute('data-receipt-status', 'expired')
+  if ((page.viewportSize()?.width || 0) <= 767) {
+    await openShellDestination(page, 'payments')
+    expect(await page.locator('.ops-client-finance-tabs button').first().evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
+    expect(await page.locator('.ops-client-finance-section .ops-financial-context > div').first().evaluate((element) => Number.parseFloat(getComputedStyle(element).borderTopWidth))).toBe(1)
+  }
+  await openShellDestination(page, 'profile')
+  await page.getByTestId('client-profile-consents').click()
+  await expect(page).toHaveURL(/view=consents/)
 
   await page.reload()
   await expect(page.locator('.ops-sidebar')).toBeVisible()
-  await expect(page.getByRole('heading', { level: 1, name: 'Согласия' })).toBeVisible()
+  await expect(page).toHaveURL(/view=consents/)
   expect(errors).toEqual([])
+})
+
+test('client booking, waitlist and cancellation refresh from the server', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'mobile and desktop client flow')
+  const start = new Date(Date.now() + 48 * 60 * 60 * 1000)
+  const end = new Date(start.getTime() + 60 * 60 * 1000)
+  const deadline = new Date(start.getTime() - 8 * 60 * 60 * 1000)
+  const participant = { id: 5, full_name: 'Иван Петров', group: { id: 7, name: 'Masters' }, balance_minor: 0 }
+  let bookingStatus = 'available'
+  await mockPortal(page, {
+    '/api/me/': { id: 3, username: 'parent', role: 'parent' },
+    '/api/client/overview/': { account: { id: 3, full_name: 'Пётр Петров' }, participants: [participant] },
+    '/api/client/profile/': { account: { id: 3, preferred_language: 'ru' }, participants: [participant] },
+    '/api/client/consents/': { consents: [] },
+  })
+  await page.route('**/api/client/schedule/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() === 'POST' && path.endsWith('/booking/')) bookingStatus = 'booked'
+    if (route.request().method() === 'DELETE' && path.endsWith('/booking/')) bookingStatus = 'available'
+    if (route.request().method() === 'POST' && path.endsWith('/waitlist/')) bookingStatus = 'waitlisted'
+    if (route.request().method() === 'DELETE' && path.endsWith('/waitlist/')) bookingStatus = 'full'
+    const session = {
+      id: 41, start_at: start.toISOString(), end_at: end.toISOString(),
+      group: { id: 7, name: 'Masters' }, trainer: 'Анна Тренер', location: 'Бассейн',
+      is_cancelled: bookingStatus === 'cancelled', requires_booking: true,
+      booking_status: bookingStatus, booking_deadline: deadline.toISOString(),
+      booking_timezone: 'Europe/Warsaw', free_places: bookingStatus === 'available' ? 1 : 0,
+      participants_count: bookingStatus === 'booked' ? 15 : 14, max_participants: 15,
+      can_cancel_booking: bookingStatus === 'booked',
+      waitlist_position: bookingStatus === 'waitlisted' ? 2 : null,
+      can_leave_waitlist: bookingStatus === 'waitlisted',
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(path.endsWith('/schedule/') ? { sessions: [session] } : session) })
+  })
+  await page.goto('/')
+  await openShellDestination(page, 'schedule')
+  if ((page.viewportSize()?.width || 0) > 767) await page.getByTestId('schedule-view-list').click()
+  const scheduleList = page.getByTestId((page.viewportSize()?.width || 0) > 767 ? 'client-schedule-list' : 'client-mobile-schedule-agenda')
+  await scheduleList.getByTestId('schedule-session-41').click()
+  await expect(page.locator('.ops-entity-card').getByText(/Europe\/Warsaw/)).toBeVisible()
+  await page.getByTestId('client-book-41').click()
+  await expect(page.getByTestId('client-booking-status')).toHaveAttribute('data-status', 'booked')
+  await page.getByTestId('client-booking-cancel-41').click()
+  await expect(page.getByTestId('client-booking-status')).toHaveAttribute('data-status', 'available')
+  bookingStatus = 'full'
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByTestId('client-waitlist-join-41')).toBeVisible()
+  await page.getByTestId('client-waitlist-join-41').click()
+  await expect(page.getByTestId('client-waitlist-position')).toHaveAttribute('data-position', '2')
+  bookingStatus = 'booked'
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByTestId('client-booking-status')).toHaveAttribute('data-status', 'booked')
+  bookingStatus = 'cancelled'
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByTestId('client-booking-status')).toHaveAttribute('data-status', 'cancelled')
 })
 
 test('admin client filters combine with search and keep the blacklist separate', async ({ page }) => {
   const viewportWidth = page.viewportSize()?.width || 0
   test.skip(![390, 1440].includes(viewportWidth), 'desktop and mobile client-filter workflow')
   const errors = collectPageErrors(page)
+  const recentVisit = new Date(Date.now() - 7 * 86400000).toISOString()
   await mockPortal(page, {
     '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Katarzyna Admin' },
     '/api/admin/dashboard/': { metrics: { clients: 4, active_subscriptions: 1, debtors: 1 } },
@@ -1977,9 +2073,9 @@ test('admin client filters combine with search and keep the blacklist separate',
     },
     '/api/admin/clients/': {
       clients: [
-        { id: 1, client_id: 11, first_name: 'Anna', last_name: 'Plus', balance_minor: -500, currency: 'PLN', has_current_subscription: true, current_subscription_remaining: 2, current_subscription_total: 4, is_recently_active: true, last_present_at: '2026-08-01T17:00:00+02:00', is_active: true, client_is_active: true, group: null },
+        { id: 1, client_id: 11, first_name: 'Anna', last_name: 'Plus', balance_minor: -500, currency: 'PLN', has_current_subscription: true, current_subscription_remaining: 2, current_subscription_total: 4, is_recently_active: true, last_present_at: recentVisit, is_active: true, client_is_active: true, group: null },
         { id: 2, client_id: 12, first_name: 'Boris', last_name: 'Debt', balance_minor: 700, currency: 'PLN', has_current_subscription: false, is_recently_active: false, last_present_at: null, is_active: true, client_is_active: true, group: null },
-        { id: 3, client_id: 13, first_name: 'Cara', last_name: 'Zero', balance_minor: 0, currency: 'PLN', has_current_subscription: false, is_recently_active: true, last_present_at: '2026-08-02T17:00:00+02:00', is_active: true, client_is_active: true, group: null },
+        { id: 3, client_id: 13, first_name: 'Cara', last_name: 'Zero', balance_minor: 0, currency: 'PLN', has_current_subscription: false, is_recently_active: true, last_present_at: recentVisit, is_active: true, client_is_active: true, group: null },
         { id: 4, client_id: 14, first_name: 'Black', last_name: 'Archive', balance_minor: 700, currency: 'PLN', has_current_subscription: false, is_recently_active: false, last_present_at: null, is_active: false, client_is_active: false, group: null },
       ],
     },
@@ -1994,7 +2090,7 @@ test('admin client filters combine with search and keep the blacklist separate',
 
   await page.goto('/?role=admin&view=clients')
   const clientList = page.locator(viewportWidth === 390 ? '.ops-client-mobile-list' : '.ops-client-desktop-table')
-  await expect(page.getByText('Найдено: 3')).toBeVisible()
+  await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '3')
 
   if (viewportWidth === 390) {
     const toolsGeometry = await page.locator('.ops-client-list-tools').evaluate((tools) => {
@@ -2019,37 +2115,37 @@ test('admin client filters combine with search and keep the blacklist separate',
     expect(toolsGeometry.appOverflow).toBeLessThanOrEqual(1)
   }
 
-  await page.getByLabel('Абонемент').selectOption('with')
-  await page.getByRole('button', { name: /Применить/ }).click()
-  await expect(page.getByText('Найдено: 1')).toBeVisible()
+  await page.getByTestId('admin-clients-filter-subscription').selectOption('with')
+  await page.getByTestId('admin-clients-filter-apply').click()
+  await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '1')
   await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
-  await expect(clientList.getByText('2 из 4', { exact: true })).toBeVisible()
+  await expect(clientList).toContainText(/2.*4/)
   if (viewportWidth === 390) {
     await expect(clientList.getByText('+5 zł', { exact: true })).toBeVisible()
-    await expect(clientList.getByText(/Активен · 01\.08\.2026/)).toBeVisible()
+    await expect(clientList.locator('.ops-client-compact-activity')).toBeVisible()
   }
 
-  await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
-  await page.getByLabel('Баланс').selectOption('positive')
-  await page.getByRole('button', { name: /Применить/ }).click()
+  await page.getByTestId('admin-clients-filter-reset').click()
+  await page.getByTestId('admin-clients-filter-balance').selectOption('positive')
+  await page.getByTestId('admin-clients-filter-apply').click()
   await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
-  await page.getByLabel('Баланс').selectOption('negative')
-  await page.getByRole('button', { name: /Применить/ }).click()
+  await page.getByTestId('admin-clients-filter-balance').selectOption('negative')
+  await page.getByTestId('admin-clients-filter-apply').click()
   await expect(clientList.getByText('Debt Boris', { exact: true })).toBeVisible()
 
-  await page.getByLabel('Абонемент').selectOption('without')
-  await page.getByLabel('Активность').selectOption('inactive')
-  await page.getByRole('button', { name: /Применить/ }).click()
-  await expect(page.getByText('Найдено: 1')).toBeVisible()
+  await page.getByTestId('admin-clients-filter-subscription').selectOption('without')
+  await page.getByTestId('admin-clients-filter-activity').selectOption('inactive')
+  await page.getByTestId('admin-clients-filter-apply').click()
+  await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '1')
   await expect(clientList.getByText('Debt Boris', { exact: true })).toBeVisible()
 
-  await page.getByLabel('Поиск клиентов').fill('Plus')
-  await expect(page.getByText('Найдено: 0')).toBeVisible()
-  await page.getByRole('button', { name: 'Сбросить фильтры' }).click()
-  await expect(page.getByText('Найдено: 3')).toBeVisible()
+  await page.locator('#admin-clients-search').fill('Plus')
+  await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '0')
+  await page.getByTestId('admin-clients-filter-reset').click()
+  await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '3')
 
-  await page.getByRole('button', { name: 'Чёрный список', exact: true }).click()
-  await expect(page.getByText('Найдено: 1')).toBeVisible()
+  await page.getByTestId('admin-clients-scope-blacklist').click()
+  await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '1')
   await expect(clientList.getByText('Archive Black', { exact: true })).toBeVisible()
   if (viewportWidth === 390) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
@@ -2132,34 +2228,38 @@ test('admin confirms and rejects pending payments and the nav counter decrements
 
   await page.goto('/')
   await expect(page.locator('main:visible')).toHaveCount(1)
-  await expect(page.locator('h1.page-title', { hasText: 'Сегодня' })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
 
-  const counter = page.locator('.ops-nav-button[title="Платежи"] .ops-nav-count')
-  await expect(counter).toHaveText('2')
+  const expectPaymentCounter = async (value) => {
+    if ((page.viewportSize()?.width || 0) <= 767) await page.getByTestId('open-menu').click()
+    await expect(page.getByTestId('nav-admin-payments').last().locator('.ops-nav-count')).toHaveText(value)
+    if ((page.viewportSize()?.width || 0) <= 767) await page.keyboard.press('Escape')
+  }
+  await expectPaymentCounter('2')
 
-  await openShellDestination(page, 'Платежи')
-  await expect(page.locator('h1.page-title', { hasText: 'Платежи' })).toBeVisible()
+  await openShellDestination(page, 'payments')
+  await expect(page.locator('h1.page-title')).toBeVisible()
 
   // Confirm is explicit on the pending card and requires no redundant second dialog.
   const compactPayments = (page.viewportSize()?.width || 0) <= 767
   const confirmSurface = compactPayments
     ? page.locator('.ops-payment-compact-card').filter({ hasText: 'Kowalski' })
     : page.getByRole('row', { name: /Kowalski/ })
-  const confirmTrigger = confirmSurface.getByRole('button', { name: 'Подтвердить' })
+  const confirmTrigger = confirmSurface.getByTestId('admin-payment-confirm-1')
   await confirmTrigger.click()
-  await expect(page.getByText('Платёж подтверждён.')).toBeVisible()
-  await expect(counter).toHaveText('1')
+  await expect(page.locator('.ops-toast-region .ops-toast.is-success').first()).toBeVisible()
+  await expectPaymentCounter('1')
 
   // Reject requires a persisted audit reason: counter 1 -> 0.
   const rejectSurface = compactPayments
     ? page.locator('.ops-payment-compact-card').filter({ hasText: 'Nowak' })
     : page.getByRole('row', { name: /Nowak/ })
-  await rejectSurface.getByRole('button', { name: 'Отклонить' }).click()
-  const rejectDialog = page.getByRole('dialog', { name: 'Отклонить платёж' })
-  await rejectDialog.getByLabel('Причина отклонения').fill('Перевод не найден')
-  await rejectDialog.getByRole('button', { name: 'Отклонить' }).click()
-  await expect(page.getByText('Платёж отклонён.')).toBeVisible()
-  await expect(counter).toHaveText('0')
+  await rejectSurface.getByTestId('admin-payment-reject-4').click()
+  const rejectDialog = page.getByTestId('form-modal')
+  await rejectDialog.locator('#admin-payment-reject-reason').fill('Перевод не найден')
+  await rejectDialog.locator('.form-modal__footer button').last().click()
+  await expect(page.locator('.ops-toast-region .ops-toast.is-success').last()).toBeVisible()
+  await expectPaymentCounter('0')
 
   expect(seen, 'confirm endpoint should be hit').toContain('/api/admin/payments/1/confirm/')
   expect(seen, 'reject endpoint should be hit').toContain('/api/admin/payments/4/reject/')

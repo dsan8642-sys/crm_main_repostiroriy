@@ -131,6 +131,7 @@ class AdminOTPDevice(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
+    last_used_counter = models.PositiveBigIntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"2FA · {self.user}"

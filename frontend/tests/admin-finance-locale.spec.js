@@ -78,6 +78,7 @@ test('admin payments switches RU to UK, PL and EN without mixed finance headings
   await page.goto('/?role=admin&view=payments')
   const selector = localeSelector(page)
 
+  await selector.selectOption('ru')
   await expect(page.getByRole('heading', { name: 'Платежи', exact: true })).toBeVisible()
   await selector.selectOption('uk')
   await expect(page.getByRole('heading', { name: 'Платежі', exact: true })).toBeVisible()

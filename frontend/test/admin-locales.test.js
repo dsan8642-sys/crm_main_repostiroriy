@@ -9,7 +9,7 @@ import {
   adminLocaleTag,
   adminT,
 } from '../src/adminLocales.js'
-import { accessCodeClipboardText } from '../src/app/accessContracts.js'
+import { accessCodeClipboardText, gmailAccessDraftUrl } from '../src/app/accessContracts.js'
 import { validateAdminSessionForm } from '../src/app/scheduleContracts.js'
 
 const ADMIN_SOURCES = [
@@ -91,4 +91,16 @@ test('admin-specific helper messages follow the selected locale', () => {
     accessCodeClipboardText({ login: 'client-1', activation_code: 'ABC', purpose: 'activation' }, en),
     'Login: client-1\nActivation code: ABC',
   )
+})
+
+test('Gmail draft contains the client address and first-login instructions', () => {
+  const url = new URL(gmailAccessDraftUrl(
+    { login: 'client@example.test', activation_code: 'a+b&c', purpose: 'activation', expires_at: '2026-10-07T12:00:00+02:00' },
+    'client@example.test', (key, params) => adminT('ru', key, params), 'https://crm.example.test',
+  ))
+  assert.equal(url.origin, 'https://mail.google.com')
+  assert.equal(url.searchParams.get('to'), 'client@example.test')
+  assert.match(url.searchParams.get('body'), /a\+b&c/)
+  assert.match(url.searchParams.get('body'), /https:\/\/crm\.example\.test/)
+  assert.match(url.searchParams.get('body'), /У меня есть код доступа/)
 })

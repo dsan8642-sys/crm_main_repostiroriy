@@ -68,7 +68,7 @@ function sessionStatus(session) {
   return 'planned'
 }
 
-export function mapClientPortalData({ overview, profile, consents, schedule, attendance, payments, notifications, resourceStates, resolvedStudentId: requestedStudentId }) {
+export function mapClientPortalData({ overview = {}, profile = {}, consents = {}, schedule = {}, attendance = {}, payments = {}, notifications = {}, resourceStates, resolvedStudentId: requestedStudentId }) {
   const account = overview.account || {}
   const participants = overview.participants || overview.students || []
   const profileSubscriptions = profile?.subscriptions || []
@@ -95,8 +95,8 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
       sub: student.current_subscription?.type || mapperLabel('noSubscription'),
         subLeft: student.current_subscription?.remaining_sessions ?? null,
         subEnds: student.current_subscription?.effective_end_date || '-',
-        subscription: profileSubscriptions.find((subscription) => subscription.participant_id === student.id) || student.current_subscription || null,
-        balance: asAccountBalance(student.balance_minor),
+        subscription: student.current_subscription || profileSubscriptions.find((subscription) => subscription.participant_id === student.id) || null,
+        balance: asAccountBalance(account.balance_minor ?? student.balance_minor),
       }))
     : [{
         id: 'account',
@@ -135,7 +135,11 @@ export function mapClientPortalData({ overview, profile, consents, schedule, att
         sessionTypeLabel: session.presentation_type_label || '',
         colorKey: normalizeScheduleColorKey(session.presentation_color_key),
         individualParticipant: session.individual_participant || null,
-        deductsExpected: session.is_cancelled ? 0 : 1,
+        deductsExpected: session.is_cancelled || (session.requires_booking && session.booking_status !== 'booked') ? 0 : 1,
+        bookingStatus: session.booking_status || null,
+        bookingDeadline: session.booking_deadline || null,
+        freePlaces: session.free_places ?? null,
+        canCancelBooking: Boolean(session.can_cancel_booking),
       })) : [],
   ]))
 
@@ -337,6 +341,9 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       priceMinor: group.price_minor,
       currency: group.currency,
       defaultCapacity: group.default_capacity ?? null,
+      selfBookingEnabled: Boolean(group.self_booking_enabled),
+      bookingCutoffHours: group.booking_cutoff_hours ?? 8,
+      bookingExcludedSessions: group.booking_excluded_sessions || 0,
       sortOrder: group.sort_order ?? null,
       colorKey: normalizeScheduleColorKey(group.color_key),
       hasScheduleColor: Boolean(group.color_key),
@@ -369,6 +376,8 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       trainerId: session.trainer_id || '',
       notes: session.notes || '',
       sessionType: session.session_type || 'group',
+      sessionTypeConfigId: session.session_type_config_id || null,
+      sessionTypeConfigCode: session.session_type_config_code || null,
       sessionTypeLabel: session.presentation_type_label || '',
       colorKey: normalizeScheduleColorKey(session.presentation_color_key),
       isCancelled: session.is_cancelled,
@@ -416,12 +425,13 @@ export function mapAdminPortalData({ reference, clients, trainers, groups, subsc
       comment: payment.comment || '',
       receipt: payment.receipt?.original_name || null,
       receiptUrl: payment.receipt?.download_url || null,
+      receiptExpired: Boolean(payment.receipt_expired),
     })),
     debtors: (debtors.debtors || []).map((row) => ({
       id: `d${row.student.id}`,
       studentId: row.student.id,
       clientId: row.student.client_id,
-      child: row.student.full_name,
+      child: row.family_name || row.student.full_name,
       parent: row.student.client_phone || '',
       group: row.student.group?.name || mapperLabel('individual'),
       groupId: row.student.group?.id || '',
@@ -489,6 +499,7 @@ export function mapClientAttendanceRows(rows) {
     id: String(record.id),
     sessionId: record.session?.id,
     date: record.session?.start_at?.slice(0, 10),
+    time: formatTime(record.session?.start_at),
     label: `${record.session?.group?.name || mapperLabel('individualLesson')} · ${formatTime(record.session?.start_at)}`,
     status: record.status,
     deducts: record.deducts,
@@ -530,6 +541,7 @@ export function mapClientPaymentRows(rows) {
     comment: payment.comment || '',
     receipt: payment.receipt?.original_name || '',
     receiptUrl: payment.receipt?.download_url || null,
+    receiptExpired: Boolean(payment.receipt_expired),
     studentId: payment.student_id,
   }))
 }

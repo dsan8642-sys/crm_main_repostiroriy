@@ -26,6 +26,19 @@ const TYPE_FIELD_MAP = {
   duration_days: 'durationDays', sessions_count: 'sessionsCount',
   is_individual: 'isIndividual', is_active: 'isActive',
 }
+
+function AdminReceiptAction({ payment, t }) {
+  const [error, setError] = useState('')
+  if (!payment.receiptUrl) return <span className="muted">{t(payment.receiptExpired ? 'payments.receiptExpired' : 'payments.receiptNone')}</span>
+  return <span><button type="button" className="ops-link-button" onClick={async () => {
+    try {
+      setError('')
+      await downloadFile(payment.receiptUrl, payment.receipt)
+    } catch {
+      setError(t('payments.receiptUnavailable'))
+    }
+  }}>{payment.receipt}</button>{error && <small role="alert">{error}</small>}</span>
+}
 const TYPE_FIELD_IDS = {
   name: 'subscription-type-name', price: 'subscription-type-price',
   currency: 'subscription-type-currency', durationDays: 'subscription-type-duration',
@@ -77,7 +90,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
   const { Table, StatusPill, Money, Button, IconButton, Tabs, Banner, Avatar, Input, Select, Checkbox } = components
   const I = icons
 
-  return function ApiAdminPayments({ go, initialTab, currentUser }) {
+  return function ApiAdminPayments({ go, initialTab, initialFinanceAction, currentUser }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminFinanceTranslator(locale), [locale])
     const localeTag = adminLocaleTag(locale)
@@ -157,6 +170,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     const [subscriptionTypeEditErrors, setSubscriptionTypeEditErrors] = useState({})
     const [subscriptionTypeEditBaseline, setSubscriptionTypeEditBaseline] = useState(null)
     const [financeAction, setFinanceAction] = useState(null)
+    const initialFinanceActionHandledRef = React.useRef(false)
     const [financeBaseline, setFinanceBaseline] = useState(null)
     const financeFormRef = React.useRef(financeForm)
     const financeBaselineRef = React.useRef(financeBaseline)
@@ -712,6 +726,12 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       setError(null)
     }
 
+    useEffect(() => {
+      if (initialFinanceActionHandledRef.current || initialFinanceAction !== 'payment') return
+      initialFinanceActionHandledRef.current = true
+      openFinanceAction('payment')
+    }, [initialFinanceAction])
+
     const financeActionMeta = {
       issue: { title: t('finance.issue'), label: t('finance.issue'), busy: 'subscription', submit: createSubscription },
       renew: { title: t('finance.renewPass'), label: t('finance.renew'), busy: 'renew', submit: renewSubscription },
@@ -741,7 +761,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             <span>{t('payments.typesTitle')}</span>
             <small>{t('payments.typesDescription')}</small>
           </button>
-          <button type="button" className={`ops-action-card${toolPanel === 'finance' ? ' is-active' : ''}`} onClick={() => setToolPanel((current) => current === 'finance' ? null : 'finance')}>
+          <button type="button" data-testid="admin-payments-finance-panel" className={`ops-action-card${toolPanel === 'finance' ? ' is-active' : ''}`} onClick={() => setToolPanel((current) => current === 'finance' ? null : 'finance')}>
             <span>{t('payments.balanceTitle')}</span>
             <small>{t('payments.balanceDescription')}</small>
           </button>
@@ -780,8 +800,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>{t('payments.financeTitle')}</div>
           <div className="ops-action-strip">
-            <Button variant="primary" disabled={busyId != null || participants.length === 0 || subscriptionTypes.length === 0} onClick={() => openFinanceAction('issue')}>{t('finance.issue')}</Button>
-            <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('renew')}>{t('finance.renew')}</Button>
+            <Button data-testid="admin-finance-open-issue" variant="primary" disabled={busyId != null || participants.length === 0 || subscriptionTypes.length === 0} onClick={() => openFinanceAction('issue')}>{t('finance.issue')}</Button>
+            <Button data-testid="admin-finance-open-renew" variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('renew')}>{t('finance.renew')}</Button>
             <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('charge')}>{t('finance.addCharge')}</Button>
             <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('payment')}>{t('finance.addPayment')}</Button>
             <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('freeze')}>{t('finance.freeze')}</Button>
@@ -814,7 +834,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             { key: 'child', header: t('common.participant'), render: (payment) => <button type="button" className="ops-link-button" disabled={!payment.clientId} onClick={() => go?.('clientDetail', { clientId: payment.clientId, tab: 'payments' })}><Avatar name={payment.child} size={26} /><span className="strong">{payment.child}</span></button> },
             { key: 'method', header: t('field.method'), muted: true, render: (payment) => paymentMethodLabel(payment.methodCode, locale) },
             { key: 'date', header: t('common.date'), muted: true, render: (payment) => <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{payment.date}</span> },
-            { key: 'receipt', header: t('field.document'), render: (payment) => payment.receipt ? <a href={payment.receiptUrl || '#'} target={payment.receiptUrl ? '_blank' : undefined} rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-link)', fontSize: 'var(--fs-xs)' }}><I.File size={14} /> {payment.receipt}</a> : <span className="muted">-</span> },
+            { key: 'receipt', header: t('field.document'), render: (payment) => <AdminReceiptAction payment={payment} t={t} /> },
             { key: 'amount', header: t('common.amount'), align: 'right', width: 110, render: (payment) => <Money amount={payment.amount} /> },
             { key: 'status', header: t('common.status'), width: 130, render: (payment) => <StatusPill status={payment.status} size="sm" /> },
             {
@@ -823,10 +843,10 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
               width: 190,
               render: (payment) => (
                 <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-                  <Button size="sm" variant="subtle" disabled={busyId != null} onClick={() => openPaymentEdit(payment)}>{t('common.edit')}</Button>
+                  <Button data-testid={`admin-payment-edit-${payment.paymentId || payment.id}`} size="sm" variant="subtle" disabled={busyId != null} onClick={() => openPaymentEdit(payment)}>{t('common.edit')}</Button>
                   {payment.status === 'pending' && <>
-                  <IconButton label={t('finance.confirm')} size="sm" disabled={busyId != null} onClick={() => updatePayment(payment, 'confirm')}><I.Check size={16} /></IconButton>
-                  <IconButton label={t('finance.reject')} size="sm" variant="danger" disabled={busyId != null} onClick={() => { setReject(payment); setRejectReason(''); setRejectErrors({}); setError(null) }}><I.X size={16} /></IconButton>
+                  <IconButton data-testid={`admin-payment-confirm-${payment.paymentId || payment.id}`} label={t('finance.confirm')} size="sm" disabled={busyId != null} onClick={() => updatePayment(payment, 'confirm')}><I.Check size={16} /></IconButton>
+                  <IconButton data-testid={`admin-payment-reject-${payment.paymentId || payment.id}`} label={t('finance.reject')} size="sm" variant="danger" disabled={busyId != null} onClick={() => { setReject(payment); setRejectReason(''); setRejectErrors({}); setError(null) }}><I.X size={16} /></IconButton>
                   </>}
                 </div>
               ),
@@ -848,11 +868,12 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
               </div>
               <div className="ops-compact-card-line"><span>{t('common.participant')}</span><strong>{payment.child || '—'}</strong></div>
               <div className="ops-compact-card-line"><span>{t('common.date')}</span><strong>{payment.date || '—'} · {payment.methodCode ? paymentMethodLabel(payment.methodCode, locale) : t('finance.methodMissing')}</strong></div>
+              <div className="ops-compact-card-line"><span>{t('field.document')}</span><AdminReceiptAction payment={payment} t={t} /></div>
               <div className="ops-payment-compact-footer">
                 <StatusPill status={payment.status} size="sm" />
                 {payment.status === 'pending' && <div className="ops-payment-pending-actions">
-                  <Button size="sm" variant="primary" disabled={busyId != null} onClick={() => updatePayment(payment, 'confirm')}>{t('finance.confirm')}</Button>
-                  <Button size="sm" variant="danger" disabled={busyId != null} onClick={() => { setReject(payment); setRejectReason(''); setRejectErrors({}); setError(null) }}>{t('finance.reject')}</Button>
+                  <Button data-testid={`admin-payment-confirm-${payment.paymentId || payment.id}`} size="sm" variant="primary" disabled={busyId != null} onClick={() => updatePayment(payment, 'confirm')}>{t('finance.confirm')}</Button>
+                  <Button data-testid={`admin-payment-reject-${payment.paymentId || payment.id}`} size="sm" variant="danger" disabled={busyId != null} onClick={() => { setReject(payment); setRejectReason(''); setRejectErrors({}); setError(null) }}>{t('finance.reject')}</Button>
                 </div>}
               </div>
             </EntityMobileCard>
@@ -893,10 +914,11 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
           {financeAction === 'payment' && <div className="ops-financial-context" aria-label={t('finance.contextPayment')}>
             <div><span>{t('client.title')}</span><strong>{selectedParticipant?.clientName || selectedParticipant?.parent || t('field.selectClient')}</strong></div>
             <div><span>{t('common.participant')}</span><strong>{selectedParticipant ? `${selectedParticipant.first || ''} ${selectedParticipant.last || ''}`.trim() : t('field.selectParticipant')}</strong></div>
-            <div><span>{t('field.currentBalance')}</span><strong><Money amount={Number(selectedParticipant?.balance || 0)} signed currency="zł" /></strong></div>
+            <div><span>{t('finance.familyBalance')}</span><strong><Money amount={Number(selectedParticipant?.balance || 0)} signed currency="zł" /></strong></div>
             <div><span>{t('field.method')}</span><strong>{paymentMethodLabel(financeForm.paymentMethod, locale)}</strong></div>
           </div>}
           <div className="ops-form-grid">
+            {financeAction === 'payment' && <p className="muted ops-grid-full">{t('finance.familyPaymentHint')}</p>}
             <SearchableSelect inputId={FINANCE_FIELD_IDS.participantId} label={t('common.participant')} value={financeForm.participantId} error={financeErrors.participantId} onChange={(value) => updateFinanceForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant, { description: (row) => row.phone || row.email || row.group }))} loadOptions={loadAdminParticipantOptions} />
             {(financeAction === 'issue' || financeAction === 'renew') && <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label={t('field.subscriptionType')} value={financeForm.subscriptionTypeId} error={financeErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}><option value="">{t('field.selectType')}</option>{subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price.toLocaleString(localeTag)} {type.currency}</option>)}</Select>}
             {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && <Select id={FINANCE_FIELD_IDS.subscriptionId} label={t('field.participantSubscription')} value={financeForm.subscriptionId} error={financeErrors.subscriptionId} disabled={subscriptionsLoading} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}><option value="">{subscriptionsLoading ? t('field.loadingSubscriptions') : t('field.selectSubscription')}</option>{subscriptions.map((subscription) => <option key={subscription.id} value={subscription.id}>#{subscription.id} · {subscription.type} · {subscriptionStatusLabel(subscription.status)} · {subscription.remaining_sessions ?? t('field.unlimitedLower')}</option>)}</Select>}

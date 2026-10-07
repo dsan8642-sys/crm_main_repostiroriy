@@ -61,7 +61,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   function ReceiptAction({ payment }) {
     const { t } = useLocale()
     const [error, setError] = useState(null)
-    if (!payment.receiptUrl) return <span className="muted">{t('client.receipt.none')}</span>
+    if (!payment.receiptUrl) return <span className="muted" data-testid={`client-receipt-${payment.id}`} data-receipt-status={payment.receiptExpired ? 'expired' : 'none'}>{t(payment.receiptExpired ? 'client.receipt.expired' : 'client.receipt.none')}</span>
     return <span><button type="button" className="ops-link-button" onClick={async () => { try { setError(null); await downloadFile(payment.receiptUrl, payment.receipt) } catch (err) { setError(err.status === 403 ? t('client.receipt.forbidden') : t('client.receipt.unavailable')) } }}>{payment.receipt || t('client.receipt.download')}</button>{error && <small role="alert" className="muted">{error}</small>}</span>
   }
 
@@ -89,7 +89,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const { locale, t } = useLocale()
     const data = parentData
     const child = data.children?.find((item) => item.id === kid) || data.children?.[0]
-    const next = child?.nextSession || (child ? (data.schedule?.[child.id] || []).find((session) => session.status === 'planned') : null)
+    const next = child?.nextSession
     return (
       <div className="page" style={{ maxWidth: 900 }}>
         <div className="page-head">
@@ -98,7 +98,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         </div>
         {child?.balance < 0 && (
           <Banner tone="danger" title={t('client.home.debt')} style={{ marginBottom: 14 }} action={<Button size="sm" variant="subtle" onClick={() => go('payments')}>{t('client.home.toPayments')}</Button>}>
-            {t('client.home.amountDue', undefined, { name: child.name, amount: Math.abs(child.balance).toLocaleString(uiLocaleTag(locale)) })}
+            {t('client.home.amountDue', undefined, { amount: Math.abs(child.balance).toLocaleString(uiLocaleTag(locale)) })}
           </Banner>
         )}
         <TodaySessionCard
@@ -130,7 +130,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
   }
 
   function Schedule({ kid, setKid, initialTab }) {
-    const { t } = useLocale()
+    const { locale, t } = useLocale()
     const child = (parentData.children || []).find((item) => item.id === kid)
     const normalize = (session) => session.startAt ? session : ({
       id: String(session.id),
@@ -149,7 +149,14 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       sessionTypeLabel: session.presentation_type_label || '',
       colorKey: normalizeScheduleColorKey(session.presentation_color_key),
       individualParticipant: session.individual_participant || null,
-      deductsExpected: session.is_cancelled ? 0 : 1,
+      deductsExpected: session.is_cancelled || (session.requires_booking && session.booking_status !== 'booked') ? 0 : 1,
+      bookingStatus: session.booking_status || null,
+      bookingDeadline: session.booking_deadline || null,
+      freePlaces: session.free_places ?? null,
+      canCancelBooking: Boolean(session.can_cancel_booking),
+      waitlistPosition: session.waitlist_position ?? null,
+      canLeaveWaitlist: Boolean(session.can_leave_waitlist),
+      bookingTimezone: session.booking_timezone || 'Europe/Warsaw',
     })
     const [rows, setRows] = useState(() => (parentData.schedule?.[kid] || []).map(normalize))
     const [selectedId, setSelectedId] = useState(initialTab || null)
@@ -157,11 +164,20 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
     const [focusDate, setFocusDate] = useState(localToday())
     const [error, setError] = useState(null)
+    const [bookingBusy, setBookingBusy] = useState(false)
     const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
     useEffect(() => { if (initialTab) setSelectedId(initialTab) }, [initialTab])
     useEffect(() => {
       setRows((parentData.schedule?.[kid] || []).map(normalize))
     }, [kid, parentData.schedule, t])
+    async function refreshSchedule() {
+      if (!child?.studentId) return
+      const query = new URLSearchParams({
+        student_id: String(child.studentId), date_from: range.dateFrom, date_to: range.dateTo,
+      })
+      const payload = await api.get(`/api/client/schedule/?${query}`)
+      setRows((payload.sessions || []).map(normalize))
+    }
     useEffect(() => {
       if (!child?.studentId) return undefined
       let active = true
@@ -177,19 +193,39 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
         .catch((err) => {
           if (active) setError(apiErrorMessage(err, t('client.schedule.loadFailed')))
         })
-      return () => { active = false }
+      const onFocus = () => { if (active) refreshSchedule().catch(() => {}) }
+      window.addEventListener('focus', onFocus)
+      return () => { active = false; window.removeEventListener('focus', onFocus) }
     }, [child?.studentId, range.dateFrom, range.dateTo, t])
     const selected = rows.find((row) => String(row.sessionId) === String(selectedId))
+    async function changeBooking(session, book, waitlist = false) {
+      setBookingBusy(true)
+      setError(null)
+      try {
+        const path = `/api/client/schedule/sessions/${session.sessionId}/${waitlist ? 'waitlist' : 'booking'}/`
+        await (book ? api.post(path, { student_id: child.studentId }) : api.delete(path, { student_id: child.studentId }))
+      } catch (err) {
+        setError(apiErrorMessage(err, t('client.schedule.bookingFailed')))
+      } finally {
+        try { await refreshSchedule() } catch { /* Keep the mutation error visible. */ }
+        setBookingBusy(false)
+      }
+    }
     return (
       <div className="page page-wide">
         <div className="page-head"><div><h1 className="page-title">{t('runtime.client.schedule.title')}</h1><p className="page-desc">{t('client.schedule.desc')}</p></div><div className="ops-page-actions"><ChildButtons kid={kid} setKid={setKid} /><ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} /></div></div>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="card card-pad" style={{ marginBottom: 14 }}>
-          <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} />
+          <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} mobileArrows />
         </div>
-        {selected && <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">{t('client.schedule.details')}</div><h3>{selected.group}</h3></div><Button size="sm" variant="subtle" onClick={() => setSelectedId(null)}>{t('shared.close')}</Button></div><div className="ops-summary-grid"><div><span>{t('client.schedule.dateTime')}</span><strong>{selected.date} · {selected.start}-{selected.end}</strong></div><div><span>{t('shared.trainer')}</span><strong>{selected.trainer}</strong></div><div><span>{t('client.schedule.place')}</span><strong>{selected.location}</strong></div><div><span>{t('client.schedule.deduction')}</span><strong>{selected.deductsExpected ? t('client.schedule.oneSession') : t('client.schedule.zeroSessions')}</strong></div></div><StatusPill status={selected.status} /></div>}
-        {displayMode === 'calendar' && <ScheduleCalendar sessions={rows} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(row) => setSelectedId(row.sessionId)} ariaLabel={t('client.schedule.calendarLabel', undefined, { name: child?.name || t('client.schedule.fallbackParticipant') })} />}
-        {displayMode === 'list' && <ScheduleList sessions={rows} testId="client-schedule-list" onOpenSession={(row) => setSelectedId(row.sessionId)} renderStatus={(row) => <span><StatusPill status={row.status} size="sm" /><small>{t('client.schedule.deductionShort', undefined, { count: row.deductsExpected ? '-1' : '0' })}</small></span>} />}
+        {selected && <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">{t('client.schedule.details')}</div><h3>{selected.group}</h3></div><Button size="sm" variant="subtle" onClick={() => setSelectedId(null)}>{t('shared.close')}</Button></div><div className="ops-summary-grid"><div><span>{t('client.schedule.dateTime')}</span><strong>{selected.date} · {selected.start}-{selected.end}</strong></div><div><span>{t('shared.trainer')}</span><strong>{selected.trainer}</strong></div><div><span>{t('client.schedule.place')}</span><strong>{selected.location}</strong></div><div><span>{t('client.schedule.deduction')}</span><strong>{selected.deductsExpected ? t('client.schedule.oneSession') : t('client.schedule.zeroSessions')}</strong></div></div><StatusPill status={selected.status} />{selected.bookingStatus && <div style={{ marginTop: 12, display: 'grid', gap: 8 }}><strong data-testid="client-booking-status" data-status={selected.bookingStatus}>{t(`client.schedule.booking.${selected.bookingStatus}`)}</strong>{selected.waitlistPosition && <span data-testid="client-waitlist-position" data-position={selected.waitlistPosition}>{t('client.schedule.waitlistPosition', undefined, { position: selected.waitlistPosition })}</span>}<span className="muted">{t('client.schedule.freePlaces', undefined, { count: selected.freePlaces })} · {t('client.schedule.bookingDeadline', undefined, { date: new Date(selected.bookingDeadline).toLocaleString(locale, { timeZone: selected.bookingTimezone }), timezone: selected.bookingTimezone })}</span>{selected.bookingStatus === 'available' && <Button data-testid={`client-book-${selected.sessionId}`} disabled={bookingBusy} onClick={() => changeBooking(selected, true)}>{t('client.schedule.book')}</Button>}{selected.bookingStatus === 'full' && <Button data-testid={`client-waitlist-join-${selected.sessionId}`} disabled={bookingBusy} onClick={() => changeBooking(selected, true, true)}>{t('client.schedule.joinWaitlist')}</Button>}{selected.canLeaveWaitlist && <Button data-testid={`client-waitlist-leave-${selected.sessionId}`} variant="secondary" disabled={bookingBusy} onClick={() => changeBooking(selected, false, true)}>{t('client.schedule.leaveWaitlist')}</Button>}{selected.canCancelBooking && <Button data-testid={`client-booking-cancel-${selected.sessionId}`} variant="secondary" disabled={bookingBusy} onClick={() => changeBooking(selected, false)}>{t('client.schedule.cancelBooking')}</Button>}{selected.bookingStatus === 'booked' && !selected.canCancelBooking && <span className="muted">{t('client.schedule.contactAdmin')}</span>}</div>}</div>}
+        <div className="ops-schedule-desktop-content">
+          {displayMode === 'calendar' && <ScheduleCalendar sessions={rows} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(row) => setSelectedId(row.sessionId)} ariaLabel={t('client.schedule.calendarLabel', undefined, { name: child?.name || t('client.schedule.fallbackParticipant') })} />}
+          {displayMode === 'list' && <ScheduleList sessions={rows} testId="client-schedule-list" onOpenSession={(row) => setSelectedId(row.sessionId)} renderStatus={(row) => <span><StatusPill status={row.status} size="sm" /><small>{row.bookingStatus ? t(`client.schedule.booking.${row.bookingStatus}`) : t('client.schedule.deductionShort', undefined, { count: row.deductsExpected ? '-1' : '0' })}</small></span>} />}
+        </div>
+        <div className="ops-schedule-mobile-content">
+          <ScheduleList groupByDate sessions={rows} testId="client-mobile-schedule-agenda" emptyLabel={t('calendar.noSessions')} onOpenSession={(row) => setSelectedId(row.sessionId)} renderStatus={(row) => <span><StatusPill status={row.status} size="sm" /><small>{row.bookingStatus ? t(`client.schedule.booking.${row.bookingStatus}`) : t('client.schedule.deductionShort', undefined, { count: row.deductsExpected ? '-1' : '0' })}</small></span>} />
+        </div>
       </div>
     )
   }
@@ -206,24 +242,23 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const [mobileTab, setMobileTab] = useState('charges')
     const [idempotencyKey, setIdempotencyKey] = useState(() => createPaymentAttemptKey('client-top-up'))
     useUnsavedChanges(Boolean(amount || file), 'client-top-up-request')
-    const child = (parentData.children || []).find((item) => item.id === kid)
-    const participantQuery = child?.studentId ? `?student_id=${encodeURIComponent(child.studentId)}` : ''
+    const familyBalance = parentData.children?.[0]?.balance || 0
     const chargeList = useScreenList({
-      path: `/api/client/charges/${participantQuery}`,
+      path: '/api/client/charges/',
       itemKey: 'charges',
       mapRows: mapClientChargeRows,
       role: 'client',
-      route: `charges-${kid || 'account'}`,
+      route: 'charges-account',
       userKey: currentUser?.id || currentUser?.username,
       initialFilters: { status: '' },
       defaultOrder: 'date',
     })
     const paymentList = useScreenList({
-      path: `/api/client/payment-history/${participantQuery}`,
+      path: '/api/client/payment-history/',
       itemKey: 'payments',
       mapRows: mapClientPaymentRows,
       role: 'client',
-      route: `payment-history-${kid || 'account'}`,
+      route: 'payment-history-account',
       userKey: currentUser?.id || currentUser?.username,
       initialFilters: { status: '', method: '' },
       defaultOrder: '-date',
@@ -255,7 +290,6 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       setBusy(true)
       setFieldErrors({})
       const formData = new FormData()
-      if (child?.studentId) formData.set('student_id', child.studentId)
       formData.set('amount_minor', String(amountMinor))
       formData.set('currency', 'PLN')
       formData.set('file', file)
@@ -263,7 +297,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       try {
         const mutation = await api.postForm('/api/client/payments/top-up-requests/', formData)
         const created = mutation.top_up_request
-        const readbackPayload = await api.get(`/api/client/payment-history/${participantQuery}`)
+        const readbackPayload = await api.get('/api/client/payment-history/')
         const readback = (readbackPayload.payments || []).find((payment) => String(payment.id) === String(created.id))
         assertPaymentReadback(created, readback, 'pending')
         setMessage(t('client.topup.submitted'))
@@ -288,16 +322,16 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
 
     return (
       <div className="page" style={{ maxWidth: 900 }}>
-        <div className="page-head"><div><h1 className="page-title">{t('runtime.client.payments.title')}</h1><p className="page-desc">{t('client.payments.desc')}</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
+        <div className="page-head"><div><h1 className="page-title">{t('runtime.client.payments.title')}</h1><p className="page-desc">{t('client.payments.desc')}</p></div></div>
         <ToastNotice id="client-payment-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>{t('client.topup.sending')}</BusyBanner>
         <div className="ops-client-finance-tabs" role="tablist" aria-label={t('client.payments.sections')}>
-          {[['charges', t('client.payments.charges')], ['history', t('client.payments.history')], ['topup', t('client.payments.topup')]].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mobileTab === value} className={mobileTab === value ? 'is-active' : ''} onClick={() => setMobileTab(value)}>{label}</button>)}
+          {[['charges', t('client.payments.charges')], ['history', t('client.payments.history')], ['topup', t('client.payments.topup')]].map(([value, label]) => <button key={value} type="button" data-testid={`client-payments-tab-${value}`} role="tab" aria-selected={mobileTab === value} className={mobileTab === value ? 'is-active' : ''} onClick={() => setMobileTab(value)}>{label}</button>)}
         </div>
         <div className={`card card-pad ops-client-finance-section${mobileTab === 'topup' ? ' is-mobile-active' : ''}`} style={{ marginBottom: 16 }}>
           <div className="eyebrow">{t('client.topup.title')}</div>
-          <div className="ops-inline-note" role="status">{t('client.topup.context', undefined, { name: child?.name || t('shared.notSelected') })} <Money amount={child?.balance || 0} signed /></div>
+          <div className="ops-inline-note" role="status">{t('client.topup.context')} <Money amount={familyBalance} signed /></div>
           <p className="muted" style={{ margin: '6px 0 14px' }}>{t('client.topup.explanation')}</p>
           <div className="ops-top-up-form">
             <Input id={TOP_UP_FIELD_IDS.amount} label={t('client.topup.amount')} inputMode="decimal" value={amount} error={fieldErrors.amount} onChange={(event) => { setAmount(event.target.value); setFieldErrors((current) => clearFieldError(current, 'amount')) }} placeholder="240,00" />
@@ -306,7 +340,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
               <input id={TOP_UP_FIELD_IDS.file} ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" aria-invalid={Boolean(fieldErrors.file)} aria-describedby={fieldErrors.file ? `${TOP_UP_FIELD_IDS.file}-error` : undefined} onChange={(event) => { setFile(event.target.files?.[0] || null); setFieldErrors((current) => clearFieldError(current, 'file')) }} />
               {fieldErrors.file && <small id={`${TOP_UP_FIELD_IDS.file}-error`} className="ops-field-error" role="alert">{fieldErrors.file}</small>}
             </label>
-            <Button variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>{t('client.topup.submit')}</Button>
+            <Button data-testid="client-top-up-submit" variant="primary" loading={busy} disabled={busy} iconLeft={<I.Upload size={15} />} onClick={createTopUpRequest}>{t('client.topup.submit')}</Button>
           </div>
         </div>
         <div className={`ops-client-finance-section${mobileTab === 'charges' ? ' is-mobile-active' : ''}`}>
@@ -363,7 +397,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const { t } = useLocale()
     const child = (parentData.children || []).find((item) => item.id === kid)
     const subscription = child?.subscription
-    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h1 className="page-title">{t('runtime.client.subscription.title')}</h1><p className="page-desc">{t('client.subscription.desc')}</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">{t('client.subscription.current')}</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>{t('client.subscription.remaining')}</span><strong>{subscription.remaining_sessions == null ? t('client.subscription.unlimited') : subscription.remaining_sessions}</strong></div><div><span>{t('client.subscription.start')}</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>{t('client.subscription.validUntil')}</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>{t('shared.status')}</span><strong>{t(`status.${subscription.status}`, subscription.status)}</strong></div></div></div> : <div className="card card-pad empty">{t('client.subscription.none')}</div>}</div>
+    return <div className="page" style={{ maxWidth: 900 }}><div className="page-head"><div><h1 className="page-title">{t('runtime.client.subscription.title')}</h1><p className="page-desc">{t('client.subscription.desc')}</p></div><ChildButtons kid={child?.id || kid} setKid={setKid} /></div>{subscription ? <div className="card ops-entity-card"><div className="ops-entity-head"><div><div className="eyebrow">{t('client.subscription.current')}</div><h3>{subscription.type}</h3></div><StatusPill status={subscription.status} /></div><div className="ops-summary-grid"><div><span>{t('client.subscription.availableNow')}</span><strong>{t(subscription.sessions_available_now ? 'client.subscription.yes' : 'client.subscription.no')}</strong></div><div><span>{t('client.subscription.remaining')}</span><strong>{subscription.remaining_sessions == null ? t('client.subscription.unlimited') : subscription.remaining_sessions}</strong></div><div><span>{t('client.subscription.start')}</span><strong>{formatDate(subscription.start_date)}</strong></div><div><span>{t('client.subscription.validUntil')}</span><strong>{formatDate(subscription.effective_end_date)}</strong></div><div><span>{t('shared.status')}</span><strong>{t(`status.${subscription.status}`, subscription.status)}</strong></div></div><h4>{t('client.subscription.movements')}</h4><Table rows={subscription.ledger || []} emptyLabel={t('client.subscription.noMovements')} columns={[{ key: 'created_at', header: t('shared.date'), render: (row) => formatDate(row.created_at) }, { key: 'reason', header: t('client.subscription.reason'), render: (row) => t(`client.subscription.reason.${row.reason}`, row.reason) }, { key: 'delta', header: t('client.subscription.change'), render: (row) => row.delta > 0 ? `+${row.delta}` : row.delta }]} /></div> : <div className="card card-pad empty">{t('client.subscription.none')}</div>}</div>
   }
 
   function History({ kid, setKid, currentUser }) {
@@ -384,30 +418,49 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const attendance = attendanceList.rows
     const [selectedHistory, setSelectedHistory] = useState(null)
     const [historyTab, setHistoryTab] = useState('attendance')
+    const [messages, setMessages] = useState([])
+    const [messagePage, setMessagePage] = useState(1)
+    const [messagePages, setMessagePages] = useState(0)
+    const [messageError, setMessageError] = useState(null)
+    useEffect(() => {
+      if (historyTab !== 'messages') return undefined
+      let active = true
+      api.get(`/api/client/notifications/?page=${messagePage}&page_size=20`)
+        .then((payload) => { if (active) { setMessages(payload.notifications || []); setMessagePages(payload.pagination?.pages || 0); setMessageError(null) } })
+        .catch((err) => { if (active) setMessageError(apiErrorMessage(err, t('client.history.messagesFailed'))) })
+      return () => { active = false }
+    }, [historyTab, messagePage, t])
     const visibleAttendance = attendance
     return (
       <div className="page page-wide">
         <div className="page-head"><div><h1 className="page-title">{t('runtime.client.history.title')}</h1><p className="page-desc">{t('client.history.desc')}</p></div><ChildButtons kid={kid} setKid={setKid} /></div>
         <div className="ops-tabs" role="tablist" aria-label={t('client.history.sections')}>
-          <button type="button" role="tab" aria-selected={historyTab === 'attendance'} className={historyTab === 'attendance' ? 'is-active' : ''} onClick={() => setHistoryTab('attendance')}>{t('client.history.attendance')}</button>
-          <button type="button" role="tab" aria-selected="false" aria-disabled="true" disabled title={t('client.history.messagesTitle')}>{t('client.history.messagesUnavailable')}</button>
+          <button type="button" data-testid="client-history-attendance-tab" role="tab" aria-selected={historyTab === 'attendance'} className={historyTab === 'attendance' ? 'is-active' : ''} onClick={() => setHistoryTab('attendance')}>{t('client.history.attendance')}</button>
+          <button type="button" data-testid="client-history-messages-tab" role="tab" aria-selected={historyTab === 'messages'} className={historyTab === 'messages' ? 'is-active' : ''} onClick={() => setHistoryTab('messages')}>{t('client.history.messages')}</button>
         </div>
         {historyTab === 'attendance' && <ListToolbar list={attendanceList} searchLabel={t('client.history.search')} searchPlaceholder={t('client.history.searchPlaceholder')}>
           <label>{t('shared.period')}<select value={attendanceList.draftFilters.period} onChange={(event) => attendanceList.setDraftFilter('period', event.target.value)}><option value="30">{t('client.history.days30')}</option><option value="90">{t('client.history.days90')}</option><option value="365">{t('client.history.year')}</option><option value="">{t('client.history.allTime')}</option></select></label>
           <label>{t('shared.status')}<select value={attendanceList.draftFilters.status} onChange={(event) => attendanceList.setDraftFilter('status', event.target.value)}><option value="">{t('shared.all')}</option><option value="present">{t('status.present')}</option><option value="absent">{t('status.absent')}</option><option value="excused">{t('client.history.excused')}</option><option value="rescheduled">{t('status.moved')}</option></select></label>
         </ListToolbar>}
-        {selectedHistory && <div className="card card-pad" style={{ marginBottom: 14 }}><div className="ops-section-head"><div><div className="eyebrow">{t('client.history.details')}</div><strong>{selectedHistory.label || selectedHistory.method}</strong></div><Button size="sm" variant="subtle" onClick={() => setSelectedHistory(null)}>{t('shared.close')}</Button></div><div className="muted">{t('client.history.detailLine', undefined, { date: selectedHistory.date })}</div></div>}
+        {selectedHistory && <div className="card card-pad ops-client-history-desktop" style={{ marginBottom: 14 }}><div className="ops-section-head"><div><div className="eyebrow">{t('client.history.details')}</div><strong>{selectedHistory.label || selectedHistory.method}</strong></div><Button size="sm" variant="subtle" onClick={() => setSelectedHistory(null)}>{t('shared.close')}</Button></div><div className="muted">{t('client.history.detailLine', undefined, { date: selectedHistory.date })}</div></div>}
         {historyTab === 'attendance' && <div>
             <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.history.attendance')}</div>
             <ListFeedback list={attendanceList} emptyLabel={t('client.history.empty')} />
-            <Table rows={visibleAttendance} emptyLabel={t('client.history.empty')} columns={[
+            <div className="ops-client-history-desktop"><Table rows={visibleAttendance} emptyLabel={t('client.history.empty')} columns={[
               { key: 'date', header: t('shared.date'), muted: true },
               { key: 'label', header: t('client.history.session'), render: (row) => <button type="button" className="ops-link-button" onClick={() => setSelectedHistory(row)}><span className="strong">{row.label}</span></button> },
               { key: 'trainer', header: t('shared.trainer'), muted: true },
               { key: 'status', header: t('shared.status'), render: (row) => <StatusPill status={row.status === 'rescheduled' ? 'moved' : row.status} size="sm" /> },
-            ]} />
+            ]} /></div>
+            <div className="ops-client-history-mobile" role="list" aria-label={t('client.history.attendance')}>
+              {visibleAttendance.map((row) => <article className="ops-client-history-row" role="listitem" key={row.id}>
+                <div className="ops-client-history-row-head"><span>{formatDate(row.date)} · {row.time}</span><StatusPill status={row.status === 'rescheduled' ? 'moved' : row.status} size="sm" /></div>
+                <strong>{row.group}</strong>
+              </article>)}
+            </div>
             <ListPagination list={attendanceList} />
         </div>}
+        {historyTab === 'messages' && <div className="card card-pad" data-testid="client-history-messages">{messageError && <Banner tone="danger">{messageError}</Banner>}{messages.length === 0 && !messageError && <p className="muted">{t('client.history.messagesEmpty')}</p>}{messages.map((message) => <article key={message.id} data-testid={`client-message-${message.id}`} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}><div className="ops-section-head"><strong>{message.subject || message.event_type}</strong><span className="muted">{formatDate(message.sent_at || message.delivered_at)}</span></div><p style={{ whiteSpace: 'pre-wrap' }}>{message.body}</p><small className="muted">{message.channel} · {message.language_code}</small></article>)}<div className="ops-button-row"><Button variant="secondary" disabled={messagePage <= 1} onClick={() => setMessagePage((page) => page - 1)}>{t('client.history.previous')}</Button><span>{messagePage} / {Math.max(1, messagePages)}</span><Button variant="secondary" disabled={messagePage >= messagePages} onClick={() => setMessagePage((page) => page + 1)}>{t('client.history.next')}</Button></div></div>}
       </div>
     )
   }
@@ -423,12 +476,14 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     const [error, setError] = useState(null)
     const [fieldErrors, setFieldErrors] = useState({})
     const [busy, setBusy] = useState(false)
+    const [editing, setEditing] = useState(false)
+    const languageNames = { ru: t('client.profile.russian'), uk: 'Українська', pl: 'Polski', en: 'English' }
     const update = (field, value) => {
       setForm((current) => ({ ...current, [field]: value }))
       setFieldErrors((current) => clearFieldError(current, field))
     }
     useUnsavedChanges(
-      Object.keys(form).some((field) => form[field] !== baseline[field]),
+      editing && Object.keys(form).some((field) => form[field] !== baseline[field]),
       'client-profile',
     )
 
@@ -437,6 +492,10 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       setForm(next)
       setBaseline(next)
     }, [account.first_name, account.last_name, account.email, account.phone, account.preferred_language])
+
+    useEffect(() => {
+      if (editing) document.getElementById(PROFILE_FIELD_IDS.firstName)?.focus()
+    }, [editing])
 
     async function saveProfile() {
       setBusy(true)
@@ -453,6 +512,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           },
         })
         setBaseline({ ...form })
+        setEditing(false)
         setMessage(t('client.profile.saved'))
         setError(null)
         reloadRoleData?.('client', { studentId: (parentData.children || []).find((item) => item.id === kid)?.studentId })
@@ -476,22 +536,26 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
       }
     }
 
+    function cancelEdit() {
+      setForm({ ...baseline })
+      setFieldErrors({})
+      setError(null)
+      setEditing(false)
+      window.requestAnimationFrame(() => document.getElementById('client-profile-edit-trigger')?.focus())
+    }
+
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">{account.full_name || t('runtime.client.profile.title')}</h1><p className="page-desc">{t('client.profile.currentBalance')} <Money amount={selectedChild?.balance || 0} signed currency="zł" /></p></div><div className="ops-page-actions"><Button variant="primary" onClick={() => go('payments')}>{t('client.profile.topup')}</Button><Button variant="secondary" onClick={() => go('consents')}>{t('runtime.client.consents.title')}</Button></div></div>
+        <div className="page-head"><div><h1 className="page-title">{account.full_name || t('runtime.client.profile.title')}</h1><p className="page-desc">{t('client.profile.currentBalance')} <Money amount={selectedChild?.balance || 0} signed currency="zł" /></p></div><div className="ops-page-actions ops-profile-actions"><Button data-testid="client-profile-topup" variant="primary" onClick={() => go('payments')}>{t('client.profile.topup')}</Button><Button data-testid="client-profile-consents" variant="secondary" onClick={() => go('consents')}>{t('runtime.client.consents.title')}</Button></div></div>
         <ChildButtons kid={kid} setKid={setKid} />
         <ToastNotice id="client-profile-result" message={message} />
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>{t('client.profile.saving')}</BusyBanner>
         <div className="card card-pad" style={{ marginBottom: 16 }}>
-          <div className="ops-profile-form-grid">
-            <Input id={PROFILE_FIELD_IDS.firstName} label={t('client.profile.firstName')} value={form.firstName} error={fieldErrors.firstName} onChange={(event) => update('firstName', event.target.value)} />
-            <Input id={PROFILE_FIELD_IDS.lastName} label={t('client.profile.lastName')} value={form.lastName} error={fieldErrors.lastName} onChange={(event) => update('lastName', event.target.value)} />
-            <Input id={PROFILE_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => update('email', event.target.value)} />
-            <Input id={PROFILE_FIELD_IDS.phone} label={t('client.profile.phone')} value={form.phone} error={fieldErrors.phone} onChange={(event) => update('phone', event.target.value)} />
-            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? t('client.profile.connected') : t('client.profile.disconnected')}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={disconnectTelegram}>{t('client.profile.disconnect')}</Button>}</div>
-            <Select id={PROFILE_FIELD_IDS.language} label={t('client.profile.notificationLanguage')} value={form.language} error={fieldErrors.language} hint={t('client.profile.notificationHint')} onChange={(event) => update('language', event.target.value)}><option value="ru">{t('client.profile.russian')}</option><option value="pl">Polski</option><option value="en">English</option></Select>
-          </div>
+          <dl className="ops-profile-summary-grid">
+            {[[t('client.profile.firstName'), baseline.firstName], [t('client.profile.lastName'), baseline.lastName], ['Email', baseline.email], [t('client.profile.phone'), baseline.phone], [t('client.profile.notificationLanguage'), languageNames[baseline.language] || baseline.language], ['Telegram', account.telegram?.connected ? t('client.profile.connected') : t('client.profile.disconnected')]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '-'}</dd></div>)}
+          </dl>
+          {!editing && <Button id="client-profile-edit-trigger" data-testid="client-profile-edit" variant="secondary" onClick={() => setEditing(true)}>{t('client.profile.edit')}</Button>}
         </div>
         <Table rows={participants} emptyLabel={t('client.profile.participantsEmpty')} columns={[
           { key: 'full_name', header: t('shared.participant'), render: (row) => <button type="button" className="ops-link-button" onClick={() => { const child = (parentData.children || []).find((item) => item.studentId === row.id); if (child) setKid(child.id) }}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
@@ -500,7 +564,18 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
           { key: 'group', header: t('shared.group'), render: (row) => row.group?.name || t('shared.individually') },
           { key: 'status', header: t('shared.status'), render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
         ]} />
-        <div className="ops-profile-save-row"><Button variant="primary" loading={busy} disabled={busy} onClick={saveProfile}>{t('client.profile.save')}</Button></div>
+        {editing && <div className="card card-pad ops-profile-edit" style={{ marginTop: 16 }}>
+          <h2>{t('client.profile.edit')}</h2>
+          <div className="ops-profile-form-grid">
+            <Input id={PROFILE_FIELD_IDS.firstName} label={t('client.profile.firstName')} value={form.firstName} error={fieldErrors.firstName} onChange={(event) => update('firstName', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.lastName} label={t('client.profile.lastName')} value={form.lastName} error={fieldErrors.lastName} onChange={(event) => update('lastName', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.email} label="Email" value={form.email} error={fieldErrors.email} onChange={(event) => update('email', event.target.value)} />
+            <Input id={PROFILE_FIELD_IDS.phone} label={t('client.profile.phone')} value={form.phone} error={fieldErrors.phone} onChange={(event) => update('phone', event.target.value)} />
+            <div><span className="muted">Telegram</span><strong style={{ display: 'block' }}>{account.telegram?.connected ? t('client.profile.connected') : t('client.profile.disconnected')}</strong>{account.telegram?.connected && <Button size="sm" variant="secondary" onClick={disconnectTelegram}>{t('client.profile.disconnect')}</Button>}</div>
+            <Select id={PROFILE_FIELD_IDS.language} label={t('client.profile.notificationLanguage')} value={form.language} error={fieldErrors.language} hint={t('client.profile.notificationHint')} onChange={(event) => update('language', event.target.value)}><option value="ru">{t('client.profile.russian')}</option><option value="uk">Українська</option><option value="pl">Polski</option><option value="en">English</option></Select>
+          </div>
+          <div className="ops-profile-save-row"><Button data-testid="client-profile-cancel" variant="secondary" disabled={busy} onClick={cancelEdit}>{t('shared.cancel')}</Button><Button data-testid="client-profile-save" variant="primary" loading={busy} disabled={busy} onClick={saveProfile}>{t('client.profile.save')}</Button></div>
+        </div>}
       </div>
     )
   }
@@ -616,5 +691,14 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     )
   }
 
-  return { Home, Schedule, Payments, Subscription, History, Profile, Consents }
+  function Help({ go }) {
+    const { t } = useLocale()
+    return <div className="page" style={{ maxWidth: 820 }}>
+      <div className="page-head"><div><h1 className="page-title">{t('runtime.client.help.title')}</h1><p className="page-desc">{t('runtime.client.help.desc')}</p></div></div>
+      {['balance', 'payments', 'schedule', 'booking'].map((section) => <section key={section} className="card card-pad" style={{ marginBottom: 12 }}><h2>{t(`client.help.${section}.title`)}</h2><p>{t(`client.help.${section}.body`)}</p></section>)}
+      <Button variant="secondary" onClick={() => go('schedule')}>{t('nav.client.schedule')}</Button>
+    </div>
+  }
+
+  return { Home, Schedule, Payments, Subscription, History, Profile, Consents, Help }
 }

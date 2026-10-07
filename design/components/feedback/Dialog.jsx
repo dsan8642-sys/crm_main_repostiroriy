@@ -87,6 +87,7 @@ export function Dialog({
     <div
       ref={dialogRef}
       role="dialog"
+      data-testid="confirmation-dialog"
       aria-modal="true"
       aria-labelledby={title ? titleId : undefined}
       aria-describedby={description ? descriptionId : undefined}
@@ -132,8 +133,8 @@ export function Dialog({
         <div style={{ padding: children ? '16px 20px' : '10px 20px' }}>{children}</div>
         {!hideFooter && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 20px', background: 'var(--surface-sunken)', borderTop: '1px solid var(--border-subtle)' }}>
-            <Button variant="secondary" data-dialog-cancel onClick={() => requestClose('cancel')}>{cancelLabel}</Button>
-            <Button variant={tone === 'danger' ? 'danger' : 'primary'} onClick={onConfirm}>{confirmLabel}</Button>
+            <Button variant="secondary" data-dialog-cancel data-testid="confirmation-cancel" onClick={() => requestClose('cancel')}>{cancelLabel}</Button>
+            <Button variant={tone === 'danger' ? 'danger' : 'primary'} data-testid="confirmation-confirm" onClick={onConfirm}>{confirmLabel}</Button>
           </div>
         )}
       </div>

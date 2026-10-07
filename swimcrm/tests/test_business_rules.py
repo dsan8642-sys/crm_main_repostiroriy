@@ -160,6 +160,24 @@ class AttendanceDeductionRule(TestCase):
         self.assertIn(LedgerReason.CORRECTION, reasons)
         self.assertEqual(len(reasons), 3)
 
+    def test_clearing_and_remarking_restores_balance_with_immutable_corrections(self):
+        record = set_attendance(session_id=self.session.id, student=self.student,
+                                status=AttendanceStatus.PRESENT)
+        self.assertEqual(self._remaining(), 7)
+
+        cleared = set_attendance(session_id=self.session.id, student=self.student, status=None)
+        self.assertEqual(cleared.id, record.id)
+        self.assertIsNone(cleared.status)
+        self.assertEqual(self._remaining(), 8)
+        self.assertEqual(list(record.ledger_entries.order_by("id").values_list("delta", flat=True)), [-1, 1])
+
+        set_attendance(session_id=self.session.id, student=self.student, status=None)
+        self.assertEqual(record.ledger_entries.count(), 2)
+        set_attendance(session_id=self.session.id, student=self.student,
+                       status=AttendanceStatus.ABSENT)
+        self.assertEqual(self._remaining(), 7)
+        self.assertEqual(list(record.ledger_entries.order_by("id").values_list("delta", flat=True)), [-1, 1, -1])
+
     def test_attendance_history_cannot_be_deleted(self):
         record = set_attendance(
             session_id=self.session.id,
@@ -562,10 +580,11 @@ class ReceiptRetentionRule(TestCase):
 
 
 class NotificationSmsRule(TestCase):
-    """Rule 5.6: SMS templates: no Polish diacritics and < 160 chars."""
-    def test_diacritics_rejected(self):
+    """One segment: 159 ASCII or 69 Unicode characters."""
+    def test_unicode_ukrainian_ok(self):
+        validate_sms_template("Нагадування про заняття завтра")
         with self.assertRaises(ValidationError):
-            validate_sms_template("Przypomnienie o płatności do piątku")
+            validate_sms_template("ї" * 70)
 
     def test_too_long_rejected(self):
         with self.assertRaises(ValidationError):

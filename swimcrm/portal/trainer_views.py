@@ -20,7 +20,8 @@ def trainer_sessions(request):
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     qs = Session.objects.filter(_effective_trainer_filter(trainer)).select_related(
-        "group", "trainer__user", "substitute_trainer__user", "individual_student")
+        "group", "trainer__user", "substitute_trainer__user", "individual_student",
+        "session_type_config")
     if history:
         qs = qs.filter(start_at__date__lt=timezone.localdate()).order_by("-start_at", "-id")
     else:
@@ -75,7 +76,8 @@ def trainer_history(request):
     qs = Session.objects.filter(
         _effective_trainer_filter(trainer), start_at__date__lt=timezone.localdate()
     ).select_related(
-        "group", "trainer__user", "substitute_trainer__user", "individual_student"
+        "group", "trainer__user", "substitute_trainer__user", "individual_student",
+        "session_type_config"
     )
     group_id = positive_int_param(request, "group_id")
     if group_id:
@@ -122,12 +124,12 @@ def trainer_history(request):
 def trainer_session_detail(request, session_id):
     trainer = _trainer_from_request(request)
     session = get_object_or_404(
-        Session.objects.select_related("group", "trainer__user", "substitute_trainer__user").filter(
+        Session.objects.select_related("group", "trainer__user", "substitute_trainer__user", "session_type_config").filter(
             _effective_trainer_filter(trainer)
         ),
         pk=session_id,
     )
-    attendance = {record.student_id: record for record in session.attendance.all()}
+    attendance = {record.student_id: record for record in session.attendance.all() if record.status is not None}
     return JsonResponse({
         "session": _role_session_payload(session),
         "students": [{
@@ -148,7 +150,7 @@ def trainer_session_detail(request, session_id):
     })
 
 
-@require_POST
+@require_http_methods(["POST", "DELETE"])
 @transaction.atomic
 def trainer_mark_attendance(request, session_id):
     trainer = _trainer_from_request(request)
@@ -162,8 +164,8 @@ def trainer_mark_attendance(request, session_id):
     except (TypeError, ValueError) as exc:
         raise _field_validation_error(
             "student_id", "Выберите участника.", code="required") from exc
-    status = data.get("status")
-    if status not in AttendanceStatus.values:
+    status = data.get("status") if request.method == "POST" else None
+    if request.method == "POST" and status not in AttendanceStatus.values:
         raise _field_validation_error(
             "status", "Выберите допустимый статус посещения.",
             code="invalid_choice")
@@ -179,11 +181,11 @@ def trainer_mark_attendance(request, session_id):
     record = set_attendance(session_id=session.id, student=Student.objects.get(pk=student_id),
                             status=status, actor=request.user)
     return JsonResponse({
-        "id": record.id,
-        "student_id": record.student_id,
-        "session_id": record.session_id,
-        "status": record.status,
-        "deducts": record.deducts,
+        "id": record.id if record else None,
+        "student_id": student_id,
+        "session_id": session.id,
+        "status": record.status if record else None,
+        "deducts": record.deducts if record else False,
     })
 
 
@@ -242,7 +244,8 @@ def trainer_bulk_attendance(request, session_id):
                 code="invalid_choice")
         seen.add(student_id)
         normalized.append((student_id, status))
-    students = Student.objects.in_bulk(seen)
+    students = {student.pk: student for student in Student.objects.filter(pk__in=seen)
+                .order_by("pk").select_for_update(no_key=True)}
     results = []
     for student_id, status in normalized:
         record = set_attendance(

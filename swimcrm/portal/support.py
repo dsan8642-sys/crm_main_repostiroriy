@@ -1,11 +1,11 @@
 import json
 import re
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Exists, OuterRef, Q, Sum
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -22,7 +22,8 @@ from audit.models import audit
 from billing.models import (Charge, Payment, PaymentMethod, PaymentSource, PaymentStatus,
                             ReceiptFile, normalize_payment_method)
 from billing.services import (
-    IdempotencyConflict, charge_statuses, confirm_payment,
+    IdempotencyConflict, charge_statuses, family_balance, family_balances,
+    family_charge_statuses, confirm_payment,
     create_admin_payment, create_client_top_up_request,
     create_manual_charge, reject_payment, reverse_manual_charge,
     student_balance,
@@ -36,11 +37,11 @@ from common.schedule_palette import (
     validate_schedule_color_key,
 )
 from dataio.exports import export_entity
-from notifications.models import Channel, NotificationLog
+from notifications.models import Channel, DeliveryStatus, NotificationLog
 from notifications.services import queue_mass_mailing
 from scheduling.models import (Location, Session, SessionParticipant,
                                SessionParticipantSource, SessionParticipantStatus,
-                               SessionType, WaitlistEntry, WaitlistStatus)
+                               SessionType, SessionTypeConfig, WaitlistEntry, WaitlistStatus)
 from scheduling.services import (ScheduleConflict, check_trainer_conflict,
                                  create_session, delete_session, edit_single_session,
                                  promote_waitlist_entry, require_mutable_split_roster,
@@ -415,6 +416,12 @@ def _session_payload(session, *, type_color_keys=None):
     waitlist_active_count = getattr(session, "waitlist_active_count", None)
     if waitlist_active_count is None and session.pk:
         waitlist_active_count = session.waitlist_entries.filter(status=WaitlistStatus.ACTIVE).count()
+    delivery_issue = getattr(session, "notification_delivery_issue", None)
+    if delivery_issue is None and session.pk:
+        delivery_issue = NotificationLog.objects.filter(
+            payload__session_id=session.pk, error__gt="",
+            created_at__gte=timezone.now() - timedelta(days=7),
+        ).exists()
     individual_participant = None
     if (
         session.session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}
@@ -470,7 +477,12 @@ def _session_payload(session, *, type_color_keys=None):
         "duration_minutes": session.duration_minutes,
         "location": session.location,
         "session_type": session.session_type,
+        "session_type_config_id": session.session_type_config_id,
+        "session_type_config_code": (
+            session.session_type_config.code if session.session_type_config_id else None),
         "presentation_type_label": (
+            (session.session_type_config.label if session.session_type_config_id else None)
+            or
             getattr(type_color_keys, "labels", {}).get(session.session_type)
             or {
                 SessionType.GROUP: "Групповая тренировка",
@@ -493,6 +505,7 @@ def _session_payload(session, *, type_color_keys=None):
         "individual_student_id": session.individual_student_id,
         "individual_participant": individual_participant,
         "is_cancelled": session.is_cancelled,
+        "requires_booking": session.requires_booking,
         "is_manually_modified": session.is_manually_modified,
         "max_participants": session.max_participants,
         "price_minor": session.price_minor,
@@ -503,16 +516,18 @@ def _session_payload(session, *, type_color_keys=None):
             second_participant.student_id if second_participant else None
         ),
         "waitlist_active_count": waitlist_active_count,
+        "notification_delivery_issue": delivery_issue,
         "notes": session.notes,
     }
 
 
 _ROLE_SESSION_FIELDS = (
     "id", "start_at", "end_at", "duration_minutes", "location", "session_type",
+    "session_type_config_code",
     "presentation_type_label", "presentation_color_key",
     "trainer_id", "trainer", "substitute_trainer_id", "substitute_trainer",
     "effective_trainer_id", "effective_trainer", "group",
-    "individual_student_id", "individual_participant", "is_cancelled", "max_participants",
+    "individual_student_id", "individual_participant", "is_cancelled", "max_participants", "requires_booking",
     "participants_count",
 )
 
@@ -650,6 +665,9 @@ def _group_payload(group):
         "price_minor": group.price_minor,
         "currency": group.currency,
         "default_capacity": group.default_capacity,
+        "self_booking_enabled": group.self_booking_enabled,
+        "booking_cutoff_hours": group.booking_cutoff_hours,
+        "booking_excluded_sessions": getattr(group, "booking_excluded_sessions", 0),
         "sort_order": group.sort_order,
         "color_key": stored_schedule_color_key(group.color_key),
         "is_active": group.is_active,
@@ -755,6 +773,7 @@ def _payment_payload(payment):
         "created_at": timezone.localtime(payment.created_at).isoformat(),
         "documents": receipts,
         "receipt": receipts[0] if receipts else None,
+        "receipt_expired": not receipts and any(receipt.is_deleted for receipt in payment.receipts.all()),
         "events": events,
     }
 
@@ -877,13 +896,13 @@ def _client_detail_payload(account):
     payments = Payment.objects.filter(student_id__in=participant_ids).select_related(
         "student", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
-    attendance = AttendanceRecord.objects.filter(student_id__in=participant_ids).select_related(
+    attendance = AttendanceRecord.objects.filter(student_id__in=participant_ids, status__isnull=False).select_related(
         "student", "session", "session__group", "session__trainer__user").order_by("-session__start_at", "-id")
-    balances = {student.id: student_balance(student).amount_minor for student in participants}
+    balance = family_balance(account).amount_minor
 
     return {
         "account": _client_account_payload(account),
-        "participants": [{**_student_payload(student), "balance_minor": balances.get(student.id, 0)} for student in participants],
+        "participants": [{**_student_payload(student), "balance_minor": balance} for student in participants],
         "subscriptions": [_subscription_detail_payload(subscription) for subscription in subscriptions],
         "charges": [_charge_payload(charge) for charge in charges],
         "payments": [_payment_payload(payment) for payment in payments],
@@ -892,7 +911,7 @@ def _client_detail_payload(account):
         "summary": {
             "participants_count": len(participants),
             "active_participants": sum(1 for student in participants if student.is_active),
-            "balance_minor": sum(balances.values()),
+            "balance_minor": balance,
             "active_subscriptions": sum(1 for subscription in subscriptions if subscription.status == SubscriptionStatus.ACTIVE),
             "pending_payments": sum(1 for payment in payments if payment.status == PaymentStatus.PENDING),
         },
@@ -965,7 +984,7 @@ def _apply_account_data(account, data, *, allow_lifecycle=True):
         account_update_fields.append("instagram_username")
     if "preferred_language" in account_data:
         language = (account_data.get("preferred_language", "") or "").lower()
-        if language not in {"ru", "pl", "en"}:
+        if language not in {"ru", "uk", "pl", "en"}:
             raise _field_validation_error(
                 "account.preferred_language", "Выберите поддерживаемый язык.",
                 code="invalid_choice")
@@ -998,7 +1017,7 @@ def _apply_client_account_data(account, data):
         account.email = account_data.get("email", "") or ""
     if "preferred_language" in account_data:
         language = (account_data.get("preferred_language", "") or "").lower()
-        if language not in {"ru", "pl", "en"}:
+        if language not in {"ru", "uk", "pl", "en"}:
             raise _field_validation_error(
                 "account.preferred_language", "Выберите поддерживаемый язык.",
                 code="invalid_choice")
@@ -1268,8 +1287,10 @@ def _apply_trainer_data(trainer, data):
     return trainer
 
 
+@transaction.atomic
 def _apply_group_data(group, data):
     group_data = _group_data(data)
+    old_booking_mode = group.self_booking_enabled
     if "name" in group_data:
         group.name = group_data.get("name", "") or ""
     if "description" in group_data:
@@ -1305,6 +1326,13 @@ def _apply_group_data(group, data):
     if "default_capacity" in group_data:
         group.default_capacity = _nullable_positive_int(
             group_data.get("default_capacity"), "default_capacity")
+    if "self_booking_enabled" in group_data:
+        group.self_booking_enabled = _bool_value(group_data["self_booking_enabled"])
+    if "booking_cutoff_hours" in group_data:
+        cutoff = _positive_int(group_data["booking_cutoff_hours"], "booking_cutoff_hours")
+        if cutoff > 168:
+            raise _field_validation_error("booking_cutoff_hours", "Срок должен быть не больше 168 часов.")
+        group.booking_cutoff_hours = cutoff
     if "sort_order" in group_data:
         group.sort_order = _nullable_nonnegative_int(
             group_data.get("sort_order"), "sort_order")
@@ -1317,6 +1345,20 @@ def _apply_group_data(group, data):
             "name", "Укажите название группы.", code="required")
     group.full_clean()
     group.save()
+    group.booking_excluded_sessions = 0
+    if group.pk and old_booking_mode != group.self_booking_enabled:
+        candidates = Session.objects.filter(
+            group=group, start_at__gt=timezone.now(),
+            requires_booking=old_booking_mode,
+        )
+        safe = candidates.filter(attendance__isnull=True)
+        if not group.self_booking_enabled:
+            safe = safe.exclude(participants__status=SessionParticipantStatus.ACTIVE)
+            safe = safe.exclude(waitlist_entries__status__in=[
+                WaitlistStatus.ACTIVE, WaitlistStatus.SUSPENDED])
+        safe_ids = list(safe.values_list("id", flat=True).distinct())
+        group.booking_excluded_sessions = candidates.count() - len(safe_ids)
+        Session.objects.filter(pk__in=safe_ids).update(requires_booking=group.self_booking_enabled)
     return group
 
 
@@ -1499,6 +1541,19 @@ def _session_changes_from_data(data, *, current_session=None):
             code="invalid_choice")
     if "session_type" in data:
         changes["session_type"] = requested_type
+    if "session_type_config_id" in data:
+        config_id = data.get("session_type_config_id")
+        config = (_object_for_field(
+            SessionTypeConfig.objects.filter(is_active=True), config_id,
+            "session_type_config_id", "тип занятия") if config_id else None)
+        if config and config.base_type != requested_type:
+            raise _field_validation_error(
+                "session_type_config_id", "Тип занятия не соответствует выбранному формату.",
+                code="invalid_choice")
+        changes["session_type_config"] = config
+    elif "session_type" in data and requested_type != current_type:
+        changes["session_type_config"] = SessionTypeConfig.objects.filter(
+            code=requested_type, is_active=True).first()
     if "trainer_id" in data:
         trainer_id = data.get("trainer_id")
         if current_session is not None and str(current_session.trainer_id) == str(trainer_id):
@@ -1655,9 +1710,12 @@ def _split_second_student_from_data(
 
 
 def _ensure_capacity_for_roster(session):
-    if session.session_type != SessionType.SPLIT:
+    if session.requires_booking:
+        roster_size = session_roster_students(session).count()
+    elif session.session_type == SessionType.SPLIT:
+        roster_size = len(split_roster_student_ids(session))
+    else:
         return
-    roster_size = len(split_roster_student_ids(session))
     if session.max_participants < roster_size:
         raise _field_validation_error(
             "max_participants",
@@ -1675,12 +1733,21 @@ def _create_session_from_data(data, *, actor=None):
     group = None
     individual_student = None
     requested_type = data.get("session_type")
+    config_id = data.get("session_type_config_id")
+    type_config = (_object_for_field(
+        SessionTypeConfig.objects.filter(is_active=True), config_id,
+        "session_type_config_id", "тип занятия") if config_id else None)
     session_type = requested_type or (
+        type_config.base_type if type_config else
         SessionType.INDIVIDUAL
         if data.get("individual_student_id") else SessionType.GROUP)
     if session_type not in {SessionType.GROUP, SessionType.INDIVIDUAL, SessionType.SPLIT}:
         raise _field_validation_error(
             "session_type", "Выберите корректный тип занятия.",
+            code="invalid_choice")
+    if type_config and type_config.base_type != session_type:
+        raise _field_validation_error(
+            "session_type_config_id", "Тип занятия не соответствует выбранному формату.",
             code="invalid_choice")
     if session_type in {SessionType.INDIVIDUAL, SessionType.SPLIT}:
         individual_student = _object_for_field(
@@ -1771,6 +1838,7 @@ def _create_session_from_data(data, *, actor=None):
         max_participants=max_participants,
         group=group,
         session_type=session_type,
+        session_type_config=type_config,
         individual_student=individual_student,
         manually_modified=_bool_value(data.get("is_manually_modified")),
         price_minor=price_minor,
@@ -1796,13 +1864,10 @@ def _student_queryset_for_client(account):
 
 
 def _default_billing_student_for_client(account):
-    participants = list(_student_queryset_for_parent(account).order_by("id"))
+    participants = list(_student_queryset_for_parent(account).filter(is_active=True).order_by("-is_account_holder", "id"))
     if not participants:
         return ensure_account_holder_participant(account)
-    if len(participants) == 1:
-        return participants[0]
-    raise _field_validation_error(
-        "student_id", "Выберите участника аккаунта.", code="required")
+    return participants[0]
 
 
 def _parent_from_request(request):
@@ -1842,7 +1907,16 @@ def _participant_for_client_request(request, account):
     student_id = request.GET.get("student_id")
     if student_id:
         return _student_owned_by_client(account, student_id)
+    if account.students.count() > 1:
+        raise _field_validation_error(
+            "student_id", "Выберите участника аккаунта.", code="required")
     return _default_billing_student_for_client(account)
+
+
+def _financial_participant_for_client_request(request, account):
+    student_id = request.GET.get("student_id")
+    return (_student_owned_by_client(account, student_id) if student_id
+            else _default_billing_student_for_client(account))
 
 
 def _participant_context(account, student):
@@ -1861,7 +1935,8 @@ def _visible_parent_sessions(students, date_from=None, date_to=None):
     group_ids = list(Group.objects.filter(students__in=students).values_list("id", flat=True))
     student_ids = [s.id for s in students]
     qs = Session.objects.select_related(
-        "group", "trainer__user", "substitute_trainer__user", "individual_student"
+        "group", "trainer__user", "substitute_trainer__user", "individual_student",
+        "session_type_config"
     ).prefetch_related("participants")
     qs = qs.filter(
         Q(group_id__in=group_ids)

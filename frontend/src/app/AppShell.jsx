@@ -200,7 +200,8 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       return {
         TrainerScreens: {
           Sessions: factories.createTrainerSessionsScreen(components, icons, roleDataRefs.current.TrainerData),
-          Session: factories.createTrainerSessionScreen(components, icons, reloadRoleData, roleDataRefs.current.TrainerData),
+          Schedule: factories.createTrainerScheduleScreen(components, icons),
+          Session: factories.createTrainerSessionScreen(components, icons, roleDataRefs.current.TrainerData),
           Groups: factories.createTrainerGroupsScreen(components, icons, roleDataRefs.current.TrainerData),
           History: factories.createTrainerHistoryScreen(components, icons, roleDataRefs.current.TrainerData),
         },
@@ -575,6 +576,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 <button
                   type="button"
                   className="ops-mobile-search-button"
+                  data-testid="open-global-search"
                   aria-label={mobileSearchOpen ? t('shell.closeSearch') : t('shell.openSearch')}
                   aria-controls="ops-mobile-search"
                   aria-expanded={mobileSearchOpen}
@@ -586,6 +588,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               <button
                 type="button"
                 className="ops-mobile-menu-button"
+                data-testid="open-menu"
                 aria-label={t('shell.openMenu')}
                 aria-controls="ops-mobile-drawer"
                 aria-expanded={mobileMenuOpen}
@@ -608,6 +611,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 <button
                   type="button"
                   className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
+                  data-testid={`nav-${role}-${item.key}`}
                   aria-current={navActiveKey === item.key ? 'page' : undefined}
                   onClick={() => navigate(item.key)}
                   title={item.label}
@@ -634,11 +638,12 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 <div className="ops-user-name">{userName}</div>
               </div>
             </div>
-            <IconButton className="ops-sidebar-logout is-desktop" label={t('shell.logout')} disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+            <IconButton data-testid="logout" className="ops-sidebar-logout is-desktop" label={t('shell.logout')} disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
           </div>
           <button
             type="button"
             className="ops-sidebar-toggle"
+            data-testid="sidebar-toggle"
             aria-label={sidebarCollapsed ? t('shell.expandMenu') : t('shell.collapseMenu')}
             aria-expanded={!sidebarCollapsed}
             onClick={toggleSidebar}
@@ -660,6 +665,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             ref={drawerRef}
             id="ops-mobile-drawer"
             className="ops-mobile-drawer"
+            data-testid="mobile-menu-dialog"
             role="dialog"
             aria-modal="true"
             aria-label={t('shell.menu')}
@@ -683,6 +689,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                     <button
                       type="button"
                       className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
+                      data-testid={`nav-${role}-${item.key}`}
                       aria-current={navActiveKey === item.key ? 'page' : undefined}
                       onClick={() => navigate(item.key)}
                       title={item.label}
@@ -707,7 +714,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                   <div className="ops-avatar" title={userName}>{initials(userName)}</div>
                   <div className="ops-user-name">{userName}</div>
                 </div>
-                <IconButton className="ops-sidebar-logout" label={t('shell.logout')} disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
+                <IconButton data-testid="logout" className="ops-sidebar-logout" label={t('shell.logout')} disabled={logoutPending} onClick={logout}><icons.Logout size={16} /></IconButton>
               </div>
             </div>
           </aside>
@@ -720,6 +727,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             ref={searchOverlayRef}
             id="ops-mobile-search"
             className="ops-mobile-search"
+            data-testid="global-search-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="ops-mobile-search-title"
@@ -732,6 +740,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 autoComplete="off"
                 aria-label={t('shell.globalSearch')}
                 value={searchQuery}
+                data-testid="global-search-input"
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder={t('shell.searchPlaceholder')}
               />
@@ -754,6 +763,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
           <section
             ref={navigationGuardRef}
             className="ops-navigation-guard"
+            data-testid="navigation-discard-dialog"
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="ops-navigation-guard-title"
@@ -763,8 +773,8 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             <h2 id="ops-navigation-guard-title">{t('shell.unsavedTitle')}</h2>
             <p id="ops-navigation-guard-description">{t('shell.unsavedDescription')}</p>
             <div>
-              <button type="button" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>{t('shell.stay')}</button>
-              <button type="button" className="is-danger" onClick={confirmPendingNavigation}>{t('shell.leave')}</button>
+              <button type="button" data-testid="navigation-discard-stay" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>{t('shell.stay')}</button>
+              <button type="button" data-testid="navigation-discard-confirm" className="is-danger" onClick={confirmPendingNavigation}>{t('shell.leave')}</button>
             </div>
           </section>
         </div>
@@ -773,7 +783,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       <div className="ops-main">
         {role === 'admin' && !isMobile && (
           <header className="topbar ops-topbar">
-            <div className="ops-global-search"><input aria-label={t('shell.globalSearch')} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('shell.searchPlaceholder')} />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">{t('shell.noResults')}</div>}</div>}</div>
+          <div className="ops-global-search"><input data-testid="global-search-input" aria-label={t('shell.globalSearch')} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('shell.searchPlaceholder')} />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">{t('shell.noResults')}</div>}</div>}</div>
             <div className="ops-topbar-statuses">
               <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>{t('shell.server')}</span>
               <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>{t('shell.data')}</span>

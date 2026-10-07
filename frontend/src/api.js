@@ -302,12 +302,9 @@ export async function fetchClientPortal({ studentId, signal } = {}) {
   const overview = await api.get('/api/client/overview/', requestOptions)
   const participants = overview.participants || overview.students || []
   const resolvedStudentId = studentId || participants[0]?.id || null
-  const target = resolvedStudentId ? `?student_id=${encodeURIComponent(resolvedStudentId)}` : ''
   const { values, resourceStates } = await fetchResourceMap({
     profile: () => api.get('/api/client/profile/', requestOptions),
     consents: () => api.get('/api/client/consents/', requestOptions),
-    schedule: () => api.get(`/api/client/schedule/${target}`, requestOptions),
-    notifications: () => fetchAllPages('/api/client/notifications/', 'notifications', 200, requestOptions),
   })
   return {
     overview,

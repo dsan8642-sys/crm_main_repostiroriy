@@ -25,6 +25,21 @@ function groupListColorStyle(row) {
   return row.hasScheduleColor ? scheduleColorStyle(row.colorKey) : uncoloredGroupStyle
 }
 
+function groupForm(row = {}) {
+  return {
+    name: row.name || '', description: row.description || '',
+    defaultTrainerId: row.defaultTrainerId || '',
+    defaultLocationId: row.defaultLocationActive !== false ? row.defaultLocationId || '' : '',
+    price: row.price == null ? '' : String(row.price),
+    defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity),
+    sortOrder: row.sortOrder == null ? '' : String(row.sortOrder),
+    colorKey: row.colorKey === 'standard' ? '' : row.colorKey || '',
+    isActive: row.active ?? true,
+    selfBookingEnabled: row.selfBookingEnabled ?? false,
+    bookingCutoffHours: String(row.bookingCutoffHours ?? 8),
+  }
+}
+
 export function createAdminGroupsScreen(components, reloadRoleData, adminData = {}) {
   const { StatusPill, Button, Banner, Input, Select, Checkbox, Avatar, Badge, Money, Dialog } = components
 
@@ -49,7 +64,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
     )
     const clients = adminData.clients || []
     const initial = (adminData.groups || []).find((row) => String(row.groupId) === String(groupId)) || null
-    const initialForm = initial ? { name: initial.name || '', description: initial.description || '', defaultTrainerId: initial.defaultTrainerId || '', defaultLocationId: initial.defaultLocationActive !== false ? initial.defaultLocationId || '' : '', price: initial.price == null ? '' : String(initial.price), defaultCapacity: initial.defaultCapacity == null ? '' : String(initial.defaultCapacity), sortOrder: initial.sortOrder == null ? '' : String(initial.sortOrder), colorKey: initial.colorKey === 'standard' ? '' : initial.colorKey, isActive: initial.active } : { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', sortOrder: '', colorKey: '', isActive: true }
+    const initialForm = groupForm(initial || undefined)
     const [selected, setSelected] = useState(initial)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState(false)
@@ -142,7 +157,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       setSelected(row); setCreating(false); setEditing(false); setCandidateId('')
       setCapacityError('')
       setFieldErrors({})
-      const next = { name: row.name || '', description: row.description || '', defaultTrainerId: row.defaultTrainerId || '', defaultLocationId: row.defaultLocationActive !== false ? row.defaultLocationId || '' : '', price: row.price == null ? '' : String(row.price), defaultCapacity: row.defaultCapacity == null ? '' : String(row.defaultCapacity), sortOrder: row.sortOrder == null ? '' : String(row.sortOrder), colorKey: row.colorKey === 'standard' ? '' : row.colorKey, isActive: row.active }
+      const next = groupForm(row)
       setForm(next)
       setFormBaseline(next)
     }
@@ -152,6 +167,11 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       const parsedCapacity = Number(capacityValue)
       const sortOrderValue = String(form.sortOrder).trim()
       const parsedSortOrder = Number(sortOrderValue)
+      const cutoff = Number(form.bookingCutoffHours)
+      if (!Number.isInteger(cutoff) || cutoff < 1 || cutoff > 168) {
+        setFieldErrors((current) => ({ ...current, bookingCutoffHours: t('groups.bookingCutoffInvalid') }))
+        return
+      }
       if (capacityValue !== '' && (!Number.isInteger(parsedCapacity) || parsedCapacity <= 0)) {
         setCapacityError(t('groups.capacityInvalid'))
         document.getElementById('admin-group-defaultCapacity')?.focus()
@@ -182,15 +202,17 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           sort_order: sortOrderValue === '' ? null : parsedSortOrder,
           color_key: form.colorKey || null,
           is_active: form.isActive,
+          self_booking_enabled: form.selfBookingEnabled,
+          booking_cutoff_hours: cutoff,
         }
         if (price !== '' && (!Number.isFinite(Number(price)) || Number(price) < 0)) {
           setFieldErrors((current) => ({ ...current, price: t('groups.priceInvalid') }))
           document.getElementById('admin-group-price')?.focus()
           return
         }
-        if (isNew) await api.post('/api/admin/groups/', payload)
-        else await api.post(`/api/admin/groups/${selected.groupId}/`, payload)
-        setMessage(isNew ? t('groups.created') : t('groups.updated'))
+        const saved = isNew ? await api.post('/api/admin/groups/', payload) : await api.post(`/api/admin/groups/${selected.groupId}/`, payload)
+        if (!isNew) setSelected((current) => current && ({ ...current, selfBookingEnabled: Boolean(saved.self_booking_enabled), bookingCutoffHours: saved.booking_cutoff_hours }))
+        setMessage(saved.booking_excluded_sessions ? t('groups.bookingExcluded', { count: saved.booking_excluded_sessions }) : isNew ? t('groups.created') : t('groups.updated'))
         setCreating(false); setEditing(false)
         setFormBaseline(null)
         await reloadRoleData?.('admin')
@@ -203,6 +225,7 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
           price_minor: 'price',
           default_capacity: 'defaultCapacity',
           sort_order: 'sortOrder',
+          booking_cutoff_hours: 'bookingCutoffHours',
           color_key: 'colorKey',
           is_active: 'isActive',
         })
@@ -282,23 +305,27 @@ export function createAdminGroupsScreen(components, reloadRoleData, adminData = 
       <>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <div className="ops-form-grid"><Input id="admin-group-name" label={t('groups.name')} value={form.name} error={fieldErrors.name} onChange={(event) => updateForm('name', event.target.value)} /><Input id="admin-group-description" label={t('common.description')} value={form.description} error={fieldErrors.description} onChange={(event) => updateForm('description', event.target.value)} /><Input id="admin-group-defaultCapacity" label={t('groups.capacity')} hint={t('groups.capacityHint')} inputMode="numeric" value={form.defaultCapacity} error={capacityError || fieldErrors.defaultCapacity} onChange={(event) => updateForm('defaultCapacity', event.target.value)} /><Input id="admin-group-sortOrder" label={t('groups.sortOrder')} hint={t('groups.sortOrderHint')} inputMode="numeric" value={form.sortOrder} error={fieldErrors.sortOrder} onChange={(event) => updateForm('sortOrder', event.target.value)} /><Input id="admin-group-price" label={t('groups.price')} hint={t('groups.priceHint')} inputMode="decimal" value={form.price} error={fieldErrors.price} onChange={(event) => updateForm('price', event.target.value)} /><Select id="admin-group-defaultTrainerId" label={t('groups.defaultTrainer')} value={form.defaultTrainerId} error={fieldErrors.defaultTrainerId} onChange={(event) => updateForm('defaultTrainerId', event.target.value)}><option value="">{t('groups.noTrainer')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</Select><Select id="admin-group-defaultLocationId" label={t('groups.defaultLocation')} value={form.defaultLocationId} error={fieldErrors.defaultLocationId} onChange={(event) => updateForm('defaultLocationId', event.target.value)}><option value="">{t('groups.noLocation')}</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select><Checkbox id="admin-group-isActive" label={t('groups.isActive')} checked={form.isActive} error={fieldErrors.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} /></div>
+        <div className="ops-form-grid">
+          <Checkbox id="admin-group-selfBooking" label={t('groups.selfBooking')} checked={form.selfBookingEnabled} onChange={(event) => updateForm('selfBookingEnabled', event.target.checked)} />
+          <Input id="admin-group-bookingCutoff" label={t('groups.bookingCutoff')} hint={t('groups.bookingCutoffHint')} inputMode="numeric" value={form.bookingCutoffHours} error={fieldErrors.bookingCutoffHours} onChange={(event) => updateForm('bookingCutoffHours', event.target.value)} />
+        </div>
         <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
       </>
     )
 
-    const groupDetail = selected && !creating ? <section role="region" className="card ops-entity-card ops-inline-entity-detail" aria-label={t('groups.cardAria', { name: selected.name })} style={{ marginTop: 16, padding: '20px 22px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', boxSizing: 'border-box' }}>
+    const groupDetail = selected && !creating ? <section role="region" data-testid={`admin-group-detail-${selected.groupId}`} className="card ops-entity-card ops-inline-entity-detail" aria-label={t('groups.cardAria', { name: selected.name })} style={{ marginTop: 16, padding: '20px 22px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', boxSizing: 'border-box' }}>
       <ContextBackButton onClick={() => setSelected(null)}>{t('groups.back')}</ContextBackButton>
-      <div className="ops-entity-head" style={{ gap: 16, marginTop: 18 }}><div style={{ minWidth: 0 }}><div className="eyebrow">{t('groups.card')}</div><h3>{selected.name}</h3><div className="muted">{selected.description || t('groups.noDescription')}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active ? <Button variant="danger" disabled={busy} onClick={() => openArchiveConfirm()}>{t('groups.archive')}</Button> : <Button variant="primary" disabled={busy} onClick={() => restoreGroup()}>{t('groups.restore')}</Button>}<Button variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button><Button variant="subtle" onClick={() => setSelected(null)}>{t('common.close')}</Button></div></div>
+      <div className="ops-entity-head" style={{ gap: 16, marginTop: 18 }}><div style={{ minWidth: 0 }}><div className="eyebrow">{t('groups.card')}</div><h3>{selected.name}</h3><div className="muted">{selected.description || t('groups.noDescription')}</div></div><div className="ops-button-row"><StatusPill status={selected.active ? 'active' : 'inactive'} />{selected.active ? <Button variant="danger" disabled={busy} onClick={() => openArchiveConfirm()}>{t('groups.archive')}</Button> : <Button variant="primary" disabled={busy} onClick={() => restoreGroup()}>{t('groups.restore')}</Button>}<Button data-testid="admin-group-edit" variant="secondary" onClick={() => { setEditing(true); setFormBaseline({ ...form }) }}>{t('groups.editAction')}</Button><Button variant="subtle" onClick={() => setSelected(null)}>{t('common.close')}</Button></div></div>
       <div className="ops-summary-grid" style={{ gap: 16, marginTop: 20 }}><div><span>{t('common.trainer')}</span><strong>{selected.trainer || t('groups.notAssigned')}</strong></div><div><span>{t('groups.participants')}</span><strong>{members.length}</strong></div><div><span>{t('groups.capacity')}</span><strong>{capacity ?? t('groups.notSet')}</strong></div><div><span>{t('groups.nextSession')}</span><strong>{groupSessions[0] ? `${groupSessions[0].date} · ${groupSessions[0].start}` : nextSessionLabel(selected)}</strong></div></div>
       <div className="ops-detail-grid" style={{ gap: 24, marginTop: 22 }}>
-        <div><div className="ops-section-head"><div className="eyebrow">{t('groups.roster')}</div><div className="ops-button-row"><Badge tone={capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? t('common.loading') : `${members.length} / ${capacity ?? t('groups.notSet')}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading || !selected.active} onClick={() => { setCandidateId(''); setAddingMember(true) }}>{t('groups.add')}</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || t('groups.contactMissing')}</small></span></button><Button size="sm" variant="subtle" disabled={busy} onClick={() => changeParticipantMembership(client.studentId, 'remove')}>{t('groups.remove')}</Button></div>)}{membersLoading && <div className="empty">{t('groups.loadingRoster')}</div>}{!membersLoading && !members.length && <div className="empty">{t('groups.emptyRoster')}</div>}</div>
+        <div><div className="ops-section-head"><div className="eyebrow">{t('groups.roster')}</div><div className="ops-button-row"><Badge tone={!selected.selfBookingEnabled && capacity && members.length >= capacity ? 'warning' : 'primary'}>{membersLoading ? t('common.loading') : selected.selfBookingEnabled ? t('groups.eligibleCount', { count: members.length }) : `${members.length} / ${capacity ?? t('groups.notSet')}`}</Badge><Button size="sm" variant="primary" disabled={busy || membersLoading || !selected.active} onClick={() => { setCandidateId(''); setAddingMember(true) }}>{t('groups.add')}</Button></div></div>{members.map((client) => <div className="ops-member-row" key={client.studentId} data-testid={`admin-group-member-${client.studentId}`}><button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: client.clientId })}><Avatar name={`${client.first} ${client.last}`} size={28} /><span><strong>{client.last} {client.first}</strong><small>{client.phone || client.email || t('groups.contactMissing')}</small></span></button><Button size="sm" variant="subtle" data-testid={`admin-group-remove-member-${client.studentId}`} disabled={busy} onClick={() => changeParticipantMembership(client.studentId, 'remove')}>{t('groups.remove')}</Button></div>)}{membersLoading && <div className="empty">{t('groups.loadingRoster')}</div>}{!membersLoading && !members.length && <div className="empty">{t('groups.emptyRoster')}</div>}</div>
         <div><div className="eyebrow" style={{ marginBottom: 10 }}>{t('groups.schedule')}</div>{groupSessions.map((session) => <button key={session.id} type="button" className={`ops-detail-row ops-schedule-detail-row${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={{ ...scheduleColorStyle(session.colorKey), display: 'grid', justifyItems: 'start', gap: 5, width: '100%', minHeight: 54, padding: '11px 14px', border: '1px solid var(--schedule-color-border)', borderRadius: 'var(--radius-md)', background: 'var(--schedule-color-background)', color: 'var(--schedule-color-text)', textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box' }} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}-{session.end}</strong><span>{session.trainer} · {session.location}</span></button>)}{!groupSessions.length && <button type="button" className="ops-empty-action" onClick={() => go?.('schedule')}>{t('groups.noSessions')}</button>}</div>
       </div>
     </section> : null
 
     return (
       <div className="page page-wide" style={{ paddingInline: 'clamp(12px, 3vw, 26px)' }}>
-        <div className="page-head"><div><h1 className="page-title">{t('groups.title')}</h1><p className="page-desc">{t('groups.description')}</p></div><Button variant="primary" onClick={() => { const next = { name: '', description: '', defaultTrainerId: '', defaultLocationId: '', price: '', defaultCapacity: '', sortOrder: '', colorKey: '', isActive: true }; setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('groups.new')}</Button></div>
+        <div className="page-head"><div><h1 className="page-title">{t('groups.title')}</h1><p className="page-desc">{t('groups.description')}</p></div><Button data-testid="admin-group-create" variant="primary" onClick={() => { const next = groupForm(); setCreating(true); setSelected(null); setCapacityError(''); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('groups.new')}</Button></div>
         <ToastNotice id="admin-groups-result" message={message} />
         {error && !creating && !editing && !addingMember && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>{t('groups.updatingRoster')}</BusyBanner>

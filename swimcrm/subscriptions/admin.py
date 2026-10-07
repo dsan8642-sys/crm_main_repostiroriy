@@ -1,17 +1,18 @@
 from django.contrib import admin
 
+from common.admin import ReadOnlyAdminMixin
+
 from .models import FreezePeriod, SessionLedgerEntry, Subscription
-from .services import renew_subscription
 
 
-class FreezeInline(admin.TabularInline):
+class FreezeInline(ReadOnlyAdminMixin, admin.TabularInline):
     model = FreezePeriod
     extra = 0
     readonly_fields = ("start_date", "end_date", "reason", "created_by", "created_at")
     can_delete = False
 
 
-class LedgerInline(admin.TabularInline):
+class LedgerInline(ReadOnlyAdminMixin, admin.TabularInline):
     model = SessionLedgerEntry
     extra = 0
     readonly_fields = ("delta", "reason", "attendance", "note", "created_by", "created_at")
@@ -19,7 +20,7 @@ class LedgerInline(admin.TabularInline):
 
 
 @admin.register(Subscription)
-class SubscriptionAdmin(admin.ModelAdmin):
+class SubscriptionAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("student", "subscription_type", "start_date", "effective_end_date",
                     "remaining_sessions", "status")
     list_filter = ("status", "subscription_type", "student__groups", "start_date")
@@ -32,24 +33,10 @@ class SubscriptionAdmin(admin.ModelAdmin):
     date_hierarchy = "start_date"
     inlines = [FreezeInline, LedgerInline]
     readonly_fields = ("effective_end_date", "remaining_sessions", "total_frozen_days")
-    actions = ["renew_same_type"]
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-    @admin.action(description="Продлить тем же типом с сегодня (остаток переносится)")
-    def renew_same_type(self, request, queryset):
-        # Decision #1: renewal carries the remaining balance over. New type/start
-        # can be chosen per-subscription later; the bulk action uses same type/today.
-        renewed = 0
-        for sub in queryset:
-            renew_subscription(subscription=sub, created_by=request.user)
-            renewed += 1
-        self.message_user(request, f"Продлено абонементов: {renewed}")
 
 
 @admin.register(SessionLedgerEntry)
-class LedgerAdmin(admin.ModelAdmin):
+class LedgerAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("subscription", "delta", "reason", "created_at", "created_by")
     list_filter = ("reason", "created_at", "subscription__subscription_type")
     search_fields = (
@@ -59,5 +46,3 @@ class LedgerAdmin(admin.ModelAdmin):
     )
     autocomplete_fields = ("subscription", "attendance", "created_by")
     date_hierarchy = "created_at"
-    def has_change_permission(self, request, obj=None): return False
-    def has_delete_permission(self, request, obj=None): return False

@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from common.admin import ReadOnlyAdminMixin
+
 from .models import AttendanceRecord
 
 
 @admin.register(AttendanceRecord)
-class AttendanceAdmin(admin.ModelAdmin):
+class AttendanceAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("session", "student", "status", "deducts", "marked_by", "marked_at")
     list_filter = ("status", "session__trainer", "session__group", "marked_by")
     search_fields = (

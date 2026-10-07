@@ -13,7 +13,7 @@ from accounts.models import Consent, ConsentType
 from attendance.models import AttendanceStatus
 from attendance.services import set_attendance
 from billing.models import Charge, Payment, PaymentStatus
-from billing.services import confirm_payment
+from billing.services import confirm_payment, family_balance, family_charge_statuses
 from catalog.models import Group
 from scheduling.services import create_session
 from students.models import Student
@@ -59,6 +59,26 @@ class LocalizationRule(TestCase):
 
 # ---------------- 5.5 Debtors / upcoming ----------------
 class DebtorsRule(TestCase):
+    def test_sibling_payment_covers_family_charge(self):
+        first = f.make_student()
+        second = f.make_student(parent=first.parent, first="Sibling")
+        charge = Charge.objects.create(
+            student=first, description="Абонемент", amount_minor=20000,
+            currency="PLN", due_date=date.today() - timedelta(days=5),
+        )
+        Payment.objects.create(
+            student=second, amount_minor=50000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.CONFIRMED,
+        )
+        self.assertEqual(family_balance(first.parent).amount_minor, -30000)
+        self.assertTrue(family_charge_statuses(first.parent)[0].is_paid)
+        self.assertEqual(debtors(), [])
+        self.assertEqual(charge.student_id, first.id)
+        second.is_active = False
+        second.save(update_fields=["is_active"])
+        self.assertEqual(family_balance(first.parent).amount_minor, -30000)
+        self.assertEqual(debtors(), [])
+
     def test_overdue_charge_makes_debtor(self):
         st = f.make_student()
         Charge.objects.create(student=st, description="Абонемент", amount_minor=24000,
@@ -363,6 +383,25 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(log.language_code, "pl")
         self.assertEqual(log.subject, "Platnosc")
         self.assertIn("prosimy o platnosc", log.body)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_ukrainian_notification_translation(self):
+        parent = self._parent_with_consent()
+        parent.preferred_language = "uk"
+        parent.save(update_fields=["preferred_language"])
+        st = Student.objects.create(parent=parent, first_name="Іван", last_name="К")
+        Charge.objects.create(student=st, description="A", amount_minor=24000,
+                              currency="PLN", due_date=date.today() - timedelta(days=1))
+        rule = self._rule(offset_minutes=0)
+        NotificationTemplateTranslation.objects.create(
+            template=rule.template, language_code="uk",
+            subject="Нагадування про оплату",
+            body="{student}, оплатіть {amount} до {date}.",
+        )
+        self.assertEqual(run_scheduler()["sent"], 1)
+        log = NotificationLog.objects.get()
+        self.assertEqual(log.language_code, "uk")
+        self.assertIn("оплатіть", log.body)
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_offset_defers_send(self):

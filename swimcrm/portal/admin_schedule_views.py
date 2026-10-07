@@ -104,20 +104,9 @@ def _session_attendance_payload(session):
         else list(_session_roster(session))
     )
     student_ids = [student.id for student in roster]
-    charge_totals = {
-        row["student_id"]: row["total"] or 0
-        for row in Charge.objects.filter(student_id__in=student_ids)
-        .values("student_id").annotate(total=Sum("amount_minor"))
-    }
-    payment_totals = {
-        row["student_id"]: row["total"] or 0
-        for row in Payment.objects.filter(
-            student_id__in=student_ids,
-            status=PaymentStatus.CONFIRMED,
-        ).values("student_id").annotate(total=Sum("amount_minor"))
-    }
-    attendance = {record.student_id: record for record in session.attendance.select_related("student")}
-    split_roster_locked = session.session_type == SessionType.SPLIT and bool(attendance)
+    balances = family_balances({student.parent_id for student in roster})
+    attendance = {record.student_id: record for record in session.attendance.select_related("student") if record.status is not None}
+    split_roster_locked = session.session_type == SessionType.SPLIT and session.attendance.exists()
     one_off_participants = {
         participant.student_id: participant
         for participant in session.participants.filter(
@@ -144,7 +133,7 @@ def _session_attendance_payload(session):
         } for entry in history],
         "students": [{
             **_student_payload(student),
-            "balance_minor": charge_totals.get(student.id, 0) - payment_totals.get(student.id, 0),
+            "balance_minor": balances[student.parent_id],
             "currency": settings.DEFAULT_CURRENCY,
             "attendance": _attendance_payload(attendance[student.id]) if student.id in attendance else None,
             "session_participant": {
@@ -182,8 +171,13 @@ def admin_schedule_sessions(request):
         return JsonResponse(_session_payload(session), status=201)
     qs = Session.objects.select_related(
         "group", "trainer__user", "substitute_trainer__user",
-        "individual_student__parent__user", "template"
-    ).prefetch_related(
+        "individual_student__parent__user", "template", "session_type_config"
+    ).annotate(notification_delivery_issue=Exists(
+        NotificationLog.objects.filter(
+            payload__session_id=OuterRef("pk"), error__gt="",
+            created_at__gte=timezone.now() - timedelta(days=7),
+        )
+    )).prefetch_related(
         "participants__student__parent__user"
     ).order_by("start_at", "id")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
@@ -215,7 +209,7 @@ def admin_schedule_session_detail(request, session_id):
     user = _admin_required(request)
     sessions = Session.objects.select_related(
             "group", "trainer__user", "substitute_trainer__user",
-            "individual_student__parent__user", "template"
+            "individual_student__parent__user", "template", "session_type_config"
         )
     if request.method != "GET":
         sessions = sessions.select_for_update(of=("self",))
@@ -358,25 +352,26 @@ def admin_schedule_session_detail(request, session_id):
     return JsonResponse(_session_payload(session))
 
 
-@require_http_methods(["GET", "POST"])
+@require_http_methods(["GET", "POST", "DELETE"])
 @transaction.atomic
 def admin_schedule_session_attendance(request, session_id):
     user = _admin_required(request)
     sessions = Session.objects.select_related(
-        "group", "trainer__user", "substitute_trainer__user", "individual_student"
+        "group", "trainer__user", "substitute_trainer__user", "individual_student",
+        "session_type_config"
     )
-    if request.method == "POST":
+    if request.method in {"POST", "DELETE"}:
         sessions = sessions.select_for_update(of=("self",))
     session = get_object_or_404(sessions, pk=session_id)
-    if request.method == "POST":
+    if request.method in {"POST", "DELETE"}:
         data = _json_body(request)
         try:
             student_id = int(data.get("student_id"))
         except (TypeError, ValueError) as exc:
             raise _field_validation_error(
                 "student_id", "Выберите участника.", code="required") from exc
-        status = data.get("status")
-        if status not in AttendanceStatus.values:
+        status = data.get("status") if request.method == "POST" else None
+        if request.method == "POST" and status not in AttendanceStatus.values:
             raise _field_validation_error(
                 "status", "Выберите допустимый статус посещения.",
                 code="invalid_choice")
@@ -391,7 +386,9 @@ def admin_schedule_session_attendance(request, session_id):
                 code="invalid_choice")
         record = set_attendance(session_id=session.id, student=Student.objects.get(pk=student_id),
                                 status=status, actor=user)
-        return JsonResponse(_attendance_payload(record))
+        return JsonResponse(_attendance_payload(record) if record else {
+            "student_id": student_id, "session_id": session.id, "status": None,
+        })
 
     return JsonResponse(_session_attendance_payload(session))
 
@@ -439,7 +436,8 @@ def admin_schedule_session_attendance_bulk(request, session_id):
                 code="invalid_choice")
         seen.add(student_id)
         normalized.append((student_id, status))
-    students = Student.objects.in_bulk(seen)
+    students = {student.pk: student for student in Student.objects.filter(pk__in=seen)
+                .order_by("pk").select_for_update(no_key=True)}
     records = [
         set_attendance(
             session_id=session.id,
@@ -469,6 +467,8 @@ def admin_schedule_session_participants(request, session_id):
     data = _json_body(request)
     if session.is_cancelled:
         raise ValidationError("cancelled sessions cannot receive participants")
+    if session.requires_booking and session.attendance.exists():
+        raise ValidationError("После отметки посещения состав менять нельзя")
     require_mutable_split_roster(session)
     try:
         student_id = int(data.get("student_id"))
@@ -567,6 +567,8 @@ def admin_schedule_session_participant_detail(request, session_id, student_id):
         pk=session_id,
     )
     require_mutable_split_roster(session)
+    if session.requires_booking and session.attendance.exists():
+        raise ValidationError("После отметки посещения состав менять нельзя")
     participant = SessionParticipant.objects.filter(
         session=session,
         student_id=student_id,
@@ -577,6 +579,9 @@ def admin_schedule_session_participant_detail(request, session_id, student_id):
     participant.status = SessionParticipantStatus.CANCELLED
     participant.full_clean()
     participant.save(update_fields=["status", "updated_at"])
+    if session.requires_booking:
+        from scheduling.services import promote_open_waitlist
+        promote_open_waitlist(session, actor=user)
     audit(user, "session_participant.cancelled", participant, {
         "session_id": session.id,
         "student_id": student_id,
@@ -585,10 +590,12 @@ def admin_schedule_session_participant_detail(request, session_id, student_id):
 
 
 @require_http_methods(["GET", "POST"])
+@transaction.atomic
 def admin_schedule_session_waitlist(request, session_id):
     user = _admin_required(request)
     session = get_object_or_404(Session, pk=session_id)
     if request.method == "POST":
+        session = Session.objects.select_for_update().get(pk=session_id)
         data = _json_body(request)
         try:
             student_id = int(data.get("student_id"))
@@ -606,6 +613,10 @@ def admin_schedule_session_waitlist(request, session_id):
                 code="duplicate")
         entry = WaitlistEntry(session=session, student=student)
         _apply_waitlist_data(entry, data)
+        if session.requires_booking:
+            from scheduling.services import promote_open_waitlist
+            promote_open_waitlist(session, actor=user)
+            entry.refresh_from_db()
         audit(user, "waitlist.created", entry, {
             "session_id": session.id,
             "student_id": entry.student_id,
@@ -621,6 +632,7 @@ def admin_schedule_session_waitlist(request, session_id):
 
 
 @require_http_methods(["GET", "POST", "PATCH", "PUT", "DELETE"])
+@transaction.atomic
 def admin_schedule_waitlist_entry_detail(request, entry_id):
     user = _admin_required(request)
     entry = get_object_or_404(
@@ -629,6 +641,9 @@ def admin_schedule_waitlist_entry_detail(request, entry_id):
     )
     if request.method == "GET":
         return JsonResponse(_waitlist_payload(entry))
+    Session.objects.select_for_update().get(pk=entry.session_id)
+    entry = WaitlistEntry.objects.select_for_update().select_related(
+        "session", "student", "student__parent").get(pk=entry_id)
     before = {"priority": entry.priority, "status": entry.status, "note": entry.note}
     if request.method == "DELETE":
         if entry.status == WaitlistStatus.PROMOTED:

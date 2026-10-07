@@ -22,16 +22,16 @@ const serializeTrainerHistoryFilters = (filters) => {
   }
 }
 
-export function createTrainerSessionScreen(components, icons, reloadRoleData, trainerData = {}) {
+export function createTrainerSessionScreen(components, icons, trainerData = {}) {
   const { Button, Avatar, Banner, Dialog, StatusPill } = components
   const I = icons
-  const options = ['present', 'absent', 'excused', 'rescheduled']
+  const options = ['present', 'absent', 'excused']
 
   return function ApiTrainerSession({ go, back, trainerSessionId }) {
     const { t } = useLocale()
     const labels = {
       present: t('trainer.attendance.present'), absent: t('trainer.attendance.absent'),
-      excused: t('trainer.attendance.excused'), rescheduled: t('trainer.attendance.rescheduled'),
+      excused: t('trainer.attendance.excused'),
     }
     const initialSession = (trainerData.sessions || []).find((item) => String(item.sessionId) === String(trainerSessionId || trainerData.activeSessionId))
     const [rows, setRows] = useState(() => [...(trainerData.roster || [])])
@@ -108,16 +108,17 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
         return next
       })
       try {
-        await api.post(`/api/trainer/sessions/${sessionId}/attendance/`, {
-          student_id: row.studentId,
-          status,
-        })
-        setRows((current) => current.map((item) => item.id === row.id ? { ...item, status } : item))
-        setMessage(t('trainer.attendance.effect', undefined, { name: row.name, status: labels[status], effect: status === 'present' || status === 'absent' ? t('client.schedule.oneSession') : t('trainer.attendance.noDeduction') }))
+        const clearing = row.status === status
+        if (clearing) {
+          await api.delete(`/api/trainer/sessions/${sessionId}/attendance/`, { student_id: row.studentId })
+        } else {
+          await api.post(`/api/trainer/sessions/${sessionId}/attendance/`, { student_id: row.studentId, status })
+        }
+        setRows((current) => current.map((item) => item.id === row.id ? { ...item, status: clearing ? null : status } : item))
+        setMessage(clearing ? t('trainer.attendance.cleared') : t('trainer.attendance.effect', undefined, { name: row.name, status: labels[status], effect: status === 'present' || status === 'absent' ? t('client.schedule.oneSession') : t('trainer.attendance.noDeduction') }))
         window.requestAnimationFrame(() => {
           document.querySelector(`#trainer-attendance-row-${row.id} button:nth-of-type(${options.indexOf(status) + 1})`)?.focus()
         })
-        reloadRoleData?.('trainer')
       } catch (err) {
         const message = apiErrorMessage(err, t('trainer.attendance.saveFailed'))
         setRowErrors((current) => ({ ...current, [row.id]: message }))
@@ -169,7 +170,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
           </div>
           <div className="ops-button-row">
             {nextSession && <Button variant="secondary" disabled={busyId != null} onClick={() => go('session', { trainerSessionId: nextSession.sessionId })}>{t('trainer.attendance.nextSession')}</Button>}
-            {!sessionMeta.cancelled && <Button variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>{t('trainer.attendance.allPresent')}</Button>}
+            {!sessionMeta.cancelled && <Button data-testid="trainer-attendance-all-present" variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>{t('trainer.attendance.allPresent')}</Button>}
           </div>
         </div>
 
@@ -195,6 +196,7 @@ export function createTrainerSessionScreen(components, icons, reloadRoleData, tr
                   return (
                     <Button
                       key={status}
+                      data-testid={`trainer-attendance-${row.id}-${status}`}
                       size="sm"
                       variant={on ? 'primary' : 'secondary'}
                       loading={busyId === row.id}
@@ -270,6 +272,7 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
             <h1 className="page-title">{t('runtime.trainer.sessions.title')}</h1>
             <p className="page-desc">{t('trainer.sessions.desc')}</p>
           </div>
+          <Button variant="secondary" onClick={() => go('schedule')}>{t('nav.trainer.schedule')}</Button>
         </div>
         {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <TodaySessionCard
@@ -283,6 +286,7 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
           onOpen={() => go('session', { trainerSessionId: primary?.sessionId })}
           emptyTitle={t('trainer.today.emptyTitle')}
           emptyDetail={t('trainer.today.emptyDetail')}
+          colorKey={primary?.colorKey}
         />
         <div className="ops-section-head" style={{ margin: '20px 0 10px' }}>
           <div className="eyebrow">{t('trainer.today.following')}</div>
@@ -290,6 +294,7 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
         <CompactStatusRow
           items={following.map((session) => ({
             id: session.id,
+            colorKey: session.colorKey,
             primary: `${session.date} · ${session.start}-${session.end} · ${session.group}`,
             secondary: session.location,
             onClick: () => go('session', { trainerSessionId: session.sessionId }),
@@ -298,6 +303,49 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
         />
       </div>
     )
+  }
+}
+
+export function createTrainerScheduleScreen(components, icons) {
+  const { Banner } = components
+  return function ApiTrainerSchedule({ go }) {
+    const { t } = useLocale()
+    const [sessions, setSessions] = useState([])
+    const [error, setError] = useState(null)
+    const [displayMode, setDisplayMode] = useState('calendar')
+    const [viewMode, setViewMode] = useState(() => (
+      typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+        ? 'week'
+        : DEFAULT_SCHEDULE_VIEW
+    ))
+    const [focusDate, setFocusDate] = useState(localToday())
+    const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
+
+    useEffect(() => {
+      let active = true
+      const query = new URLSearchParams({ date_from: range.dateFrom, date_to: range.dateTo })
+      api.get(`/api/trainer/sessions/?${query}`)
+        .then((payload) => { if (active) setSessions((payload.sessions || []).map(mapTrainerSession)) })
+        .catch((err) => { if (active) setError(apiErrorMessage(err, t('trainer.sessions.loadFailed'))) })
+      return () => { active = false }
+    }, [range.dateFrom, range.dateTo, t])
+
+    return <div className="page page-wide">
+      <div className="page-head">
+        <div><h1 className="page-title">{t('runtime.trainer.schedule.title')}</h1><p className="page-desc">{t('runtime.trainer.schedule.desc')}</p></div>
+        <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={icons} />
+      </div>
+      {error && <Banner tone="danger" style={{ marginBottom: 14 }} onClose={() => setError(null)}>{error}</Banner>}
+      <div className="ops-calendar-toolbar"><CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} mobileArrows /></div>
+      <div className="ops-schedule-desktop-content">
+        {displayMode === 'calendar'
+          ? <ScheduleCalendar sessions={sessions} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} ariaLabel={t('trainer.sessions.calendarLabel')} />
+          : <ScheduleList sessions={sessions} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-schedule-list" emptyLabel={t('trainer.sessions.empty')} />}
+      </div>
+      <div className="ops-schedule-mobile-content">
+        <ScheduleList groupByDate sessions={sessions} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-mobile-schedule-agenda" emptyLabel={t('trainer.sessions.empty')} />
+      </div>
+    </div>
   }
 }
 

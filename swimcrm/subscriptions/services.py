@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from audit.models import audit
+from students.models import Student
 
 from .models import (FreezePeriod, LedgerReason, SessionLedgerEntry,
                      Subscription, SubscriptionStatus)
@@ -14,6 +15,7 @@ from .models import (FreezePeriod, LedgerReason, SessionLedgerEntry,
 @transaction.atomic
 def create_subscription(*, student, subscription_type, start_date, created_by=None):
     """Create a subscription and post the initial +N ledger entry (rule 1)."""
+    Student.objects.select_for_update(no_key=True).get(pk=student.pk)
     sub = Subscription.objects.create(
         student=student,
         subscription_type=subscription_type,
@@ -47,6 +49,8 @@ def renew_subscription(*, subscription, subscription_type=None, start_date=None,
     If the new type is unlimited, finite leftovers are moot — the old ledger is
     just zeroed (nothing to carry into a counter-less subscription).
     """
+    Student.objects.select_for_update(no_key=True).get(pk=subscription.student_id)
+    subscription = Subscription.objects.select_for_update(no_key=True).get(pk=subscription.pk)
     subscription_type = subscription_type or subscription.subscription_type
     start_date = start_date or timezone.localdate()
 
@@ -126,6 +130,7 @@ def manual_adjust(*, subscription, delta, created_by=None, note=""):
                 code="invalid",
             ),
         })
+    Student.objects.select_for_update(no_key=True).get(pk=subscription.student_id)
     entry = SessionLedgerEntry.objects.create(
         subscription=subscription, delta=delta, reason=LedgerReason.MANUAL,
         created_by=created_by, note=note)

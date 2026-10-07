@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.models import Consent, ConsentType, ParentAccount, Role
-from attendance.models import AttendanceStatus
+from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
 from audit.models import AuditLogEntry
 from billing.models import (
@@ -109,6 +109,54 @@ class ClientPortalApiRule(TestCase):
         names = [row["full_name"] for row in response.json()["students"]]
         self.assertIn("Ковальский Ян", names)
         self.assertNotIn("Новак Ева", names)
+
+    def test_family_balance_and_history_do_not_require_switching_participant(self):
+        sibling = f.make_student(parent=self.parent, first="Анна", last="Ковальская")
+        Charge.objects.create(
+            student=self.student, description="Абонемент", amount_minor=20000,
+            currency="PLN", due_date=date.today() - timedelta(days=2),
+        )
+        payment = Payment.objects.create(
+            student=sibling, amount_minor=50000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.CONFIRMED,
+        )
+        Payment.objects.create(
+            student=self.student, amount_minor=10000, currency="PLN",
+            paid_at=date.today(), status=PaymentStatus.PENDING,
+        )
+        overview = self.client.get("/api/client/overview/").json()
+        self.assertEqual(overview["account"]["balance_minor"], -30000)
+        self.assertEqual({row["balance_minor"] for row in overview["participants"]}, {-30000})
+        charges = self.client.get("/api/client/charges/").json()
+        self.assertEqual(charges["summary"]["unpaid_minor"], 0)
+        self.assertEqual(charges["charges"][0]["student_id"], self.student.id)
+        history = self.client.get("/api/client/payment-history/").json()
+        self.assertIn(payment.id, [row["id"] for row in history["payments"]])
+        self.assertEqual(self.client.get(
+            "/api/client/payment-history/", {"student_id": self.other_student.id},
+        ).status_code, 404)
+        top_up = self.client.post("/api/client/payments/top-up-requests/", {
+            "amount_minor": "7000", "currency": "PLN",
+            "idempotency_key": "family-topup-001",
+            "file": SimpleUploadedFile("transfer.pdf", PDF, content_type="application/pdf"),
+        })
+        self.assertEqual(top_up.status_code, 201)
+        self.assertEqual(top_up.json()["payment"]["balance_minor"], -30000)
+        self.client.force_login(f.make_admin())
+        detail = self.client.get(f"/api/admin/clients/{self.parent.id}/").json()
+        self.assertEqual(detail["summary"]["balance_minor"], -30000)
+        self.assertEqual({row["balance_minor"] for row in detail["participants"]}, {-30000})
+
+    def test_cleared_attendance_is_absent_from_client_history(self):
+        session = create_session(
+            trainer=self.trainer, group=self.group, start_at=timezone.now(),
+            end_at=timezone.now() + timedelta(hours=1), location="A", max_participants=10)
+        set_attendance(session_id=session.id, student=self.student, status=AttendanceStatus.PRESENT)
+        set_attendance(session_id=session.id, student=self.student, status=None)
+
+        response = self.client.get("/api/client/attendance/", {"student_id": self.student.id})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["attendance"], [])
 
     def test_client_schedule_contains_sessions_from_every_membership_group(self):
         second_group = f.make_group("Вторая группа")
@@ -456,6 +504,21 @@ class TrainerPortalApiRule(TestCase):
         self.assertEqual(response.json()["status"], AttendanceStatus.PRESENT)
         self.assertEqual(self.student.attendance.count(), 1)
 
+    def test_trainer_can_clear_mark_but_not_other_trainers_session(self):
+        set_attendance(session_id=self.session.id, student=self.student,
+                       status=AttendanceStatus.PRESENT, actor=self.trainer.user)
+        body = json.dumps({"student_id": self.student.id})
+        forbidden = self.client.delete(f"/api/trainer/sessions/{self.other_session.id}/attendance/",
+                                       data=body, content_type="application/json")
+        cleared = self.client.delete(f"/api/trainer/sessions/{self.session.id}/attendance/",
+                                     data=body, content_type="application/json")
+        detail = self.client.get(f"/api/trainer/sessions/{self.session.id}/")
+
+        self.assertEqual(forbidden.status_code, 404)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["status"])
+        self.assertIsNone(detail.json()["students"][0]["attendance"])
+
     def test_trainer_cannot_mark_other_trainers_session(self):
         response = self.client.post(
             f"/api/trainer/sessions/{self.other_session.id}/attendance/",
@@ -505,6 +568,27 @@ class AdminPortalApiRule(TestCase):
         rows = response.json()["clients"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["full_name"], "Тестова Ада")
+
+    def test_admin_can_clear_attendance_and_client_cannot(self):
+        trainer = f.make_trainer()
+        session = create_session(
+            trainer=trainer, group=self.group, start_at=timezone.now(),
+            end_at=timezone.now() + timedelta(hours=1), location="A", max_participants=10)
+        record = set_attendance(session_id=session.id, student=self.student,
+                                status=AttendanceStatus.ABSENT, actor=self.admin)
+        path = f"/api/admin/schedule/sessions/{session.id}/attendance/"
+        body = json.dumps({"student_id": self.student.id})
+        self.client.force_login(self.student.parent.user)
+        forbidden = self.client.delete(path, data=body, content_type="application/json")
+        self.client.force_login(self.admin)
+        cleared = self.client.delete(path, data=body, content_type="application/json")
+        roster = self.client.get(path)
+
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["status"])
+        self.assertIsNone(next(row for row in roster.json()["students"] if row["id"] == self.student.id)["attendance"])
+        self.assertTrue(AttendanceRecord.objects.filter(pk=record.pk).exists())
 
     def test_admin_can_edit_subscription_effective_end_date(self):
         subscription = create_subscription(
@@ -582,7 +666,7 @@ class AdminPortalApiRule(TestCase):
         )
         self.assertEqual(blocked_profile_edit.status_code, 400)
 
-    def test_admin_client_list_exposes_each_participants_confirmed_money_balance(self):
+    def test_admin_client_list_exposes_family_confirmed_money_balance(self):
         overpaid = f.make_student(group=self.group, first="Over", last="Paid")
         family_sibling = f.make_student(
             parent=overpaid.parent,
@@ -612,7 +696,7 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(rows[self.student.id]["balance_minor"], 24000)
         self.assertEqual(rows[overpaid.id]["balance_minor"], -500)
-        self.assertEqual(rows[family_sibling.id]["balance_minor"], 0)
+        self.assertEqual(rows[family_sibling.id]["balance_minor"], -500)
         self.assertEqual(rows[zero.id]["balance_minor"], 0)
         self.assertEqual(rows[overpaid.id]["currency"], "PLN")
 
@@ -2235,10 +2319,12 @@ class AdminPortalApiRule(TestCase):
 
         color_queries = [
             query["sql"] for query in captured.captured_queries
-            if "scheduling_sessiontypeconfig" in query["sql"].lower()
+            if query["sql"].lower().startswith(
+                'select "scheduling_sessiontypeconfig"'
+            )
         ]
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(color_queries), 1)
+        self.assertEqual(len(color_queries), 1, "\n".join(color_queries))
 
     def test_individual_and_split_sessions_use_their_type_colors_without_group(self):
         trainer = f.make_trainer(username="palette_individual_coach")

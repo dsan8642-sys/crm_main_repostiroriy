@@ -1,12 +1,13 @@
 from django.contrib import admin
 
 from audit.mixins import AuditAdminMixin
+from common.admin import ReadOnlyAdminMixin
 
 from .models import Charge, Payment, PaymentEvent, ReceiptFile
 
 
 @admin.register(Charge)
-class ChargeAdmin(AuditAdminMixin, admin.ModelAdmin):
+class ChargeAdmin(ReadOnlyAdminMixin, AuditAdminMixin, admin.ModelAdmin):
     list_display = ("student", "description", "amount", "due_date", "subscription", "created_by")
     list_filter = ("currency", "due_date", "student__groups")
     search_fields = (
@@ -31,7 +32,7 @@ class ChargeAdmin(AuditAdminMixin, admin.ModelAdmin):
         return False
 
 
-class ReceiptInline(admin.TabularInline):
+class ReceiptInline(ReadOnlyAdminMixin, admin.TabularInline):
     model = ReceiptFile
     extra = 0
     readonly_fields = ("uploaded_by", "uploaded_at", "is_deleted", "deleted_at")
@@ -41,7 +42,7 @@ class ReceiptInline(admin.TabularInline):
 
 
 @admin.register(Payment)
-class PaymentAdmin(AuditAdminMixin, admin.ModelAdmin):
+class PaymentAdmin(ReadOnlyAdminMixin, AuditAdminMixin, admin.ModelAdmin):
     list_display = (
         "student", "amount", "source", "method", "status", "paid_at",
         "confirmed_by", "confirmed_at",
@@ -74,7 +75,7 @@ class PaymentAdmin(AuditAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(ReceiptFile)
-class ReceiptAdmin(admin.ModelAdmin):
+class ReceiptAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("payment", "uploaded_by", "uploaded_at", "is_deleted", "deleted_at")
     list_filter = ("is_deleted", "uploaded_at", "deleted_at")
     search_fields = (
@@ -92,7 +93,7 @@ class ReceiptAdmin(admin.ModelAdmin):
 
 
 @admin.register(PaymentEvent)
-class PaymentEventAdmin(admin.ModelAdmin):
+class PaymentEventAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = (
         "payment", "event_type", "from_status", "to_status", "actor", "created_at")
     list_filter = ("event_type", "to_status", "currency", "created_at")

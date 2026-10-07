@@ -2,7 +2,7 @@ import re
 
 
 OPENAPI_VERSION = "3.1.0"
-API_VERSION = "2026-09-15"
+API_VERSION = "2026-10-05"
 PATH_PARAMETER = re.compile(r"<(?:(?P<converter>\w+):)?(?P<name>\w+)>")
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 
@@ -16,13 +16,14 @@ BASE_LIST_PARAMETERS = [
 ]
 
 
-def _query_parameter(name, *, values=None, value_type="string", minimum=None):
+def _query_parameter(name, *, values=None, value_type="string", minimum=None, description=None):
     schema = {"type": value_type}
     if values:
         schema["enum"] = list(values)
     if minimum is not None:
         schema["minimum"] = minimum
-    return {"name": name, "in": "query", "schema": schema}
+    return {"name": name, "in": "query", "schema": schema,
+            **({"description": description} if description else {})}
 
 
 LIST_QUERY_POLICIES = {
@@ -76,13 +77,15 @@ LIST_QUERY_POLICIES = {
         _query_parameter("status", values=("present", "absent", "excused", "rescheduled")),
     ],
     "/api/client/charges/": [
-        _query_parameter("student_id", value_type="integer", minimum=1),
+        _query_parameter("student_id", value_type="integer", minimum=1,
+                         description="Optional ownership check; financial records cover the entire family."),
         _query_parameter("date_from"),
         _query_parameter("date_to"),
         _query_parameter("status", values=("overdue", "upcoming")),
     ],
     "/api/client/payment-history/": [
-        _query_parameter("student_id", value_type="integer", minimum=1),
+        _query_parameter("student_id", value_type="integer", minimum=1,
+                         description="Optional ownership check; financial records cover the entire family."),
         _query_parameter("date_from"),
         _query_parameter("date_to"),
         _query_parameter("status", values=("pending", "confirmed", "rejected")),
@@ -216,6 +219,40 @@ def build_openapi_schema():
                     "required": True,
                     "content": {"application/json": {"schema": {
                         "$ref": "#/components/schemas/SubscriptionUpdate",
+                    }}},
+                }
+            if method == "POST" and path == "/api/admin/settings/session-types/":
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "required": ["code", "label", "base_type"],
+                        "properties": {
+                            "code": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+                            "label": {"type": "string"},
+                            "base_type": {"type": "string", "enum": ["group", "individual", "split"]},
+                            "default_capacity": {"type": ["integer", "null"], "minimum": 1},
+                            "default_duration_minutes": {"type": "integer", "minimum": 15},
+                            "default_price_minor": {"type": ["integer", "null"], "minimum": 0},
+                        },
+                    }}},
+                }
+            if method in {"POST", "DELETE"} and path in {
+                "/api/client/schedule/sessions/{session_id}/booking/",
+                "/api/client/schedule/sessions/{session_id}/waitlist/",
+                "/api/admin/schedule/sessions/{session_id}/attendance/",
+                "/api/trainer/sessions/{session_id}/attendance/",
+            }:
+                attendance_mark = method == "POST" and path.endswith("/attendance/")
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "required": ["student_id", "status"] if attendance_mark else ["student_id"],
+                        "properties": {
+                            "student_id": {"type": "integer", "minimum": 1},
+                            **({"status": {"type": "string", "enum": ["present", "absent", "excused", "rescheduled"]}} if attendance_mark else {}),
+                        },
                     }}},
                 }
             paths.setdefault(path, {})[method.lower()] = operation

@@ -6,6 +6,7 @@ from django.db.models import Sum
 
 from audit.models import audit
 from billing.models import Charge
+from students.models import Student
 from subscriptions.models import (LedgerReason, SessionLedgerEntry,
                                   Subscription, SubscriptionStatus)
 from scheduling.models import Session, SessionType
@@ -88,11 +89,13 @@ def set_attendance(
     """Create or update the attendance record and reconcile the ledger (rule 1 & 2).
 
     - PRESENT / ABSENT  -> session consumed (net -1 against the ledger)
-    - EXCUSED / RESCHEDULED -> not consumed (net 0)
+    - EXCUSED / RESCHEDULED / None -> not consumed (net 0)
     Status changes never edit past ledger rows; they post a compensating
     CORRECTION row so the journal stays append-only and transparent.
     """
     session = Session.objects.select_for_update().get(pk=session_id)
+    if status is not None and status not in AttendanceStatus.values:
+        raise ValidationError("Недопустимый статус посещения")
     if session.is_cancelled:
         raise ValidationError("Занятие отменено")
     if not student.is_active:
@@ -102,10 +105,13 @@ def set_attendance(
 
     record = AttendanceRecord.objects.select_for_update().filter(
         session=session, student=student).first()
+    if status is None and (record is None or record.status is None):
+        return record
+    previous_status = record.status if record else None
 
     if record is None:
         # Rule 5: capacity check under the session row lock (race-safe).
-        current_count = AttendanceRecord.objects.filter(session=session).count()
+        current_count = AttendanceRecord.objects.filter(session=session, status__isnull=False).count()
         if current_count >= session.max_participants:
             raise ValidationError(
                 f"Превышен лимит участников занятия ({session.max_participants})")
@@ -122,24 +128,35 @@ def set_attendance(
         record.save(update_fields=["status", "marked_by", "marked_at"])
 
     if not record.financial_effects_enabled:
-        audit(actor, "attendance.marked", record, {
+        audit(actor, "attendance.cleared" if status is None else "attendance.marked", record, {
             "status": str(status),
+            "previous_status": previous_status,
             "session": session_id,
             "source": source,
             "financial_effects": record.financial_effects_enabled,
         })
         return record
 
+    # Different sessions share the participant's balance, not a session lock.
+    Student.objects.select_for_update(no_key=True).get(pk=student.pk)
     desired = -1 if status in DEDUCTING_STATUSES else 0
     current = _current_effect(record)
     diff = desired - current
     existing = record.ledger_entries.select_related("subscription").first()
     sub = existing.subscription if existing else None
+    unlimited_covers = sub is None and any(
+        candidate.is_active_on(session.start_at.date())
+        for candidate in Subscription.objects.filter(
+            student=student, subscription_type__sessions_count__isnull=True,
+            status__in=(SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN),
+            start_date__lte=session.start_at.date(),
+        ).prefetch_related("freeze_periods")
+    )
     if diff != 0:
         # A status change reconciles against the SAME subscription the original
         # deduction hit (append-only compensation); a first-time deduction picks
         # a counted subscription that still has sessions left.
-        if sub is None:
+        if sub is None and not unlimited_covers:
             sub = _deductible_subscription(student, session.start_at.date())
         if sub is not None:  # unlimited / no sub with balance -> nothing to deduct
             reason = (LedgerReason.ATTENDANCE
@@ -147,14 +164,16 @@ def set_attendance(
             SessionLedgerEntry.objects.create(
                 subscription=sub, delta=diff, reason=reason,
                 attendance=record, created_by=actor,
-                note=f"{record.get_status_display()} · {session}")
+                note=f"{record.get_status_display() if status is not None else 'Отметка снята'} · {session}")
 
     # A subscription that already absorbed this visit keeps absorbing it across
-    # status changes, so bill money only when no subscription ever covered it.
-    _reconcile_visit_charge(record, session, covered_by_subscription=sub is not None,
+    # status changes. A valid unlimited subscription covers without a deduction.
+    _reconcile_visit_charge(record, session,
+                            covered_by_subscription=sub is not None or unlimited_covers,
                             actor=actor)
-    audit(actor, "attendance.marked", record, {
+    audit(actor, "attendance.cleared" if status is None else "attendance.marked", record, {
         "status": str(status),
+        "previous_status": previous_status,
         "session": session_id,
         "source": source,
         "financial_effects": record.financial_effects_enabled,

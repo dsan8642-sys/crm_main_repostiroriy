@@ -165,7 +165,7 @@ def unpaid_charges(currency="PLN"):
 
 def attendance_summary(*, student=None, group=None, trainer=None, date_from=None, date_to=None):
     """Counts per status for the chosen scope."""
-    qs = AttendanceRecord.objects.all()
+    qs = AttendanceRecord.objects.filter(status__isnull=False)
     if student:
         qs = qs.filter(student=student)
     if group:

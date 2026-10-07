@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 const baseURL = process.env.SWIMCRM_PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5174'
 const port = new URL(baseURL).port || '5174'
+const matrixLocale = process.env.SWIMCRM_PLAYWRIGHT_LOCALE
 
 export default defineConfig({
   testDir: './tests',
@@ -10,6 +11,10 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL,
+    ...(matrixLocale ? { storageState: { cookies: [], origins: [{ origin: new URL(baseURL).origin, localStorage: [
+      { name: 'swimcrm.ui.locale.1.admin', value: matrixLocale },
+      { name: 'swimcrm.ui.locale.3.parent', value: matrixLocale },
+    ] }] } } : {}),
   },
   webServer: process.env.SWIMCRM_PLAYWRIGHT_EXTERNAL_SERVER === '1' ? undefined : {
     command: `npm.cmd run dev -- --host 127.0.0.1 --port ${port}`,

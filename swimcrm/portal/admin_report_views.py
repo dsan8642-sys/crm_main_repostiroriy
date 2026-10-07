@@ -85,6 +85,8 @@ def _debtor_payload(row):
     today = timezone.localdate()
     return {
         "student": _student_payload(row.student),
+        "family_name": row.family_name,
+        "group_ids": row.group_ids,
         "reasons": row.reasons,
         "balance_minor": row.balance_minor,
         "currency": row.currency,
@@ -112,7 +114,7 @@ def admin_debtors(request):
     if group_id:
         payload_rows = [
             row for row in payload_rows
-            if any(group.get("id") == group_id for group in row["student"].get("groups", []))
+            if group_id in row["group_ids"]
         ]
     if min_amount_minor:
         payload_rows = [

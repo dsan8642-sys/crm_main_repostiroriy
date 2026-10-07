@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { clampedPopoverPosition } from './entityListContracts.js'
 import { useLocale } from '../i18n.jsx'
 
-export function ActionPopover({ label, actions, disabled = false }) {
+export function ActionPopover({ label, actions, disabled = false, testId }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const triggerRef = useRef(null)
   const menuRef = useRef(null)
@@ -79,6 +79,7 @@ export function ActionPopover({ label, actions, disabled = false }) {
       className="ops-action-popover"
       role="menu"
       aria-label={label}
+      data-testid={testId ? `${testId}-menu` : undefined}
       onKeyDown={moveFocus}
       style={position ? {
         top: position.top,
@@ -95,6 +96,7 @@ export function ActionPopover({ label, actions, disabled = false }) {
           key={action.key || action.label}
           type="button"
           role="menuitem"
+          data-testid={testId ? `${testId}-${action.key || index}` : undefined}
           className={danger ? 'is-danger' : ''}
           disabled={action.disabled}
           style={{
@@ -133,6 +135,7 @@ export function ActionPopover({ label, actions, disabled = false }) {
         className="ops-entity-actions-trigger"
         aria-label={label}
         aria-haspopup="menu"
+        data-testid={testId ? `${testId}-trigger` : undefined}
         aria-expanded={open}
         aria-controls={open ? `entity-actions-${id}` : undefined}
         disabled={disabled}

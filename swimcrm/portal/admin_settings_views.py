@@ -89,9 +89,17 @@ SYSTEM_SESSION_TYPE_DEFAULTS = {
 }
 
 
-@require_GET
+@require_http_methods(["GET", "POST"])
 def admin_settings_session_types(request):
     require_admin_settings(request)
+    if request.method == "POST":
+        data = _json_body(request)
+        code = (data.get("code") or "").strip().lower()
+        if code in SYSTEM_SESSION_TYPE_DEFAULTS:
+            raise ValidationError({"code": "Системный тип восстанавливается отдельным действием."})
+        session_type = apply_session_type(SessionTypeConfig(), data)
+        audit_admin_settings(_admin_required(request), session_type, "created")
+        return JsonResponse(session_type_payload(session_type), status=201)
     configured = {
         row.code: row
         for row in SessionTypeConfig.objects.filter(
@@ -106,6 +114,8 @@ def admin_settings_session_types(request):
             rows.append({
                 "id": None,
                 "code": code,
+                "base_type": code,
+                "is_system": True,
                 "label": defaults["label"],
                 "default_capacity": defaults["default_capacity"],
                 "default_price_minor": None,
@@ -114,23 +124,28 @@ def admin_settings_session_types(request):
                 "color_key": None,
                 "is_active": False,
                 "configured": False,
-                "repair_available": code == SessionType.SPLIT,
+                "repair_available": True,
             })
+    rows.extend(session_type_payload(row) for row in SessionTypeConfig.objects.exclude(
+        code__in=SYSTEM_SESSION_TYPE_DEFAULTS).order_by("label", "id"))
     return JsonResponse({"session_types": rows})
 
 
 @require_POST
-def admin_settings_restore_split(request):
+def admin_settings_restore_system_type(request, code=SessionType.SPLIT):
     require_admin_settings(request)
+    if code not in SYSTEM_SESSION_TYPE_DEFAULTS:
+        raise ValidationError({"code": "Неизвестный системный тип занятия."})
     actor = _admin_required(request)
     defaults = {
-        **SYSTEM_SESSION_TYPE_DEFAULTS[SessionType.SPLIT],
+        **SYSTEM_SESSION_TYPE_DEFAULTS[code],
+        "base_type": code,
         "default_price_minor": None,
         "default_currency": "PLN",
         "is_active": True,
     }
     session_type, created = SessionTypeConfig.objects.get_or_create(
-        code=SessionType.SPLIT,
+        code=code,
         defaults=defaults,
     )
     changed = []
@@ -139,7 +154,7 @@ def admin_settings_restore_split(request):
         session_type.save(update_fields=["is_active", "updated_at"])
         changed.append("is_active")
     audit_admin_settings(actor, session_type, "system_type_restored", {
-        "code": SessionType.SPLIT,
+        "code": code,
         "created": created,
         "changed_fields": changed,
         "idempotent_replay": not created and not changed,
@@ -148,6 +163,9 @@ def admin_settings_restore_split(request):
         {**session_type_payload(session_type), "configured": True, "created": created},
         status=201 if created else 200,
     )
+
+
+admin_settings_restore_split = admin_settings_restore_system_type
 
 
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
@@ -293,7 +311,7 @@ def admin_settings_notification_template_translation_detail(request, translation
 __all__ = [
     "admin_settings_locations", "admin_settings_location_detail",
     "admin_settings_session_types", "admin_settings_session_type_detail",
-    "admin_settings_restore_split",
+    "admin_settings_restore_split", "admin_settings_restore_system_type",
     "admin_settings_languages", "admin_settings_language_detail",
     "admin_settings_dictionary_keys", "admin_settings_dictionary_key_detail",
     "admin_settings_dictionary_translations", "admin_settings_dictionary_translation_detail",

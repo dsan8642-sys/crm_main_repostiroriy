@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react'
 import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
+import { adminFinanceTranslator } from '../../adminFinanceLocales.js'
 import { api, downloadFile } from '../../api.js'
 import { useLocale } from '../../i18n.jsx'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime, mapAdminSessionRows } from '../../mappers.js'
@@ -24,6 +25,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
   return function ApiAdminOverview({ go }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
+    const financeT = useMemo(() => adminFinanceTranslator(locale), [locale])
     const localeTag = adminLocaleTag(locale)
     const data = adminData
     const [overviewLists, setOverviewLists] = useState(() => ({
@@ -118,7 +120,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
         <QuickActions
           label={t('overview.quickLinks')}
           actions={[
-            { label: t('overview.findClient'), icon: <I.ClientFamily size={18} />, onClick: () => go('clients') },
+            { key: 'payment', testId: 'overview-add-payment', label: financeT('finance.addPayment'), icon: <I.Cash size={18} />, onClick: () => go('payments', { financeAction: 'payment' }) },
             { label: t('overview.createClient'), icon: <I.User size={18} />, onClick: () => go('clients', { createClient: '1' }) },
             { label: t('overview.schedule'), icon: <I.Calendar size={18} />, onClick: () => go('schedule') },
             { label: t('overview.individualSession'), icon: <I.Waves size={18} />, onClick: () => go('schedule', { createSession: 'individual' }) },
@@ -133,10 +135,8 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
         )}
 
         <div className="eyebrow" aria-hidden="true" style={{ marginBottom: 10 }}>&nbsp;</div>
-        <div className="kpi-grid" style={{ marginBottom: 20 }}>
+        <div className="kpi-grid ops-overview-kpi-grid" style={{ marginBottom: 20 }}>
           <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={todaySessions.length} sub={t('overview.todaySessions')} onClick={() => go('schedule', { tab: 'day' })} />
-          <Kpi icon={<I.ClientFamily size={15} />} label={t('overview.clients')} value={(data.clients || []).length} sub={t('overview.openDatabase')} onClick={() => go('clients')} />
-          <Kpi icon={<I.TrainerWhistle size={15} />} label={t('overview.trainers')} value={(data.trainers || []).filter((row) => row.active).length} sub={t('overview.openTeam')} onClick={() => go('trainers')} />
           <Kpi icon={<I.Alert size={15} />} label={t('overview.debtors')} value={debtorCount} sub={`${debtTotal.toLocaleString(localeTag)} zł`} tone="var(--money-debt)" onClick={() => go('debtors')} />
         </div>
 

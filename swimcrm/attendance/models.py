@@ -18,7 +18,7 @@ class AttendanceRecord(models.Model):
     """Rule 2: status of a student on a concrete Session. One record per (session, student)."""
     session = models.ForeignKey("scheduling.Session", on_delete=models.CASCADE, related_name="attendance")
     student = models.ForeignKey("students.Student", on_delete=models.CASCADE, related_name="attendance")
-    status = models.CharField(max_length=16, choices=AttendanceStatus.choices)
+    status = models.CharField(max_length=16, choices=AttendanceStatus.choices, null=True, blank=True)
     comment = models.TextField(blank=True)
     marked_by = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
     marked_at = models.DateTimeField(default=timezone.now)

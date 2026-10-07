@@ -103,27 +103,59 @@ test('attendance opens the selected session editor and returns after saving', as
     expect((await card.boundingBox()).height).toBeLessThan(340)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   }
-  await card.getByRole('button', { name: /Редактировать|Редагувати|Edit|Edytuj/ }).click()
-  const dialog = page.getByRole('dialog')
+  await card.locator('.ops-attendance-session-heading button').click()
+  const dialog = page.getByTestId('form-modal')
   await expect(dialog.locator('#admin-session-edit-notes')).toHaveValue('')
   await dialog.locator('#admin-session-edit-notes').fill('Updated from attendance')
-  await dialog.getByRole('button', { name: /Сохранить|Зберегти|Save|Zapisz/ }).click()
+  await dialog.getByTestId('admin-schedule-edit-save').click()
   await expect(page).toHaveURL(/view=attendance.*session=71/)
   await expect(card).toContainText('Updated from attendance')
   expect(saves).toBe(1)
-  await card.getByRole('button', { name: /Редактировать|Редагувати|Edit|Edytuj/ }).click()
-  await dialog.getByRole('button', { name: /^(Закрыть|Закрити|Close|Zamknij)$/ }).last().click()
+  await card.locator('.ops-attendance-session-heading button').click()
+  await dialog.locator('.form-modal__footer button').first().click()
   await expect(page).toHaveURL(/view=attendance.*session=71/)
   expect(saves).toBe(1)
+})
+
+test('admin clears a selected attendance mark on desktop and phone', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'attendance layouts')
+  const session = {
+    id: 71, start_at: '2026-09-08T07:45:00+02:00', end_at: '2026-09-08T08:30:00+02:00',
+    session_type: 'group', group: { id: 1, name: 'Audit Group' }, trainer_id: 1,
+    trainer: 'Audit Trainer', location: 'Pool A', max_participants: 8,
+    participants_count: 1, is_cancelled: false,
+  }
+  await mockAdmin(page, { sessions: [session], trainers: [{ id: 1, full_name: 'Audit Trainer' }], groups: [{ id: 1, name: 'Audit Group' }] })
+  let status = null
+  const methods = []
+  await page.route('**/api/admin/schedule/sessions/71/attendance/', (route) => {
+    const method = route.request().method()
+    if (method !== 'GET') {
+      methods.push(method)
+      status = method === 'DELETE' ? null : route.request().postDataJSON().status
+      return json(route, { id: 1, participant_id: 5, session_id: 71, status })
+    }
+    return json(route, { session, history: [], students: [{
+      id: 5, client_id: 3, full_name: 'Jan Kowalski', balance_minor: 0, currency: 'PLN',
+      attendance: status ? { status } : null,
+    }] })
+  })
+  await page.goto('/?role=admin&view=attendance&session=71')
+  const present = page.getByTestId('admin-attendance-5-present')
+  await present.click()
+  await expect(present).toHaveAttribute('aria-pressed', 'true')
+  await present.click()
+  await expect(present).toHaveAttribute('aria-pressed', 'false')
+  expect(methods).toEqual(['POST', 'DELETE'])
 })
 
 test('schedule form keeps shared control sizing and vertical rhythm', async ({ page }) => {
   test.skip(page.viewportSize()?.width !== 1440, 'one desktop style contract is sufficient')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=schedule')
-  await page.getByRole('button', { name: /^(Individual training|Индивидуальная тренировка|Індивідуальне тренування)$/ }).click()
+  await page.getByTestId('admin-schedule-create-individual').click()
 
-  const dialog = page.getByRole('dialog', { name: /New session|Новое занятие|Нове заняття/ })
+  const dialog = page.getByTestId('form-modal')
   await expect(dialog).toBeVisible()
   const metrics = await dialog.evaluate((node) => {
     const grid = node.querySelector('.ops-form-grid')
@@ -142,7 +174,7 @@ test('schedule form keeps shared control sizing and vertical rhythm', async ({ p
   expect(metrics.selectHeight).toBeGreaterThanOrEqual(40)
   expect(metrics.selectRadius).toBeGreaterThanOrEqual(6)
 
-  await dialog.getByRole('button', { name: /Open calendar|Открыть календарь|Відкрити календар|Otwórz kalendarz/ }).click()
+  await dialog.locator('#admin-session-date').locator('..').locator('button').click()
   const calendarMetrics = await dialog.locator('.ops-picker-popover').evaluate((node) => {
     const arrows = [...node.querySelectorAll('.ops-picker-head button')]
     const grid = node.querySelector('.ops-date-grid')
@@ -163,8 +195,8 @@ test('schedule form keeps shared control sizing and vertical rhythm', async ({ p
   expect(calendarMetrics.todayGap).toBeGreaterThanOrEqual(8)
   await dialog.locator('.ops-date-grid + .ops-picker-today').click()
 
-  await dialog.getByRole('button', { name: /Open time picker|Открыть выбор времени|Відкрити вибір часу|Otwórz wybór godziny/ }).click()
-  const doneMetrics = await dialog.getByRole('button', { name: /Done|Готово|Gotowe/ }).evaluate((node) => {
+  await dialog.locator('#admin-session-start').locator('..').locator('button').click()
+  const doneMetrics = await dialog.locator('.ops-picker-done').evaluate((node) => {
     const style = getComputedStyle(node)
     return {
       background: style.backgroundColor,
@@ -186,9 +218,9 @@ test('client search results stay opaque and below the input', async ({ page }) =
     { id: 2, client_id: 12, first_name: 'Boris', last_name: 'Client', full_name: 'Boris Client', birth_date: '2014-01-01', email: 'boris@example.test', client_phone: '+48222222222', client_is_active: true, is_active: true, group: null },
   ] })
   await page.goto('/?role=admin&view=schedule')
-  await page.getByRole('button', { name: /Individual|Индивиду|Індивіду/ }).click()
-  const dialog = page.getByRole('dialog', { name: /New session|Новое занятие|Нове заняття/ })
-  const input = dialog.getByRole('combobox', { name: /Participant|Участник|Учасник/ })
+  await page.getByTestId('admin-schedule-create-individual').click()
+  const dialog = page.getByTestId('form-modal')
+  const input = dialog.locator('#admin-session-participantId')
   await input.focus()
   const list = dialog.getByRole('listbox')
   await expect(list).toBeVisible()
@@ -216,7 +248,7 @@ test('schedule navigation and training actions keep application styling', async 
   test.skip(page.viewportSize()?.width !== 1440, 'one desktop style contract is sufficient')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=schedule')
-  await expect(page.getByRole('heading', { name: /Schedule|Расписание|Розклад/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
 
   const metrics = await page.evaluate(() => {
     const activeNav = document.querySelector('.ops-nav-button.is-active')
@@ -261,13 +293,13 @@ test('sidebar shows language above the user and initials only when collapsed', a
   test.skip(![768, 1440].includes(page.viewportSize()?.width || 0), 'desktop sidebar boundaries')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=schedule')
-  await expect(page.getByRole('heading', { name: /Schedule|Расписание|Розклад/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
 
   const sidebar = page.locator('.ops-sidebar')
-  const locale = sidebar.getByRole('combobox', { name: /Interface language|Язык интерфейса|Мова інтерфейсу/ })
+  const locale = sidebar.locator('select').filter({ has: page.locator('option[value="uk"]') })
   const name = sidebar.getByText('Audit Administrator', { exact: true })
   const avatar = sidebar.locator('.ops-avatar')
-  const logout = sidebar.getByRole('button', { name: /Log out|Выйти|Вийти/ })
+  const logout = sidebar.getByTestId('logout')
   await expect(locale).toBeVisible()
   await expect(logout).toBeVisible()
 
@@ -303,7 +335,7 @@ test('trainer rows scroll inside the table on a medium-height screen', async ({ 
   }))
   await mockAdmin(page, { trainers })
   await page.goto('/?role=admin&view=trainers')
-  await expect(page.getByRole('heading', { name: /Trainers|Тренеры|Тренери/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
 
   const scroller = page.locator('.ops-trainer-list-scroll > .table-wrap')
   await expect(scroller).toBeVisible()
@@ -336,7 +368,7 @@ test('shared controls never fall back to browser-native styling', async ({ page 
   ] })
 
   await page.goto('/?role=admin&view=clients')
-  await expect(page.getByRole('heading', { name: /Clients|Клиенты|Клієнти/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const clientMetrics = await page.evaluate(() => {
     const metrics = (node) => {
       const style = getComputedStyle(node)
@@ -364,7 +396,7 @@ test('shared controls never fall back to browser-native styling', async ({ page 
   expect(clientMetrics.entityLink.background).toBe('rgba(0, 0, 0, 0)')
 
   await page.goto('/?role=admin&view=groups')
-  await expect(page.getByRole('heading', { name: /Groups|Группы|Групи/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const listFilterMetrics = await page.locator('.ops-list-filter-toggle').evaluate((node) => {
     const style = getComputedStyle(node)
     return { background: style.backgroundColor, borderStyle: style.borderStyle, radius: Number.parseFloat(style.borderRadius) }
@@ -374,7 +406,7 @@ test('shared controls never fall back to browser-native styling', async ({ page 
   expect(listFilterMetrics.background).not.toBe('rgb(240, 240, 240)')
 
   await page.goto('/?role=admin&view=overview')
-  await expect(page.getByRole('heading', { name: /Dashboard|Сегодня|Сьогодні/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const quickActionMetrics = await page.locator('.ops-quick-actions__grid button').first().evaluate((node) => {
     const style = getComputedStyle(node)
     return { background: style.backgroundColor, borderStyle: style.borderStyle, radius: Number.parseFloat(style.borderRadius) }
@@ -384,7 +416,7 @@ test('shared controls never fall back to browser-native styling', async ({ page 
   expect(quickActionMetrics.background).not.toBe('rgb(240, 240, 240)')
 
   await page.goto('/?role=admin&view=schedule')
-  await expect(page.getByRole('heading', { name: /Schedule|Расписание|Розклад/ })).toBeVisible()
+  await expect(page.locator('h1.page-title')).toBeVisible()
   const scheduleMetrics = await page.evaluate(() => {
     const metrics = (node) => {
       const style = getComputedStyle(node)
@@ -540,8 +572,8 @@ test('overview rows, trainer tabs and searchable toggles keep integrated applica
   await mockAdmin(page, { sessions, trainers, groups, clients })
 
   await page.goto('/?role=admin&view=schedule')
-  await page.getByRole('button', { name: /^(Individual training|Индивидуальная тренировка|Індивідуальне тренування)$/ }).click()
-  const dialog = page.getByRole('dialog', { name: /New session|Новое занятие|Нове заняття/ })
+  await page.getByTestId('admin-schedule-create-individual').click()
+  const dialog = page.getByTestId('form-modal')
   const toggle = dialog.locator('.ops-search-select-toggle')
   const toggleMetrics = await toggle.evaluate((node) => {
     const style = getComputedStyle(node)
@@ -606,8 +638,8 @@ test('overview rows, trainer tabs and searchable toggles keep integrated applica
 
   await page.goto('/?role=admin&view=groups')
   await page.locator('.ops-link-button').filter({ hasText: 'Audit Group' }).click()
-  await page.locator('.ops-entity-card').getByRole('button', { name: /^(Add|Добавить|Додати|Dodaj)$/ }).click()
-  const memberDialog = page.getByRole('dialog', { name: /Add participant to group|Добавить участника в группу|Додати учасника до групи|Dodaj uczestnika do grupy/ })
+  await page.locator('.ops-entity-card .ops-section-head button').click()
+  const memberDialog = page.getByTestId('form-modal')
   const memberInput = memberDialog.getByRole('combobox')
   await memberInput.focus()
   const memberList = memberDialog.getByRole('listbox')

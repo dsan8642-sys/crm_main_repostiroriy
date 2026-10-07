@@ -50,4 +50,6 @@ def resolve_session_color_key(session, type_color_keys=None):
         return safe_schedule_color_key(group_color)
     if type_color_keys is None:
         type_color_keys = session_type_color_keys()
+    if session.session_type_config_id:
+        return safe_schedule_color_key(session.session_type_config.color_key)
     return safe_schedule_color_key(type_color_keys.get(session.session_type))

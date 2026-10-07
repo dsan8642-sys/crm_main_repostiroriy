@@ -13,7 +13,7 @@ from attendance.models import AttendanceRecord, AttendanceStatus
 from billing.models import Payment, PaymentMethod, PaymentSource, PaymentStatus
 from catalog.models import Group
 from dataio import exports, importer
-from dataio.contracts import CONTRACTS
+from dataio.contracts import CONTRACTS, METADATA_KEYS, prepare_rows
 from dataio.importer import MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, parse_source
 from dataio.matching import match_student, normalize_email, normalize_phone
 from dataio.models import ImportBatch, ImportKind
@@ -59,6 +59,22 @@ class ExportImportContractRegressionTest(TestCase):
             except Resolver404:
                 missing.append(entity)
         self.assertEqual(missing, [])
+
+    def test_external_metadata_does_not_block_import_mapping(self):
+        headers = [*METADATA_KEYS, "amount [Сумма]", "paid_at [Дата]", "method [Способ]"]
+        prepared = prepare_rows("payments", headers, [{
+            "schema_version": "2",
+            "exported_at": "2026-09-30T10:00:00+00:00",
+            "source_system": "paperoni_reconciliation",
+            "entity_type": "payments",
+            "amount [Сумма]": "130.00",
+            "paid_at [Дата]": "2026-09-01",
+            "method [Способ]": "bank_transfer",
+        }])
+
+        self.assertFalse(prepared["own_export"])
+        self.assertEqual(prepared["metadata"]["source_system"], "paperoni_reconciliation")
+        self.assertEqual(prepared["rows"][0]["amount"], "130.00")
 
     def test_export_contract_import_kind_and_routes_stay_in_parity(self):
         expected = set(exports.DATASETS)

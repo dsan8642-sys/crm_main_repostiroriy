@@ -7,6 +7,7 @@ from django.db.models import Prefetch
 from django.utils import timezone
 
 from billing.models import Charge, Payment, PaymentStatus
+from billing.services import allocate_charge_statuses
 from students.models import Student
 from subscriptions.models import Subscription, SubscriptionStatus
 
@@ -16,6 +17,8 @@ FILTER_DAYS = (1, 3, 7, 14, 30)  # 'сегодня'==1, then 3/7/14/30
 @dataclass
 class DebtorRow:
     student: Student
+    family_name: str = ""
+    group_ids: list = field(default_factory=list)
     reasons: list = field(default_factory=list)
     balance_minor: int = 0
     currency: str = "PLN"
@@ -34,7 +37,7 @@ def debtors(currency=None):
     today = timezone.localdate()
     out = []
     students = Student.objects.filter(
-            is_active=True, parent__user__is_active=True,
+            parent__user__is_active=True,
     ).select_related("parent", "parent__user").prefetch_related(
         "groups",
         Prefetch(
@@ -51,39 +54,50 @@ def debtors(currency=None):
             to_attr="debtor_payments",
         ),
     )
-    for st in students:
+    families = {}
+    for student in students:
+        families.setdefault(student.parent_id, []).append(student)
+    for members in families.values():
+        st = next((member for member in members if member.is_active), None)
+        if st is None:
+            continue
         reasons = []
-        charged = sum(charge.amount_minor for charge in st.debtor_charges)
+        charges = sorted(
+            (charge for member in members for charge in member.debtor_charges),
+            key=lambda charge: (charge.due_date, charge.id),
+        )
+        payments = sorted(
+            (payment for member in members for payment in member.debtor_payments),
+            key=lambda payment: (payment.paid_at, payment.id), reverse=True,
+        )
+        charged = sum(charge.amount_minor for charge in charges)
         reversed_minor = sum(
             charge.reversal.amount_minor
-            for charge in st.debtor_charges if hasattr(charge, "reversal")
+            for charge in charges if hasattr(charge, "reversal")
         )
-        paid_minor = sum(payment.amount_minor for payment in st.debtor_payments)
+        paid_minor = sum(payment.amount_minor for payment in payments)
         balance_minor = charged - reversed_minor - paid_minor
         if balance_minor <= 0:
             continue
 
-        payment_pool = paid_minor
-        oldest_due_date = None
-        for charge in st.debtor_charges:
-            if hasattr(charge, "reversal"):
-                continue
-            applied = min(payment_pool, charge.amount_minor)
-            payment_pool -= applied
-            if applied < charge.amount_minor and charge.due_date < today:
-                oldest_due_date = oldest_due_date or charge.due_date
+        oldest_due_date = next((
+            status.charge.due_date
+            for status in allocate_charge_statuses(charges, paid_minor, today)
+            if status.is_overdue
+        ), None)
 
         if oldest_due_date is not None:
             reasons.append("Просроченная оплата")
         reasons.append("Отрицательный баланс")
         out.append(DebtorRow(
             student=st,
+            family_name=st.parent.user.get_full_name() or st.parent.user.username,
+            group_ids=sorted({group.id for member in members for group in member.groups.all()}),
             reasons=reasons,
             balance_minor=balance_minor,
             currency=currency,
             oldest_due_date=oldest_due_date,
-            last_payment_at=(st.debtor_payments[0].paid_at
-                             if st.debtor_payments else None),
+            last_payment_at=payments[0].paid_at if payments else None,
         ))
     return out
 

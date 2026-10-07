@@ -18,7 +18,7 @@ def _payment_for_readback(payment_id):
 def _payment_mutation_payload(payment, *, idempotent_replay=False):
     payment = _payment_for_readback(payment.pk)
     payload = _payment_payload(payment)
-    balance = student_balance(payment.student)
+    balance = family_balance(payment.student.parent)
     payload.update({
         "balance_minor": balance.amount_minor,
         "balance_currency": balance.currency,
@@ -38,7 +38,7 @@ def _charge_for_readback(charge_id):
 def _charge_mutation_payload(charge, *, idempotent_replay=False):
     charge = _charge_for_readback(charge.pk)
     payload = _charge_payload(charge)
-    balance = student_balance(charge.student)
+    balance = family_balance(charge.student.parent)
     payload.update({
         "balance_minor": balance.amount_minor,
         "balance_currency": balance.currency,

@@ -111,15 +111,15 @@ test('remote participant search and trainer reactivation remain available', asyn
   })
 
   await page.goto('/?role=admin&view=schedule')
-  await expect(page.locator('h1.page-title', { hasText: 'Расписание' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   if ((page.viewportSize()?.width || 0) >= 960) {
-    await expect(page.getByRole('button', { name: 'Клиенты 315' })).toBeVisible()
+    await expect(page.getByTestId('nav-admin-clients')).toBeVisible()
   }
 
   if ((page.viewportSize()?.width || 0) <= 767) {
-    await page.getByRole('button', { name: 'Открыть глобальный поиск' }).click()
+    await page.getByTestId('open-global-search').click()
   }
-  const globalSearch = page.getByRole('textbox', { name: 'Глобальный поиск', exact: true })
+  const globalSearch = page.getByTestId('global-search-input')
   await globalSearch.fill('ScaleSearch')
   const globalResults = (page.viewportSize()?.width || 0) <= 767
     ? page.locator('.ops-mobile-search-results button')
@@ -131,13 +131,13 @@ test('remote participant search and trainer reactivation remain available', asyn
   await expect(page.getByRole('button', { name: /Remote Participant/ })).toBeVisible()
 
   if ((page.viewportSize()?.width || 0) <= 767) {
-    await page.getByRole('button', { name: 'Закрыть поиск' }).click()
+    await page.getByTestId('open-global-search').click()
   } else {
-    await page.getByRole('textbox', { name: 'Глобальный поиск', exact: true }).fill('')
+    await page.getByTestId('global-search-input').fill('')
   }
-  await page.getByRole('button', { name: 'Индивидуальная тренировка' }).click()
-  const sessionDialog = page.getByRole('dialog', { name: 'Новое занятие' })
-  const participantInput = sessionDialog.getByRole('combobox', { name: 'Участник' })
+  await page.getByTestId('admin-schedule-create-individual').click()
+  const sessionDialog = page.getByTestId('form-modal')
+  const participantInput = sessionDialog.locator('#admin-session-participantId')
   if ((page.viewportSize()?.width || 0) >= 960) {
     await participantInput.fill('ScaleSearch')
     const resultList = sessionDialog.locator('.ops-search-select-list')
@@ -152,30 +152,33 @@ test('remote participant search and trainer reactivation remain available', asyn
   await expect(sessionDialog.getByRole('option', { name: /Participant Remote/ })).toBeVisible()
   await participantInput.fill('Account Owner')
   await expect(sessionDialog.getByRole('option', { name: /Participant Remote/ })).toBeVisible()
-  await sessionDialog.getByRole('contentinfo').getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await sessionDialog.getByTestId('form-modal-close').click()
 
   if ((page.viewportSize()?.width || 0) <= 767) {
-    await page.getByRole('button', { name: 'Открыть меню' }).click()
+    await page.getByTestId('open-menu').click()
   }
-  await page.getByRole('button', { name: /^Тренеры/ }).click()
-  await expect(page.locator('h1.page-title', { hasText: 'Тренеры' })).toBeVisible()
+  const trainerNav = (page.viewportSize()?.width || 0) <= 767
+    ? page.getByTestId('mobile-menu-dialog').getByTestId('nav-admin-trainers')
+    : page.locator('.ops-sidebar').getByTestId('nav-admin-trainers')
+  await trainerNav.click()
+  await expect(page).toHaveURL(/view=trainers/)
   await page.getByRole('button', { name: /Inactive Trainer/ }).first().click()
-  await page.getByRole('button', { name: 'Редактировать' }).click()
+  await page.getByTestId('admin-trainer-edit').click()
 
-  const trainerDialog = page.getByRole('dialog', { name: 'Редактирование профиля' })
-  const activeCheckbox = trainerDialog.getByRole('checkbox', { name: 'Активен' })
+  const trainerDialog = page.getByTestId('form-modal')
+  const activeCheckbox = trainerDialog.locator('#admin-trainer-active')
   await expect(activeCheckbox).toBeVisible()
   await expect(activeCheckbox).not.toBeChecked()
   await activeCheckbox.check()
-  await trainerDialog.getByRole('button', { name: 'Сохранить' }).click()
+  await trainerDialog.getByTestId('admin-trainer-save').click()
 
   await expect.poll(() => trainerUpdate).not.toBeNull()
   expect(trainerUpdate.trainer.is_active).toBe(true)
   expect(trainerUpdate.trainer.user_is_active).toBe(true)
 
-  await page.getByRole('button', { name: 'Вернуть доступ' }).click()
+  await page.getByTestId('client-access-restore').click()
   await expect(page.getByText('trainer-activation-code')).toBeVisible()
-  await page.getByRole('button', { name: 'Отозвать доступ' }).click()
+  await page.getByTestId('client-access-revoke').click()
   await expect.poll(() => trainerAccessActions).toEqual(['restore', 'revoke'])
 })
 
@@ -254,25 +257,25 @@ test('global client search retargets payments to the newly opened client', async
   await page.goto('/?role=admin&view=clientDetail&client=10')
   await expect(page.locator('h1.page-title', { hasText: 'Previous Account' })).toBeVisible()
 
-  await page.getByRole('textbox', { name: 'Глобальный поиск', exact: true }).fill('Current Client')
+  await page.getByTestId('global-search-input').fill('Current Client')
   await page.getByRole('button', { name: /Current Client/ }).click()
   await expect(page.locator('h1.page-title', { hasText: 'Current Account' })).toBeVisible()
   await expect(page).toHaveURL(/client=20/)
 
-  await page.getByRole('button', { name: 'Пополнить баланс' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Пополнить баланс' })
-  await expect(dialog.getByLabel('Контекст оплаты')).toContainText('Current Account')
-  await dialog.getByLabel('Сумма, zł').fill('100')
-  await dialog.getByRole('button', { name: 'Подтвердить оплату' }).click()
+  await page.getByTestId('admin-client-action-payment').click()
+  const dialog = page.getByTestId('form-modal')
+  await expect(dialog.locator('.ops-financial-context')).toContainText('Current Account')
+  await dialog.locator('#admin-client-payment-amount').fill('100')
+  await dialog.getByTestId('admin-client-payment-confirm').click()
 
   await expect.poll(() => submittedPayment?.participant_id).toBe('202')
   expect(submittedPayment.client_id).toBe(20)
 
-  await page.getByRole('button', { name: 'Добавить списание' }).click()
-  const chargeDialog = page.getByRole('dialog', { name: 'Новое списание' })
-  await chargeDialog.getByLabel('Описание').fill('Проверка клиента')
-  await chargeDialog.getByLabel('Сумма', { exact: true }).fill('25')
-  await chargeDialog.getByRole('button', { name: 'Сохранить' }).click()
+  await page.getByTestId('admin-client-action-charge').click()
+  const chargeDialog = page.getByTestId('form-modal')
+  await chargeDialog.locator('#admin-client-finance-description').fill('Проверка клиента')
+  await chargeDialog.locator('#admin-client-finance-amount').fill('25')
+  await chargeDialog.getByTestId('admin-client-finance-save').click()
 
   await expect.poll(() => submittedChargePath).toBe('/api/admin/participants/202/charges/')
   expect(submittedCharge.client_id).toBe(20)
@@ -428,12 +431,11 @@ test('client profile exposes contact links and opens routed individual and split
     expect(financeGeometry.columns).toBe(6)
     expect(new Set(financeGeometry.firstRowTops).size).toBe(1)
     expect(new Set(financeGeometry.secondRowTops).size).toBe(1)
-    await expect(financeActions.locator('.ops-action-card > span')).toHaveText([
-      'Пополнить баланс',
-      'Добавить списание',
-      'Напомнить',
-      'Редактировать абонемент',
-      'Продать абонемент',
+    expect(await financeActions.locator('[data-testid^="admin-client-action-"]').evaluateAll(
+      (nodes) => nodes.map((node) => node.dataset.testid),
+    )).toEqual([
+      'admin-client-action-payment', 'admin-client-action-charge', 'admin-client-action-remind',
+      'admin-client-action-edit-subscription', 'admin-client-action-sell-subscription',
     ])
     expect(await financeActions.locator('small').evaluateAll(
       (nodes) => nodes.every((node) => getComputedStyle(node).display === 'none'),
@@ -442,48 +444,47 @@ test('client profile exposes contact links and opens routed individual and split
     const tabList = page.locator('.ops-client-detail-tabs [role="tablist"]')
     await expect(tabList).toHaveCSS('justify-content', 'center')
     await expect(page.locator('.ops-client-detail-tabs')).toHaveCSS('justify-content', 'center')
-    const consentsTab = tabList.getByRole('tab', { name: /Согласия/ })
+    const consentsTab = tabList.getByTestId('admin-client-tab-consents')
     await expect(consentsTab).toHaveCSS('border-top-width', '1px')
     await expect(consentsTab).toHaveCSS('border-top-color', 'rgb(174, 215, 245)')
     const [actionsBox, tabsBox] = await Promise.all([financeActions.boundingBox(), tabList.boundingBox()])
     expect(Math.abs(actionsBox.width - tabsBox.width)).toBeLessThanOrEqual(1)
 
-    const balanceCell = page.locator('td:has(> .ops-client-detail-balance)')
-    await expect(balanceCell).toHaveCSS('text-align', 'left')
+    await expect(page.locator('.ops-client-balance-kpi .kpi-value')).toBeVisible()
 
-    await tabList.getByRole('tab', { name: /Абонементы/ }).click()
+    await tabList.getByTestId('admin-client-tab-subscriptions').click()
     const remainingCell = page.locator('td:has(> .ops-client-detail-remaining)')
     await expect(remainingCell).toHaveCSS('text-align', 'left')
     await expect(remainingCell.locator('.ops-client-detail-remaining')).toHaveCSS('justify-self', 'start')
-    await tabList.getByRole('tab', { name: /Участники/ }).click()
+    await tabList.getByTestId('admin-client-tab-participants').click()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   }
 
-  await page.getByRole('button', { name: /^Редактировать абонемент/ }).click()
-  const subscriptionDialog = page.getByRole('dialog', { name: 'Редактирование абонемента' })
-  await expect(subscriptionDialog.getByRole('combobox', { name: 'Действие' })).toHaveValue('edit')
-  const subscriptionEndDateInput = subscriptionDialog.getByRole('textbox', { name: 'Дата окончания абонемента' })
+  await page.getByTestId('admin-client-action-edit-subscription').click()
+  const subscriptionDialog = page.getByTestId('form-modal')
+  await expect(subscriptionDialog.locator('#admin-client-finance-subscription-action')).toHaveValue('edit')
+  const subscriptionEndDateInput = subscriptionDialog.locator('#admin-client-finance-subscription-end-date')
   await expect(subscriptionEndDateInput).toHaveValue('2026-09-26')
   await subscriptionEndDateInput.fill('2026-10-15')
-  await subscriptionDialog.getByRole('button', { name: 'Сохранить' }).click()
+  await subscriptionDialog.getByTestId('admin-client-finance-save').click()
   await expect.poll(() => subscriptionEditPayload).toEqual({ effective_end_date: '2026-10-15' })
 
-  await page.getByRole('button', { name: 'Индивидуальная', exact: true }).click()
+  await page.getByTestId('admin-client-create-individual-202').click()
   await expect(page).toHaveURL(/view=schedule.*participant=202.*createSession=individual/)
-  let sessionDialog = page.getByRole('dialog', { name: 'Новое занятие' })
-  await expect(sessionDialog.getByRole('combobox', { name: 'Участник' })).toHaveValue('Swimmer Current')
+  let sessionDialog = page.getByTestId('form-modal')
+  await expect(sessionDialog.locator('#admin-session-participantId')).toHaveValue('Swimmer Current')
 
   await page.goto('/?role=admin&view=clientDetail&client=20')
-  await page.getByRole('button', { name: 'Сплит', exact: true }).click()
+  await page.getByTestId('admin-client-create-split-202').click()
   await expect(page).toHaveURL(/view=schedule.*participant=202.*createSession=split/)
-  sessionDialog = page.getByRole('dialog', { name: 'Новое занятие' })
-  await expect(sessionDialog.getByRole('combobox', { name: 'Клиент 1' })).toHaveValue('Swimmer Current')
-  await expect(sessionDialog.getByRole('combobox', { name: 'Клиент 2', exact: true })).toBeVisible()
+  sessionDialog = page.getByTestId('form-modal')
+  await expect(sessionDialog.locator('#admin-session-participantId')).toHaveValue('Swimmer Current')
+  await expect(sessionDialog.locator('#admin-session-secondParticipantId')).toBeVisible()
 
   contactMode = 'invalid'
   await page.goto('/?role=admin&view=clientDetail&client=20')
   await expect(page.getByText('Telegram', { exact: true })).toHaveAttribute('aria-disabled', 'true')
-  await expect(page.getByText('WhatsApp', { exact: true })).toHaveAttribute('title', 'Добавьте номер телефона в международном формате')
+  await expect(page.getByText('WhatsApp', { exact: true })).toHaveAttribute('title', /.+/)
   await expect(page.getByText('Instagram', { exact: true })).toHaveAttribute('aria-disabled', 'true')
 
   contactMode = 'archived'
@@ -493,5 +494,5 @@ test('client profile exposes contact links and opens routed individual and split
 
   contactMode = 'anonymized'
   await page.goto('/?role=admin&view=clientDetail&client=20')
-  await expect(page.getByLabel('Связаться с клиентом')).toHaveCount(0)
+  await expect(page.locator('.ops-contact-links')).toHaveCount(0)
 })

@@ -238,12 +238,12 @@ function ClientSearch({ Button, disabled, onChoose }) {
 
   return <div style={{ display: 'grid', gap: 8 }}>
     <div className="ops-button-row">
-      <input value={query} onChange={(event) => setQuery(event.target.value)}
+      <input data-testid="admin-import-client-search" value={query} onChange={(event) => setQuery(event.target.value)}
         placeholder={t('import.clientSearchPlaceholder')} />
-      <Button size="sm" variant="secondary" disabled={disabled} onClick={search}>{t('import.findClient')}</Button>
+      <Button data-testid="admin-import-client-search-submit" size="sm" variant="secondary" disabled={disabled} onClick={search}>{t('import.findClient')}</Button>
     </div>
     {error && <span className="muted">{error}</span>}
-    {results.map((client) => <button type="button" key={client.id} className="card card-pad"
+    {results.map((client) => <button type="button" key={client.id} data-testid={`admin-import-client-${client.id}`} className="card card-pad"
       style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => onChoose(client)}>
       <strong>{client.name}</strong> · ID {client.id} · {client.email || t('import.noEmail')} · {client.phone || t('import.noPhone')}
     </button>)}
@@ -286,7 +286,7 @@ function RowEditor({ state, row, Button, Banner, onClose }) {
     <div className="ops-form-grid">
       {editable.map((field) => <label key={field.key}>
         {field.label}{field.required ? ' *' : ''}
-        <input value={values[field.key] ?? ''}
+        <input id={`admin-import-edit-${field.key}`} value={values[field.key] ?? ''}
           onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} />
       </label>)}
     </div>
@@ -331,7 +331,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
 
   const columns = [
     { key: 'selected', header: '', width: 42, render: (row) => <input type="checkbox"
-      aria-label={t('import.selectRow', { index: row.index })} checked={state.selected.includes(row.index)}
+      aria-label={t('import.selectRow', { index: row.index })} data-testid={`admin-import-row-select-${row.index}`} checked={state.selected.includes(row.index)}
       disabled={row.excluded || row.status === 'error' || row.status === 'duplicate'}
       onChange={() => state.toggle(row.index)} /> },
     { key: 'index', header: '#', width: 52, render: (row) => row.index },
@@ -346,7 +346,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       ...(row.errors || []), ...(row.warnings || []),
     ].join('; ') || '—' },
     { key: 'actions', header: t('import.actions'), width: 190, render: (row) => <div className="ops-button-row">
-      <Button size="sm" variant="subtle" onClick={() => setEditing(row.index)}>{t('import.correct')}</Button>
+      <Button data-testid={`admin-import-row-edit-${row.index}`} size="sm" variant="subtle" onClick={() => setEditing(row.index)}>{t('import.correct')}</Button>
       <Button size="sm" variant="subtle" onClick={() => state.patchRow(row.index, { excluded: !row.excluded })}>
         {t(row.excluded ? 'import.restoreRow' : 'import.excludeRow')}
       </Button>
@@ -381,8 +381,8 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
 
     {state.error && !editing && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
     <ImportSummary summary={state.summary} />
-    {state.meta.ownExport && <Banner tone="success">{t('import.ownExport', { schema: state.meta.schema })}</Banner>}
-    {state.meta.duplicateFile && <Banner tone="warning">{t('import.duplicateFile')}</Banner>}
+    {state.meta.ownExport && <div data-testid="admin-import-own-export"><Banner tone="success">{t('import.ownExport', { schema: state.meta.schema })}</Banner></div>}
+    {state.meta.duplicateFile && <div data-testid="admin-import-duplicate-file"><Banner tone="warning">{t('import.duplicateFile')}</Banner></div>}
     {state.meta.requiredMissing?.length > 0 && <Banner tone="warning">
       {t('import.requiredMissing', { fields: state.meta.requiredMissing.join(', ') })}
     </Banner>}
@@ -420,7 +420,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
           <strong>{t('import.counts', { total: state.counts.total || state.rows.length, errors: state.counts.error || 0, duplicates: (state.counts.duplicate || 0) + (state.counts.possible_duplicate || 0), excluded: state.counts.excluded || 0 })}</strong>
           <div className="ops-button-row">
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('import.rowSearch')} />
-            <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <select data-testid="admin-import-row-filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
               <option value="all">{t('import.filterAll')}</option>
               <option value="error">{t('import.filterErrors')}</option>
               <option value="warning">{t('import.filterWarnings')}</option>
@@ -574,7 +574,7 @@ export function createAdminImportExportPanel(components, icons, reloadRoleData) 
     return <div>
       <Tabs value={tab} onChange={setTab} items={[
         { value: 'export', label: t('import.export') },
-        ...DATASETS.map((dataset) => ({ value: dataset.kind, label: t(dataset.label) })),
+        ...DATASETS.map((dataset) => ({ value: dataset.kind, label: t(dataset.label), testId: `admin-import-tab-${dataset.kind}` })),
       ]} />
 
       {tab === 'export' && <div className="card card-pad" style={{ marginTop: 12 }}>

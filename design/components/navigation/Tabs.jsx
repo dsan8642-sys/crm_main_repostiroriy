@@ -23,6 +23,7 @@ export function Tabs({ items, value, onChange, style }) {
             key={it.value}
             role="tab"
             aria-selected={active}
+            data-testid={it.testId}
             className="swim-tab"
             onClick={() => onChange && onChange(it.value)}
             style={{

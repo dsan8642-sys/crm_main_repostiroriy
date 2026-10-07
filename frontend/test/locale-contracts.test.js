@@ -14,10 +14,10 @@ import {
 
 test('web UI supports Russian, Ukrainian, Polish and English', () => {
   assert.deepEqual(SUPPORTED_UI_LOCALES, ['ru', 'uk', 'pl', 'en'])
-  assert.equal(DEFAULT_UI_LOCALE, 'ru')
+  assert.equal(DEFAULT_UI_LOCALE, 'uk')
   assert.equal(normalizeUiLocale('UA'), 'uk')
   assert.equal(normalizeUiLocale('uk-UA'), 'uk')
-  assert.equal(normalizeUiLocale('de'), 'ru')
+  assert.equal(normalizeUiLocale('de'), 'uk')
   assert.equal(uiLocaleTag('ua'), 'uk-UA')
   assert.equal(uiLocaleTag('pl'), 'pl-PL')
 })
@@ -34,8 +34,8 @@ test('locale storage is scoped to the authenticated user and role', () => {
   const storage = { getItem: (key) => values.get(key) || null }
   assert.equal(readScopedUiLocale(storage, { userId: 17, role: 'admin' }), 'pl')
   assert.equal(readScopedUiLocale(storage, { userId: 18, role: 'admin' }), 'en')
-  assert.equal(readScopedUiLocale(storage, { userId: 19, role: 'admin' }), 'ru')
-  assert.equal(readScopedUiLocale(storage, null), 'ru')
+  assert.equal(readScopedUiLocale(storage, { userId: 19, role: 'admin' }), 'uk')
+  assert.equal(readScopedUiLocale(storage, null), 'uk')
 })
 
 test('active document language is updated synchronously before locale-sensitive mapping', () => {

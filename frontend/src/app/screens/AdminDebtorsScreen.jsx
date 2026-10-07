@@ -170,7 +170,7 @@ export function createAdminDebtorsScreen(components, icons, reloadRoleData, admi
               <div className="ops-compact-card-head">
                 <button type="button" className="ops-compact-card-title with-avatar" onClick={() => go?.('clientDetail', { clientId: row.clientId })}><Avatar name={row.child} size={34} /><strong id={`debtor-card-${row.id}`} title={row.child}>{row.child}</strong></button>
                 <span className="ops-debtor-amount">{formatEntityMoney(row.balance)}</span>
-                <ActionPopover label={t('common.actionsFor', { name: row.child })} actions={[
+                <ActionPopover testId={`admin-debtor-actions-${row.id}`} label={t('common.actionsFor', { name: row.child })} actions={[
                   { key: 'profile', label: t('debtors.profile'), onSelect: () => go?.('clientDetail', { clientId: row.clientId }) },
                   { key: 'copy', label: t('debtors.copyPhone'), disabled: !row.parent, onSelect: () => copyPhone(row) },
                   { key: 'balance', label: t('debtors.recordPayment'), onSelect: () => openBalance(row) },

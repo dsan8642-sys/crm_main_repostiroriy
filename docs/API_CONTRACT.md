@@ -1,6 +1,6 @@
 # SwimCRM API contract
 
-Last updated: 2026-09-15
+Last updated: 2026-10-05
 
 This document is the human-readable companion to:
 
@@ -23,6 +23,22 @@ contract. The authenticated compatibility endpoint returns the same schema.
 - Public terminology is `client` and `participant`.
 - Internal legacy model names may still contain `ParentAccount` or `Student`.
 
+## Family money balance
+
+`GET /api/client/overview/` includes `account.balance_minor`; each participant's
+`balance_minor` repeats this same family amount for older clients. Monetary
+balance includes charges, reversals and confirmed payments of every current or
+archived participant in the account. Subscription sessions remain personal.
+
+`GET /api/client/charges/`, `/api/client/payment-history/` and the legacy
+`/api/client/payments/` return account-wide records, with `student_id` on each
+record showing its original attribution. An optional `student_id` query parameter
+is validated for account ownership but does not filter financial records. A
+top-up request may omit `student_id`; the server records it against the active
+account-holder participant, or the first active participant. Pending payments
+do not change the balance. Admin client, attendance and debtor balances use the
+same account pool; debtor results contain one row per indebted family.
+
 ## Roles
 
 | Role | Prefix |
@@ -30,6 +46,46 @@ contract. The authenticated compatibility endpoint returns the same schema.
 | Client | `/api/client/` |
 | Trainer | `/api/trainer/` |
 | Admin | `/api/admin/` |
+
+## Client self-booking
+
+`POST|DELETE /api/client/schedule/sessions/<session_id>/booking/` accepts
+`{"student_id": <id>}` and returns the updated client-safe session payload.
+Only a participant who belongs to the group may book. The session must use
+the group self-booking mode; booking and cancellation close at the group's
+configured number of hours before the start. The server checks capacity under
+a session row lock. An administrator may add participants later while places
+remain, until attendance is recorded. Booking does not change finances.
+
+`GET /api/client/schedule/` includes `requires_booking`, `booking_status`
+(`available`, `full`, `booked`, `waitlisted`, `closed`, `cancelled`),
+`booking_deadline`, `booking_timezone`, `free_places`, `can_cancel_booking`,
+`can_leave_waitlist` and the caller's `waitlist_position`. It never exposes
+another participant's waitlist entry. Cancelled sessions retain their bookings.
+`POST|DELETE /api/client/schedule/sessions/<session_id>/waitlist/` accepts
+`{"student_id": <id>}`. Joining requires a full, open self-booking session;
+leaving remains available after the deadline. When a seat opens before the
+deadline, the first eligible active entry by priority, creation time and ID is
+promoted in the same transaction. After the deadline only an administrator
+can add a participant. Cancelled sessions suspend the queue; restore resumes
+it before the deadline and expires it afterward.
+
+`GET /api/client/overview/` returns `next_session` only for a future active
+session in which the participant has a place, plus `current_subscription` with
+`sessions_available_now` and that subscription's `ledger` movements. Counted
+sessions with a positive balance remain available after the printed end date.
+`GET /api/client/notifications/` is paginated and contains only sent or
+delivered messages. Receipt-bearing payment payloads include `receipt_expired`
+when their file has been removed under the retention policy.
+The group admin payload includes `self_booking_enabled` and
+`booking_cutoff_hours` (1–168, initially 8). Existing future sessions without
+attendance adopt a changed group mode; completed sessions keep their mode.
+Schedule change and promotion notifications use active rules, channel consent
+and quiet hours after the database commit. Admin schedule payloads include
+`notification_delivery_issue` for recent delivery errors; the notification log
+contains the details. Active templates without a Ukrainian translation expose
+`missing_uk_translation` in the admin template API; the default language
+continues to be used until a translation is saved.
 
 ## Health and Readiness
 
@@ -56,6 +112,23 @@ Supported write surfaces:
 - `GET|POST /api/admin/settings/session-types/`
 - `GET|PATCH|PUT|DELETE /api/admin/settings/session-types/<id>/`
 - `POST /api/admin/settings/session-types/split/restore/`
+- `POST /api/admin/settings/session-types/{code}/restore/`
+
+`POST /api/admin/settings/session-types/` creates a custom type with a unique
+lowercase `code`, a `label`, and `base_type` (`group`, `individual`, or `split`).
+The base format determines roster, billing and payroll behavior. `code` and
+`base_type` cannot change after creation; the label, defaults and active state
+can. Existing system types are restored with the dedicated action above. The
+older `/split/restore/` URL remains valid. `DELETE` deactivates a custom type;
+existing sessions retain their selected type and saved financial/capacity
+snapshots.
+
+System type restore actions require an authenticated administrator and accept
+no request body. `{code}` supports the built-in codes `group`, `individual`
+and `split`; the dedicated `/split/restore/` route remains available for older
+clients. A successful request returns the restored type payload, with `201`
+when a missing system type is created and `200` when an existing type is
+reactivated or already active. An unsupported code returns a JSON `400` error.
 - `GET|POST /api/admin/settings/languages/`
 - `GET|PATCH|PUT|DELETE /api/admin/settings/languages/<id>/`
 - `GET|POST /api/admin/settings/dictionary-keys/`
@@ -253,6 +326,10 @@ Admin-created payments are confirmed by default. Pass `"status": "pending"` to k
 ```
 
 Trainer overlap is checked by the scheduling service before the session is saved.
+To use a custom type, send its `session_type_config_id` alongside the matching
+base `session_type`. Session responses include `session_type_config_id`,
+`session_type_config_code` and `presentation_type_label`. An inactive type
+cannot be selected for a new session; existing sessions continue to display it.
 Admins may later set `"substitute_trainer_id"` on a concrete session. The
 response keeps `"trainer_id"` as the originally scheduled trainer and exposes
 `"effective_trainer_id"` as the trainer used for delivery/payroll.
@@ -285,6 +362,16 @@ historical roster. A Split with active additional participants cannot be changed
 to another session type until those participants are removed. The snapshot price
 is the total Split price: an uncovered present client is charged
 `floor(price_minor / enrolled roster size)`.
+
+### Снятие отметки посещаемости
+
+`DELETE /api/admin/schedule/sessions/{session_id}/attendance/` и
+`DELETE /api/trainer/sessions/{session_id}/attendance/` принимают JSON
+`{"student_id": 123}`. Администратор работает с составом занятия, тренер —
+только со своим занятием. Повторный запрос безопасен: ответ содержит
+`"status": null`. История списаний и начислений сохраняется; при снятии
+добавляются компенсирующие записи. Снятая отметка не показывается как
+посещение в клиентской истории и сводках.
 
 ### Check Trainer Conflict
 

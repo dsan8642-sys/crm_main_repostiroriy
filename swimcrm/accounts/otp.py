@@ -25,16 +25,27 @@ def totp_code(secret, *, for_time=None, step=30, digits=6):
     return str(value % (10 ** digits)).zfill(digits)
 
 
-def verify_totp(secret, code, *, for_time=None, step=30, digits=6, window=1):
+def matching_totp_counter(
+    secret, code, *, for_time=None, step=30, digits=6, window=1, after_counter=None
+):
     code = "".join(ch for ch in str(code) if ch.isdigit())
     if len(code) != digits:
-        return False
+        return None
     now = int(for_time if for_time is not None else time.time())
-    for drift in range(-window, window + 1):
-        expected = totp_code(secret, for_time=now + drift * step, step=step, digits=digits)
+    current_counter = now // step
+    for counter in range(current_counter - window, current_counter + window + 1):
+        if counter < 0 or (after_counter is not None and counter <= after_counter):
+            continue
+        expected = totp_code(secret, for_time=counter * step, step=step, digits=digits)
         if hmac.compare_digest(expected, code):
-            return True
-    return False
+            return counter
+    return None
+
+
+def verify_totp(secret, code, *, for_time=None, step=30, digits=6, window=1):
+    return matching_totp_counter(
+        secret, code, for_time=for_time, step=step, digits=digits, window=window
+    ) is not None
 
 
 def provisioning_uri(*, secret, username, issuer="SwimCRM"):

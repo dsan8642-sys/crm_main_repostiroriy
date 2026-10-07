@@ -2,10 +2,17 @@
 
 ## Read first
 
-1. `README.md` — product and basic commands.
-2. `PROJECT_MAP.md` — code ownership and role navigation.
-3. `DECISIONS.md` — binding business decisions.
-4. The task-specific document linked from `docs/README.md`.
+1. `README.md` — short product overview and basic commands.
+2. `PROJECT_MAP.md` — start with the quick route, then read only the sections
+   relevant to the task.
+3. For business-rule changes, read the relevant section of `DECISIONS.md`.
+   For other work, consult it when a decision may affect the change.
+4. Use `docs/README.md` to find the task-specific document; read that document
+   only when the task needs it.
+
+Search for the symbol or route before opening large files. Read the affected
+code and tests directly; documentation is a navigation aid, not evidence that
+the current implementation behaves as described.
 
 ## Architecture boundaries
 

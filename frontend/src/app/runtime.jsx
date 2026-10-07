@@ -30,6 +30,7 @@ export const ROLE_META = {
     initialView: 'sessions',
     titles: {
       sessions: ['runtime.trainer.sessions.title', 'runtime.trainer.sessions.desc'],
+      schedule: ['runtime.trainer.schedule.title', 'runtime.trainer.schedule.desc'],
       session: ['runtime.trainer.session.title', 'runtime.trainer.session.desc'],
       groups: ['runtime.trainer.groups.title', 'runtime.trainer.groups.desc'],
       history: ['runtime.trainer.history.title', 'runtime.trainer.history.desc'],
@@ -49,6 +50,7 @@ export const ROLE_META = {
       consents: ['runtime.client.consents.title', 'runtime.client.consents.desc'],
       history: ['runtime.client.history.title', 'runtime.client.history.desc'],
       profile: ['runtime.client.profile.title', 'runtime.client.profile.desc'],
+      help: ['runtime.client.help.title', 'runtime.client.help.desc'],
     },
   },
 }
@@ -79,7 +81,7 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
       {
         key: 'subscriptions',
         label: t('nav.admin.subscriptions'),
-        icon: <icons.Layers size={17} />,
+        icon: <icons.Ticket size={17} />,
         section: t('shell.financeSection'),
       },
       { key: 'settings', label: t('nav.admin.settings'), icon: <icons.Settings size={17} />, section: t('shell.systemSection') },
@@ -89,6 +91,7 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
   if (role === 'trainer') {
     return [
       { key: 'sessions', label: t('nav.trainer.sessions'), icon: <icons.Calendar size={17} /> },
+      { key: 'schedule', label: t('nav.trainer.schedule'), icon: <icons.Calendar size={17} /> },
       { key: 'session', label: t('nav.trainer.session'), icon: <icons.Check size={17} />, section: t('shell.operationsSection') },
       { key: 'groups', label: t('nav.trainer.groups'), icon: <icons.Users size={17} />, section: t('shell.operationsSection') },
       { key: 'history', label: t('nav.trainer.history'), icon: <icons.File size={17} />, section: t('shell.operationsSection') },
@@ -102,6 +105,7 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
     { key: 'payments', label: t('nav.client.payments'), icon: <icons.Wallet size={17} />, section: t('shell.accountSection') },
     { key: 'history', label: t('nav.client.history'), icon: <icons.File size={17} />, section: t('shell.accountSection') },
     { key: 'profile', label: t('nav.client.profile'), icon: <icons.User size={17} />, section: t('shell.settingsSection') },
+    { key: 'help', label: t('nav.client.help'), icon: <icons.File size={17} />, section: t('shell.settingsSection') },
   ]
 }
 

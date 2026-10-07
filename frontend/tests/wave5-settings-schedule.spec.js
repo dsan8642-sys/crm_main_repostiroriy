@@ -51,27 +51,43 @@ async function mockAdmin(page, { clients = [], sessions = [], scheduleRequests =
   })
 }
 
+test('desktop Settings keeps categories and resources beside their detail', async ({ page }) => {
+  test.skip(page.viewportSize()?.width !== 1440, 'desktop settings navigation')
+  await mockAdmin(page)
+  await page.goto('/?role=admin&view=settings')
+
+  const nav = page.locator('.ops-settings-desktop-nav')
+  await expect(nav).toBeVisible()
+  await nav.getByTestId('admin-settings-category-notifications').click()
+  await nav.getByTestId('admin-settings-resource-rules').click()
+  await expect(nav.getByTestId('admin-settings-category-notifications')).toHaveAttribute('aria-selected', 'true')
+  await expect(nav.getByTestId('admin-settings-resource-rules')).toHaveAttribute('aria-current', 'true')
+  await expect(page.locator('.ops-settings-detail .section-title')).toBeVisible()
+  const [navBox, detailBox] = await Promise.all([nav.boundingBox(), page.locator('.ops-settings-detail').boundingBox()])
+  expect(detailBox.x).toBeGreaterThan(navBox.x + navBox.width)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+})
+
 test('Wave 5 mobile Settings is an unambiguous Category to Resource to Detail hierarchy', async ({ page }) => {
   test.skip(page.viewportSize()?.width !== 390, 'phone hierarchy')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=settings')
 
-  const categories = page.getByLabel('Категории настроек')
+  const categories = page.locator('.ops-settings-mobile-nav .ops-settings-mobile-list').first()
   await expect(categories).toBeVisible()
   await expect(page.locator('.ops-settings-desktop-nav')).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Обновить' })).toBeHidden()
-  await categories.getByRole('button', { name: 'Справочники' }).click()
+  await expect(page.locator('.ops-settings-page-refresh')).toBeHidden()
+  await categories.getByTestId('admin-settings-category-catalog').click()
 
-  await expect(page.getByRole('button', { name: 'Категории', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Типы абонементов/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Обновить' })).toBeHidden()
-  await page.getByRole('button', { name: /Типы абонементов/ }).click()
+  await expect(page.locator('.ops-settings-mobile-nav .ops-context-back')).toBeVisible()
+  await expect(page.getByTestId('admin-settings-resource-subscriptionTypes').last()).toBeVisible()
+  await expect(page.locator('.ops-settings-page-refresh')).toBeHidden()
+  await page.getByTestId('admin-settings-resource-subscriptionTypes').last().click()
 
-  await expect(page.getByRole('button', { name: 'Справочники', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Типы абонементов' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Обновить' })).toBeVisible()
-  await page.getByRole('button', { name: 'Справочники', exact: true }).click()
-  await page.getByRole('button', { name: 'Категории', exact: true }).click()
+  await expect(page.locator('.ops-settings-mobile-back .ops-context-back')).toBeVisible()
+  await expect(page.locator('.ops-settings-detail .section-title')).toBeVisible()
+  await expect(page.locator('.ops-settings-page-refresh')).toBeVisible()
+  await page.locator('.ops-settings-mobile-back > button').last().click()
   await expect(categories).toBeVisible()
 
   const geometry = await page.evaluate(() => ({
@@ -92,11 +108,11 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
   await mockAdmin(page, { sessions, scheduleRequests })
   await page.goto('/?role=admin&view=schedule')
 
-  const trigger = page.getByRole('button', { name: /Фильтры/ })
+  const trigger = page.getByTestId('admin-schedule-filters-trigger')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
   if ((page.viewportSize()?.width || 0) === 390) {
-    await expect(page.getByRole('button', { name: 'День', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+    await expect(page.getByTestId('schedule-period-day')).toHaveAttribute('aria-pressed', 'true')
+    await page.getByTestId('schedule-period-week').click()
   }
   const lessonStyle = await page.locator('.ops-schedule-event:visible').first().evaluate((node) => {
     const style = getComputedStyle(node)
@@ -109,17 +125,16 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
   expect(lessonStyle.radius).toBeGreaterThanOrEqual(8)
   expect(lessonStyle.cursor).toBe('pointer')
   expect(lessonStyle.background).not.toBe('rgba(0, 0, 0, 0)')
-  await expect(trigger).toContainText('За неделю: 2')
+  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
   await trigger.click()
-  const filters = page.getByRole('dialog', { name: 'Фильтры расписания' })
-  await filters.getByLabel('Тип тренировки').selectOption('split')
-  await filters.getByRole('button', { name: 'Применить' }).click()
+  await page.getByTestId('admin-schedule-filter-type').selectOption('split')
+  await page.getByTestId('admin-schedule-filter-apply').click()
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(1)
-  await expect(trigger).toContainText('За неделю: 1')
-  await page.getByRole('button', { name: 'День', exact: true }).click()
-  await expect(trigger).toContainText('За день: 1')
-  await page.getByRole('button', { name: 'Месяц', exact: true }).click()
-  await expect(trigger).toContainText('За месяц: 1')
+  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
+  await page.getByTestId('schedule-period-day').click()
+  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
+  await page.getByTestId('schedule-period-month').click()
+  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
 
   const strip = page.locator('.ops-action-strip').first()
   if ((page.viewportSize()?.width || 0) === 390) {
@@ -133,8 +148,8 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
 
   await page.goto('/?role=admin&view=clients')
   await page.goto('/?role=admin&view=schedule')
-  const resetTrigger = page.getByRole('button', { name: /Фильтры/ })
-  await expect(resetTrigger).not.toContainText('· 1')
+  const resetTrigger = page.getByTestId('admin-schedule-filters-trigger')
+  await expect(resetTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
   for (const requestUrl of scheduleRequests) {
     expect(requestUrl.searchParams.get('date_from')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
@@ -159,7 +174,7 @@ test('Wave 5 desktop Clients keeps actions inside the table and reveals full ell
   await expect(table).toBeVisible()
   const row = table.getByRole('row').filter({ hasText: 'Ковальская-Длинная-Фамилия' })
   const actions = isTablet
-    ? row.getByRole('button', { name: /Действия:/ })
+    ? row.locator('.ops-entity-actions-trigger')
     : row.locator('.ops-client-row-actions')
   const bounds = await Promise.all([table.boundingBox(), actions.boundingBox()])
   expect(bounds[1].x).toBeGreaterThanOrEqual(bounds[0].x - 1)
@@ -199,10 +214,48 @@ test('Wave 5 Trainer and Client schedule surfaces never expose the Admin filter'
 
   await page.goto('/?role=trainer&view=sessions')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Фильтры/ })).toHaveCount(0)
+  await expect(page.getByTestId('admin-schedule-filters-trigger')).toHaveCount(0)
+  await page.getByTestId('nav-trainer-schedule').first().click()
+  await expect(page.getByTestId('schedule-calendar')).toBeVisible()
+  await page.getByTestId('schedule-view-list').click()
+  await expect(page.getByTestId('trainer-schedule-list')).toBeVisible()
   role = 'client'
   await page.goto('/?role=client&view=schedule')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Фильтры/ })).toHaveCount(0)
-  await expect(page.getByRole('dialog', { name: 'Фильтры расписания' })).toHaveCount(0)
+  await expect(page.getByTestId('admin-schedule-filters-trigger')).toHaveCount(0)
+  await expect(page.getByTestId('admin-schedule-filter-type')).toHaveCount(0)
+})
+
+test('trainer attendance keeps the selected session after saving a mark', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'attendance layouts')
+  const methods = []
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/api/health/') return json(route, { status: 'ok' })
+    if (path === '/api/me/') return json(route, { id: 2, username: 'trainer', role: 'trainer', full_name: 'Marek Trainer' })
+    if (path === '/api/csrf/') return json(route, { ok: true })
+    if (path === '/api/trainer/sessions/42/' && request.method() === 'GET') return json(route, {
+      session: { id: 42, start_at: '2026-10-04T17:00:00+02:00', end_at: '2026-10-04T18:00:00+02:00', group: { name: 'Masters' }, location: 'Pool A', is_cancelled: false },
+      students: [{ id: 8, full_name: 'Jan Kowalski', attendance: null }],
+    })
+    if (path === '/api/trainer/sessions/42/attendance/' && ['POST', 'DELETE'].includes(request.method())) {
+      methods.push(request.method())
+      return json(route, { status: request.method() === 'DELETE' ? null : 'present' })
+    }
+    if (path === '/api/trainer/sessions/' || path === '/api/trainer/groups/' || path === '/api/trainer/history/') return json(route, { sessions: [], groups: [] })
+    return json(route, {})
+  })
+
+  await page.goto('/?role=trainer&view=session&trainerSession=42')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.locator('.ops-attendance-actions button')).toHaveCount(3)
+  await expect(page.locator('.ops-attendance-actions button')).toHaveCount(3)
+  await page.getByTestId('trainer-attendance-8-present').click()
+  await expect(page.getByTestId('trainer-attendance-8-present')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('trainer-attendance-8-present').click()
+  await expect(page.getByTestId('trainer-attendance-8-present')).toHaveAttribute('aria-pressed', 'false')
+  expect(methods).toEqual(['POST', 'DELETE'])
+  await expect(page).toHaveURL(/trainerSession=42/)
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 })

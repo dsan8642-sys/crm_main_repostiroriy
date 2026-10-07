@@ -141,14 +141,15 @@ export function LoginScreen({ design, apiState, onLogin }) {
           {fieldErrors.password && <small id={`${AUTH_FIELD_IDS.password}-error`} className="ops-field-error" role="alert">{fieldErrors.password}</small>}
           {activationMode && <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('auth.minPassword')}</span>}
         </label>
-        <Button type="submit" loading={busy}
+        <Button type="submit" data-testid="auth-submit" loading={busy}
           disabled={busy || !password || (activationMode ? !activationToken : !loginValue)}>
           <icons.Logout size={16} style={{ transform: 'rotate(180deg)' }} />
           {activationMode ? t('auth.setPassword') : t('auth.submit')}
         </Button>
-        <button type="button" className="ops-link-button" onClick={() => { setActivationMode((value) => !value); setError(''); setFieldErrors({}); setMessage('') }}>
+        <button type="button" data-testid="auth-toggle-activation" className="ops-link-button" onClick={() => { setActivationMode((value) => !value); setError(''); setFieldErrors({}); setMessage('') }}>
           {activationMode ? t('auth.back') : t('auth.haveCode')}
         </button>
+        <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-xs)' }}>{t('auth.recoveryHelp')}</p>
       </form>
     </div>
   )

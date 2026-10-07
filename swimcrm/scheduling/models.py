@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone as dj_timezone
+from django.core.validators import RegexValidator
 
 from common.money import CURRENCY_CHOICES, Money
 
@@ -138,7 +139,10 @@ class Location(models.Model):
 
 
 class SessionTypeConfig(models.Model):
-    code = models.CharField(max_length=16, choices=SessionType.choices, unique=True)
+    code = models.CharField(max_length=64, unique=True, validators=[
+        RegexValidator(r"^[a-z][a-z0-9_-]*$", "Use lowercase Latin letters, digits, - or _; start with a letter.")])
+    base_type = models.CharField(max_length=16, choices=SessionType.choices,
+                                 default=SessionType.GROUP)
     label = models.CharField(max_length=120)
     default_capacity = models.PositiveIntegerField(null=True, blank=True)
     default_price_minor = models.BigIntegerField(null=True, blank=True)
@@ -154,8 +158,8 @@ class SessionTypeConfig(models.Model):
         ordering = ["code"]
 
     def clean(self):
-        if self.code not in SessionType.values:
-            raise ValidationError("unsupported session type code")
+        if self.code in SessionType.values:
+            self.base_type = self.code
         self.label = (self.label or "").strip()
         if not self.label:
             raise ValidationError("label is required")
@@ -169,9 +173,15 @@ class SessionTypeConfig(models.Model):
     def __str__(self):
         return self.label
 
+    def save(self, *args, **kwargs):
+        if self.code in SessionType.values:
+            self.base_type = self.code
+        super().save(*args, **kwargs)
+
 
 class WaitlistStatus(models.TextChoices):
     ACTIVE = "active", "Active"
+    SUSPENDED = "suspended", "Suspended"
     PROMOTED = "promoted", "Promoted"
     CANCELLED = "cancelled", "Cancelled"
     EXPIRED = "expired", "Expired"
@@ -179,6 +189,7 @@ class WaitlistStatus(models.TextChoices):
 
 class SessionParticipantSource(models.TextChoices):
     MANUAL = "manual", "Manual"
+    CLIENT = "client", "Client"
     WAITLIST = "waitlist", "Waitlist"
 
 
@@ -339,6 +350,9 @@ class Session(models.Model):
         related_name="sessions")
     session_type = models.CharField(max_length=16, choices=SessionType.choices,
                                     default=SessionType.GROUP)
+    session_type_config = models.ForeignKey(
+        SessionTypeConfig, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="sessions")
     group = models.ForeignKey("catalog.Group", null=True, blank=True,
                               on_delete=models.CASCADE, related_name="sessions")
     trainer = models.ForeignKey("accounts.Trainer", on_delete=models.PROTECT, related_name="sessions")
@@ -363,6 +377,7 @@ class Session(models.Model):
 
     is_manually_modified = models.BooleanField(default=False)  # rule 4
     is_cancelled = models.BooleanField(default=False)
+    requires_booking = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -399,6 +414,8 @@ class Session(models.Model):
         return None if self.price_minor is None else Money(self.price_minor, self.currency)
 
     def clean(self):
+        if self.session_type_config_id and self.session_type_config.base_type != self.session_type:
+            raise ValidationError({"session_type_config": "Type format does not match this session"})
         if self.substitute_trainer_id and self.substitute_trainer_id == self.trainer_id:
             raise ValidationError("substitute trainer must differ from scheduled trainer")
         if self.end_at <= self.start_at:

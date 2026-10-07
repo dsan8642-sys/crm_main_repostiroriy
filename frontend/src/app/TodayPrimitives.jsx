@@ -1,4 +1,5 @@
 import React from 'react'
+import { scheduleColorStyle } from './schedulePalette.js'
 
 export function TodaySessionCard({
   Button,
@@ -11,10 +12,11 @@ export function TodaySessionCard({
   onOpen,
   emptyTitle,
   emptyDetail,
+  colorKey,
 }) {
   const hasSession = Boolean(title)
   return (
-    <section className={`ops-today-session${hasSession ? '' : ' is-empty'}`}>
+    <section className={`ops-today-session${hasSession ? '' : ' is-empty'}${hasSession && colorKey ? ' has-schedule-color' : ''}`} data-color-key={hasSession ? colorKey : undefined} style={hasSession && colorKey ? scheduleColorStyle(colorKey) : undefined}>
       <div className="ops-today-session__icon" aria-hidden="true">{icon}</div>
       <div className="ops-today-session__body">
         <div className="eyebrow">{eyebrow}</div>
@@ -37,7 +39,7 @@ export function QuickActions({ label, actions }) {
       <div className="eyebrow" aria-hidden="true">&nbsp;</div>
       <div className="ops-quick-actions__grid">
         {actions.map((action) => (
-          <button key={action.label} type="button" onClick={action.onClick}>
+          <button key={action.key || action.label} type="button" data-testid={action.testId} onClick={action.onClick}>
             <span aria-hidden="true">{action.icon}</span>
             <span>{action.label}</span>
           </button>
@@ -52,7 +54,7 @@ export function CompactStatusRow({ items, emptyLabel }) {
   return (
     <div className="ops-today-status-list">
       {items.map((item) => (
-        <button key={item.id} type="button" onClick={item.onClick}>
+        <button key={item.id} type="button" data-color-key={item.colorKey || undefined} style={item.colorKey ? scheduleColorStyle(item.colorKey) : undefined} onClick={item.onClick}>
           <span>{item.primary}</span>
           <small>{item.secondary}</small>
         </button>

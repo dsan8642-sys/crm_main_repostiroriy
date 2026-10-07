@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from accounts.models import AdminOTPDevice, User
-from accounts.otp import generate_totp_secret, provisioning_uri, verify_totp
+from accounts.otp import generate_totp_secret, matching_totp_counter, provisioning_uri
 
 
 class Command(BaseCommand):
@@ -27,14 +27,25 @@ class Command(BaseCommand):
             device.secret = generate_totp_secret()
             device.is_confirmed = False
             device.confirmed_at = None
-            device.save(update_fields=["secret", "is_confirmed", "confirmed_at"])
+            device.last_used_at = None
+            device.last_used_counter = None
+            device.save(update_fields=[
+                "secret", "is_confirmed", "confirmed_at", "last_used_at", "last_used_counter"
+            ])
 
         if options.get("code"):
-            if not verify_totp(device.secret, options["code"]):
+            counter = matching_totp_counter(
+                device.secret, options["code"], after_counter=device.last_used_counter
+            )
+            if counter is None:
                 raise CommandError("Код не подошёл")
             device.is_confirmed = True
             device.confirmed_at = timezone.now()
-            device.save(update_fields=["is_confirmed", "confirmed_at"])
+            device.last_used_at = device.confirmed_at
+            device.last_used_counter = counter
+            device.save(update_fields=[
+                "is_confirmed", "confirmed_at", "last_used_at", "last_used_counter"
+            ])
             self.stdout.write(self.style.SUCCESS("2FA подтверждена"))
             return
 

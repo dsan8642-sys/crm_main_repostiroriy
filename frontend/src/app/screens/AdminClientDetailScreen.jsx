@@ -190,12 +190,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const selectedSubscriptions = useMemo(() => subscriptions.filter(
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
     ), [selectedParticipantId, subscriptions])
-    const selectedCharges = useMemo(() => charges.filter(
-      (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
-    ), [charges, selectedParticipantId])
-    const selectedPayments = useMemo(() => payments.filter(
-      (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
-    ), [payments, selectedParticipantId])
+    const selectedCharges = charges
+    const selectedPayments = payments
     const selectedAttendance = useMemo(() => attendance.filter(
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
     ), [attendance, selectedParticipantId])
@@ -211,9 +207,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const participantName = (id) => participants.find((participant) => participant.id === id)?.full_name || '-'
     const money = (minor) => asMoneyMajor(minor || 0)
     const accountBalance = asAccountBalance(summary.balance_minor)
-    const selectedParticipantBalance = selectedParticipant
-      ? asAccountBalance(selectedParticipant.balance_minor)
-      : accountBalance
+    const selectedParticipantBalance = accountBalance
     const status = (value) => {
       if (value === 'active') return 'active'
       if (value === 'confirmed') return 'paid'
@@ -279,7 +273,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       )
       setPaymentForm((current) => ({
         ...current,
-        participantId: participantIdForClient(current.participantId),
+        participantId: String((participants.find((item) => item.is_account_holder && item.is_active) || participants.find((item) => item.is_active) || participants[0]).id),
       }))
       setFinanceForm((current) => ({
         ...current,
@@ -293,7 +287,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
     useEffect(() => {
       if (!selectedParticipantId) return
-      setPaymentForm((current) => ({ ...current, participantId: selectedParticipantId }))
       setFinanceForm((current) => ({
         ...current,
         participantId: selectedParticipantId,
@@ -305,9 +298,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
     useEffect(() => {
       if (debtPrefillHandledRef.current || !prefillAmount || !participants.length) return
-      const participantId = participants.some((participant) => String(participant.id) === String(initialParticipantId))
-        ? String(initialParticipantId)
-        : String(participants[0].id)
+      const participantId = String((participants.find((item) => item.is_account_holder && item.is_active) || participants.find((item) => item.is_active) || participants[0]).id)
       const next = {
         ...paymentForm,
         participantId,
@@ -329,16 +320,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     }
 
     const selectedPaymentParticipant = participants.find((participant) => String(participant.id) === String(paymentForm.participantId))
-    const selectedPaymentBalance = selectedPaymentParticipant
-      ? asAccountBalance(selectedPaymentParticipant.balance_minor)
-      : accountBalance
-    const selectedChargeParticipant = participants.find(
-      (participant) => String(participant.id) === String(financeForm.participantId),
-    )
+    const selectedPaymentBalance = accountBalance
     const chargePreviewMinor = moneyMajorToMinor(financeForm.amount) || 0
-    const chargeBalanceBefore = selectedChargeParticipant
-      ? asAccountBalance(selectedChargeParticipant.balance_minor)
-      : accountBalance
+    const chargeBalanceBefore = accountBalance
     const chargeBalanceAfter = chargeBalanceBefore - asMoneyMajor(chargePreviewMinor)
 
     function selectParticipant(participantId) {
@@ -794,6 +778,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           setMessage(t('client.anonymized'))
           refreshDetail()
         }
+        if (confirmAction.type === 'revokeAccess') {
+          await api.post(`/api/admin/clients/${fallbackClientId}/access/revoke/`)
+          setMessage(t('access.revoked'))
+          refreshDetail()
+        }
         setConfirmAction(null)
       } catch (err) {
         setError(apiErrorMessage(err, t('client.actionError')))
@@ -833,24 +822,24 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             </div>}
           </div>
           <div className="ops-button-row ops-page-actions">
-            {!accountArchived && !loading && <AccessButtons Button={Button} portalAccess={account.portal_access} accessActivated={account.access_activated} busy={Boolean(actionBusy)} onAction={accessAction} />}
-            {!accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>{t('client.edit')}</Button>}
-            {accountArchived && <Button variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>{t('clients.restore')}</Button>}
+            {!accountArchived && !loading && <AccessButtons Button={Button} portalAccess={account.portal_access} accessActivated={account.access_activated} busy={Boolean(actionBusy)} onAction={(action) => action === 'revoke' ? setConfirmAction({ type: 'revokeAccess' }) : accessAction(action)} />}
+            {!accountArchived && <Button data-testid="admin-client-edit-account" variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>{t('client.edit')}</Button>}
+            {accountArchived && <Button data-testid="admin-client-restore" variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>{t('clients.restore')}</Button>}
             <Button variant="secondary" disabled={loading} onClick={refreshDetail}>{t('client.refresh')}</Button>
           </div>
         </div>
 
         {error && !editingAccount && !editingParticipant && !financeAction && !paymentPanelOpen && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <ToastNotice id="admin-client-detail-result" message={message} />
-        {activationInfo && <div style={{ marginBottom: 12 }}><AccessCodeCard info={activationInfo} Button={Button} onClose={() => setActivationInfo(null)} /></div>}
+        {activationInfo && <div style={{ marginBottom: 12 }}><AccessCodeCard info={activationInfo} Button={Button} email={account.email} emailLanguage={account.preferred_language} onClose={() => setActivationInfo(null)} /></div>}
         <BusyBanner id="admin-client-detail-busy" show={loading}>{t('client.loading')}</BusyBanner>
-        {accountArchived && <Banner tone="warning" style={{ marginBottom: 12 }}><strong>{t('client.blacklisted')}</strong> {t('client.blacklistedDescription')}</Banner>}
+        {accountArchived && <div data-testid="admin-client-archived-banner"><Banner tone="warning" style={{ marginBottom: 12 }}><strong>{t('client.blacklisted')}</strong> {t('client.blacklistedDescription')}</Banner></div>}
 
         {participants.length > 0 && <section className="card card-pad" style={{ display: 'grid', gap: 12, marginBottom: 16 }} aria-label={t('client.selectParticipant')}>
           <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
             <div className="eyebrow">{t('client.selectParticipant')}</div>
             <strong>{selectedParticipant?.full_name || '-'}</strong>
-            <div className="muted"><Money amount={selectedParticipantBalance} signed currency="zł" /> · {selectedSubscription?.type || t('client.noSubscriptions')}</div>
+            <div className="muted">{selectedSubscription?.type || t('client.noSubscriptions')}</div>
           </div>
           <div style={{ display: 'grid', gap: 8 }} role="list">
             {participants.map((participant) => {
@@ -876,7 +865,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
           <div className="kpi ops-client-balance-kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>{t('common.balance')}</div>
+            <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>{t('finance.familyBalance')}</div>
             <div className="kpi-value">
               <Money amount={selectedParticipantBalance} signed currency="zł" size="inherit" />
             </div>
@@ -900,7 +889,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         </div>
 
         <div className="ops-action-strip ops-client-finance-actions" aria-label={t('client.financeActionsAria')}>
-          <button type="button" className="ops-action-card" disabled={accountArchived} onClick={openPaymentPanel}>
+          <button type="button" data-testid="admin-client-action-payment" className="ops-action-card" disabled={accountArchived} onClick={openPaymentPanel}>
             <span>{t('client.topUp')}</span>
             <small>{t('client.topUpHint')}</small>
           </button>
@@ -910,6 +899,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             <button
               key={value}
               type="button"
+              data-testid={`admin-client-action-${value}`}
               className={`ops-action-card${financeAction === value ? ' is-active' : ''}`}
               disabled={accountArchived}
               onClick={() => { const next = { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
@@ -918,13 +908,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <small>{hint}</small>
             </button>
           ))}
-          <button type="button" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
+          <button type="button" data-testid="admin-client-action-remind" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
             <span>{t('client.remind')}</span>
             <small>{t('client.remindHint')}</small>
           </button>
           <button
             type="button"
             className={`ops-action-card${subscriptionEditorOpen ? ' is-active' : ''}`}
+            data-testid="admin-client-action-edit-subscription"
             disabled={accountArchived || subscriptions.length === 0}
             onClick={() => openSubscriptionEditor()}
           >
@@ -934,6 +925,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           <button
             type="button"
             className={`ops-action-card${financeAction === 'issue' ? ' is-active' : ''}`}
+            data-testid="admin-client-action-sell-subscription"
             disabled={accountArchived}
             onClick={() => { const next = { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), paymentReceived: false, paymentMethod: 'cash', paymentDate: new Date().toISOString().slice(0, 10) }; setFinanceForm(next); setFinanceAction('issue'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
           >
@@ -942,7 +934,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           </button>
         </div>
 
-        <FormModal open={Boolean(financeAction)} title={subscriptionEditorOpen ? t('client.editPassTitle') : ({ charge: t('client.newCharge'), issue: t('client.sellPassTitle') }[financeAction] || t('finance.operation'))} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>{t('common.save')}</Button></>}>
+        <FormModal open={Boolean(financeAction)} title={subscriptionEditorOpen ? t('client.editPassTitle') : ({ charge: t('client.newCharge'), issue: t('client.sellPassTitle') }[financeAction] || t('finance.operation'))} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" data-testid="admin-client-finance-save" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>{t('common.save')}</Button></>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               {(financeAction === 'charge' || financeAction === 'issue') && (
@@ -1026,12 +1018,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         <div className="toolbar ops-client-detail-tabs">
           <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
-            { value: 'participants', label: t('client.participants'), count: participants.length },
-            { value: 'subscriptions', label: t('client.subscriptions'), count: selectedSubscriptions.length },
-            { value: 'payments', label: t('payments.title'), count: selectedPayments.length + selectedCharges.length },
-            { value: 'attendance', label: t('client.attendance'), count: selectedAttendance.length },
-            { value: 'consents', label: t('client.consents'), count: consents.length },
-            { value: 'privacy', label: t('client.privacy') },
+            { value: 'participants', label: t('client.participants'), count: participants.length, testId: 'admin-client-tab-participants' },
+            { value: 'subscriptions', label: t('client.subscriptions'), count: selectedSubscriptions.length, testId: 'admin-client-tab-subscriptions' },
+            { value: 'payments', label: t('payments.title'), count: selectedPayments.length + selectedCharges.length, testId: 'admin-client-tab-payments' },
+            { value: 'attendance', label: t('client.attendance'), count: selectedAttendance.length, testId: 'admin-client-tab-attendance' },
+            { value: 'consents', label: t('client.consents'), count: consents.length, testId: 'admin-client-tab-consents' },
+            { value: 'privacy', label: t('client.privacy'), testId: 'admin-client-tab-privacy' },
           ]} />
         </div>
 
@@ -1056,9 +1048,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               { key: 'birth_date', header: t('field.birthDate'), muted: true, render: (row) => row.birth_date || '-' },
               { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
               { key: 'groups', header: t('common.groups'), render: (row) => (row.groups || []).map((group) => group.name).join(', ') || t('clients.individual') },
-              { key: 'balance', header: t('common.balance'), align: 'right', width: 110, render: (row) => <span className="ops-client-detail-balance"><Money amount={asAccountBalance(row.balance_minor)} signed /></span> },
               { key: 'status', header: t('common.status'), width: 110, render: (row) => <StatusPill status={row.is_active ? 'active' : 'inactive'} size="sm" /> },
-              { key: 'training', header: t('field.training'), render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'individual', participantId: row.id })}>{t('field.individualSession')}</Button><Button size="sm" variant="subtle" disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'split', participantId: row.id })}>{t('field.splitSession')}</Button></div> },
+              { key: 'training', header: t('field.training'), render: (row) => <div className="ops-button-row"><Button size="sm" variant="subtle" data-testid={`admin-client-create-individual-${row.id}`} disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'individual', participantId: row.id })}>{t('field.individualSession')}</Button><Button size="sm" variant="subtle" data-testid={`admin-client-create-split-${row.id}`} disabled={!row.is_active || accountArchived} onClick={() => go?.('schedule', { createSession: 'split', participantId: row.id })}>{t('field.splitSession')}</Button></div> },
             ]}
           />
           </div>
@@ -1083,23 +1074,16 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {tab === 'payments' && (
           <div>
-            <FormModal open={paymentPanelOpen} title={t('client.topUp')} description={t('client.paymentFormDescription')} size="lg" busy={actionBusy != null} dirty={Boolean(paymentBaseline) && JSON.stringify(paymentForm) !== JSON.stringify(paymentBaseline)} onRequestClose={() => { if (paymentBaseline) setPaymentForm(paymentBaseline); setPaymentPanelOpen(false); setPaymentBaseline(null); setPaymentFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>{t('client.confirmPayment')}</Button></>}>
+            <FormModal open={paymentPanelOpen} title={t('client.topUp')} description={t('client.paymentFormDescription')} size="lg" busy={actionBusy != null} dirty={Boolean(paymentBaseline) && JSON.stringify(paymentForm) !== JSON.stringify(paymentBaseline)} onRequestClose={() => { if (paymentBaseline) setPaymentForm(paymentBaseline); setPaymentPanelOpen(false); setPaymentBaseline(null); setPaymentFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button data-testid="admin-client-payment-confirm" variant="primary" loading={actionBusy === 'manual-payment'} disabled={actionBusy != null || loading} onClick={createManualPayment}>{t('client.confirmPayment')}</Button></>}>
                 {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
                 <div className="ops-financial-context" aria-label={t('finance.contextPayment')}>
                   <div><span>{t('client.title')}</span><strong>{account.full_name || account.username || '—'}</strong></div>
                   <div><span>{t('common.participant')}</span><strong>{selectedPaymentParticipant?.full_name || t('field.selectParticipant')}</strong></div>
-                  <div><span>{t('field.currentBalance')}</span><strong><Money amount={selectedPaymentBalance} signed currency="zł" /></strong></div>
+                  <div><span>{t('finance.familyBalance')}</span><strong><Money amount={selectedPaymentBalance} signed currency="zł" /></strong></div>
                   <div><span>{t('field.method')}</span><strong>{paymentMethodLabel(paymentForm.method, locale)}</strong></div>
                 </div>
                 <div className="ops-form-grid">
-                  <SearchableSelect
-                    inputId={PAYMENT_FIELD_IDS.participantId}
-                    label={t('common.participant')}
-                    value={paymentForm.participantId}
-                    error={paymentFieldErrors.participantId}
-                    onChange={(value) => updatePaymentForm('participantId', value)}
-                    options={participants.map((participant) => clientSelectOption(participant))}
-                  />
+                  <p className="muted ops-grid-full">{t('finance.familyPaymentHint')}</p>
                   <Input id={PAYMENT_FIELD_IDS.amount} label={t('field.amountCurrency')} value={paymentForm.amount} error={paymentFieldErrors.amount} onChange={(event) => updatePaymentForm('amount', event.target.value)} placeholder="240,00" inputMode="decimal" />
                   <DateField id={PAYMENT_FIELD_IDS.paidAt} label={t('field.paidAt')} value={paymentForm.paidAt} error={paymentFieldErrors.paidAt} onChange={(value) => updatePaymentForm('paidAt', value)} />
                   <Select id={PAYMENT_FIELD_IDS.method} label={t('field.method')} value={paymentForm.method} error={paymentFieldErrors.method} onChange={(event) => updatePaymentForm('method', event.target.value)}>
@@ -1189,14 +1173,14 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <div className="strong">{t('client.exportTitle')}</div>
                   <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.exportDescription')}</div>
                 </div>
-                <Button variant="secondary" loading={actionBusy === 'export'} disabled={actionBusy != null || loading} onClick={exportClientData}>{t('client.downloadData')}</Button>
+                <Button data-testid="admin-client-privacy-export" variant="secondary" loading={actionBusy === 'export'} disabled={actionBusy != null || loading} onClick={exportClientData}>{t('client.downloadData')}</Button>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <div>
                   <div className="strong">{t('client.archiveTitle')}</div>
                   <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.archiveDescription')}</div>
                 </div>
-                <Button variant="secondary" loading={actionBusy === 'archive'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'archive' })}>{t('client.archive')}</Button>
+                <Button data-testid="admin-client-privacy-archive" variant="secondary" loading={actionBusy === 'archive'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'archive' })}>{t('client.archive')}</Button>
               </div>
               {accountArchived && <div className="ops-privacy-row">
                 <div>
@@ -1210,7 +1194,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <div className="strong">{t('client.anonymizeTitle')}</div>
                   <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('client.anonymizeDescription')}</div>
                 </div>
-                <Button variant="danger" loading={actionBusy === 'anonymize'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'anonymize' })}>{t('client.anonymize')}</Button>
+                <Button data-testid="admin-client-privacy-anonymize" variant="danger" loading={actionBusy === 'anonymize'} disabled={accountArchived || actionBusy != null || loading} onClick={() => setConfirmAction({ type: 'anonymize' })}>{t('client.anonymize')}</Button>
               </div>
             </div>
           </div>
@@ -1218,15 +1202,17 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         {confirmAction && (
           <Dialog
-            title={confirmAction.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction.type === 'restore' ? t('client.restoreConfirmTitle') : t('client.anonymizeConfirmTitle')}
+            title={confirmAction.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction.type === 'restore' ? t('client.restoreConfirmTitle') : confirmAction.type === 'revokeAccess' ? t('access.revokeConfirmTitle') : t('client.anonymizeConfirmTitle')}
             description={confirmAction.type === 'archive'
               ? t('client.archiveConfirmDescription')
               : confirmAction.type === 'restore'
                 ? t('client.restoreConfirmDescription')
-              : t('client.anonymizeConfirmDescription')}
+                : confirmAction.type === 'revokeAccess'
+                  ? t('access.revokeConfirmDescription')
+                  : t('client.anonymizeConfirmDescription')}
             tone={confirmAction.type === 'restore' ? 'default' : 'danger'}
             irreversible={confirmAction.type === 'anonymize'}
-            confirmLabel={confirmAction.type === 'archive' ? t('client.blacklistAction') : confirmAction.type === 'restore' ? t('clients.restore') : t('client.anonymize')}
+            confirmLabel={confirmAction.type === 'archive' ? t('client.blacklistAction') : confirmAction.type === 'restore' ? t('clients.restore') : confirmAction.type === 'revokeAccess' ? t('access.revoke') : t('client.anonymize')}
             onClose={() => actionBusy ? null : setConfirmAction(null)}
             onConfirm={runDangerAction}
           >

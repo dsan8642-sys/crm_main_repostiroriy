@@ -5,6 +5,9 @@ export const ADMIN_FINANCE_LOCALES = ADMIN_LOCALES
 // Compact, finance-scoped rows keep the four catalogs in lockstep. Shared admin
 // labels intentionally live in adminLocales.js and are resolved by adminFinanceT.
 export const ADMIN_FINANCE_MESSAGE_ROWS = Object.freeze({
+  'payments.receiptExpired': ['Файл удалён по сроку хранения', 'Файл видалено після завершення строку зберігання', 'Plik usunięty po okresie przechowywania', 'File removed after retention period'],
+  'payments.receiptNone': ['—', '—', '—', '—'],
+  'payments.receiptUnavailable': ['Не удалось скачать файл.', 'Не вдалося завантажити файл.', 'Nie udało się pobrać pliku.', 'Could not download file.'],
   'common.continue': ['Продолжить', 'Продовжити', 'Kontynuuj', 'Continue'],
   'subscriptions.title': ['Абонементы', 'Абонементи', 'Karnety', 'Subscriptions'],
   'subscriptions.description': ['Активные, будущие и завершённые абонементы.', 'Активні, майбутні та завершені абонементи.', 'Aktywne, przyszłe i zakończone karnety.', 'Active, future and completed subscriptions.'],
@@ -200,6 +203,8 @@ export const ADMIN_FINANCE_MESSAGE_ROWS = Object.freeze({
   'finance.saveAdjustment': ['Сохранить корректировку', 'Зберегти коригування', 'Zapisz korektę', 'Save adjustment'],
   'finance.operation': ['Финансовая операция', 'Фінансова операція', 'Operacja finansowa', 'Financial operation'],
   'finance.paymentReadback': ['Платёж подтверждается сразу; результат и баланс проверяются повторным чтением с сервера.', 'Платіж підтверджується одразу; результат і баланс перевіряються повторним читанням із сервера.', 'Płatność jest potwierdzana od razu; wynik i saldo są ponownie sprawdzane na serwerze.', 'The payment is confirmed immediately; the result and balance are verified by reading them back from the server.'],
+  'finance.familyPaymentHint': ['Платёж пополнит общий баланс семьи и покроет начисления всех её участников.', 'Платіж поповнить спільний баланс сім’ї та покриє нарахування всіх її учасників.', 'Wpłata zasili wspólne saldo rodziny i pokryje należności wszystkich jej uczestników.', 'The payment adds to the family balance and covers charges for every participant.'],
+  'finance.familyBalance': ['Баланс семьи', 'Баланс сім’ї', 'Saldo rodziny', 'Family balance'],
   'finance.contextPayment': ['Контекст оплаты', 'Контекст оплати', 'Kontekst płatności', 'Payment context'],
   'finance.contextReject': ['Контекст отклонения платежа', 'Контекст відхилення платежу', 'Kontekst odrzucenia płatności', 'Payment rejection context'],
   'finance.confirm': ['Подтвердить', 'Підтвердити', 'Potwierdź', 'Confirm'],
