@@ -94,6 +94,7 @@ test('logout broadcasts an auth generation and clears private data in another ta
   await expect(secondPage.getByText('Private Admin', { exact: true })).toBeVisible()
 
   await page.getByTestId('logout').first().click()
+  await page.getByTestId('navigation-discard-dialog').getByTestId('navigation-discard-confirm').click()
 
   await expect(secondPage.locator('#auth-login')).toBeVisible()
   await expect(secondPage.getByText('Private Admin', { exact: true })).toHaveCount(0)
@@ -150,6 +151,7 @@ test('a late private bootstrap response cannot restore data after cross-tab logo
   await referenceStarted
 
   await page.getByTestId('logout').first().click()
+  await page.getByTestId('navigation-discard-dialog').getByTestId('navigation-discard-confirm').click()
   await expect(secondPage.locator('#auth-login')).toBeVisible()
   releaseReference()
 

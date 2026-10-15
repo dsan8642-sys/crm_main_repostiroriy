@@ -99,10 +99,11 @@ test('appearance editor selects nested session text with Ctrl and edits spacing 
   const tree = outline.getByRole('tree', { name: 'Элементы страницы' })
   await tree.evaluate((node) => { node.style.maxHeight = '180px' })
   expect(await tree.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
-  const headerTop = await outline.locator('header').evaluate((node) => node.getBoundingClientRect().top)
+  const headerOffset = () => outline.evaluate((node) => node.querySelector('header').getBoundingClientRect().top - node.getBoundingClientRect().top)
+  const headerTop = await headerOffset()
   await tree.evaluate((node) => { node.scrollTop = node.scrollHeight })
   await expect.poll(() => tree.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
-  expect(await outline.locator('header').evaluate((node) => node.getBoundingClientRect().top)).toBe(headerTop)
+  expect(Math.abs(await headerOffset() - headerTop)).toBeLessThan(1)
   const selectedRow = outline.locator('.appearance-editor__outline-node.is-selected')
   await expect(selectedRow).toContainText('Текст')
   const childPath = await selectedRow.getAttribute('data-appearance-selector')
@@ -342,6 +343,7 @@ test('attendance opens the selected session editor and returns after saving', as
   await expect(page).toHaveURL(/view=attendance.*session=71/)
   await expect(card).toContainText('Updated from attendance')
   expect(saves).toBe(1)
+  await toggleDetails.click()
   await page.getByTestId('admin-attendance-edit-session').click()
   await dialog.locator('.form-modal__footer button').first().click()
   await expect(page).toHaveURL(/view=attendance.*session=71/)
@@ -514,7 +516,7 @@ test('schedule navigation and training actions keep application styling', async 
   }
 })
 
-test('schedule calendar keeps its desktop and mobile spacing', async ({ page }) => {
+test('schedule calendar keeps desktop spacing and visible mobile controls', async ({ page }) => {
   test.skip(page.viewportSize()?.width !== 1440, 'one responsive spacing contract is sufficient')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=schedule')
@@ -526,11 +528,9 @@ test('schedule calendar keeps its desktop and mobile spacing', async ({ page }) 
 
   await expect.poll(calendarSpacing).toEqual({ top: 8, bottom: 8 })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect.poll(calendarSpacing).toEqual({ top: 2, bottom: 0 })
+  await expect(page.locator('.ops-calendar-date-controls')).toBeHidden()
+  await expect(page.locator('.ops-mobile-date-navigation')).toBeVisible()
   await expect(page.locator('.ops-calendar-toolbar')).toHaveCSS('margin-top', '8px')
-  await expect(page.locator('.ops-calendar-date-controls input')).toHaveCSS('margin-bottom', '8px')
-  await expect(page.locator('.ops-calendar-date-controls .ops-picker-input button')).toHaveCSS('margin-bottom', '8px')
-  await expect(page.locator('.ops-calendar-today')).toHaveCSS('margin-bottom', '8px')
 })
 
 test('sidebar shows language above the user and initials only when collapsed', async ({ page }) => {

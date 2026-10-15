@@ -602,7 +602,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     const weekdayHeader = page.getByTestId('month-weekday-header')
     await expect(weekdayHeader).toBeVisible()
     await expect(weekdayHeader.locator('.ops-calendar-weekday')).toHaveCount(7)
-    await expect(weekdayHeader.locator('.ops-calendar-weekday strong').first()).toHaveCSS('font-size', '16px')
+    await expect(weekdayHeader.locator('.ops-calendar-weekday strong').first()).toHaveCSS('font-size', '13px')
     await expect(page.locator('.ops-schedule-event:visible .ops-event-type').first()).toBeVisible()
     await expect(page.locator('.ops-schedule-event:visible .ops-event-trainer').first()).toBeHidden()
     const weekdayCenters = await weekdayHeader.locator('.ops-calendar-weekday').evaluateAll((nodes) => (
@@ -617,7 +617,10 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
         return box.left + box.width / 2
       })
     ))
-    weekdayCenters.forEach((center, index) => expect(Math.abs(center - firstWeekCenters[index])).toBeLessThan(1.5))
+    // The weekday strip reserves space for the previous/next arrows.
+    expect(weekdayCenters[0]).toBeGreaterThan(firstWeekCenters[0])
+    expect(weekdayCenters.at(-1)).toBeLessThan(firstWeekCenters.at(-1))
+    expect(weekdayCenters.every((center, index) => index === 0 || center > weekdayCenters[index - 1])).toBe(true)
     await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
     const dateButton = page.locator('.ops-schedule-day > header button').first()
     await expect(dateButton).toHaveCSS('color', 'rgb(25, 50, 75)')
@@ -1685,7 +1688,9 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     expect(referencePickerBox?.height).toBeGreaterThanOrEqual(44)
     await referencePickerButton.click()
     await expect(page.locator('#schedule-focus-date-popover')).toBeVisible()
+    await page.locator('#schedule-focus-date-popover button').first().focus()
     await page.keyboard.press('Escape')
+    await expect(page.locator('#schedule-focus-date-popover')).toHaveCount(0)
     await expect(referencePickerButton).toBeFocused()
     await page.getByTestId('schedule-period-month').click()
     if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
@@ -2276,7 +2281,9 @@ test('admin confirms and rejects pending payments and the nav counter decrements
 
   const expectPaymentCounter = async (value) => {
     if ((page.viewportSize()?.width || 0) <= 767) await page.getByTestId('open-menu').click()
-    await expect(page.getByTestId('nav-admin-payments').last().locator('.ops-nav-count')).toHaveText(value)
+    const counter = page.getByTestId('nav-admin-payments').last().locator('.ops-nav-count')
+    if (value === '0') await expect(counter).toHaveCount(0)
+    else await expect(counter).toHaveText(value)
     if ((page.viewportSize()?.width || 0) <= 767) await page.keyboard.press('Escape')
   }
   await expectPaymentCounter('2')

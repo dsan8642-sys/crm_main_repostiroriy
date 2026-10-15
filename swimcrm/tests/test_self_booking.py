@@ -238,7 +238,7 @@ class SelfBookingTest(TestCase):
         overview = client.get('/api/client/overview/').json()['participants'][0]
         self.assertEqual(overview['current_subscription']['id'], subscription.id)
         self.assertTrue(overview['current_subscription']['sessions_available_now'])
-        self.assertEqual(overview['current_subscription']['ledger'][0]['delta'], 3)
+        self.assertEqual(overview['current_subscription']['remaining_sessions'], 3)
         for status in (DeliveryStatus.QUEUED, DeliveryStatus.FAILED,
                        DeliveryStatus.SENT, DeliveryStatus.DELIVERED):
             NotificationLog.objects.create(recipient=student.parent,

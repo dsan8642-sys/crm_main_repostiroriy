@@ -127,6 +127,7 @@ test('Wave 3 admin mobile cards, clamped menu, named action and return state', a
   const trigger = card.getByTestId('admin-client-actions-client-10-participant-7-trigger')
   await trigger.click()
   const menu = page.getByTestId('admin-client-actions-client-10-participant-7-menu')
+  await expect(menu).toBeVisible()
   const menuBox = await menu.boundingBox()
   const viewport = page.viewportSize()
   expect(menuBox.x).toBeGreaterThanOrEqual(8)

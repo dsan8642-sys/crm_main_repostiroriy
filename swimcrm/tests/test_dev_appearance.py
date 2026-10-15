@@ -12,7 +12,7 @@ from . import factories as f
 @override_settings(DEBUG=True, ENVIRONMENT="development", ALLOWED_HOSTS=["127.0.0.1", "testserver"])
 class DevAppearanceTest(TestCase):
     def setUp(self):
-        self.temp = TemporaryDirectory(dir=Path(__file__).resolve().parents[2] / "backups")
+        self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         for path in ("design/tokens", "frontend/src/design/tokens"):

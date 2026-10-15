@@ -110,7 +110,8 @@ test('client detail localizes independently from its notification language', asy
 
   await selector.selectOption('en')
   await expect(page.getByRole('button', { name: /Top up balance/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Edit client', exact: true }).click()
+  await page.getByTestId('admin-client-actions-trigger').click()
+  await page.getByTestId('admin-client-edit-account').click()
 
   const notificationLanguage = page.getByRole('dialog', { name: 'Edit client' }).getByLabel('Notification language')
   await expect(notificationLanguage).toHaveValue('pl')
