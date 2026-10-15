@@ -761,7 +761,7 @@ class AdminPortalApiRule(TestCase):
         grace = f.make_student(group=self.group, first="Grace", last="Pack")
         expired = f.make_student(group=self.group, first="Expired", last="Pack")
         cancelled = f.make_student(group=self.group, first="Cancelled", last="Pack")
-        today = date.today()
+        today = timezone.localdate()
         current_subscription = create_subscription(
             student=current,
             subscription_type=subscription_type,
