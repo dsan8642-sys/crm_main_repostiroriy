@@ -10,6 +10,7 @@ from .pagination import (
 from datetime import timedelta
 
 from django.db.models import Max
+from attendance.services import change_attendance_payment
 
 from .client_lifecycle import (
     ClientLifecycleConflict,
@@ -17,6 +18,28 @@ from .client_lifecycle import (
     edit_client_account,
     restore_client_account,
 )
+
+
+@require_POST
+def admin_participant_attendance_payment(request, participant_id):
+    user = _admin_required(request)
+    student = get_object_or_404(Student, pk=participant_id)
+    data = _json_body(request)
+    if not isinstance(data, dict):
+        raise ValidationError("Ожидается JSON-объект.")
+    ids = data.get("attendance_ids")
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= MAX_LIST_ROWS
+            or any(type(value) is not int or value <= 0 for value in ids)
+            or len(set(ids)) != len(ids)):
+        raise _field_validation_error(
+            "attendance_ids", f"Выберите от 1 до {MAX_LIST_ROWS} разных посещений.", code="invalid")
+    subscription_id = data.get("subscription_id")
+    if subscription_id is not None and (type(subscription_id) is not int or subscription_id <= 0):
+        raise _field_validation_error("subscription_id", "Выберите абонемент.", code="invalid")
+    records = change_attendance_payment(
+        student=student, attendance_ids=ids, source=data.get("source"),
+        subscription_id=subscription_id, actor=user)
+    return JsonResponse({"attendance": [_attendance_payload(record) for record in records]})
 
 
 def _client_list_balances(students):

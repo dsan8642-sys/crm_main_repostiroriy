@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { api } from '../api.js'
-import { SUPPORTED_LOCALES, useLocale } from '../i18n.jsx'
+import { NATIVE_LOCALE_NAMES, SUPPORTED_LOCALES, useLocale } from '../i18n.jsx'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -101,7 +101,7 @@ export function LoginScreen({ design, apiState, onLogin }) {
         <label style={{ display: 'grid', gap: 6 }}>
           <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('locale.label')}</span>
           <select className="input" aria-label={t('locale.label')} value={locale} onChange={(event) => setLocale(event.target.value)}>
-            {SUPPORTED_LOCALES.map((code) => <option key={code} value={code}>{t(`locale.${code}`)}</option>)}
+            {SUPPORTED_LOCALES.map((code) => <option key={code} value={code} lang={code}>{NATIVE_LOCALE_NAMES[code]}</option>)}
           </select>
         </label>
         {message && <Banner tone="success" onClose={() => setMessage('')}>{message}</Banner>}

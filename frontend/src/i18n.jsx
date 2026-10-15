@@ -11,6 +11,8 @@ import {
 import { portalCatalogs } from './portalLocales.js'
 
 export const SUPPORTED_LOCALES = SUPPORTED_UI_LOCALES
+export const NATIVE_LOCALE_NAMES = Object.freeze({ ru: 'Русский', uk: 'Українська', pl: 'Polski', en: 'English' })
+export const COMPACT_LOCALE_NAMES = Object.freeze({ ru: 'РУС', uk: 'УКР', pl: 'PL', en: 'EN' })
 
 export const catalogs = portalCatalogs
 

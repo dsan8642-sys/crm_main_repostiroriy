@@ -271,6 +271,7 @@ test('global client search retargets payments to the newly opened client', async
   await expect.poll(() => submittedPayment?.participant_id).toBe('202')
   expect(submittedPayment.client_id).toBe(20)
 
+  await page.getByTestId('admin-client-finance-trigger').click()
   await page.getByTestId('admin-client-action-charge').click()
   const chargeDialog = page.getByTestId('form-modal')
   await chargeDialog.locator('#admin-client-finance-description').fill('Проверка клиента')
@@ -383,7 +384,7 @@ test('client profile exposes contact links and opens routed individual and split
       return json(route, { clients: [participant], pagination: { total: 1 } })
     }
     if (path === '/api/admin/clients/20/') return json(route, detail())
-    if (path === '/api/admin/subscriptions/77/' && request.method() === 'POST') {
+    if (path === '/api/admin/subscriptions/77/update/' && request.method() === 'POST') {
       subscriptionEditPayload = request.postDataJSON()
       subscriptionEndDate = subscriptionEditPayload.effective_end_date
       return json(route, {
@@ -411,63 +412,39 @@ test('client profile exposes contact links and opens routed individual and split
   await expect(page.getByRole('link', { name: 'Instagram' })).toHaveAttribute('href', 'https://instagram.com/h2o_client')
   await expect(page.getByRole('cell', { name: 'Alpha, Beta, Gamma' })).toBeVisible()
 
+  const hub = page.locator('.ops-client-hub')
+  await expect(hub.getByRole('tab')).toHaveCount(6)
+  await expect(page.locator('.ops-client-balance-kpi,.ops-client-detail-tabs')).toHaveCount(0)
+  await expect(page.getByTestId('admin-client-tab-subscriptions')).toContainText(/Без ліміту|Без лимита|Bez limitu|Unlimited/)
+  const geometry = await hub.evaluate((node) => {
+    const tabs = [...node.querySelectorAll('[role="tab"]')].map((tab) => tab.getBoundingClientRect())
+    return { columns: getComputedStyle(node.querySelector('[role="tablist"]')).gridTemplateColumns.split(' ').length,
+      firstRowTops: tabs.slice(0, 2).map((tab) => Math.round(tab.top)) }
+  })
+  expect(geometry.columns).toBe((page.viewportSize()?.width || 0) >= 960 ? 4 : 2)
+  expect(new Set(geometry.firstRowTops).size).toBe(1)
+  await expect(page.locator('.ops-client-quick-actions')).toBeVisible()
+  await page.getByTestId('admin-client-tab-subscriptions').click()
   if ((page.viewportSize()?.width || 0) === 390) {
-    const balanceKpi = page.locator('.ops-client-balance-kpi')
-    await expect(balanceKpi).toHaveCSS('height', '100px')
-    await expect(balanceKpi.locator('.kpi-value')).toHaveCSS('font-size', '27px')
-    await expect(balanceKpi).not.toContainText('Переплата')
-
-    const financeActions = page.locator('.ops-client-finance-actions')
-    const financeGeometry = await financeActions.evaluate((node) => {
-      const buttons = [...node.querySelectorAll('.ops-action-card')].map((button) => button.getBoundingClientRect())
-      return {
-        height: node.getBoundingClientRect().height,
-        columns: getComputedStyle(node).gridTemplateColumns.split(' ').length,
-        firstRowTops: buttons.slice(0, 3).map((button) => Math.round(button.top)),
-        secondRowTops: buttons.slice(3).map((button) => Math.round(button.top)),
-      }
-    })
-    expect(financeGeometry.height).toBeLessThanOrEqual(130)
-    expect(financeGeometry.columns).toBe(6)
-    expect(new Set(financeGeometry.firstRowTops).size).toBe(1)
-    expect(new Set(financeGeometry.secondRowTops).size).toBe(1)
-    expect(await financeActions.locator('[data-testid^="admin-client-action-"]').evaluateAll(
-      (nodes) => nodes.map((node) => node.dataset.testid),
-    )).toEqual([
-      'admin-client-action-payment', 'admin-client-action-charge', 'admin-client-action-remind',
-      'admin-client-action-edit-subscription', 'admin-client-action-sell-subscription',
-    ])
-    expect(await financeActions.locator('small').evaluateAll(
-      (nodes) => nodes.every((node) => getComputedStyle(node).display === 'none'),
-    )).toBeTruthy()
-
-    const tabList = page.locator('.ops-client-detail-tabs [role="tablist"]')
-    await expect(tabList).toHaveCSS('justify-content', 'center')
-    await expect(page.locator('.ops-client-detail-tabs')).toHaveCSS('justify-content', 'center')
-    const consentsTab = tabList.getByTestId('admin-client-tab-consents')
-    await expect(consentsTab).toHaveCSS('border-top-width', '1px')
-    await expect(consentsTab).toHaveCSS('border-top-color', 'rgb(174, 215, 245)')
-    const [actionsBox, tabsBox] = await Promise.all([financeActions.boundingBox(), tabList.boundingBox()])
-    expect(Math.abs(actionsBox.width - tabsBox.width)).toBeLessThanOrEqual(1)
-
-    await expect(page.locator('.ops-client-balance-kpi .kpi-value')).toBeVisible()
-
-    await tabList.getByTestId('admin-client-tab-subscriptions').click()
     const remainingCell = page.locator('td:has(> .ops-client-detail-remaining)')
     await expect(remainingCell).toHaveCSS('text-align', 'left')
     await expect(remainingCell.locator('.ops-client-detail-remaining')).toHaveCSS('justify-self', 'start')
-    await tabList.getByTestId('admin-client-tab-participants').click()
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   }
-
+  await page.getByTestId('admin-client-tab-participants').click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.getByTestId('admin-client-finance-trigger').click()
   await page.getByTestId('admin-client-action-edit-subscription').click()
   const subscriptionDialog = page.getByTestId('form-modal')
-  await expect(subscriptionDialog.locator('#admin-client-finance-subscription-action')).toHaveValue('edit')
-  const subscriptionEndDateInput = subscriptionDialog.locator('#admin-client-finance-subscription-end-date')
+  const subscriptionEndDateInput = subscriptionDialog.locator('#admin-client-subscription-end-date')
   await expect(subscriptionEndDateInput).toHaveValue('2026-09-26')
   await subscriptionEndDateInput.fill('2026-10-15')
-  await subscriptionDialog.getByTestId('admin-client-finance-save').click()
-  await expect.poll(() => subscriptionEditPayload).toEqual({ effective_end_date: '2026-10-15' })
+  const reasonSelect = subscriptionDialog.locator('#admin-client-subscription-reason')
+  await reasonSelect.selectOption({ index: 1 })
+  const chosenReason = await reasonSelect.inputValue()
+  await subscriptionDialog.getByTestId('admin-client-subscription-save').click()
+  await expect.poll(() => subscriptionEditPayload).toEqual({ effective_end_date: '2026-10-15', reason: chosenReason })
+  await subscriptionDialog.locator('.form-modal__footer button').first().click()
+  await expect(subscriptionDialog).toHaveCount(0)
 
   await page.getByTestId('admin-client-create-individual-202').click()
   await expect(page).toHaveURL(/view=schedule.*participant=202.*createSession=individual/)

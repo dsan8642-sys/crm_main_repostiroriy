@@ -26,6 +26,7 @@ function Copy-IfChanged {
 }
 
 Copy-IfChanged (Join-Path $DesignDir "styles.css") (Join-Path $FrontendDesignDir "styles.css")
+Copy-IfChanged (Join-Path $DesignDir "appearance.json") (Join-Path $FrontendDesignDir "appearance.json")
 # The application bundle is a tree-shaken runtime artifact generated separately
 # by generate-design-bundle.mjs. Do not overwrite it with the larger authoring
 # bundle used by the standalone design specimens.

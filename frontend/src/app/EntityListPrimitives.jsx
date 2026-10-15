@@ -2,19 +2,24 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState
 import { createPortal } from 'react-dom'
 import { clampedPopoverPosition } from './entityListContracts.js'
 import { useLocale } from '../i18n.jsx'
+import { usePresence } from './usePresence.js'
 
-export function ActionPopover({ label, actions, disabled = false, testId }) {
+export function ActionPopover({ label, actions, disabled = false, testId, children }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const triggerRef = useRef(null)
   const menuRef = useRef(null)
   const [open, setOpen] = useState(false)
+  const menuPresence = usePresence(open)
   const [position, setPosition] = useState(null)
 
   const close = useCallback((restoreFocus = false) => {
     setOpen(false)
-    setPosition(null)
     if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus())
   }, [])
+
+  useEffect(() => {
+    if (!menuPresence.present) setPosition(null)
+  }, [menuPresence.present])
 
   const updatePosition = useCallback(() => {
     if (!triggerRef.current || !menuRef.current) return
@@ -72,12 +77,14 @@ export function ActionPopover({ label, actions, disabled = false, testId }) {
     items[next].focus()
   }
 
-  const menu = open ? (
+  const menu = menuPresence.present ? (
     <div
       ref={menuRef}
       id={`entity-actions-${id}`}
-      className="ops-action-popover"
+      className={`ops-action-popover ops-motion-panel${menuPresence.exiting ? ' is-exiting' : ''}`}
       role="menu"
+      aria-hidden={menuPresence.exiting || undefined}
+      inert={menuPresence.exiting || undefined}
       aria-label={label}
       data-testid={testId ? `${testId}-menu` : undefined}
       onKeyDown={moveFocus}
@@ -96,7 +103,7 @@ export function ActionPopover({ label, actions, disabled = false, testId }) {
           key={action.key || action.label}
           type="button"
           role="menuitem"
-          data-testid={testId ? `${testId}-${action.key || index}` : undefined}
+          data-testid={action.testId || (testId ? `${testId}-${action.key || index}` : undefined)}
           className={danger ? 'is-danger' : ''}
           disabled={action.disabled}
           style={{
@@ -141,7 +148,11 @@ export function ActionPopover({ label, actions, disabled = false, testId }) {
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
       >
-        <span aria-hidden="true">⋮</span>
+        {children ?? <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="5" cy="12" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="19" cy="12" r="2" />
+        </svg>}
       </button>
       {menu ? createPortal(menu, document.body) : null}
     </>

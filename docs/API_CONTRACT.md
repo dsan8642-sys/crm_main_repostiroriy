@@ -47,6 +47,18 @@ same account pool; debtor results contain one row per indebted family.
 | Trainer | `/api/trainer/` |
 | Admin | `/api/admin/` |
 
+## Local appearance editor
+
+`GET|POST /api/dev/appearance/` is available only to an authenticated admin
+on the local development server (`DEBUG=1`, local host and local connection).
+GET returns `fields`, `state` (`values`, named `presets`, and element `overrides`)
+and a `revision`. POST accepts `{"revision": "...", "state": {"values": {}, "presets": [], "overrides": []}}`.
+Values are limited to predefined colors and pixel sizes; a stale revision
+returns 409. Saving writes `design/appearance.json`, its frontend runtime copy,
+and generated canonical and runtime CSS. Text replacements include a SHA-256
+match of the original text so changing source data is not overwritten. The
+server backs up the prior files first.
+
 ## Client self-booking
 
 `POST|DELETE /api/client/schedule/sessions/<session_id>/booking/` accepts
@@ -72,7 +84,7 @@ it before the deadline and expires it afterward.
 
 `GET /api/client/overview/` returns `next_session` only for a future active
 session in which the participant has a place, plus `current_subscription` with
-`sessions_available_now` and that subscription's `ledger` movements. Counted
+`sessions_available_now` but no subscription movement ledger. Counted
 sessions with a positive balance remain available after the printed end date.
 `GET /api/client/notifications/` is paginated and contains only sent or
 delivered messages. Receipt-bearing payment payloads include `receipt_expired`
@@ -198,7 +210,9 @@ Imports use a server-owned two-phase batch:
   default is `history_only`.
 - `history_only` creates immutable attendance history without changing
   subscription balances or creating visit charges. This policy remains attached
-  to the attendance record during later status corrections.
+  to the attendance record during later status corrections. An explicit admin
+  billing-source reassignment can enable financial effects for selected visits;
+  ordinary attendance edits never enable them.
 - `apply_financial` is stored in the server-owned batch and commit additionally
   requires `confirm_financial_effects=true`. The committed mode, result, and
   acting administrator are recorded in the audit log.
@@ -515,4 +529,34 @@ payroll calculation results remain Django-owned.
 - A client can have at most one `is_account_holder=true` participant.
 - A schedule session must be either group-based or individual, not both.
 - A trainer cannot have overlapping non-cancelled sessions.
-- Ledger entries are append-only; use `POST /api/admin/subscriptions/<id>/adjust/` for corrections.
+- Ledger entries are append-only. The admin client card uses `POST /api/admin/subscriptions/<id>/update/` with `reason` and any combination of `start_date`, `effective_end_date`, `remaining_sessions` (absolute target), and `freeze` (`start_date`, `end_date`). Start and end are independent; the final end cannot precede the start. Changing dates does not rebill attendance. All changes commit atomically. The older `adjust/` endpoint remains available for existing integrations.
+
+### Reassign attendance billing source
+
+`POST /api/admin/participants/<id>/attendance/payment/` is admin-only and accepts
+`attendance_ids` (1–2000 distinct positive integers), `source` (`account` or
+`subscription`), and optional `subscription_id`. The subscription must belong
+to that participant, must not be cancelled, and must either have an effective
+end date on or after today (Europe/Warsaw), or a positive session balance.
+Expired subscriptions with zero/negative balance cannot be assigned. The admin
+subscription detail payload exposes `can_assign_attendance` for this choice.
+Omitting the ID is allowed only when exactly one eligible subscription is
+available. Visits before the subscription start date may still be covered,
+and counted subscriptions may become negative (the UI warns before saving).
+
+All selected visits must consume a session. Explicit reassignment enables
+financial effects for selected history-only visits; the UI warns before saving.
+Unselected historical visits keep their history-only policy.
+The whole batch commits or rolls back. Moving to a subscription compensates
+visit charges and deducts sessions; moving to the account restores sessions and
+bills the session price snapshot. Payments and their dates never change.
+Repeating the request does not duplicate financial movements. Later attendance
+status changes preserve the explicit source and reconcile its effects.
+
+The response has `attendance`; its records and the admin client detail include
+`payment_source` (`account`, `subscription`, or `none`) and
+`payment_subscription_id` (integer or null). `none` covers visits without a
+financial deduction. `subscription_session_delta` is the net session ledger
+movement for the visit (0 for account billing and unlimited coverage).
+Subscription `end_date_changes` also includes
+`previous_start` and `current_start` for date corrections.

@@ -49,14 +49,14 @@ test('runtime design bundle excludes authoring-only demo screens', async () => {
     'navigation/SidebarNav.jsx',
   ]) assert.doesNotMatch(bundle, new RegExp(authoringOnlyComponent.replace('.', '\\.')))
   for (const authoringOnlyIcon of [
-    'ArrowUpRight', 'Chart', 'Clock', 'Dots', 'Filter', 'Heart', 'Import',
+    'ArrowUpRight', 'Chart', 'Dots', 'Filter', 'Heart', 'Import',
     'Mail', 'Phone', 'Plus', 'Shield', 'Snowflake', 'Trash', 'Whistle',
   ]) assert.doesNotMatch(bundle, new RegExp(`\\b${authoringOnlyIcon}:`))
   for (const runtimeIcon of [
-    'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'ChevronL',
-    'ChevronR', 'ClientFamily', 'Download', 'File', 'GroupMembers', 'Home',
+    'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'ChevronL', 'Clock',
+    'ChevronR', 'ClientFamily', 'Download', 'File', 'GroupMembers', 'GroupMembersPlus', 'Home',
     'Layers', 'Location', 'Logout', 'Pencil', 'Search', 'Settings',
-    'TrainerWhistle', 'Upload', 'User', 'Users', 'Wallet', 'Waves', 'X',
+    'Trainer', 'Upload', 'User', 'Users', 'Wallet', 'Waves', 'X',
   ]) assert.match(bundle, new RegExp(`\\b${runtimeIcon}:`))
 })
 

@@ -34,7 +34,7 @@ export function Button({
       border: '1px solid var(--primary)',
     },
     secondary: {
-      background: 'var(--surface-card)',
+      background: 'var(--action-secondary-background, var(--surface-card))',
       color: 'var(--text-body)',
       border: '1px solid var(--border-default)',
     },

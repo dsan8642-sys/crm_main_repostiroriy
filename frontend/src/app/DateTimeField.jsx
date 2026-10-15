@@ -9,6 +9,7 @@ import {
 } from './scheduleContracts.js'
 import { useLocale } from '../i18n.jsx'
 import { uiLocaleTag } from '../localeContracts.js'
+import { usePresence } from './usePresence.js'
 
 function FieldShell({
   id,
@@ -25,6 +26,7 @@ function FieldShell({
 }) {
   const buttonRef = useRef(null)
   const popoverRef = useRef(null)
+  const popoverPresence = usePresence(open)
 
   useEffect(() => {
     if (!open) return undefined
@@ -64,8 +66,8 @@ function FieldShell({
         </button>
       </div>
       {error && <small id={`${id}-error`} className="ops-field-error" role="alert">{error}</small>}
-      {open && (
-        <div ref={popoverRef} id={`${id}-popover`} className="ops-picker-popover" role="dialog" aria-label={buttonLabel} onKeyDown={closeOnEscape}>
+      {popoverPresence.present && (
+        <div ref={popoverRef} id={`${id}-popover`} className={`ops-picker-popover ops-motion-fade${popoverPresence.exiting ? ' is-exiting' : ''}`} role="dialog" aria-label={buttonLabel} aria-hidden={popoverPresence.exiting || undefined} inert={popoverPresence.exiting || undefined} onKeyDown={closeOnEscape}>
           {children}
         </div>
       )}

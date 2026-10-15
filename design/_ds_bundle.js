@@ -1,4 +1,4 @@
-/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"ed192cb798f1","components/data/Avatar.jsx":"671d0dab0cb2","components/data/Badge.jsx":"ed0aa3033c94","components/data/Money.jsx":"85eddda66503","components/data/StatusPill.jsx":"7a47cce4c3f6","components/data/Table.jsx":"0739116ccae8","components/forms/Button.jsx":"d515b677698e","components/forms/Checkbox.jsx":"e8519173e668","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"f9aababef51a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"63fc8b0831ed","components/forms/Switch.jsx":"3fbe898249dc","components/forms/Textarea.jsx":"0870c4205f77","components/feedback/Banner.jsx":"3cd502ece8b4","components/feedback/Dialog.jsx":"4840b19f04d0","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"99d130d777c8"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
+/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"0ca32dca41bc","components/data/Avatar.jsx":"671d0dab0cb2","components/data/Badge.jsx":"81ff738aa46a","components/data/Money.jsx":"85eddda66503","components/data/StatusPill.jsx":"7a47cce4c3f6","components/data/Table.jsx":"0739116ccae8","components/forms/Button.jsx":"daec87b574df","components/forms/Checkbox.jsx":"1dec073e20db","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"f9aababef51a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"63fc8b0831ed","components/forms/Switch.jsx":"3fbe898249dc","components/forms/Textarea.jsx":"0870c4205f77","components/feedback/Banner.jsx":"3cd502ece8b4","components/feedback/Dialog.jsx":"a8ef0da8c4ba","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"99d130d777c8"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
 
 (() => {
 const __ds_ns = (window.SwimCRMDesignSystem_546643 = window.SwimCRMDesignSystem_546643 || {});
@@ -21,15 +21,25 @@ try { (() => {
   const circle = (cx, cy, r, key) => React.createElement("circle", { key: key || "c" + cx + cy, cx, cy, r });
   const rect = (x, y, w, h, rx, key) => React.createElement("rect", { key: key || "r" + x + y, x, y, width: w, height: h, rx });
   const line = (x1, y1, x2, y2, key) => React.createElement("line", { key: key || "l" + x1 + y1, x1, y1, x2, y2 });
+  const trainerShape = [
+    React.createElement("circle", { key: "head", cx: 12, cy: 5.4, r: 3.2, fill: "currentColor", stroke: "none" }),
+    React.createElement("path", { key: "body", d: "M8 10.2 9.6 10.5 11.3 14.6 10.7 17.3 11.8 17.7 12.7 17.5 13.3 15.7 13.3 15.1 12.7 14.6 14.2 10.9 14.6 10.2 16 10.2 17.7 11.3 19.9 14.6 20.8 16.4 20.6 17.9 17.5 21 16.4 21 15.7 20.6 15.7 22.1 8.3 22.1 8.3 20.6 7.4 21 6.3 20.8 3.2 17.5 3.2 16.4 4.1 14.6 6.3 11.3ZM10.2 10.2 13.8 10.2 12.2 14.2 11.8 14.2ZM7.6 14.4 5.8 16.4 5.8 17.1 8 19ZM16.6 14.4 16.2 15.5 16 19 18.2 17.1 18.2 16.4Z", fill: "currentColor", fillRule: "evenodd", stroke: "none" })
+  ];
   window.SwimIcons = {
     Home: P([path("M3 11.5 12 4l9 7.5"), path("M5.5 10v9.5h13V10")]),
     Users: P([path("M16 19v-1.5a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3V19"), circle(9.5, 8, 3.2), path("M17.5 19v-1.5a3 3 0 0 0-2.2-2.9"), path("M15 5.2a3 3 0 0 1 0 5.6")]),
     ClientFamily: P([circle(8.5, 7.5, 2.8), circle(16.5, 10, 2.2), path("M3.5 19v-1.3a4 4 0 0 1 4-4h2a4 4 0 0 1 4 4V19"), path("M13.5 19v-.8a3 3 0 0 1 3-3h.5a3 3 0 0 1 3 3v.8")]),
     GroupMembers: P([circle(12, 6.7, 2.8), circle(6, 9.2, 2), circle(18, 9.2, 2), path("M6.5 20v-1.2a5.5 5.5 0 0 1 11 0V20"), path("M2.5 20v-1a3.5 3.5 0 0 1 4.8-3.25"), path("M21.5 20v-1a3.5 3.5 0 0 0-4.8-3.25")]),
-    TrainerWhistle: P([circle(12, 6.5, 3), path("M5.5 20v-1.5a6.5 6.5 0 0 1 13 0V20"), path("M9.5 12.7 12 15l2.5-2.3"), path("M11 15h3.2l2.3 1v1.8l-2.3 1H13a2 2 0 0 1-2-2V15Z"), circle(13.2, 16.9, 0.55)]),
+    GroupMembersPlus: P([circle(8.5, 8, 2.8), circle(15.5, 10, 2.2), path("M2.5 20v-1a5.5 5.5 0 0 1 11 0v1"), path("M14 20v-1a3.5 3.5 0 0 1 6.5-1.8"), path("M20 2.5v6M17 5.5h6", "plus")]),
+    Trainer: P(trainerShape),
+    TrainerPlus: P([...trainerShape, path("M20 3v6M17 6h6", "plus")]),
     User: P([path("M18 20v-1.5a4 4 0 0 0-4-4H10a4 4 0 0 0-4 4V20"), circle(12, 7.5, 3.5)]),
+    UserPlus: P([path("M14 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20"), circle(8, 7.5, 3.5), path("M19 7v8"), path("M15 11h8")]),
     Calendar: P([rect(3.5, 5, 17, 15.5, 2), line(3.5, 9.5, 20.5, 9.5), line(8, 3, 8, 6.5), line(16, 3, 16, 6.5)]),
+    Swimmer: P([circle(17, 5.5, 2), path("M3 12l6-2 4-4 5 3 3 1"), path("M2 16c2-1.4 3.5-1.4 5.5 0s3.5 1.4 5.5 0 3.5-1.4 5.5 0 3.5 1.4 5.5 0"), path("M2 20c2-1.4 3.5-1.4 5.5 0s3.5 1.4 5.5 0 3.5-1.4 5.5 0 3.5 1.4 5.5 0")]),
     Clock: P([circle(12, 12, 8.5), path("M12 7.5V12l3 2")]),
+    History: P([path("M3 8V4h4"), path("M3.5 8a9 9 0 1 1-.5 6"), path("M12 7.5V12l3 2")]),
+    HelpCircle: P([circle(12, 12, 9), path("M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2.3-2.5 4"), circle(12, 17, 0.5)]),
     Cash: P([rect(3, 6.5, 18, 11, 2), circle(12, 12, 2.4), path("M6.5 9v6M17.5 9v6")]),
     Wallet: P([path("M4 7.5A2.5 2.5 0 0 1 6.5 5H18a2 2 0 0 1 2 2v1.5"), path("M20 8.5H6.5A2.5 2.5 0 0 0 4 11v6a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1V9.5a1 1 0 0 0-1-1Z"), circle(16.5, 13.5, 1.3)]),
     Alert: P([path("M12 4 21 20H3L12 4Z"), line(12, 10, 12, 14.5), path("M12 17.2h.01")]),
@@ -41,10 +51,12 @@ try { (() => {
     Waves: P([path("M3 8c1.5-1.5 3-1.5 4.5 0S10.5 9.5 12 8s3-1.5 4.5 0S19.5 9.5 21 8"), path("M3 13c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0"), path("M3 18c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0")]),
     Search: P([circle(11, 11, 6.5), line(20, 20, 16, 16)]),
     Plus: P("M12 5v14M5 12h14"),
+    Copy: P([rect(8, 8, 13, 13, 2), path("M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3")]),
     Filter: P("M4 6h16l-6 7v5l-4 2v-7L4 6Z"),
     Download: P([path("M12 4v10"), path("M8 11l4 3 4-3"), path("M5 19h14")]),
     Upload: P([path("M12 15V5"), path("M8 8l4-3 4 3"), path("M5 19h14")]),
     Check: P("M5 12.5l4.5 4.5L19 7"),
+    CheckCheck: P([path("M2.5 12.5 7 17 17.5 6.5"), path("M11 16.5 13.5 19 22 10.5")]),
     X: P("M6 6l12 12M18 6L6 18"),
     ChevronR: P("M9 6l6 6-6 6"),
     ChevronD: P("M6 9l6 6 6-6"),
@@ -142,7 +154,7 @@ const TONES = {
 };
 function Badge({ children, tone = "neutral", dot = false, solid = false, style }) {
   const [bg, fg, bd] = TONES[tone] || TONES.neutral;
-  const base = solid ? { background: `var(${fg})`, color: "#fff", border: "1px solid transparent" } : { background: `var(${bg})`, color: `var(${fg})`, border: `1px solid var(${bd})` };
+  const base = solid ? { background: `var(${fg})`, color: "var(--text-on-solid)", border: "1px solid transparent" } : { background: `var(${bg})`, color: `var(${fg})`, border: `1px solid var(${bd})` };
   return /* @__PURE__ */ React.createElement(
     "span",
     {
@@ -162,7 +174,7 @@ function Badge({ children, tone = "neutral", dot = false, solid = false, style }
         ...style
       }
     },
-    dot && /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: solid ? "#fff" : `var(${fg})` } }),
+    dot && /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: solid ? "var(--text-on-solid)" : `var(${fg})` } }),
     children
   );
 }
@@ -434,7 +446,7 @@ function Button({
       border: "1px solid var(--primary)"
     },
     secondary: {
-      background: "var(--surface-card)",
+      background: "var(--action-secondary-background, var(--surface-card))",
       color: "var(--text-body)",
       border: "1px solid var(--border-default)"
     },
@@ -554,8 +566,8 @@ function Checkbox({ label, checked = false, indeterminate = false, disabled = fa
           justifyContent: "center"
         }
       },
-      checked && !indeterminate && /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M5 12.5l4.2 4.2L19 6.5", stroke: "#fff", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round" })),
-      indeterminate && !checked && /* @__PURE__ */ React.createElement("span", { style: { width: 9, height: 2.5, background: "#fff", borderRadius: 2 } }),
+      checked && !indeterminate && /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 24 24", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M5 12.5l4.2 4.2L19 6.5", stroke: "var(--text-on-solid)", strokeWidth: "3", strokeLinecap: "round", strokeLinejoin: "round" })),
+      indeterminate && !checked && /* @__PURE__ */ React.createElement("span", { style: { width: 9, height: 2.5, background: "var(--text-on-solid)", borderRadius: 2 } }),
       /* @__PURE__ */ React.createElement(
         "input",
         {
@@ -1010,6 +1022,22 @@ function Dialog({
   const dialogId = `design-dialog-${React.useId()}`;
   const dialogRef = React.useRef(null);
   const onCloseRef = React.useRef(onClose);
+  const [present, setPresent] = React.useState(Boolean(open));
+  const lastContent = React.useRef(null);
+  if (open) lastContent.current = { title, description, children, confirmLabel, cancelLabel, tone, irreversible, irreversibleLabel, hideFooter, width };
+  const shown = lastContent.current;
+  const exiting = present && !open;
+  React.useLayoutEffect(() => {
+    var _a;
+    if (open) {
+      setPresent(true);
+      return void 0;
+    }
+    if (!present) return void 0;
+    const duration = ((_a = window.matchMedia) == null ? void 0 : _a.call(window, "(prefers-reduced-motion: reduce)").matches) ? 0 : 180;
+    const timer = window.setTimeout(() => setPresent(false), duration);
+    return () => window.clearTimeout(timer);
+  }, [open, present]);
   onCloseRef.current = onClose;
   React.useEffect(() => {
     if (!open) return void 0;
@@ -1064,16 +1092,19 @@ function Dialog({
       first.focus();
     }
   }
-  if (!open) return null;
+  if (!present || !shown) return null;
   return /* @__PURE__ */ React.createElement(
     "div",
     {
       ref: dialogRef,
+      "data-motion-dialog": true,
       role: "dialog",
       "data-testid": "confirmation-dialog",
       "aria-modal": "true",
-      "aria-labelledby": title ? titleId : void 0,
-      "aria-describedby": description ? descriptionId : void 0,
+      "aria-labelledby": shown.title ? titleId : void 0,
+      "aria-describedby": shown.description ? descriptionId : void 0,
+      "aria-hidden": exiting || void 0,
+      inert: exiting || void 0,
       tabIndex: -1,
       onKeyDown: handleDialogKeyDown,
       style: {
@@ -1088,7 +1119,7 @@ function Dialog({
         padding: "10vh 16px 16px",
         background: "rgba(26,33,41,0.44)",
         backdropFilter: "blur(2px)",
-        animation: "swim-fade var(--dur-normal) var(--ease-standard)"
+        animation: exiting ? "swim-fade-out var(--dur-normal) var(--ease-standard) both" : "swim-fade var(--dur-normal) var(--ease-standard)"
       },
       onMouseDown: (e) => {
         if (dismissOnBackdrop && e.target === e.currentTarget) requestClose("backdrop");
@@ -1098,19 +1129,19 @@ function Dialog({
       "div",
       {
         style: {
-          width,
+          width: shown.width,
           maxWidth: "100%",
           background: "var(--surface-card)",
           borderRadius: "var(--radius-xl)",
           boxShadow: "var(--shadow-pop)",
           border: "1px solid var(--border-subtle)",
           overflow: "hidden",
-          animation: "swim-pop var(--dur-normal) var(--ease-out)"
+          animation: exiting ? "swim-pop-out var(--dur-normal) var(--ease-standard) both" : "swim-pop var(--dur-normal) var(--ease-out)"
         }
       },
-      /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 0" } }, irreversible && /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--red-600)", fontSize: "var(--fs-2xs)", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" } }, /* @__PURE__ */ React.createElement(WarnIcon, null), " ", irreversibleLabel), title && /* @__PURE__ */ React.createElement("h2", { id: titleId, style: { margin: 0, font: "var(--text-card-title)", color: "var(--text-strong)" } }, title), description && /* @__PURE__ */ React.createElement("p", { id: descriptionId, style: { margin: "7px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-muted)", lineHeight: "var(--lh-normal)" } }, description)),
-      /* @__PURE__ */ React.createElement("div", { style: { padding: children ? "16px 20px" : "10px 20px" } }, children),
-      !hideFooter && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 20px", background: "var(--surface-sunken)", borderTop: "1px solid var(--border-subtle)" } }, /* @__PURE__ */ React.createElement(Button, { variant: "secondary", "data-dialog-cancel": true, "data-testid": "confirmation-cancel", onClick: () => requestClose("cancel") }, cancelLabel), /* @__PURE__ */ React.createElement(Button, { variant: tone === "danger" ? "danger" : "primary", "data-testid": "confirmation-confirm", onClick: onConfirm }, confirmLabel))
+      /* @__PURE__ */ React.createElement("div", { style: { padding: "18px 20px 0" } }, shown.irreversible && /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10, color: "var(--red-600)", fontSize: "var(--fs-2xs)", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" } }, /* @__PURE__ */ React.createElement(WarnIcon, null), " ", shown.irreversibleLabel), shown.title && /* @__PURE__ */ React.createElement("h2", { id: titleId, style: { margin: 0, font: "var(--text-card-title)", color: "var(--text-strong)" } }, shown.title), shown.description && /* @__PURE__ */ React.createElement("p", { id: descriptionId, style: { margin: "7px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-muted)", lineHeight: "var(--lh-normal)" } }, shown.description)),
+      /* @__PURE__ */ React.createElement("div", { style: { padding: shown.children ? "16px 20px" : "10px 20px" } }, shown.children),
+      !shown.hideFooter && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 20px", background: "var(--surface-sunken)", borderTop: "1px solid var(--border-subtle)" } }, /* @__PURE__ */ React.createElement(Button, { variant: "secondary", "data-dialog-cancel": true, "data-testid": "confirmation-cancel", onClick: () => requestClose("cancel") }, shown.cancelLabel), /* @__PURE__ */ React.createElement(Button, { variant: shown.tone === "danger" ? "danger" : "primary", "data-testid": "confirmation-confirm", onClick: onConfirm }, shown.confirmLabel))
     )
   );
 }

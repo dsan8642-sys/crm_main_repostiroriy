@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocale } from '../i18n.jsx'
+import { usePresence } from './usePresence.js'
 
 function normalizeSearch(value) {
   return String(value || '')
@@ -50,6 +51,7 @@ export function SearchableSelect({
   const selected = options.find((option) => String(option.value) === String(value)) || null
   const [query, setQuery] = useState(selected?.label || '')
   const [open, setOpen] = useState(false)
+  const listPresence = usePresence(open)
   const [activeIndex, setActiveIndex] = useState(-1)
   const [remoteOptions, setRemoteOptions] = useState(null)
   const [remoteQuery, setRemoteQuery] = useState('')
@@ -207,8 +209,8 @@ export function SearchableSelect({
         </button>
       </span>
       {error && <small id={errorId} className="ops-field-error" role="alert">{error}</small>}
-      {open && (
-        <ul id={listboxId} className="ops-search-select-list" role="listbox">
+      {listPresence.present && (
+        <ul id={listboxId} className={`ops-search-select-list ops-motion-panel${listPresence.exiting ? ' is-exiting' : ''}`} role="listbox" aria-hidden={listPresence.exiting || undefined} inert={listPresence.exiting || undefined}>
           {filteredOptions.map((option, index) => (
             <li
               id={`${id}-option-${index}`}

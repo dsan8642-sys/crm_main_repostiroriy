@@ -17,7 +17,7 @@ const TONES = {
 export function Badge({ children, tone = 'neutral', dot = false, solid = false, style }) {
   const [bg, fg, bd] = TONES[tone] || TONES.neutral;
   const base = solid
-    ? { background: `var(${fg})`, color: '#fff', border: '1px solid transparent' }
+    ? { background: `var(${fg})`, color: 'var(--text-on-solid)', border: '1px solid transparent' }
     : { background: `var(${bg})`, color: `var(${fg})`, border: `1px solid var(${bd})` };
   return (
     <span
@@ -37,7 +37,7 @@ export function Badge({ children, tone = 'neutral', dot = false, solid = false, 
         ...style,
       }}
     >
-      {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: solid ? '#fff' : `var(${fg})` }} />}
+      {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: solid ? 'var(--text-on-solid)' : `var(${fg})` }} />}
       {children}
     </span>
   );

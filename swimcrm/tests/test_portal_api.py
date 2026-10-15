@@ -103,12 +103,17 @@ class ClientPortalApiRule(TestCase):
         self.client.force_login(self.parent.user)
 
     def test_client_overview_only_contains_own_students(self):
+        create_subscription(
+            student=self.student, subscription_type=f.make_sub_type(sessions=8),
+            start_date=date.today(),
+        )
         response = self.client.get("/api/client/overview/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["account"]["id"], self.parent.id)
         names = [row["full_name"] for row in response.json()["students"]]
         self.assertIn("Ковальский Ян", names)
         self.assertNotIn("Новак Ева", names)
+        self.assertNotIn("ledger", response.json()["students"][0].get("current_subscription", {}))
 
     def test_family_balance_and_history_do_not_require_switching_participant(self):
         sibling = f.make_student(parent=self.parent, first="Анна", last="Ковальская")
@@ -629,6 +634,50 @@ class AdminPortalApiRule(TestCase):
         )
         subscription.refresh_from_db()
         self.assertEqual(subscription.effective_end_date, date(2026, 2, 20))
+
+    def test_admin_can_update_subscription_fields_atomically(self):
+        subscription = create_subscription(
+            student=self.student,
+            subscription_type=f.make_sub_type(name="Combined edit", days=30, sessions=8),
+            start_date=date(2026, 1, 1), created_by=self.admin,
+        )
+        path = f"/api/admin/subscriptions/{subscription.id}/update/"
+        failed = self.client.post(path, data=json.dumps({
+            "reason": "Исправление ошибки", "remaining_sessions": 5,
+            "freeze": {"start_date": "2026-01-10", "end_date": "2026-01-09"},
+        }), content_type="application/json")
+        self.assertEqual(failed.status_code, 400)
+        self.assertEqual(subscription.ledger_entries.count(), 1)
+        self.assertEqual(subscription.freeze_periods.count(), 0)
+
+        rolled_back = self.client.post(path, data=json.dumps({
+            "reason": "Исправление ошибки", "remaining_sessions": 5,
+            "effective_end_date": "2025-12-31",
+            "freeze": {"start_date": "2026-01-10", "end_date": "2026-01-12"},
+        }), content_type="application/json")
+        self.assertEqual(rolled_back.status_code, 400)
+        self.assertEqual(subscription.freeze_periods.count(), 0)
+        self.assertEqual(subscription.ledger_entries.count(), 1)
+
+        response = self.client.post(path, data=json.dumps({
+            "reason": "Исправление ошибки", "remaining_sessions": 5,
+            "effective_end_date": "2026-02-20",
+            "freeze": {"start_date": "2026-01-10", "end_date": "2026-01-12"},
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["remaining_sessions"], 5)
+        self.assertEqual(response.json()["effective_end_date"], "2026-02-20")
+        self.assertEqual(response.json()["ledger"][-1]["delta"], -3)
+        self.assertEqual(response.json()["ledger"][-1]["balance_after"], 5)
+        self.assertEqual(response.json()["ledger"][-1]["note"], "Исправление ошибки")
+        self.assertEqual(response.json()["freezes"][0]["reason"], "Исправление ошибки")
+        self.assertEqual(response.json()["end_date_changes"][0]["reason"], "Исправление ошибки")
+        self.assertEqual(subscription.freeze_periods.count(), 1)
+        self.client.force_login(self.student.parent.user)
+        forbidden = self.client.post(path, data=json.dumps({
+            "reason": "Скрытая корректировка", "remaining_sessions": 4,
+        }), content_type="application/json")
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_group_roster_counts_lists_and_can_remove_inactive_participant(self):
         inactive = f.make_student(
@@ -1749,6 +1798,7 @@ class AdminPortalApiRule(TestCase):
         self.assertIn(("POST", "/api/admin/settings/session-types/split/restore/"), routes)
         self.assertIn(("POST", "/api/admin/settings/notification-template-translations/"), routes)
         self.assertIn(("GET", "/api/client/overview/"), routes)
+        self.assertIn(("POST", "/api/admin/subscriptions/<id>/update/"), routes)
         self.assertEqual(payload["openapi"], "3.1.0")
         location_path = payload["paths"]["/api/admin/settings/locations/{location_id}/"]
         self.assertIn("patch", location_path)
@@ -2477,6 +2527,11 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(renew.status_code, 201)
         self.assertEqual(renew.json()["subscription"]["subscription_type_id"], new_type.id)
         self.assertEqual(renew.json()["charge"]["amount_minor"], 22000)
+        related_id = renew.json()["subscription"]["id"]
+        old_detail = self.client.get(f"/api/admin/subscriptions/{subscription.id}/").json()
+        new_detail = self.client.get(f"/api/admin/subscriptions/{related_id}/").json()
+        self.assertEqual(old_detail["ledger"][-1]["related_subscription_id"], related_id)
+        self.assertEqual(new_detail["ledger"][-1]["related_subscription_id"], subscription.id)
 
     def test_admin_can_create_charge_and_payment_workflow(self):
         charge = self.client.post(

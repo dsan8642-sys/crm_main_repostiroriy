@@ -11,6 +11,7 @@ from billing.services import payment_reference_id
 from subscriptions.models import SessionLedgerEntry
 
 from .admin_support import _admin_required
+from subscriptions.services import update_subscription_dates
 from .pagination import choice_param, paginated_payload, positive_int_param, search_param
 
 
@@ -377,6 +378,62 @@ def admin_subscription_detail(request, subscription_id):
             subscription.status = status
             subscription.save(update_fields=["status"])
             audit(user, "subscription.updated", subscription, {"status": status})
+    return JsonResponse(_subscription_detail_payload(subscription))
+
+
+@require_POST
+def admin_subscription_update(request, subscription_id):
+    user = _admin_required(request)
+    data = _json_body(request)
+    reason = data.get("reason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 255:
+        raise _field_validation_error(
+            "reason", "Укажите причину изменения (до 255 символов).", code="required")
+    reason = reason.strip()
+    freeze_data = data.get("freeze")
+    if freeze_data is not None and not isinstance(freeze_data, dict):
+        raise _field_validation_error("freeze", "Неверные данные заморозки.", code="invalid")
+    freeze_start = _parse_date(freeze_data.get("start_date"), "freeze.start_date") if freeze_data else None
+    freeze_end = _parse_date(freeze_data.get("end_date"), "freeze.end_date") if freeze_data else None
+    if freeze_data and (freeze_start is None or freeze_end is None):
+        raise _field_validation_error("freeze", "Укажите даты заморозки.", code="required")
+    if freeze_start and freeze_end and freeze_end < freeze_start:
+        raise _field_validation_error("freeze.end_date", "Дата окончания раньше начала.", code="invalid_range")
+    end_date = (_parse_date(data.get("effective_end_date"), "effective_end_date")
+                if "effective_end_date" in data else None)
+    start_date = _parse_date(data.get("start_date"), "start_date") if "start_date" in data else None
+    if "start_date" in data and start_date is None:
+        raise _field_validation_error("start_date", "Укажите дату начала.", code="required")
+    if "effective_end_date" in data and end_date is None:
+        raise _field_validation_error("effective_end_date", "Укажите дату окончания.", code="required")
+    target_remaining = (_required_int(data.get("remaining_sessions"), "remaining_sessions")
+                        if "remaining_sessions" in data else None)
+    if target_remaining is not None and target_remaining < 0:
+        raise _field_validation_error("remaining_sessions", "Остаток не может быть отрицательным.", code="invalid")
+    if start_date is None and end_date is None and target_remaining is None and not freeze_data:
+        raise _field_validation_error("changes", "Нет изменений для сохранения.", code="required")
+
+    with transaction.atomic():
+        student_id = get_object_or_404(Subscription, pk=subscription_id).student_id
+        Student.objects.select_for_update(no_key=True).get(pk=student_id)
+        subscription = get_object_or_404(
+            Subscription.objects.select_for_update().select_related(
+                "student", "student__parent__user", "subscription_type"), pk=subscription_id)
+        _require_active_participant(subscription.student, "have subscriptions edited")
+        if target_remaining is not None and subscription.subscription_type.is_unlimited:
+            raise _field_validation_error("remaining_sessions", "У безлимитного абонемента нет остатка.", code="invalid")
+        if freeze_data:
+            freeze_subscription(subscription=subscription, start_date=freeze_start,
+                                end_date=freeze_end, reason=reason, created_by=user)
+        if start_date is not None or end_date is not None:
+            subscription = update_subscription_dates(
+                subscription=subscription, start_date=start_date,
+                effective_end_date=end_date, created_by=user, reason=reason)
+        if target_remaining is not None:
+            delta = target_remaining - subscription.remaining_sessions
+            if delta:
+                manual_adjust(subscription=subscription, delta=delta, note=reason,
+                              created_by=user)
     return JsonResponse(_subscription_detail_payload(subscription))
 
 

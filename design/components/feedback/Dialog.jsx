@@ -27,6 +27,18 @@ export function Dialog({
   const dialogId = `design-dialog-${React.useId()}`;
   const dialogRef = React.useRef(null);
   const onCloseRef = React.useRef(onClose);
+  const [present, setPresent] = React.useState(Boolean(open));
+  const lastContent = React.useRef(null);
+  if (open) lastContent.current = { title, description, children, confirmLabel, cancelLabel, tone, irreversible, irreversibleLabel, hideFooter, width };
+  const shown = lastContent.current;
+  const exiting = present && !open;
+  React.useLayoutEffect(() => {
+    if (open) { setPresent(true); return undefined; }
+    if (!present) return undefined;
+    const duration = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
+    const timer = window.setTimeout(() => setPresent(false), duration);
+    return () => window.clearTimeout(timer);
+  }, [open, present]);
   onCloseRef.current = onClose;
   React.useEffect(() => {
     if (!open) return undefined;
@@ -82,15 +94,18 @@ export function Dialog({
     }
   }
 
-  if (!open) return null;
+  if (!present || !shown) return null;
   return (
     <div
       ref={dialogRef}
+      data-motion-dialog
       role="dialog"
       data-testid="confirmation-dialog"
       aria-modal="true"
-      aria-labelledby={title ? titleId : undefined}
-      aria-describedby={description ? descriptionId : undefined}
+      aria-labelledby={shown.title ? titleId : undefined}
+      aria-describedby={shown.description ? descriptionId : undefined}
+      aria-hidden={exiting || undefined}
+      inert={exiting || undefined}
       tabIndex={-1}
       onKeyDown={handleDialogKeyDown}
       style={{
@@ -105,36 +120,36 @@ export function Dialog({
         padding: '10vh 16px 16px',
         background: 'rgba(26,33,41,0.44)',
         backdropFilter: 'blur(2px)',
-        animation: 'swim-fade var(--dur-normal) var(--ease-standard)',
+        animation: exiting ? 'swim-fade-out var(--dur-normal) var(--ease-standard) both' : 'swim-fade var(--dur-normal) var(--ease-standard)',
       }}
       onMouseDown={(e) => { if (dismissOnBackdrop && e.target === e.currentTarget) requestClose('backdrop'); }}
     >
       <div
         style={{
-          width,
+          width: shown.width,
           maxWidth: '100%',
           background: 'var(--surface-card)',
           borderRadius: 'var(--radius-xl)',
           boxShadow: 'var(--shadow-pop)',
           border: '1px solid var(--border-subtle)',
           overflow: 'hidden',
-          animation: 'swim-pop var(--dur-normal) var(--ease-out)',
+          animation: exiting ? 'swim-pop-out var(--dur-normal) var(--ease-standard) both' : 'swim-pop var(--dur-normal) var(--ease-out)',
         }}
       >
         <div style={{ padding: '18px 20px 0' }}>
-          {irreversible && (
+          {shown.irreversible && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 10, color: 'var(--red-600)', fontSize: 'var(--fs-2xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              <WarnIcon /> {irreversibleLabel}
+              <WarnIcon /> {shown.irreversibleLabel}
             </div>
           )}
-          {title && <h2 id={titleId} style={{ margin: 0, font: 'var(--text-card-title)', color: 'var(--text-strong)' }}>{title}</h2>}
-          {description && <p id={descriptionId} style={{ margin: '7px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 'var(--lh-normal)' }}>{description}</p>}
+          {shown.title && <h2 id={titleId} style={{ margin: 0, font: 'var(--text-card-title)', color: 'var(--text-strong)' }}>{shown.title}</h2>}
+          {shown.description && <p id={descriptionId} style={{ margin: '7px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 'var(--lh-normal)' }}>{shown.description}</p>}
         </div>
-        <div style={{ padding: children ? '16px 20px' : '10px 20px' }}>{children}</div>
-        {!hideFooter && (
+        <div style={{ padding: shown.children ? '16px 20px' : '10px 20px' }}>{shown.children}</div>
+        {!shown.hideFooter && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 20px', background: 'var(--surface-sunken)', borderTop: '1px solid var(--border-subtle)' }}>
-            <Button variant="secondary" data-dialog-cancel data-testid="confirmation-cancel" onClick={() => requestClose('cancel')}>{cancelLabel}</Button>
-            <Button variant={tone === 'danger' ? 'danger' : 'primary'} data-testid="confirmation-confirm" onClick={onConfirm}>{confirmLabel}</Button>
+            <Button variant="secondary" data-dialog-cancel data-testid="confirmation-cancel" onClick={() => requestClose('cancel')}>{shown.cancelLabel}</Button>
+            <Button variant={shown.tone === 'danger' ? 'danger' : 'primary'} data-testid="confirmation-confirm" onClick={onConfirm}>{shown.confirmLabel}</Button>
           </div>
         )}
       </div>

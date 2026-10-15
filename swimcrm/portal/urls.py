@@ -56,6 +56,8 @@ urlpatterns = [
          name="api-admin-client-participants"),
     path("admin/participants/<int:participant_id>/", views.admin_participant_detail,
          name="api-admin-participant-detail"),
+    path("admin/participants/<int:participant_id>/attendance/payment/",
+         views.admin_participant_attendance_payment, name="api-admin-participant-attendance-payment"),
     path("admin/api-contract/", views.admin_api_contract, name="api-admin-api-contract"),
     path("admin/trainers/", views.admin_trainers, name="api-admin-trainers"),
     path("admin/trainers/<int:trainer_id>/", views.admin_trainer_detail,
@@ -86,6 +88,8 @@ urlpatterns = [
          name="api-admin-subscriptions"),
     path("admin/subscriptions/<int:subscription_id>/", views.admin_subscription_detail,
          name="api-admin-subscription-detail"),
+    path("admin/subscriptions/<int:subscription_id>/update/", views.admin_subscription_update,
+         name="api-admin-subscription-update"),
     path("admin/subscriptions/<int:subscription_id>/renew/", views.admin_subscription_renew,
          name="api-admin-subscription-renew"),
     path("admin/subscriptions/<int:subscription_id>/freeze/", views.admin_subscription_freeze,
@@ -260,7 +264,9 @@ urlpatterns = [
 ]
 
 if settings.DEBUG or any("test" in arg for arg in sys.argv):
+    from .dev_appearance import appearance
     urlpatterns += [
+        path("dev/appearance/", appearance, name="api-dev-appearance"),
         path("dev-login/<str:role>/", views.dev_login, name="api-dev-login"),
         path("dev-logout/", views.dev_logout, name="api-dev-logout"),
     ]

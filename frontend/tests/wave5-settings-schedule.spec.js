@@ -62,6 +62,11 @@ test('desktop Settings keeps categories and resources beside their detail', asyn
   await nav.getByTestId('admin-settings-resource-rules').click()
   await expect(nav.getByTestId('admin-settings-category-notifications')).toHaveAttribute('aria-selected', 'true')
   await expect(nav.getByTestId('admin-settings-resource-rules')).toHaveAttribute('aria-current', 'true')
+  const categoryBox = await nav.getByTestId('admin-settings-category-notifications').boundingBox()
+  const resourceBox = await nav.getByTestId('admin-settings-resource-rules').boundingBox()
+  const nextCategoryBox = await nav.getByTestId('admin-settings-category-payroll').boundingBox()
+  expect(resourceBox.y).toBeGreaterThan(categoryBox.y)
+  expect(resourceBox.y).toBeLessThan(nextCategoryBox.y)
   await expect(page.locator('.ops-settings-detail .section-title')).toBeVisible()
   const [navBox, detailBox] = await Promise.all([nav.boundingBox(), page.locator('.ops-settings-detail').boundingBox()])
   expect(detailBox.x).toBeGreaterThan(navBox.x + navBox.width)
@@ -77,6 +82,7 @@ test('Wave 5 mobile Settings is an unambiguous Category to Resource to Detail hi
   await expect(categories).toBeVisible()
   await expect(page.locator('.ops-settings-desktop-nav')).toBeHidden()
   await expect(page.locator('.ops-settings-page-refresh')).toBeHidden()
+  expect((await categories.getByTestId('admin-settings-category-catalog').boundingBox()).height).toBeLessThanOrEqual(60)
   await categories.getByTestId('admin-settings-category-catalog').click()
 
   await expect(page.locator('.ops-settings-mobile-nav .ops-context-back')).toBeVisible()
@@ -89,6 +95,10 @@ test('Wave 5 mobile Settings is an unambiguous Category to Resource to Detail hi
   await expect(page.locator('.ops-settings-page-refresh')).toBeVisible()
   await page.locator('.ops-settings-mobile-back > button').last().click()
   await expect(categories).toBeVisible()
+  await categories.getByTestId('admin-settings-category-notifications').click()
+  const templates = page.getByTestId('admin-settings-resource-templates').last()
+  await expect(templates).toContainText('Тексти повідомлень')
+  await expect(templates).not.toContainText('Створення та редагування')
 
   const geometry = await page.evaluate(() => ({
     pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
@@ -110,9 +120,23 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
 
   const trigger = page.getByTestId('admin-schedule-filters-trigger')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+  await expect(page.getByTestId('schedule-period-day')).toHaveCount(0)
   if ((page.viewportSize()?.width || 0) === 390) {
-    await expect(page.getByTestId('schedule-period-day')).toHaveAttribute('aria-pressed', 'true')
-    await page.getByTestId('schedule-period-week').click()
+    await expect(page.getByTestId('schedule-period-week')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('schedule-calendar-view-switch')).toBeHidden()
+    await expect(page.locator('.ops-mobile-date-strip button')).toHaveCount(7)
+    const mobileHeader = await page.locator('.ops-mobile-date-navigation').evaluate((node) => ({
+      background: getComputedStyle(node).backgroundColor,
+      border: getComputedStyle(node).borderStyle,
+      height: node.getBoundingClientRect().height,
+    }))
+    expect(mobileHeader.background).not.toBe('rgba(0, 0, 0, 0)')
+    expect(mobileHeader.border).toBe('solid')
+    expect(mobileHeader.height).toBeGreaterThanOrEqual(58)
+  } else {
+    await expect(page.locator('.ops-calendar-period-header.is-week > .ops-calendar-period-arrow')).toHaveCount(2)
+    await expect(page.locator('.ops-calendar-period-header.is-week > .ops-calendar-period-arrow').first()).toHaveCSS('height', '58px')
+    await expect(page.locator('.ops-calendar-period-header.is-week > .ops-calendar-period-arrow').last()).toHaveCSS('height', '58px')
   }
   const lessonStyle = await page.locator('.ops-schedule-event:visible').first().evaluate((node) => {
     const style = getComputedStyle(node)
@@ -126,15 +150,20 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
   expect(lessonStyle.cursor).toBe('pointer')
   expect(lessonStyle.background).not.toBe('rgba(0, 0, 0, 0)')
   await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
+  await expect(page.getByTestId('admin-schedule-filter-count')).toBeHidden()
   await trigger.click()
   await page.getByTestId('admin-schedule-filter-type').selectOption('split')
   await page.getByTestId('admin-schedule-filter-apply').click()
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(1)
   await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
-  await page.getByTestId('schedule-period-day').click()
-  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
-  await page.getByTestId('schedule-period-month').click()
-  await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
+  await expect(page.getByTestId('admin-schedule-filter-count')).toBeVisible()
+  if ((page.viewportSize()?.width || 0) > 767) {
+    await expect(page.getByTestId('schedule-period-day')).toHaveCount(0)
+    await page.getByTestId('schedule-period-month').click()
+    await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '1')
+    await expect(page.locator('.ops-calendar-period-header.is-month > .ops-calendar-period-arrow').first()).toHaveCSS('height', '58px')
+    await expect(page.locator('.ops-calendar-period-header.is-month > .ops-calendar-period-arrow').last()).toHaveCSS('height', '58px')
+  }
 
   const strip = page.locator('.ops-action-strip').first()
   if ((page.viewportSize()?.width || 0) === 390) {
@@ -151,6 +180,7 @@ test('Wave 5 Admin schedule type filter controls rows and counts only inside the
   const resetTrigger = page.getByTestId('admin-schedule-filters-trigger')
   await expect(resetTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+  await expect(page.getByTestId('admin-schedule-filter-count')).toBeHidden()
   for (const requestUrl of scheduleRequests) {
     expect(requestUrl.searchParams.get('date_from')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(requestUrl.searchParams.get('date_to')).toMatch(/^\d{4}-\d{2}-\d{2}$/)

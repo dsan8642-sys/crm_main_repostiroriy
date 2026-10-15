@@ -1,10 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { toastReducer } from './toastContracts.js'
 import { useLocale } from '../i18n.jsx'
 
 const ToastContext = createContext(null)
 
-function ToastItem({ toast, dismiss }) {
+function ToastItem({ toast, dismiss, exiting }) {
   const { t } = useLocale()
   useEffect(() => {
     if (!toast.duration) return undefined
@@ -14,7 +14,7 @@ function ToastItem({ toast, dismiss }) {
   const role = toast.tone === 'danger' ? 'alert' : 'status'
   return (
     <div
-      className={`ops-toast is-${toast.tone || 'info'}`}
+      className={`ops-toast is-${toast.tone || 'info'}${exiting ? ' is-exiting' : ''}`}
       role={role}
       style={{
         background: 'var(--surface-inverse)',
@@ -22,7 +22,7 @@ function ToastItem({ toast, dismiss }) {
         borderRadius: 'var(--radius-md)',
         boxShadow: 'var(--shadow-lg)',
         color: '#fff',
-        animation: 'ops-toast-in var(--dur-normal) var(--ease-out)',
+        animation: exiting ? 'ops-toast-out 180ms ease-in both' : 'ops-toast-in var(--dur-normal) var(--ease-out)',
       }}
     >
       {toast.tone === 'loading' && <span className="ops-toast-spinner" aria-hidden="true" />}
@@ -55,13 +55,33 @@ function ToastItem({ toast, dismiss }) {
 export function ToastProvider({ children }) {
   const { t } = useLocale()
   const [toasts, dispatch] = useReducer(toastReducer, [])
-  const dismiss = useCallback((id) => dispatch({ type: 'dismiss', id }), [])
+  const [exitingIds, setExitingIds] = useState(() => new Set())
+  const exitTimers = useRef(new Map())
+  useEffect(() => () => { for (const timer of exitTimers.current.values()) window.clearTimeout(timer) }, [])
+  const dismiss = useCallback((id) => {
+    if (exitTimers.current.has(id)) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      dispatch({ type: 'dismiss', id })
+      return
+    }
+    setExitingIds((current) => new Set(current).add(id))
+    exitTimers.current.set(id, window.setTimeout(() => {
+      dispatch({ type: 'dismiss', id })
+      setExitingIds((current) => { const next = new Set(current); next.delete(id); return next })
+      exitTimers.current.delete(id)
+    }, 180))
+  }, [])
   const show = useCallback(({
     id = `toast-${Date.now()}`,
     message,
     tone = 'info',
     duration = tone === 'loading' ? 0 : 5000,
   }) => {
+    if (exitTimers.current.has(id)) {
+      window.clearTimeout(exitTimers.current.get(id))
+      exitTimers.current.delete(id)
+      setExitingIds((current) => { const next = new Set(current); next.delete(id); return next })
+    }
     dispatch({ type: 'show', toast: { id, message, tone, duration } })
     return id
   }, [])
@@ -70,7 +90,7 @@ export function ToastProvider({ children }) {
     <ToastContext.Provider value={value}>
       {children}
       <div className="ops-toast-region" role="region" aria-label={t('toast.region')} aria-live="polite" aria-relevant="additions text">
-        {toasts.map((toast) => <ToastItem key={toast.id} toast={toast} dismiss={dismiss} />)}
+        {toasts.map((toast) => <ToastItem key={toast.id} toast={toast} dismiss={dismiss} exiting={exitingIds.has(toast.id)} />)}
       </div>
     </ToastContext.Provider>
   )

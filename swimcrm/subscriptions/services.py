@@ -12,6 +12,14 @@ from .models import (FreezePeriod, LedgerReason, SessionLedgerEntry,
                      Subscription, SubscriptionStatus)
 
 
+def can_assign_attendance(subscription):
+    """Available for an explicit admin assignment, including an overdraft."""
+    return subscription.status != SubscriptionStatus.CANCELLED and (
+        subscription.effective_end_date >= timezone.localdate()
+        or (subscription.remaining_sessions or 0) > 0
+    )
+
+
 @transaction.atomic
 def create_subscription(*, student, subscription_type, start_date, created_by=None):
     """Create a subscription and post the initial +N ledger entry (rule 1)."""
@@ -95,10 +103,16 @@ def freeze_subscription(*, subscription, start_date, end_date, created_by=None, 
 
 
 @transaction.atomic
-def update_subscription_end_date(*, subscription, effective_end_date, created_by=None):
-    """Correct the displayed end date without rewriting freeze history or the ledger."""
+def update_subscription_dates(*, subscription, start_date=None, effective_end_date=None,
+                              created_by=None, reason=""):
+    """Correct either date independently, preserving freezes and financial history."""
     locked = Subscription.objects.select_for_update().get(pk=subscription.pk)
-    if effective_end_date < locked.start_date:
+    previous_start_date = locked.start_date
+    previous_base_end_date = locked.base_end_date
+    previous_effective_end_date = locked.effective_end_date
+    start_date = start_date if start_date is not None else locked.start_date
+    effective_end_date = effective_end_date if effective_end_date is not None else locked.effective_end_date
+    if effective_end_date < start_date:
         raise ValidationError({
             "effective_end_date": ValidationError(
                 "Дата окончания не может быть раньше даты начала абонемента.",
@@ -106,18 +120,27 @@ def update_subscription_end_date(*, subscription, effective_end_date, created_by
             ),
         })
 
-    previous_base_end_date = locked.base_end_date
-    previous_effective_end_date = locked.effective_end_date
+    locked.start_date = start_date
     locked.base_end_date = effective_end_date - timedelta(days=locked.total_frozen_days)
     locked.full_clean()
-    locked.save(update_fields=["base_end_date"])
-    audit(created_by, "subscription.end_date_updated", locked, {
+    locked.save(update_fields=["start_date", "base_end_date"])
+    action = "subscription.dates_updated" if start_date != previous_start_date else "subscription.end_date_updated"
+    audit(created_by, action, locked, {
+        "previous_start_date": previous_start_date.isoformat(),
+        "start_date": locked.start_date.isoformat(),
         "previous_base_end_date": previous_base_end_date.isoformat(),
         "base_end_date": locked.base_end_date.isoformat(),
         "previous_effective_end_date": previous_effective_end_date.isoformat(),
         "effective_end_date": locked.effective_end_date.isoformat(),
+        "reason": reason,
     })
     return locked
+
+
+def update_subscription_end_date(*, subscription, effective_end_date, created_by=None, reason=""):
+    return update_subscription_dates(
+        subscription=subscription, effective_end_date=effective_end_date,
+        created_by=created_by, reason=reason)
 
 
 @transaction.atomic

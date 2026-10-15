@@ -41,11 +41,11 @@ export function Checkbox({ label, checked = false, indeterminate = false, disabl
         >
           {checked && !indeterminate && (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-              <path d="M5 12.5l4.2 4.2L19 6.5" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M5 12.5l4.2 4.2L19 6.5" stroke="var(--text-on-solid)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           )}
           {indeterminate && !checked && (
-            <span style={{ width: 9, height: 2.5, background: '#fff', borderRadius: 2 }} />
+            <span style={{ width: 9, height: 2.5, background: 'var(--text-on-solid)', borderRadius: 2 }} />
           )}
           <input
             ref={ref}

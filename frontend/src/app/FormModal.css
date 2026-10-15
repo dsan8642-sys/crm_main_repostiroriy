@@ -153,7 +153,7 @@
 .form-modal-confirm button.is-danger {
   border-color: var(--red-600);
   background: var(--red-600);
-  color: white;
+  color: var(--text-on-solid);
 }
 
 @media (max-width: 767px) {

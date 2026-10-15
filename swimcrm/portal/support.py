@@ -5,7 +5,7 @@ from datetime import datetime, time, timedelta
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Q, Sum
+from django.db.models import Exists, OuterRef, Prefetch, Q, Sum
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -17,8 +17,8 @@ from accounts.social import normalize_instagram_username
 from analytics.debtors import debtors, upcoming
 from analytics.reports import income_by_group, income_by_trainer, income_for_period
 from attendance.models import AttendanceRecord, AttendanceStatus
-from attendance.services import set_attendance
-from audit.models import audit
+from attendance.services import attendance_payment, set_attendance
+from audit.models import AuditLogEntry, audit
 from billing.models import (Charge, Payment, PaymentMethod, PaymentSource, PaymentStatus,
                             ReceiptFile, normalize_payment_method)
 from billing.services import (
@@ -51,8 +51,8 @@ from scheduling.services import (ScheduleConflict, check_trainer_conflict,
 from scheduling.services import sync_split_second_student
 from students.models import Student
 from students.services import ensure_account_holder_participant, set_student_groups
-from subscriptions.models import Subscription, SubscriptionStatus
-from subscriptions.services import (create_subscription, freeze_subscription,
+from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription, SubscriptionStatus
+from subscriptions.services import (can_assign_attendance, create_subscription, freeze_subscription,
                                     manual_adjust, renew_subscription,
                                     update_subscription_end_date)
 
@@ -780,6 +780,7 @@ def _payment_payload(payment):
 
 def _attendance_payload(record):
     session = record.session
+    payment_source, payment_subscription_id = attendance_payment(record)
     return {
         "id": record.id,
         "participant_id": record.student_id,
@@ -795,6 +796,9 @@ def _attendance_payload(record):
         "marked_at": timezone.localtime(record.marked_at).isoformat(),
         "deducts": record.deducts,
         "financial_effects_enabled": record.financial_effects_enabled,
+        "payment_source": payment_source,
+        "payment_subscription_id": payment_subscription_id,
+        "subscription_session_delta": sum(entry.delta for entry in record.ledger_entries.all()),
     }
 
 
@@ -812,20 +816,51 @@ def _consent_payload(consent):
 
 
 def _ledger_entry_payload(entry):
+    attendance = entry.attendance
+    session = attendance.session if attendance else None
+    related_subscription = re.search(r"абонемент(?:а|е)? #(\d+)", entry.note) if entry.reason == LedgerReason.CARRYOVER else None
     return {
         "id": entry.id,
         "delta": entry.delta,
         "reason": entry.reason,
         "note": entry.note,
         "created_at": timezone.localtime(entry.created_at).isoformat(),
+        "created_by": str(entry.created_by) if entry.created_by_id else None,
+        "attendance_id": entry.attendance_id,
+        "session_id": session.id if session else None,
+        "session_start_at": timezone.localtime(session.start_at).isoformat() if session else None,
+        "group": session.group.name if session and session.group_id else None,
+        "trainer": str(session.trainer) if session and session.trainer_id else None,
+        "location": session.location if session else None,
+        "related_subscription_id": int(related_subscription.group(1)) if related_subscription else None,
     }
 
 
-def _subscription_detail_payload(subscription):
+def _subscription_detail_payload(subscription, end_date_changes=None):
+    balance = 0
+    ledger = []
+    for entry in sorted(subscription.ledger_entries.all(), key=lambda row: (row.created_at, row.id)):
+        balance += entry.delta
+        ledger.append({**_ledger_entry_payload(entry), "balance_after": balance})
+    if end_date_changes is None:
+        end_date_changes = AuditLogEntry.objects.filter(
+            entity_type="Subscription", entity_id=str(subscription.id),
+            action__in=["subscription.end_date_updated", "subscription.dates_updated"]).select_related("actor")
     return {
         **_subscription_payload(subscription),
+        "can_assign_attendance": can_assign_attendance(subscription),
         "participant": _student_payload(subscription.student),
-        "ledger": [_ledger_entry_payload(entry) for entry in subscription.ledger_entries.all()],
+        "ledger": ledger,
+        "end_date_changes": [{
+            "id": change.id,
+            "created_at": timezone.localtime(change.created_at).isoformat(),
+            "created_by": str(change.actor) if change.actor_id else None,
+            "previous": change.changes.get("previous_effective_end_date"),
+            "current": change.changes.get("effective_end_date"),
+            "previous_start": change.changes.get("previous_start_date"),
+            "current_start": change.changes.get("start_date"),
+            "reason": change.changes.get("reason", ""),
+        } for change in end_date_changes],
         "charges": [_charge_payload(charge) for charge in subscription.charges.select_related("student").all()],
         "freezes": [{
             "id": freeze.id,
@@ -833,6 +868,8 @@ def _subscription_detail_payload(subscription):
             "end_date": freeze.end_date.isoformat(),
             "days": freeze.days,
             "reason": freeze.reason,
+            "created_at": timezone.localtime(freeze.created_at).isoformat(),
+            "created_by": str(freeze.created_by) if freeze.created_by_id else None,
         } for freeze in subscription.freeze_periods.all()],
     }
 
@@ -886,10 +923,18 @@ def _client_safe_detail_payload(account):
 def _client_detail_payload(account):
     participants = list(_student_queryset_for_parent(account).order_by("id"))
     participant_ids = [student.id for student in participants]
-    subscriptions = Subscription.objects.filter(student_id__in=participant_ids).select_related(
+    subscriptions = list(Subscription.objects.filter(student_id__in=participant_ids).select_related(
         "student", "student__parent", "subscription_type").prefetch_related(
         "student__groups",
-        "ledger_entries", "charges", "freeze_periods").order_by("-start_date", "-id")
+        Prefetch("ledger_entries", queryset=SessionLedgerEntry.objects.select_related(
+            "created_by", "attendance__session__group", "attendance__session__trainer__user")),
+        "charges", "freeze_periods__created_by").order_by("-start_date", "-id"))
+    end_date_changes = {}
+    if subscriptions:
+        for change in AuditLogEntry.objects.filter(
+                entity_type="Subscription", action__in=["subscription.end_date_updated", "subscription.dates_updated"],
+                entity_id__in=[str(row.id) for row in subscriptions]).select_related("actor"):
+            end_date_changes.setdefault(change.entity_id, []).append(change)
     charges = Charge.objects.filter(student_id__in=participant_ids).select_related(
         "student", "subscription", "attendance", "created_by",
         "reversal", "reversal__created_by").order_by("-due_date", "-id")
@@ -897,13 +942,17 @@ def _client_detail_payload(account):
         "student", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     attendance = AttendanceRecord.objects.filter(student_id__in=participant_ids, status__isnull=False).select_related(
-        "student", "session", "session__group", "session__trainer__user").order_by("-session__start_at", "-id")
+        "student", "session", "session__group", "session__trainer__user").prefetch_related(
+        "ledger_entries", "charges", "student__subscriptions__subscription_type",
+        "student__subscriptions__freeze_periods").order_by("-session__start_at", "-id")
     balance = family_balance(account).amount_minor
 
     return {
         "account": _client_account_payload(account),
         "participants": [{**_student_payload(student), "balance_minor": balance} for student in participants],
-        "subscriptions": [_subscription_detail_payload(subscription) for subscription in subscriptions],
+        "subscriptions": [_subscription_detail_payload(
+            subscription, end_date_changes.get(str(subscription.id), []))
+            for subscription in subscriptions],
         "charges": [_charge_payload(charge) for charge in charges],
         "payments": [_payment_payload(payment) for payment in payments],
         "attendance": [_attendance_payload(record) for record in attendance[:MAX_LIST_ROWS]],

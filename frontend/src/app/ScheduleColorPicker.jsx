@@ -1,6 +1,7 @@
 import React, { useId, useState } from 'react'
 import { adminTranslator } from '../adminLocales.js'
 import { useLocale } from '../i18n.jsx'
+import { usePresence } from './usePresence.js'
 
 import {
   normalizeScheduleColorKey,
@@ -23,6 +24,7 @@ export function ScheduleColorPicker({
   const t = adminTranslator(locale)
   const generatedName = useId()
   const [expanded, setExpanded] = useState(false)
+  const panelPresence = usePresence(expanded)
   const selectedKey = normalizeScheduleColorKey(value)
   const selectedOption = scheduleColorOption(selectedKey)
   const groupName = name || `schedule-color-${generatedName}`
@@ -48,8 +50,8 @@ export function ScheduleColorPicker({
         </span>
         <span className="ops-schedule-color-chevron" aria-hidden="true">⌄</span>
       </button>
-      {expanded && (
-        <div className="ops-schedule-color-panel" id={panelId}>
+      {panelPresence.present && (
+        <div className={`ops-schedule-color-panel ops-motion-panel${panelPresence.exiting ? ' is-exiting' : ''}`} id={panelId} aria-hidden={panelPresence.exiting || undefined} inert={panelPresence.exiting || undefined}>
           <span className="ops-schedule-color-hint">{t('scheduleColor.hint')}</span>
           <div className="ops-schedule-color-grid">
             {schedulePaletteOptions.map((option) => {

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage } from '../../api.js'
 import { formatDate, formatShortDate, formatTime, mapTrainerHistoryRows, mapTrainerSession } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
-import { calendarRange, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday } from '../scheduleContracts.js'
+import { calendarRange, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday, sessionIsoDate } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
@@ -170,7 +170,7 @@ export function createTrainerSessionScreen(components, icons, trainerData = {}) 
           </div>
           <div className="ops-button-row">
             {nextSession && <Button variant="secondary" disabled={busyId != null} onClick={() => go('session', { trainerSessionId: nextSession.sessionId })}>{t('trainer.attendance.nextSession')}</Button>}
-            {!sessionMeta.cancelled && <Button data-testid="trainer-attendance-all-present" variant="primary" disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>{t('trainer.attendance.allPresent')}</Button>}
+            {!sessionMeta.cancelled && <Button data-testid="trainer-attendance-all-present" variant="primary" iconLeft={<I.Check size={18} aria-hidden="true" />} disabled={!rows.length || busyId != null} loading={busyId === 'all'} onClick={() => setBulkPending(true)}>{t('trainer.attendance.allPresent')}</Button>}
           </div>
         </div>
 
@@ -281,7 +281,7 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
           title={primary?.group}
           detail={primary && `${primary.date} · ${primary.start}-${primary.end}`}
           meta={primary && `${primary.location} · ${primary.count}/${primary.limit}`}
-          icon={<I.Calendar size={20} />}
+          icon={<I.Swimmer size={20} />}
           actionLabel={t('trainer.today.openAttendance')}
           onOpen={() => go('session', { trainerSessionId: primary?.sessionId })}
           emptyTitle={t('trainer.today.emptyTitle')}
@@ -313,11 +313,7 @@ export function createTrainerScheduleScreen(components, icons) {
     const [sessions, setSessions] = useState([])
     const [error, setError] = useState(null)
     const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(() => (
-      typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
-        ? 'week'
-        : DEFAULT_SCHEDULE_VIEW
-    ))
+    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
     const [focusDate, setFocusDate] = useState(localToday())
     const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
 
@@ -343,7 +339,7 @@ export function createTrainerScheduleScreen(components, icons) {
           : <ScheduleList sessions={sessions} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-schedule-list" emptyLabel={t('trainer.sessions.empty')} />}
       </div>
       <div className="ops-schedule-mobile-content">
-        <ScheduleList groupByDate sessions={sessions} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-mobile-schedule-agenda" emptyLabel={t('trainer.sessions.empty')} />
+        <ScheduleList groupByDate icons={icons} sessions={sessions.filter((session) => sessionIsoDate(session) === focusDate)} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-mobile-schedule-agenda" emptyLabel={t('trainer.sessions.empty')} />
       </div>
     </div>
   }

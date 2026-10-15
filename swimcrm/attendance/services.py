@@ -9,10 +9,12 @@ from billing.models import Charge
 from students.models import Student
 from subscriptions.models import (LedgerReason, SessionLedgerEntry,
                                   Subscription, SubscriptionStatus)
+from subscriptions.services import can_assign_attendance
 from scheduling.models import Session, SessionType
 from scheduling.services import split_roster_student_ids
 
-from .models import AttendanceRecord, AttendanceStatus, DEDUCTING_STATUSES
+from .models import (AttendancePaymentSource, AttendanceRecord, AttendanceStatus,
+                     DEDUCTING_STATUSES)
 
 
 def _deductible_subscription(student, when):
@@ -38,6 +40,101 @@ def _deductible_subscription(student, when):
 def _current_effect(record):
     agg = record.ledger_entries.aggregate(total=Sum("delta"))
     return agg["total"] or 0
+
+
+def attendance_payment(record):
+    """Resolve the source for both historical and explicitly reassigned visits."""
+    if not record.financial_effects_enabled or not record.deducts:
+        return "none", None
+    if record.payment_source:
+        return record.payment_source, record.payment_subscription_id
+    balances = {}
+    for entry in record.ledger_entries.all():
+        balances[entry.subscription_id] = balances.get(entry.subscription_id, 0) + entry.delta
+    for subscription_id, balance in balances.items():
+        if balance < 0:
+            return AttendancePaymentSource.SUBSCRIPTION, subscription_id
+    if sum(charge.amount_minor for charge in record.charges.all()) > 0:
+        return AttendancePaymentSource.ACCOUNT, None
+    for subscription in record.student.subscriptions.all():
+        if (subscription.subscription_type.is_unlimited
+                and subscription.is_active_on(record.session.start_at.date())):
+            return AttendancePaymentSource.SUBSCRIPTION, subscription.id
+    return "none", None
+
+
+def _reconcile_explicit_payment(record, session, *, actor):
+    subscription = record.payment_subscription
+    desired = -1 if record.deducts and subscription and not subscription.subscription_type.is_unlimited else 0
+    balances = dict(record.ledger_entries.values("subscription_id").annotate(
+        total=Sum("delta")).values_list("subscription_id", "total"))
+    if desired:
+        balances.setdefault(subscription.id, 0)
+    for subscription_id, current in balances.items():
+        target = desired if subscription and subscription_id == subscription.id else 0
+        if target != current:
+            SessionLedgerEntry.objects.create(
+                subscription_id=subscription_id, attendance=record,
+                delta=target - current, reason=LedgerReason.CORRECTION,
+                created_by=actor, note="Изменение источника списания / отметки посещения")
+    _reconcile_visit_charge(
+        record, session, covered_by_subscription=subscription is not None, actor=actor)
+
+
+@transaction.atomic
+def change_attendance_payment(*, student, attendance_ids, source, subscription_id=None, actor=None):
+    """Reassign a participant's selected visits atomically; never create payments."""
+    if source not in (AttendancePaymentSource.ACCOUNT, AttendancePaymentSource.SUBSCRIPTION):
+        raise ValidationError("Выберите источник списания: счёт или абонемент.")
+    # Match the session -> attendance -> participant lock order of set_attendance.
+    session_ids = AttendanceRecord.objects.filter(
+        student=student, pk__in=attendance_ids).values_list("session_id", flat=True)
+    list(Session.objects.select_for_update().filter(pk__in=session_ids).order_by("pk"))
+    records = list(AttendanceRecord.objects.select_for_update().filter(
+        student=student, pk__in=attendance_ids).order_by("pk"))
+    if not records or len(records) != len(attendance_ids):
+        raise ValidationError("Выберите посещения одного участника.")
+    student = Student.objects.select_for_update(no_key=True).get(pk=student.pk)
+    if not student.is_active or (student.parent_id and not student.parent.user.is_active):
+        raise ValidationError("Нельзя изменять посещения архивного клиента.")
+    subscription = None
+    if source == AttendancePaymentSource.SUBSCRIPTION:
+        candidates = Subscription.objects.filter(student=student).exclude(
+            status=SubscriptionStatus.CANCELLED)
+        if subscription_id is None:
+            ids = [candidate.pk for candidate in candidates.select_related(
+                "subscription_type").prefetch_related("freeze_periods")
+                if can_assign_attendance(candidate)]
+            if len(ids) != 1:
+                raise ValidationError("Выберите абонемент участника.")
+            subscription_id = ids[0]
+        subscription = candidates.select_related("subscription_type").filter(pk=subscription_id).first()
+        if subscription is None:
+            raise ValidationError("Абонемент недоступен или принадлежит другому участнику.")
+        if not can_assign_attendance(subscription):
+            raise ValidationError("Срок действия абонемента закончился и оставшихся занятий нет.")
+    elif subscription_id is not None:
+        raise ValidationError("Для списания со счёта абонемент не выбирается.")
+    for record in records:
+        if not record.deducts or record.session.is_cancelled:
+            raise ValidationError("Источник списания можно изменить только у списываемых посещений.")
+        if source == AttendancePaymentSource.ACCOUNT and record.session.price_minor is None:
+            raise ValidationError("У занятия не сохранена стоимость для списания со счёта.")
+        previous_source, previous_subscription_id = attendance_payment(record)
+        previous_financial_effects = record.financial_effects_enabled
+        record.payment_source = source
+        record.payment_subscription = subscription
+        record.financial_effects_enabled = True
+        record.save(update_fields=["payment_source", "payment_subscription", "financial_effects_enabled"])
+        _reconcile_explicit_payment(record, record.session, actor=actor)
+        audit(actor, "attendance.payment_changed", record, {
+            "previous_source": previous_source,
+            "previous_subscription_id": previous_subscription_id,
+            "source": source, "subscription_id": record.payment_subscription_id,
+            "previous_financial_effects": previous_financial_effects,
+            "financial_effects": True,
+        })
+    return records
 
 
 def _reconcile_visit_charge(record, session, *, covered_by_subscription, actor):
@@ -139,6 +236,14 @@ def set_attendance(
 
     # Different sessions share the participant's balance, not a session lock.
     Student.objects.select_for_update(no_key=True).get(pk=student.pk)
+    if record.payment_source:
+        _reconcile_explicit_payment(record, session, actor=actor)
+        audit(actor, "attendance.cleared" if status is None else "attendance.marked", record, {
+            "status": str(status), "previous_status": previous_status,
+            "session": session_id, "source": source,
+            "financial_effects": record.financial_effects_enabled,
+        })
+        return record
     desired = -1 if status in DEDUCTING_STATUSES else 0
     current = _current_effect(record)
     diff = desired - current

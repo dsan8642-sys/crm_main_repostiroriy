@@ -109,7 +109,10 @@ def _session_attendance_payload(session):
     )
     student_ids = [student.id for student in roster]
     balances = family_balances({student.parent_id for student in roster})
-    attendance = {record.student_id: record for record in session.attendance.select_related("student") if record.status is not None}
+    attendance = {record.student_id: record for record in session.attendance.select_related(
+        "student", "session").prefetch_related(
+        "ledger_entries", "charges", "student__subscriptions__subscription_type",
+        "student__subscriptions__freeze_periods") if record.status is not None}
     split_roster_locked = session.session_type == SessionType.SPLIT and session.attendance.exists()
     one_off_participants = {
         participant.student_id: participant

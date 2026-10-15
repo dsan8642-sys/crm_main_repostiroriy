@@ -1,5 +1,5 @@
 // SwimCRM shared icon set — Lucide-style line icons.
-// 24px grid, 1.7px stroke, round caps/joins, currentColor. No fills.
+// 24px grid, 1.7px stroke, round caps/joins, currentColor.
 // Loaded as a Babel script by UI-kit pages; registers window.SwimIcons.
 (function () {
   const P = (d, size = 18, extra = null) => (props) => {
@@ -17,15 +17,26 @@
   const rect = (x, y, w, h, rx, key) => React.createElement('rect', { key: key || 'r' + x + y, x, y, width: w, height: h, rx });
   const line = (x1, y1, x2, y2, key) => React.createElement('line', { key: key || 'l' + x1 + y1, x1, y1, x2, y2 });
 
+  const trainerShape = [
+    React.createElement('circle', { key: 'head', cx: 12, cy: 5.4, r: 3.2, fill: 'currentColor', stroke: 'none' }),
+    React.createElement('path', { key: 'body', d: 'M8 10.2 9.6 10.5 11.3 14.6 10.7 17.3 11.8 17.7 12.7 17.5 13.3 15.7 13.3 15.1 12.7 14.6 14.2 10.9 14.6 10.2 16 10.2 17.7 11.3 19.9 14.6 20.8 16.4 20.6 17.9 17.5 21 16.4 21 15.7 20.6 15.7 22.1 8.3 22.1 8.3 20.6 7.4 21 6.3 20.8 3.2 17.5 3.2 16.4 4.1 14.6 6.3 11.3ZM10.2 10.2 13.8 10.2 12.2 14.2 11.8 14.2ZM7.6 14.4 5.8 16.4 5.8 17.1 8 19ZM16.6 14.4 16.2 15.5 16 19 18.2 17.1 18.2 16.4Z', fill: 'currentColor', fillRule: 'evenodd', stroke: 'none' }),
+  ];
+
   window.SwimIcons = {
     Home:       P([path('M3 11.5 12 4l9 7.5'), path('M5.5 10v9.5h13V10')]),
     Users:      P([path('M16 19v-1.5a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3V19'), circle(9.5, 8, 3.2), path('M17.5 19v-1.5a3 3 0 0 0-2.2-2.9'), path('M15 5.2a3 3 0 0 1 0 5.6')]),
     ClientFamily: P([circle(8.5, 7.5, 2.8), circle(16.5, 10, 2.2), path('M3.5 19v-1.3a4 4 0 0 1 4-4h2a4 4 0 0 1 4 4V19'), path('M13.5 19v-.8a3 3 0 0 1 3-3h.5a3 3 0 0 1 3 3v.8')]),
     GroupMembers: P([circle(12, 6.7, 2.8), circle(6, 9.2, 2), circle(18, 9.2, 2), path('M6.5 20v-1.2a5.5 5.5 0 0 1 11 0V20'), path('M2.5 20v-1a3.5 3.5 0 0 1 4.8-3.25'), path('M21.5 20v-1a3.5 3.5 0 0 0-4.8-3.25')]),
-    TrainerWhistle: P([circle(12, 6.5, 3), path('M5.5 20v-1.5a6.5 6.5 0 0 1 13 0V20'), path('M9.5 12.7 12 15l2.5-2.3'), path('M11 15h3.2l2.3 1v1.8l-2.3 1H13a2 2 0 0 1-2-2V15Z'), circle(13.2, 16.9, .55)]),
+    GroupMembersPlus: P([circle(8.5, 8, 2.8), circle(15.5, 10, 2.2), path('M2.5 20v-1a5.5 5.5 0 0 1 11 0v1'), path('M14 20v-1a3.5 3.5 0 0 1 6.5-1.8'), path('M20 2.5v6M17 5.5h6', 'plus')]),
+    Trainer:    P(trainerShape),
+    TrainerPlus: P([...trainerShape, path('M20 3v6M17 6h6', 'plus')]),
     User:       P([path('M18 20v-1.5a4 4 0 0 0-4-4H10a4 4 0 0 0-4 4V20'), circle(12, 7.5, 3.5)]),
+    UserPlus:   P([path('M14 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20'), circle(8, 7.5, 3.5), path('M19 7v8'), path('M15 11h8')]),
     Calendar:   P([rect(3.5, 5, 17, 15.5, 2), line(3.5, 9.5, 20.5, 9.5), line(8, 3, 8, 6.5), line(16, 3, 16, 6.5)]),
+    Swimmer:    P([circle(17, 5.5, 2), path('M3 12l6-2 4-4 5 3 3 1'), path('M2 16c2-1.4 3.5-1.4 5.5 0s3.5 1.4 5.5 0 3.5-1.4 5.5 0 3.5 1.4 5.5 0'), path('M2 20c2-1.4 3.5-1.4 5.5 0s3.5 1.4 5.5 0 3.5-1.4 5.5 0 3.5 1.4 5.5 0')]),
     Clock:      P([circle(12, 12, 8.5), path('M12 7.5V12l3 2')]),
+    History:    P([path('M3 8V4h4'), path('M3.5 8a9 9 0 1 1-.5 6'), path('M12 7.5V12l3 2')]),
+    HelpCircle: P([circle(12, 12, 9), path('M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2.3-2.5 4'), circle(12, 17, .5)]),
     Cash:       P([rect(3, 6.5, 18, 11, 2), circle(12, 12, 2.4), path('M6.5 9v6M17.5 9v6')]),
     Wallet:     P([path('M4 7.5A2.5 2.5 0 0 1 6.5 5H18a2 2 0 0 1 2 2v1.5'), path('M20 8.5H6.5A2.5 2.5 0 0 0 4 11v6a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1V9.5a1 1 0 0 0-1-1Z'), circle(16.5, 13.5, 1.3)]),
     Alert:      P([path('M12 4 21 20H3L12 4Z'), line(12, 10, 12, 14.5), path('M12 17.2h.01')]),
@@ -37,10 +48,12 @@
     Waves:      P([path('M3 8c1.5-1.5 3-1.5 4.5 0S10.5 9.5 12 8s3-1.5 4.5 0S19.5 9.5 21 8'), path('M3 13c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0'), path('M3 18c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0')]),
     Search:     P([circle(11, 11, 6.5), line(20, 20, 16, 16)]),
     Plus:       P('M12 5v14M5 12h14'),
+    Copy:       P([rect(8, 8, 13, 13, 2), path('M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3')]),
     Filter:     P('M4 6h16l-6 7v5l-4 2v-7L4 6Z'),
     Download:   P([path('M12 4v10'), path('M8 11l4 3 4-3'), path('M5 19h14')]),
     Upload:     P([path('M12 15V5'), path('M8 8l4-3 4 3'), path('M5 19h14')]),
     Check:      P('M5 12.5l4.5 4.5L19 7'),
+    CheckCheck: P([path('M2.5 12.5 7 17 17.5 6.5'), path('M11 16.5 13.5 19 22 10.5')]),
     X:          P('M6 6l12 12M18 6L6 18'),
     ChevronR:   P('M9 6l6 6-6 6'),
     ChevronD:   P('M6 9l6 6 6-6'),

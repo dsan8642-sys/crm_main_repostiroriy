@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { useLocale } from '../../i18n.jsx'
@@ -9,6 +9,7 @@ import {
   formErrorMessage,
 } from '../formErrors.js'
 import { FormModal } from '../FormModal.jsx'
+import { usePresence } from '../usePresence.js'
 
 const DATASETS = [
   { kind: 'trainers', label: 'import.dataset.trainers', help: 'import.help.trainers' },
@@ -19,14 +20,14 @@ const DATASETS = [
 ]
 
 const STATUS_META = {
-  new: ['import.status.new', '#1a7f37'],
-  matched: ['import.status.matched', '#1a7f37'],
-  will_create_session: ['import.status.willCreateSession', '#9a6700'],
-  duplicate: ['import.status.duplicate', '#9a6700'],
-  possible_duplicate: ['import.status.possibleDuplicate', '#b54708'],
-  update: ['import.status.update', '#0969da'],
-  skipped: ['import.status.skipped', '#57606a'],
-  error: ['import.status.error', '#cf222e'],
+  new: ['import.status.new', 'var(--status-paid-fg)'],
+  matched: ['import.status.matched', 'var(--status-paid-fg)'],
+  will_create_session: ['import.status.willCreateSession', 'var(--status-pending-fg)'],
+  duplicate: ['import.status.duplicate', 'var(--status-pending-fg)'],
+  possible_duplicate: ['import.status.possibleDuplicate', 'var(--status-pending-fg)'],
+  update: ['import.status.update', 'var(--text-link)'],
+  skipped: ['import.status.skipped', 'var(--text-muted)'],
+  error: ['import.status.error', 'var(--status-overdue-fg)'],
 }
 
 const READY = new Set(['new', 'update', 'matched', 'will_create_session', 'possible_duplicate'])
@@ -38,7 +39,7 @@ function cleanMapping(mapping) {
 function StatusText({ status }) {
   const { locale } = useLocale()
   const t = adminTranslator(locale)
-  const [label, color] = STATUS_META[status] || [null, '#57606a']
+  const [label, color] = STATUS_META[status] || [null, 'var(--text-muted)']
   return <span style={{ color, fontWeight: 650 }}>{label ? t(label) : status}</span>
 }
 
@@ -250,7 +251,7 @@ function ClientSearch({ Button, disabled, onChoose }) {
   </div>
 }
 
-function RowEditor({ state, row, Button, Banner, onClose }) {
+function RowEditor({ state, row, open, Button, Banner, onClose }) {
   const { locale } = useLocale()
   const t = adminTranslator(locale)
   const editable = state.fieldOptions.filter((field) => field.editable)
@@ -281,7 +282,7 @@ function RowEditor({ state, row, Button, Banner, onClose }) {
 
   const baseline = Object.fromEntries(editable.map((field) => [field.key, row.data?.[field.key] ?? '']))
 
-  return <FormModal open title={t('import.rowEditorTitle', { index: row.index })} size="lg" busy={state.busy} dirty={JSON.stringify(values) !== JSON.stringify(baseline)} onRequestClose={onClose} footer={({ requestClose }) => <><Button variant="secondary" disabled={state.busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>{t('import.saveCorrections')}</Button></>}>
+  return <FormModal open={open} title={t('import.rowEditorTitle', { index: row.index })} size="lg" busy={state.busy} dirty={JSON.stringify(values) !== JSON.stringify(baseline)} onRequestClose={onClose} footer={({ requestClose }) => <><Button variant="secondary" disabled={state.busy} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" loading={state.busy} disabled={state.busy} onClick={save}>{t('import.saveCorrections')}</Button></>}>
     {state.error && <Banner tone="danger" onClose={() => state.setError('')}>{state.error}</Banner>}
     <div className="ops-form-grid">
       {editable.map((field) => <label key={field.key}>
@@ -314,6 +315,10 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [editing, setEditing] = useState(null)
+  const editorPresence = usePresence(Boolean(editing))
+  const lastEditing = useRef(null)
+  if (editing) lastEditing.current = editing
+  const shownEditing = editing || lastEditing.current
   const [bulkClient, setBulkClient] = useState(null)
 
   const visibleRows = useMemo(() => state.rows.filter((row) => {
@@ -435,7 +440,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       </div>
       <Table rows={visibleRows} rowKey={(row) => row.row_key || row.index} columns={columns} density="sm"
         emptyLabel={t('import.noFilteredRows')} />
-      {editing && <RowEditor state={state} row={state.rows.find((row) => row.index === editing)}
+      {editorPresence.present && shownEditing && <RowEditor state={state} row={state.rows.find((row) => row.index === shownEditing)} open={Boolean(editing)}
         Button={Button} Banner={Banner} onClose={() => { state.setError(''); setEditing(null) }} />}
       <div className="card card-pad" style={{ display: 'grid', gap: 10 }}>
         <div className="eyebrow">{t('import.bulkActions', { count: state.selected.length })}</div>

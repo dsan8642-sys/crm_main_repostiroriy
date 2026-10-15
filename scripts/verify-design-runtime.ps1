@@ -11,8 +11,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $pairs = @(
+    @("design\appearance.json", "frontend\src\design\appearance.json"),
+    @("design\tokens\appearance.css", "frontend\src\design\tokens\appearance.css"),
     @("design\styles.css", "frontend\src\design\styles.css"),
     @("design\tokens\colors.css", "frontend\src\design\tokens\colors.css"),
+    @("design\tokens\themes.css", "frontend\src\design\tokens\themes.css"),
     @("design\tokens\fonts.css", "frontend\src\design\tokens\fonts.css"),
     @("design\tokens\typography.css", "frontend\src\design\tokens\typography.css"),
     @("design\tokens\schedule-palette.json", "frontend\src\design\tokens\schedule-palette.json"),

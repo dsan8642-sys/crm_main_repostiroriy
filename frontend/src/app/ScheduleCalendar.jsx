@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { DateField } from './DateTimeField.jsx'
 import {
   calendarDates,
@@ -11,7 +11,7 @@ import { scheduleColorStyle } from './schedulePalette.js'
 import { useLocale } from '../i18n.jsx'
 import { uiLocaleTag } from '../localeContracts.js'
 
-const VIEW_KEYS = { day: 'calendar.day', week: 'calendar.week', month: 'calendar.month' }
+const VIEW_KEYS = { week: 'calendar.week', month: 'calendar.month' }
 
 export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
   const { t } = useLocale()
@@ -35,7 +35,7 @@ export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
         data-testid="schedule-view-list"
         onClick={() => setDisplayMode('list')}
       >
-        {ListIcon && <ListIcon size={15} />}<span>{t('calendar.list')}</span>
+        {ListIcon && <ListIcon className="ops-view-switcher-icon" size={18} aria-hidden="true" />}<span>{t('calendar.list')}</span>
       </button>
     </div>
   )
@@ -48,7 +48,14 @@ export function CalendarNavigation({
   setViewMode,
   mobileArrows = false,
 }) {
-  const { t } = useLocale()
+  const { locale, t } = useLocale()
+  const localeTag = uiLocaleTag(locale)
+  const weekDates = calendarDates(focusDate, 'week')
+  const selectedDateRef = useRef(null)
+  useEffect(() => {
+    selectedDateRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [focusDate])
+  const changeWeek = (direction) => setFocusDate(moveCalendarFocus(focusDate, viewMode, direction))
   return (
     <div className="ops-calendar-navigation">
       <div className="seg" role="group" aria-label={t('calendar.period')} data-testid="schedule-calendar-view-switch">
@@ -86,6 +93,16 @@ export function CalendarNavigation({
           >›</button>
         )}
         <button className="ops-calendar-today" type="button" onClick={() => setFocusDate(localToday())}>{t('calendar.today')}</button>
+      </div>
+      <div className="ops-mobile-date-navigation">
+        <button type="button" className="ops-calendar-period-arrow" aria-label={t('calendar.previousPeriod', undefined, { period: t(VIEW_KEYS[viewMode === 'month' ? 'month' : 'week']) })} onClick={() => changeWeek(-1)}>‹</button>
+        <div className="ops-mobile-date-strip" role="group" aria-label={t('calendar.weekdays')}>
+          {weekDates.map((date) => {
+            const parsed = dateFromIso(date)
+            return <button key={date} ref={date === focusDate ? selectedDateRef : null} type="button" data-testid={`schedule-day-${date}`} className={date === focusDate ? 'is-selected' : ''} aria-pressed={date === focusDate} aria-label={parsed.toLocaleDateString(localeTag, { dateStyle: 'full' })} onClick={() => setFocusDate(date)}><span>{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</span><strong>{parsed.getDate()}</strong></button>
+          })}
+        </div>
+        <button type="button" className="ops-calendar-period-arrow" aria-label={t('calendar.nextPeriod', undefined, { period: t(VIEW_KEYS[viewMode === 'month' ? 'month' : 'week']) })} onClick={() => changeWeek(1)}>›</button>
       </div>
       <span className="ops-calendar-announcement" role="status" aria-live="polite">
         {t(VIEW_KEYS[viewMode])} · {focusDate}
@@ -139,7 +156,7 @@ export function scheduleOccupancyLabel(session, t = (_key, fallback) => fallback
   return t('calendar.occupancy', `Записано ${count} из ${limit}`, { count, limit })
 }
 
-export function ScheduleEventContent({ session }) {
+export function ScheduleEventContent({ session, icons }) {
   const { t } = useLocale()
   const occupancy = scheduleOccupancy(session)
   const supportingLabel = scheduleEventSupportingLabel(session, t)
@@ -152,15 +169,15 @@ export function ScheduleEventContent({ session }) {
   return (
     <>
       <span className="ops-event-primary">
-        <span className="mono">{session.start}-{session.end}</span>
+        <span className="mono">{icons?.Clock && <icons.Clock size={14} aria-hidden="true" />}{session.start}-{session.end}</span>
         {occupancy && <span className="ops-event-occupancy" aria-label={scheduleOccupancyLabel(session)}>{occupancy}</span>}
       </span>
       <strong className="ops-event-title">{scheduleEventHeading(session, t)}</strong>
       {supportingLabel && (splitRosterNames
         ? <span className="ops-event-type is-split-roster"><span className="ops-event-roster-names">{splitRosterNames}</span>{hiddenSplitCount > 0 && <span className="ops-event-roster-count">· +{hiddenSplitCount}</span>}</span>
         : <span className="ops-event-type">{supportingLabel}</span>)}
-      {session.trainer && <small className="ops-event-secondary ops-event-trainer">{session.trainer}</small>}
-      {session.location && <small className="ops-event-secondary ops-event-location">{session.location}</small>}
+      {session.trainer && <small className="ops-event-secondary ops-event-trainer">{icons?.Trainer && <icons.Trainer size={14} aria-hidden="true" />}{session.trainer}</small>}
+      {session.location && <small className="ops-event-secondary ops-event-location">{icons?.Location && <icons.Location size={14} aria-hidden="true" />}{session.location}</small>}
     </>
   )
 }
@@ -241,7 +258,7 @@ export function ScheduleCalendar({
 
   function chooseDate(date) {
     setFocusDate(date)
-    setViewMode('day')
+    setViewMode('week')
   }
 
   function eventNode(session) {
@@ -250,7 +267,7 @@ export function ScheduleCalendar({
       : <DefaultEvent session={session} onOpenSession={onOpenSession} />
   }
 
-  const periodDates = viewMode === 'day' ? dates : dates.slice(0, 7)
+  const periodDates = dates.slice(0, 7)
 
   return (
     <div
@@ -260,51 +277,21 @@ export function ScheduleCalendar({
     >
       <div className={`ops-calendar-period-header is-${viewMode}`} data-testid={viewMode === 'month' ? 'month-weekday-header' : undefined}>
         <PeriodArrow direction="previous" focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} />
-        {viewMode === 'day' ? (
-          <div className="ops-calendar-day-heading">
-            {dateFromIso(focusDate).toLocaleDateString(localeTag, { weekday: 'long', day: 'numeric', month: 'long' })}
-          </div>
-        ) : (
-          <div className="ops-calendar-weekday-row">
-            {periodDates.map((date) => {
-              const parsed = dateFromIso(date)
-              return (
-                <div className="ops-calendar-weekday" key={`weekday-${date}`}>
-                  <strong>{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</strong>
-                  {viewMode === 'week' && <span>{parsed.toLocaleDateString(localeTag, { day: 'numeric', month: 'short' })}</span>}
-                </div>
-              )
-            })}
-          </div>
-        )}
+        <div className="ops-calendar-weekday-row">
+          {periodDates.map((date) => {
+            const parsed = dateFromIso(date)
+            return (
+              <div className="ops-calendar-weekday" key={`weekday-${date}`}>
+                <strong>{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</strong>
+                {viewMode === 'week' && <span>{parsed.toLocaleDateString(localeTag, { day: 'numeric', month: 'short' })}</span>}
+              </div>
+            )
+          })}
+        </div>
         <PeriodArrow direction="next" focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} />
       </div>
       {viewMode === 'week' && (
         <div className="ops-mobile-week">
-          <div className="ops-mobile-week-nav">
-            <PeriodArrow direction="previous" focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} />
-            <div className="ops-mobile-week-strip" role="tablist" aria-label={t('calendar.weekdays')}>
-              {dates.map((date) => {
-                const parsed = dateFromIso(date)
-                const count = grouped[date]?.length || 0
-                return (
-                  <button
-                    type="button"
-                    role="tab"
-                    key={date}
-                    aria-selected={date === focusDate}
-                    aria-label={`${parsed.toLocaleDateString(localeTag, { dateStyle: 'long' })}. ${t('calendar.sessionCount', undefined, { count })}`}
-                    onClick={() => setFocusDate(date)}
-                  >
-                    <span>{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</span>
-                    <strong>{parsed.getDate()}</strong>
-                    {count > 0 && <span className="ops-mobile-week-dot" aria-hidden="true" />}
-                  </button>
-                )
-              })}
-            </div>
-            <PeriodArrow direction="next" focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} />
-          </div>
           <div className="ops-mobile-week-events">
             {(grouped[focusDate] || []).map((session) => <React.Fragment key={session.id}>{eventNode(session)}</React.Fragment>)}
             {!(grouped[focusDate] || []).length && <span className="ops-schedule-empty-day">{t('calendar.noSessions')}</span>}
@@ -352,6 +339,8 @@ export function ScheduleList({
   testId,
   emptyLabel,
   groupByDate = false,
+  icons,
+  renderAction,
 }) {
   const { locale, t } = useLocale()
   const localeTag = uiLocaleTag(locale)
@@ -376,6 +365,19 @@ export function ScheduleList({
       session.trainer,
       session.location,
     ].filter(Boolean).join(' · ')
+    if (groupByDate) {
+      return <div className={`ops-mobile-session-row${session.isCancelled || session.status === 'cancelled' ? ' is-cancelled' : ''}`} key={session.id} data-color-key={session.colorKey || 'standard'} style={scheduleColorStyle(session.colorKey)}>
+        <button type="button" className="ops-mobile-session-open" aria-label={`${dateLabel}. ${eventAccessibleLabel(session, t)}`} data-testid={`schedule-session-${session.id}`} onClick={() => onOpenSession(session)}>
+          <time className="ops-mobile-session-start">{session.start}</time>
+          <span className="ops-mobile-session-info"><strong>{scheduleEventTitle(session, t)}</strong><small className="ops-mobile-session-meta">
+            <span>{icons?.Clock && <icons.Clock size={14} aria-hidden="true" />}{session.start}-{session.end}</span>
+            {session.trainer && <span>{icons?.Trainer && <icons.Trainer size={14} aria-hidden="true" />}{session.trainer}</span>}
+            {session.location && <span>{icons?.Location && <icons.Location size={14} aria-hidden="true" />}{session.location}</span>}
+          </small></span>
+        </button>
+        <div className="ops-mobile-session-side">{renderAction?.(session)}{renderStatus?.(session)}</div>
+      </div>
+    }
     return (
       <button
         type="button"

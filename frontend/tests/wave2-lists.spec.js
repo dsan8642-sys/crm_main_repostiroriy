@@ -88,6 +88,7 @@ test('screen-owned clients enforce Wave 2 search, filters and page policy', asyn
   })
 
   await page.goto('/?role=admin&view=clients')
+  await page.getByTestId('admin-clients-filter-toggle').click()
   const rows = width === 390
     ? page.locator('.ops-client-mobile-list article')
     : page.locator('.ops-client-desktop-table tbody tr')
@@ -122,7 +123,7 @@ test('screen-owned clients enforce Wave 2 search, filters and page policy', asyn
     await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '0')
     await expect(page.getByTestId('list-empty')).toBeVisible()
     await expect(page.getByTestId('list-empty-reset')).toHaveCount(1)
-    const geometry = await page.locator('.ops-command-row').evaluate((node) => {
+    const geometry = await page.locator('.ops-list-tools').evaluate((node) => {
       const box = node.getBoundingClientRect()
       return {
         left: box.left,
@@ -135,4 +136,29 @@ test('screen-owned clients enforce Wave 2 search, filters and page policy', asyn
     expect(geometry.right).toBeLessThanOrEqual(geometry.viewport)
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewport)
   }
+})
+
+test('subscriptions list settles without repeated requests', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'phone and desktop list behavior')
+  let requests = 0
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/admin/subscriptions/') requests += 1
+    const payload = {
+      '/api/health/': { status: 'ok' },
+      '/api/me/': { id: 901, username: 'wave2-admin', role: 'admin' },
+      '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+      '/api/admin/reference/': { trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [], choices: { payment_methods: [], notification_channels: [] }, notification_settings: {} },
+      '/api/admin/subscriptions/': { subscriptions: [], counts: {}, pagination: { page: 1, page_size: 50, total: 0, pages: 0, has_next: false, has_previous: false } },
+    }[path] || {}
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) })
+  })
+
+  await page.goto('/?role=admin&view=subscriptions')
+  await expect(page.locator('.ops-subscriptions-page')).toBeVisible()
+  await expect(page.getByTestId('list-empty')).toBeVisible()
+  const settledRequests = requests
+  await page.waitForTimeout(350)
+  expect(settledRequests).toBeLessThanOrEqual(2)
+  expect(requests).toBe(settledRequests)
 })

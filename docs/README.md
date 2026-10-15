@@ -35,6 +35,13 @@ models и migrations.
 | [`PRODUCTION_CUTOVER_EVIDENCE.example.json`](PRODUCTION_CUTOVER_EVIDENCE.example.json) | Шаблон доказательств production cutover |
 | [`PRODUCTION_READINESS_AUDIT.json`](PRODUCTION_READINESS_AUDIT.json) | Проверяемый снимок production readiness |
 
+## Инструкции для пользователей CRM
+
+- [`user_guides/SwimCRM_admin_guide_text_ru.docx`](user_guides/SwimCRM_admin_guide_text_ru.docx) — полное текстовое руководство администратора.
+- [`user_guides/SwimCRM_admin_guide_visual_ru.docx`](user_guides/SwimCRM_admin_guide_visual_ru.docx) — руководство администратора с реальными экранами CRM и пошаговыми подсказками.
+- [`user_guides/SwimCRM_trainer_guide_text_ru.docx`](user_guides/SwimCRM_trainer_guide_text_ru.docx) — текстовое руководство тренера.
+- [`user_guides/SwimCRM_trainer_guide_visual_ru.docx`](user_guides/SwimCRM_trainer_guide_visual_ru.docx) — руководство тренера со скриншотами.
+
 ## Справочные и исторические материалы
 
 Эти файлы полезны для контекста, но не должны переопределять действующий код и

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { adminLocaleTag } from '../../adminLocales.js'
 import { adminFinanceTranslator } from '../../adminFinanceLocales.js'
@@ -22,11 +22,12 @@ import { BusyBanner } from '../runtime.jsx'
 import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { DateField } from '../DateTimeField.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
-import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
+import { AccessCodeCard } from '../AccessControls.jsx'
 import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
-import { ContextBackButton } from '../EntityListPrimitives.jsx'
+import { ActionPopover, ContextBackButton } from '../EntityListPrimitives.jsx'
 import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
+import { usePresence } from '../usePresence.js'
 
 const PARTICIPANT_FIELD_IDS = {
   firstName: 'admin-client-participant-first-name',
@@ -44,22 +45,15 @@ const PAYMENT_FIELD_IDS = {
 const FINANCE_FIELD_IDS = {
   participantId: 'admin-client-finance-participant',
   subscriptionId: 'admin-client-finance-subscription',
-  subscriptionAction: 'admin-client-finance-subscription-action',
   subscriptionTypeId: 'admin-client-finance-subscription-type',
   amount: 'admin-client-finance-amount', description: 'admin-client-finance-description',
   startDate: 'admin-client-finance-start-date', dueDate: 'admin-client-finance-due-date',
-  subscriptionEndDate: 'admin-client-finance-subscription-end-date',
   paymentReceived: 'admin-client-finance-payment-received',
   paymentMethod: 'admin-client-finance-payment-method',
   paymentDate: 'admin-client-finance-payment-date',
-  freezeStart: 'admin-client-finance-freeze-start',
-  freezeEnd: 'admin-client-finance-freeze-end',
-  freezeReason: 'admin-client-finance-freeze-reason',
-  adjustDelta: 'admin-client-finance-adjust-delta',
-  adjustNote: 'admin-client-finance-adjust-note',
 }
 
-const SUBSCRIPTION_EDIT_ACTIONS = ['edit', 'renew', 'freeze', 'adjust']
+const SUBSCRIPTION_EDIT_ACTIONS = ['renew']
 
 function internationalPhoneDigits(value) {
   const compact = String(value || '').replace(/[\s().-]/g, '')
@@ -84,6 +78,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const t = useMemo(() => adminFinanceTranslator(locale), [locale])
     const localeTag = adminLocaleTag(locale)
     const formatLocalDate = (value) => new Intl.DateTimeFormat(localeTag).format(new Date(value))
+    const subscriptionLabel = (subscription) => subscription?.start_date
+      ? t('finance.subscriptionStarted', { name: subscription.type, date: formatLocalDate(subscription.start_date) })
+      : subscription?.type || ''
     const formatLocalShortDate = (value) => new Intl.DateTimeFormat(localeTag, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(value))
     const fallbackClientId = clientId || adminData.clients?.find((row) => row.clientId)?.clientId
     const [tab, setTab] = useState('participants')
@@ -97,6 +94,21 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const [refreshKey, setRefreshKey] = useState(0)
     const [paymentPanelOpen, setPaymentPanelOpen] = useState(false)
     const [financeAction, setFinanceAction] = useState(null)
+    const [openedSubscriptionId, setOpenedSubscriptionId] = useState(null)
+    const [subscriptionEditing, setSubscriptionEditing] = useState(false)
+    const [subscriptionDraft, setSubscriptionDraft] = useState(null)
+    const [subscriptionError, setSubscriptionError] = useState(null)
+    const [attendanceEditing, setAttendanceEditing] = useState(false)
+    const attendancePaymentPresence = usePresence(attendanceEditing)
+    const [attendanceIds, setAttendanceIds] = useState([])
+    const [attendanceSource, setAttendanceSource] = useState('subscription')
+    const [attendanceSubscriptionId, setAttendanceSubscriptionId] = useState('')
+    const [attendanceError, setAttendanceError] = useState(null)
+    const [attendancePaymentFilter, setAttendancePaymentFilter] = useState([])
+    const [attendanceStatusFilter, setAttendanceStatusFilter] = useState([])
+    const [attendanceFiltersOpen, setAttendanceFiltersOpen] = useState(false)
+    const attendanceFilterPresence = usePresence(attendanceFiltersOpen)
+    const [mobilePaymentView, setMobilePaymentView] = useState('topups')
     const [editingAccount, setEditingAccount] = useState(false)
     const [accountForm, setAccountForm] = useState({ firstName: '', lastName: '', email: '', username: '', phone: '', telegramChatId: '', instagramUsername: '', preferredLanguage: 'ru' })
     const [accountBaseline, setAccountBaseline] = useState(null)
@@ -123,17 +135,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       description: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
-      subscriptionEndDate: '',
       paymentReceived: false,
       paymentMethod: 'cash',
       paymentDate: new Date().toISOString().slice(0, 10),
       chargeIdempotencyKey: createPaymentAttemptKey('admin-charge'),
       subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
-      freezeStart: new Date().toISOString().slice(0, 10),
-      freezeEnd: '',
-      freezeReason: '',
-      adjustDelta: '',
-      adjustNote: '',
     })
     const [financeFieldErrors, setFinanceFieldErrors] = useState({})
     const [financeBaseline, setFinanceBaseline] = useState(null)
@@ -190,11 +196,33 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const selectedSubscriptions = useMemo(() => subscriptions.filter(
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
     ), [selectedParticipantId, subscriptions])
+    const openedSubscription = subscriptions.find((row) => String(row.id) === String(openedSubscriptionId))
     const selectedCharges = charges
     const selectedPayments = payments
     const selectedAttendance = useMemo(() => attendance.filter(
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
     ), [attendance, selectedParticipantId])
+    const filteredAttendance = selectedAttendance.filter((row) => (
+      (!attendancePaymentFilter.length || attendancePaymentFilter.includes(row.payment_source || 'none'))
+      && (!attendanceStatusFilter.length || attendanceStatusFilter.includes(
+        row.status === 'excused' ? 'absent' : row.status,
+      ))
+    ))
+    const editableAttendance = filteredAttendance.filter((row) => row.deducts)
+    const selectedHistoricalAttendance = selectedAttendance.some(
+      (row) => attendanceIds.includes(row.id) && row.financial_effects_enabled === false,
+    )
+    const paymentSubscriptions = selectedSubscriptions.filter((row) => row.can_assign_attendance)
+    const paymentSubscription = paymentSubscriptions.find((row) => String(row.id) === attendanceSubscriptionId)
+    const paymentRemaining = paymentSubscription?.remaining_sessions == null ? null
+      : paymentSubscription.remaining_sessions - selectedAttendance.filter((row) => attendanceIds.includes(row.id)
+        && String(row.payment_subscription_id || '') !== attendanceSubscriptionId).length
+
+    useEffect(() => {
+      setAttendanceEditing(false)
+      setAttendanceIds([])
+      setAttendanceError(null)
+    }, [selectedParticipantId, fallbackClientId, tab, attendancePaymentFilter, attendanceStatusFilter])
     const selectedSubscription = subscriptions.find((subscription) => (
       String(subscription.participant_id) === String(selectedParticipant?.id)
         && subscription.status === 'active'
@@ -207,7 +235,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const participantName = (id) => participants.find((participant) => participant.id === id)?.full_name || '-'
     const money = (minor) => asMoneyMajor(minor || 0)
     const accountBalance = asAccountBalance(summary.balance_minor)
-    const selectedParticipantBalance = accountBalance
     const status = (value) => {
       if (value === 'active') return 'active'
       if (value === 'confirmed') return 'paid'
@@ -236,7 +263,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         subscriptionTypeId: subscription?.subscription_type_id
           ? String(subscription.subscription_type_id)
           : current.subscriptionTypeId,
-        subscriptionEndDate: subscription?.effective_end_date || '',
       }))
       setFinanceFieldErrors((current) => clearFieldError(current, 'subscriptionId'))
     }
@@ -396,15 +422,101 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         ),
         subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
         paymentReceived: false,
-        subscriptionEndDate: selectedSubscription?.effective_end_date || '',
       }
       setFinanceForm(next)
       setFinanceBaseline(next)
       setFinanceFieldErrors({})
-      setFinanceAction('edit')
+      setFinanceAction('renew')
       setPaymentPanelOpen(false)
       setPaymentBaseline(null)
       setError(null)
+    }
+
+    function openSubscriptionDetails(subscription, edit = false) {
+      if (!subscription) return
+      setOpenedSubscriptionId(subscription.id)
+      setSubscriptionEditing(edit)
+      setSubscriptionDraft({
+        startDate: subscription.start_date || '',
+        endDate: subscription.effective_end_date || '',
+        remaining: subscription.remaining_sessions == null ? '' : String(subscription.remaining_sessions),
+        freezeStart: '', freezeEnd: '', reasonPreset: '', customReason: '',
+      })
+      setSubscriptionError(null)
+    }
+
+    async function saveSubscriptionDetails() {
+      const subscription = openedSubscription
+      if (!subscription || !subscriptionDraft) return
+      const draft = subscriptionDraft
+      const changes = {}
+      if (draft.startDate !== subscription.start_date || draft.endDate !== subscription.effective_end_date) {
+        if (!validIsoDate(draft.startDate) || !validIsoDate(draft.endDate) || draft.endDate < draft.startDate) {
+          setSubscriptionError(t('finance.subscriptionDatesError'))
+          return
+        }
+      }
+      if (draft.startDate !== subscription.start_date) changes.start_date = draft.startDate
+      if (draft.endDate !== subscription.effective_end_date) {
+        changes.effective_end_date = draft.endDate
+      }
+      if (subscription.remaining_sessions != null && draft.remaining !== String(subscription.remaining_sessions)) {
+        const remaining = Number(draft.remaining)
+        if (!draft.remaining.trim() || !Number.isInteger(remaining) || remaining < 0) {
+          setSubscriptionError(t('finance.targetRemainingError'))
+          return
+        }
+        changes.remaining_sessions = remaining
+      }
+      if (draft.freezeStart || draft.freezeEnd) {
+        if (!validIsoDate(draft.freezeStart) || !validIsoDate(draft.freezeEnd) || draft.freezeEnd < draft.freezeStart) {
+          setSubscriptionError(t('finance.freezeOrderError'))
+          return
+        }
+        changes.freeze = { start_date: draft.freezeStart, end_date: draft.freezeEnd }
+      }
+      if (!Object.keys(changes).length) {
+        setSubscriptionError(t('finance.noSubscriptionChanges'))
+        return
+      }
+      const reason = draft.reasonPreset === 'other' ? draft.customReason.trim() : draft.reasonPreset
+      if (!reason || reason.length > 255) {
+        setSubscriptionError(t('finance.subscriptionReasonRequired'))
+        return
+      }
+      setSubscriptionError(null)
+      setActionBusy('combined-subscription')
+      try {
+        await api.post(`/api/admin/subscriptions/${subscription.id}/update/`, { ...changes, reason })
+        setSubscriptionEditing(false)
+        setMessage(t('finance.subscriptionUpdated'))
+        refreshDetail()
+      } catch (err) {
+        setSubscriptionError(formErrorMessage(err, t('finance.operationError')))
+      } finally {
+        setActionBusy(null)
+      }
+    }
+
+    async function saveAttendancePayment() {
+      if (!attendanceIds.length || (attendanceSource === 'subscription' && !paymentSubscription)) return
+      setActionBusy('attendance-payment')
+      setAttendanceError(null)
+      try {
+        await api.post(`/api/admin/participants/${selectedParticipant.id}/attendance/payment/`, {
+          attendance_ids: attendanceIds,
+          source: attendanceSource,
+          ...(attendanceSource === 'subscription' ? { subscription_id: paymentSubscription.id } : {}),
+        })
+        setAttendanceEditing(false)
+        setAttendanceIds([])
+        setMessage(t('finance.attendancePaymentUpdated'))
+        refreshDetail()
+      } catch (err) {
+        setAttendanceError(formErrorMessage(err, t('finance.operationError')))
+      } finally {
+        setActionBusy(null)
+      }
     }
 
     useEffect(() => {
@@ -421,12 +533,15 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         subscriptionId: String(selectedSubscription?.id || ''),
         subscriptionTypeId: String(
           selectedSubscription?.subscription_type_id || subscriptionTypes[0]?.typeId || ''),
-        subscriptionEndDate: selectedSubscription?.effective_end_date || '',
         subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
         paymentReceived: false,
       }
       financeRouteHandledRef.current = true
       setTab('subscriptions')
+      if (['edit', 'freeze', 'adjust'].includes(initialFinanceAction)) {
+        openSubscriptionDetails(selectedSubscription || subscriptions[0], true)
+        return
+      }
       setFinanceForm(next)
       setFinanceBaseline(next)
       setFinanceFieldErrors({})
@@ -633,25 +748,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         if (financeForm.paymentReceived && !financeForm.paymentMethod) nextErrors.paymentMethod = t('finance.paymentMethodError')
         if (financeForm.paymentReceived && !validIsoDate(financeForm.paymentDate)) nextErrors.paymentDate = t('finance.paymentDateError')
       }
-      if (financeAction === 'freeze') {
-        if (!validIsoDate(financeForm.freezeStart)) nextErrors.freezeStart = t('finance.freezeStartShortError')
-        if (!validIsoDate(financeForm.freezeEnd)) nextErrors.freezeEnd = t('finance.freezeEndShortError')
-        if (validIsoDate(financeForm.freezeStart) && validIsoDate(financeForm.freezeEnd) && financeForm.freezeEnd < financeForm.freezeStart) nextErrors.freezeEnd = t('finance.freezeOrderError')
-      }
-      if (financeAction === 'edit') {
-        const selectedSubscription = subscriptions.find(
-          (item) => String(item.id) === String(financeForm.subscriptionId),
-        )
-        if (!validIsoDate(financeForm.subscriptionEndDate)) {
-          nextErrors.subscriptionEndDate = t('finance.subscriptionEndDateError')
-        } else if (selectedSubscription?.start_date && financeForm.subscriptionEndDate < selectedSubscription.start_date) {
-          nextErrors.subscriptionEndDate = t('finance.subscriptionEndBeforeStartError')
-        }
-      }
-      if (financeAction === 'adjust') {
-        const delta = Number(financeForm.adjustDelta)
-        if (!Number.isInteger(delta) || delta === 0) nextErrors.adjustDelta = t('finance.adjustDeltaError')
-      }
       if (Object.keys(nextErrors).length) {
         setFinanceFieldErrors(nextErrors)
         setError(null)
@@ -698,27 +794,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           })
           setMessage(t(financeForm.paymentReceived ? 'finance.subscriptionRenewedPaid' : 'finance.subscriptionRenewed'))
         }
-        if (financeAction === 'freeze') {
-          const result = await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/freeze/`, {
-            start_date: financeForm.freezeStart,
-            end_date: financeForm.freezeEnd,
-            reason: financeForm.freezeReason,
-          })
-          setMessage(t('finance.frozenDays', { count: result.days }))
-        }
-        if (financeAction === 'edit') {
-          await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/`, {
-            effective_end_date: financeForm.subscriptionEndDate,
-          })
-          setMessage(t('finance.subscriptionEndDateUpdated'))
-        }
-        if (financeAction === 'adjust') {
-          await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/adjust/`, {
-            delta: Number(financeForm.adjustDelta || 0),
-            note: financeForm.adjustNote,
-          })
-          setMessage(t('finance.remainingAdjusted'))
-        }
         setFinanceAction(null)
         setFinanceBaseline(null)
         refreshDetail()
@@ -726,11 +801,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         const nextFieldErrors = fieldErrorsFromApi(err, {
           participant_id: 'participantId', subscription_id: 'subscriptionId',
           subscription_type_id: 'subscriptionTypeId', amount_minor: 'amount',
-          description: 'description', start_date: financeAction === 'freeze' ? 'freezeStart' : 'startDate',
-          due_date: 'dueDate', end_date: 'freezeEnd', reason: 'freezeReason',
-          effective_end_date: 'subscriptionEndDate',
+          description: 'description', start_date: 'startDate',
+          due_date: 'dueDate',
           payment_method: 'paymentMethod', payment_date: 'paymentDate',
-          delta: 'adjustDelta', note: 'adjustNote', idempotency_key: 'subscriptionTypeId',
+          idempotency_key: 'subscriptionTypeId',
           currency: 'amount',
         })
         setFinanceFieldErrors(nextFieldErrors)
@@ -807,13 +881,43 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     }
 
     const subscriptionEditorOpen = SUBSCRIPTION_EDIT_ACTIONS.includes(financeAction)
+    const activeSubscriptions = selectedSubscriptions.filter((row) => row.status === 'active')
+    const currentSubscription = activeSubscriptions[0] || selectedSubscriptions.find((row) => row.status === 'frozen')
+    const pendingPayments = summary.pending_payments ?? selectedPayments.filter((row) => row.status === 'pending').length
+    const hubSections = [
+      { value: 'payments', label: t('payments.title'), Icon: I.Wallet, count: selectedPayments.length + selectedCharges.length,
+        valueLabel: <Money amount={accountBalance} signed currency="zł" size="inherit" />,
+        detail: pendingPayments ? `${t('client.awaitingReview')}: ${pendingPayments}` : t('finance.familyBalance') },
+      { value: 'subscriptions', label: t('client.subscriptions'), Icon: I.Ticket, count: selectedSubscriptions.length,
+        valueLabel: currentSubscription ? currentSubscription.remaining_sessions == null ? t('field.noLimit') : t('field.remainingPrefix', { count: currentSubscription.remaining_sessions }) : '—',
+        detail: currentSubscription ? `${currentSubscription.status === 'frozen' ? t('status.frozen') : t('client.activeCount', { count: activeSubscriptions.length })}${currentSubscription.effective_end_date ? ` · ${t('client.passUntil', { date: formatLocalDate(currentSubscription.effective_end_date) })}` : ''}` : t('client.noSubscriptions') },
+      { value: 'participants', label: t('client.participants'), Icon: I.Users, valueLabel: participants.length,
+        detail: t('client.activeCount', { count: summary.active_participants ?? participants.filter((row) => row.is_active).length }) },
+      { value: 'attendance', label: t('client.attendance'), Icon: I.History, valueLabel: selectedAttendance.length,
+        detail: selectedAttendance[0]?.session_start_at ? t('client.lastVisit', { date: formatLocalDate(selectedAttendance[0].session_start_at) }) : t('client.noAttendance') },
+      { value: 'consents', label: t('client.consents'), Icon: I.Check, count: consents.length },
+      { value: 'privacy', label: t('client.privacy'), Icon: I.File },
+    ]
+    const accountActions = [
+      !accountArchived && { key: 'edit', testId: 'admin-client-edit-account', label: t('client.edit'), disabled: loading || actionBusy != null, onSelect: openAccountEdit },
+      { key: 'refresh', label: t('client.refresh'), disabled: loading, onSelect: refreshDetail },
+      !accountArchived && !loading && (account.portal_access === 'revoked'
+        ? { key: 'restore-access', testId: 'client-access-restore', label: t('access.restore'), disabled: Boolean(actionBusy), onSelect: () => accessAction('restore') }
+        : { key: 'issue-access', testId: 'client-access-issue', label: t(account.access_activated ? 'access.recover' : 'access.issue'), disabled: Boolean(actionBusy), onSelect: () => accessAction('issue') }),
+      !accountArchived && !loading && account.portal_access !== 'revoked' && { key: 'revoke-access', testId: 'client-access-revoke', label: t('access.revoke'), disabled: Boolean(actionBusy), onSelect: () => setConfirmAction({ type: 'revokeAccess' }) },
+    ]
 
     return (
-      <div className="page page-wide">
-        <div className="page-head">
-          <div>
+      <div className="page page-wide ops-client-compact">
+        <div className="page-head ops-client-compact-head">
+          <div className="ops-client-identity">
             <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('clients') : go?.('clients')}>{t('clients.title')}</ContextBackButton>
             <h1 className="page-title">{accountDisplayName}</h1>
+            {selectedParticipant && <div className="ops-client-participant-context">
+              {participants.length > 1
+                ? <label><span>{t('common.participant')}</span><select data-testid="admin-client-participant-select" value={selectedParticipantId} onChange={(event) => selectParticipant(event.target.value)}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.full_name}</option>)}</select></label>
+                : <span>{t('common.participant')}: {selectedParticipant.full_name}</span>}
+            </div>}
             <p className="page-desc ops-client-contact-summary"><span>{account.phone || '—'}</span><span>{account.email || '—'}</span></p>
             {!contactsHidden && <div className="ops-contact-links" aria-label={t('client.contactAria')}>
               <ContactLink href={contactPhoneDigits ? `https://t.me/+${contactPhoneDigits}` : null} label="Telegram" disabledHint={phoneContactHint} />
@@ -821,11 +925,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               <ContactLink href={account.instagram_username ? `https://instagram.com/${account.instagram_username}` : null} label="Instagram" disabledHint={t('client.instagramMissing')} />
             </div>}
           </div>
-          <div className="ops-button-row ops-page-actions">
-            {!accountArchived && !loading && <AccessButtons Button={Button} portalAccess={account.portal_access} accessActivated={account.access_activated} busy={Boolean(actionBusy)} onAction={(action) => action === 'revoke' ? setConfirmAction({ type: 'revokeAccess' }) : accessAction(action)} />}
-            {!accountArchived && <Button data-testid="admin-client-edit-account" variant="primary" disabled={loading || actionBusy != null} onClick={openAccountEdit}>{t('client.edit')}</Button>}
+          <div className="ops-client-account-actions">
             {accountArchived && <Button data-testid="admin-client-restore" variant="primary" disabled={loading || actionBusy != null} onClick={() => setConfirmAction({ type: 'restore' })}>{t('clients.restore')}</Button>}
-            <Button variant="secondary" disabled={loading} onClick={refreshDetail}>{t('client.refresh')}</Button>
+            <ActionPopover testId="admin-client-actions" label={t('common.actionsFor', { name: accountDisplayName })} actions={accountActions} />
           </div>
         </div>
 
@@ -835,19 +937,18 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <BusyBanner id="admin-client-detail-busy" show={loading}>{t('client.loading')}</BusyBanner>
         {accountArchived && <div data-testid="admin-client-archived-banner"><Banner tone="warning" style={{ marginBottom: 12 }}><strong>{t('client.blacklisted')}</strong> {t('client.blacklistedDescription')}</Banner></div>}
 
-        {participants.length > 0 && <section className="card card-pad" style={{ display: 'grid', gap: 12, marginBottom: 16 }} aria-label={t('client.selectParticipant')}>
-          <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-            <div className="eyebrow">{t('client.selectParticipant')}</div>
-            <strong>{selectedParticipant?.full_name || '-'}</strong>
-            <div className="muted">{selectedSubscription?.type || t('client.noSubscriptions')}</div>
-          </div>
-          <div style={{ display: 'grid', gap: 8 }} role="list">
-            {participants.map((participant) => {
-              const isSelected = String(participant.id) === selectedParticipantId
-              return <Button key={participant.id} fullWidth variant={isSelected ? 'primary' : 'secondary'} aria-pressed={isSelected} style={{ justifyContent: 'space-between', gap: 8, textAlign: 'left' }} onClick={() => selectParticipant(participant.id)}><span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{participant.full_name}</span>{isSelected && <span style={{ flexShrink: 0, fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-semibold)', whiteSpace: 'nowrap' }}> · {t('client.participantSelected')}</span>}</Button>
-            })}
-          </div>
-        </section>}
+        <section className="ops-client-hub" aria-label={t('client.statusSummary')} onClickCapture={(event) => {
+          const button = event.target.closest('button[role="tab"]')
+          if (!button || button.getAttribute('aria-selected') === 'true') return
+          const rect = button.getBoundingClientRect()
+          button.style.setProperty('--reveal-x', event.detail ? `${event.clientX - rect.left}px` : '50%')
+          button.style.setProperty('--reveal-y', event.detail ? `${event.clientY - rect.top}px` : '50%')
+        }}>
+          <Tabs value={tab} onChange={setTab} style={{ display: 'grid', gap: 0, border: 0 }} items={hubSections.map((section) => ({
+            value: section.value, testId: `admin-client-tab-${section.value}`,
+            label: <span className="ops-client-hub-content"><span className="ops-client-hub-label"><section.Icon size={15} aria-hidden="true" />{section.label}{section.count != null && <span> · {section.count}</span>}</span>{section.valueLabel != null && <strong className="ops-client-hub-value">{section.valueLabel}</strong>}{section.detail && <span className="ops-client-hub-detail">{section.detail}</span>}</span>,
+          }))} />
+        </section>
 
         <FormModal open={editingAccount} title={t('client.editTitle')} description={t('client.accountOwner')} size="lg" busy={actionBusy != null} dirty={Boolean(accountBaseline) && JSON.stringify(accountForm) !== JSON.stringify(accountBaseline)} onRequestClose={() => { if (accountBaseline) setAccountForm(accountBaseline); setEditingAccount(false); setAccountBaseline(null); setAccountFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" loading={actionBusy === 'account'} disabled={actionBusy != null} onClick={saveAccount}>{t('client.saveChanges')}</Button></>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
@@ -863,78 +964,16 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             </div>
         </FormModal>
 
-        <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
-          <div className="kpi ops-client-balance-kpi">
-            <div className="kpi-label"><span className="kpi-ico"><I.Cash size={15} /></span>{t('finance.familyBalance')}</div>
-            <div className="kpi-value">
-              <Money amount={selectedParticipantBalance} signed currency="zł" size="inherit" />
-            </div>
-          </div>
-          <section className="card card-pad" aria-label={t('client.statusSummary')}>
-            <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.statusSummary')}</div>
-            <div className="ops-client-status-summary-grid">
-              {[
-                [I.Users, t('client.participants'), summary.participants_count ?? participants.length, t('client.activeCount', { count: summary.active_participants ?? participants.filter((item) => item.is_active).length })],
-                [I.Layers, t('client.subscriptions'), selectedSubscriptions.filter((item) => item.status === 'active').length, t('client.active')],
-                [I.Alert, t('payments.title'), selectedPayments.filter((item) => item.status === 'pending').length, t('client.awaitingReview')],
-              ].map(([Icon, label, value, detail], index) => (
-                <div key={label} style={{ display: 'grid', gap: 5, minWidth: 0, padding: index ? '0 0 0 10px' : '0 10px 0 0', borderLeft: index ? '1px solid var(--border-subtle)' : undefined }}>
-                  <div className="kpi-label" style={{ gap: 5, marginBottom: 0, fontSize: 'calc(var(--fs-xs) - 2px)', whiteSpace: 'nowrap' }}><span className="kpi-ico" style={{ width: 16, height: 16, borderRadius: 0, background: 'transparent' }}><Icon size={15} /></span>{label}</div>
-                  <div className="kpi-value" style={{ fontSize: 'calc(var(--fs-3xl) - 2px)' }}>{value}</div>
-                  <div className="kpi-sub" style={{ marginTop: 0, fontSize: 'calc(var(--fs-xs) - 2px)', whiteSpace: 'nowrap' }}>{detail}</div>
-                </div>
-              ))}
-            </div>
-          </section>
+        <div className="ops-client-quick-actions" aria-label={t('client.financeActionsAria')}>
+          <Button data-testid="admin-client-action-payment" variant="primary" disabled={accountArchived || loading} onClick={openPaymentPanel}>{t('client.topUp')}</Button>
+          <Button data-testid="admin-client-action-sell-subscription" variant="secondary" disabled={accountArchived || loading} onClick={() => { const next = { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), paymentReceived: false, paymentMethod: 'cash', paymentDate: new Date().toISOString().slice(0, 10) }; setFinanceForm(next); setFinanceAction('issue'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}>{t('client.sellPass')}</Button>
+          <ActionPopover testId="admin-client-finance" label={t('client.moreFinanceActions')} disabled={accountArchived || loading} actions={[
+            { key: 'edit-subscription', testId: 'admin-client-action-edit-subscription', label: t('client.editPass'), disabled: !selectedSubscriptions.length, onSelect: () => openSubscriptionDetails(selectedSubscription || selectedSubscriptions[0], true) },
+            { key: 'charge', testId: 'admin-client-action-charge', label: t('client.addCharge'), onSelect: () => { const next = { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }; setFinanceForm(next); setFinanceAction('charge'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) } },
+            { key: 'remind', testId: 'admin-client-action-remind', label: t('client.remind'), disabled: actionBusy != null, onSelect: sendReminder },
+          ]}><span>{t('common.more')}</span><I.ChevronD size={14} aria-hidden="true" /></ActionPopover>
         </div>
-
-        <div className="ops-action-strip ops-client-finance-actions" aria-label={t('client.financeActionsAria')}>
-          <button type="button" data-testid="admin-client-action-payment" className="ops-action-card" disabled={accountArchived} onClick={openPaymentPanel}>
-            <span>{t('client.topUp')}</span>
-            <small>{t('client.topUpHint')}</small>
-          </button>
-          {[
-            ['charge', t('client.addCharge'), t('client.amountPayable')],
-          ].map(([value, label, hint]) => (
-            <button
-              key={value}
-              type="button"
-              data-testid={`admin-client-action-${value}`}
-              className={`ops-action-card${financeAction === value ? ' is-active' : ''}`}
-              disabled={accountArchived}
-              onClick={() => { const next = { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }; setFinanceForm(next); setFinanceAction(value); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
-            >
-              <span>{label}</span>
-              <small>{hint}</small>
-            </button>
-          ))}
-          <button type="button" data-testid="admin-client-action-remind" className="ops-action-card" disabled={accountArchived || actionBusy != null} onClick={sendReminder}>
-            <span>{t('client.remind')}</span>
-            <small>{t('client.remindHint')}</small>
-          </button>
-          <button
-            type="button"
-            className={`ops-action-card${subscriptionEditorOpen ? ' is-active' : ''}`}
-            data-testid="admin-client-action-edit-subscription"
-            disabled={accountArchived || subscriptions.length === 0}
-            onClick={() => openSubscriptionEditor()}
-          >
-            <span>{t('client.editPass')}</span>
-            <small>{t('client.editPassHint')}</small>
-          </button>
-          <button
-            type="button"
-            className={`ops-action-card${financeAction === 'issue' ? ' is-active' : ''}`}
-            data-testid="admin-client-action-sell-subscription"
-            disabled={accountArchived}
-            onClick={() => { const next = { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), paymentReceived: false, paymentMethod: 'cash', paymentDate: new Date().toISOString().slice(0, 10) }; setFinanceForm(next); setFinanceAction('issue'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}
-          >
-            <span>{t('client.sellPass')}</span>
-            <small>{t('client.newPassHint')}</small>
-          </button>
-        </div>
-
-        <FormModal open={Boolean(financeAction)} title={subscriptionEditorOpen ? t('client.editPassTitle') : ({ charge: t('client.newCharge'), issue: t('client.sellPassTitle') }[financeAction] || t('finance.operation'))} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" data-testid="admin-client-finance-save" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>{t('common.save')}</Button></>}>
+        <FormModal open={Boolean(financeAction)} title={subscriptionEditorOpen ? t('finance.renewPass') : ({ charge: t('client.newCharge'), issue: t('client.sellPassTitle') }[financeAction] || t('finance.operation'))} size="lg" busy={actionBusy != null} dirty={Boolean(financeBaseline) && JSON.stringify(financeForm) !== JSON.stringify(financeBaseline)} onRequestClose={() => { if (financeBaseline) setFinanceForm(financeBaseline); setFinanceAction(null); setFinanceBaseline(null); setFinanceFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.close')}</Button><Button variant="primary" data-testid="admin-client-finance-save" loading={actionBusy === financeAction} disabled={actionBusy != null || loading} onClick={executeFinanceAction}>{t('common.save')}</Button></>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               {(financeAction === 'charge' || financeAction === 'issue') && (
@@ -948,14 +987,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 />
               )}
               {subscriptionEditorOpen && (
-                <Select id={FINANCE_FIELD_IDS.subscriptionAction} label={t('field.action')} value={financeAction} onChange={(event) => { setFinanceAction(event.target.value); setFinanceFieldErrors({}); setError(null) }}>
-                    <option value="edit">{t('finance.editPass')}</option>
-                    <option value="renew">{t('finance.renewPass')}</option>
-                    <option value="freeze">{t('finance.freezePass')}</option>
-                    <option value="adjust">{t('client.adjustRemaining')}</option>
-                </Select>
-              )}
-              {subscriptionEditorOpen && (
                 <Select id={FINANCE_FIELD_IDS.subscriptionId} label={t('clients.subscription')} value={financeForm.subscriptionId} error={financeFieldErrors.subscriptionId} onChange={(event) => updateFinanceSubscription(event.target.value)}>
                     <option value="">{t('field.selectSubscription')}</option>
                     {selectedSubscriptions.map((subscription) => (
@@ -964,9 +995,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                       </option>
                     ))}
                 </Select>
-              )}
-              {financeAction === 'edit' && (
-                <DateField id={FINANCE_FIELD_IDS.subscriptionEndDate} label={t('field.subscriptionEndDate')} value={financeForm.subscriptionEndDate} error={financeFieldErrors.subscriptionEndDate} onChange={(value) => updateFinanceForm('subscriptionEndDate', value)} />
               )}
               {(financeAction === 'issue' || financeAction === 'renew') && (
                 <>
@@ -994,20 +1022,62 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   <div className="ops-financial-context ops-grid-full" role="status" aria-label={t('finance.chargeReview')}><div><span>{t('finance.balanceNow')}</span><strong>{chargeBalanceBefore.toFixed(2)} zł</strong></div><div><span>{t('finance.chargePreview')}</span><strong>-{asMoneyMajor(chargePreviewMinor).toFixed(2)} zł</strong></div><div><span>{t('finance.balanceAfter')}</span><strong>{chargeBalanceAfter.toFixed(2)} zł</strong></div></div>
                 </>
               )}
-              {financeAction === 'freeze' && (
-                <>
-                  <DateField id={FINANCE_FIELD_IDS.freezeStart} label={t('field.freezeStart')} value={financeForm.freezeStart} error={financeFieldErrors.freezeStart} onChange={(value) => updateFinanceForm('freezeStart', value)} />
-                  <DateField id={FINANCE_FIELD_IDS.freezeEnd} label={t('field.freezeEnd')} value={financeForm.freezeEnd} error={financeFieldErrors.freezeEnd} onChange={(value) => updateFinanceForm('freezeEnd', value)} />
-                  <Input id={FINANCE_FIELD_IDS.freezeReason} label={t('field.reason')} value={financeForm.freezeReason} error={financeFieldErrors.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} />
-                </>
-              )}
-              {financeAction === 'adjust' && (
-                <>
-                  <Input id={FINANCE_FIELD_IDS.adjustDelta} label={t('field.remainingChange')} value={financeForm.adjustDelta} error={financeFieldErrors.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} placeholder={t('field.exampleDelta')} />
-                  <Input id={FINANCE_FIELD_IDS.adjustNote} label={t('field.comment')} value={financeForm.adjustNote} error={financeFieldErrors.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} />
-                </>
-              )}
             </div>
+        </FormModal>
+
+        <FormModal open={Boolean(openedSubscription)} title={subscriptionLabel(openedSubscription)} size="lg" busy={actionBusy === 'combined-subscription'} dirty={subscriptionEditing && Boolean(subscriptionDraft) && (subscriptionDraft.startDate !== openedSubscription?.start_date || subscriptionDraft.endDate !== openedSubscription?.effective_end_date || subscriptionDraft.remaining !== String(openedSubscription?.remaining_sessions ?? '') || Boolean(subscriptionDraft.freezeStart || subscriptionDraft.freezeEnd))} onRequestClose={() => { setOpenedSubscriptionId(null); setSubscriptionEditing(false); setSubscriptionError(null) }} footer={({ requestClose }) => <>
+          <Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('close')}>{t('common.close')}</Button>
+          {!accountArchived && openedSubscription && !subscriptionEditing && <><Button variant="secondary" onClick={() => { setOpenedSubscriptionId(null); openSubscriptionEditor(openedSubscription) }}>{t('finance.renewPass')}</Button><Button variant="primary" onClick={() => openSubscriptionDetails(openedSubscription, true)}>{t('finance.editPass')}</Button></>}
+          {subscriptionEditing && <Button variant="primary" data-testid="admin-client-subscription-save" loading={actionBusy === 'combined-subscription'} disabled={actionBusy != null} onClick={saveSubscriptionDetails}>{t('common.save')}</Button>}
+        </>}>
+          {openedSubscription && <div className="ops-subscription-detail">
+            <div className="ops-financial-context">
+              <div><span>{t('common.participant')}</span><strong>{openedSubscription.participant?.full_name || participantName(openedSubscription.participant_id)}</strong></div>
+              <div><span>{t('field.start')}</span><strong>{openedSubscription.start_date}</strong></div>
+              <div><span>{t('field.end')}</span><strong>{openedSubscription.effective_end_date}</strong></div>
+              <div><span>{t('field.remaining')}</span><strong>{openedSubscription.remaining_sessions ?? t('field.noLimit')}</strong></div>
+            </div>
+            {subscriptionError && <Banner tone="danger" onClose={() => setSubscriptionError(null)}>{subscriptionError}</Banner>}
+            {subscriptionEditing && subscriptionDraft && <div className="ops-form-grid">
+              <DateField id="admin-client-subscription-start-date" label={t('field.subscriptionStartDate')} value={subscriptionDraft.startDate} onChange={(value) => setSubscriptionDraft((draft) => ({ ...draft, startDate: value }))} />
+              <DateField id="admin-client-subscription-end-date" label={t('field.subscriptionEndDate')} value={subscriptionDraft.endDate} onChange={(value) => setSubscriptionDraft((draft) => ({ ...draft, endDate: value }))} />
+              {openedSubscription.remaining_sessions != null && <Input id="admin-client-subscription-remaining" type="number" min="0" step="1" label={t('finance.targetRemaining')} value={subscriptionDraft.remaining} onChange={(event) => setSubscriptionDraft((draft) => ({ ...draft, remaining: event.target.value }))} />}
+              <div className="ops-grid-full ops-freeze-fields" role="group" aria-label={t('finance.freezePeriod')}>
+                <strong>{t('finance.freezePeriod')}</strong>
+                <div className="ops-form-grid">
+                  <DateField id="admin-client-subscription-freeze-start" label={t('field.freezeStart')} value={subscriptionDraft.freezeStart} onChange={(value) => setSubscriptionDraft((draft) => ({ ...draft, freezeStart: value }))} />
+                  <DateField id="admin-client-subscription-freeze-end" label={t('field.freezeEnd')} value={subscriptionDraft.freezeEnd} onChange={(value) => setSubscriptionDraft((draft) => ({ ...draft, freezeEnd: value }))} />
+                </div>
+              </div>
+              <Select id="admin-client-subscription-reason" label={t('field.reason')} value={subscriptionDraft.reasonPreset} onChange={(event) => setSubscriptionDraft((draft) => ({ ...draft, reasonPreset: event.target.value }))}>
+                <option value="">{t('finance.selectReason')}</option>
+                <option value={t('finance.reasonMistake')}>{t('finance.reasonMistake')}</option>
+                <option value={t('finance.reasonCompensation')}>{t('finance.reasonCompensation')}</option>
+                <option value={t('finance.reasonBonus')}>{t('finance.reasonBonus')}</option>
+                <option value="other">{t('finance.reasonOther')}</option>
+              </Select>
+              {subscriptionDraft.reasonPreset === 'other' && <Input id="admin-client-subscription-custom-reason" label={t('field.reason')} maxLength={255} value={subscriptionDraft.customReason} onChange={(event) => setSubscriptionDraft((draft) => ({ ...draft, customReason: event.target.value }))} />}
+              <div className="ops-grid-full ops-subscription-preview" role="status">
+                {subscriptionDraft.startDate !== openedSubscription.start_date && <p>{t('field.subscriptionStartDate')}: {openedSubscription.start_date} → {subscriptionDraft.startDate || '—'}</p>}
+                {subscriptionDraft.endDate !== openedSubscription.effective_end_date && <p>{t('field.subscriptionEndDate')}: {openedSubscription.effective_end_date} → {subscriptionDraft.endDate || '—'}</p>}
+                {openedSubscription.remaining_sessions != null && subscriptionDraft.remaining !== String(openedSubscription.remaining_sessions) && <p>{t('finance.subscriptionPreview', { before: openedSubscription.remaining_sessions, after: subscriptionDraft.remaining || '—' })}</p>}
+                {(subscriptionDraft.freezeStart || subscriptionDraft.freezeEnd) && <p>{t('finance.freezePass')}: {subscriptionDraft.freezeStart || '—'} — {subscriptionDraft.freezeEnd || '—'}</p>}
+              </div>
+            </div>}
+            <h3>{t('finance.subscriptionHistory')}</h3>
+            {(openedSubscription.ledger || []).length ? <div className="ops-subscription-history">
+              {[...openedSubscription.ledger].reverse().map((entry) => <div key={entry.id} className="ops-subscription-history-row">
+                <div><strong>{t(`finance.ledger.${entry.reason}`)}</strong><span>{entry.session_start_at ? formatLocalDate(entry.session_start_at) : formatLocalDate(entry.created_at)}</span></div>
+                {entry.session_id && <button type="button" className="ops-link-button" onClick={() => { setOpenedSubscriptionId(null); go?.('attendance', { sessionId: entry.session_id }) }}>{entry.group || t('field.session')} · {entry.trainer || '—'}</button>}
+                {entry.related_subscription_id && subscriptions.some((row) => row.id === entry.related_subscription_id && row.participant_id === openedSubscription.participant_id) && <button type="button" className="ops-link-button" onClick={() => openSubscriptionDetails(subscriptions.find((row) => row.id === entry.related_subscription_id))}>{t('finance.relatedSubscription', { id: entry.related_subscription_id })}</button>}
+                <div><strong>{entry.delta > 0 ? `+${entry.delta}` : entry.delta}</strong><span>{t('finance.balanceAfterSessions', { count: entry.balance_after })}</span></div>
+                {entry.note && <small>{entry.note}</small>}
+                {entry.created_by && <small>{t('finance.changedBy', { name: entry.created_by })}</small>}
+              </div>)}
+            </div> : <p className="muted">{t('finance.noSubscriptionHistory')}</p>}
+            {(openedSubscription.freezes || []).length > 0 && <><h3>{t('finance.freezeHistory')}</h3><div className="ops-subscription-history">{openedSubscription.freezes.map((freeze) => <div key={freeze.id} className="ops-subscription-history-row"><strong>{freeze.start_date} — {freeze.end_date}</strong><span>{freeze.reason}</span>{freeze.created_by && <small>{t('finance.changedBy', { name: freeze.created_by })}</small>}</div>)}</div></>}
+            {(openedSubscription.end_date_changes || []).length > 0 && <><h3>{t('finance.endDateHistory')}</h3><div className="ops-subscription-history">{openedSubscription.end_date_changes.map((change) => <div key={change.id} className="ops-subscription-history-row">{change.previous_start && change.previous_start !== change.current_start && <strong>{t('field.start')}: {change.previous_start} → {change.current_start}</strong>}{change.previous !== change.current && <strong>{t('field.end')}: {change.previous} → {change.current}</strong>}<span>{formatLocalDate(change.created_at)}</span>{change.reason && <small>{change.reason}</small>}{change.created_by && <small>{t('finance.changedBy', { name: change.created_by })}</small>}</div>)}</div></>}
+          </div>}
         </FormModal>
 
         <FormModal open={Boolean(reversalTarget)} title={t('finance.reverseChargeTitle')} description={t('finance.reverseChargeDescription')} size="sm" busy={actionBusy === 'reverse-charge'} dirty={Boolean(reversalReason)} onRequestClose={() => { setReversalTarget(null); setReversalReason(''); setReversalReasonError(null); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy === 'reverse-charge'} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="danger" loading={actionBusy === 'reverse-charge'} disabled={actionBusy === 'reverse-charge'} onClick={reverseCharge}>{t('finance.reverseCharge')}</Button></>}>
@@ -1016,17 +1086,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           <Input id="admin-client-charge-reversal-reason" label={t('finance.reverseReason')} value={reversalReason} error={reversalReasonError} onChange={(event) => { setReversalReason(event.target.value); setReversalReasonError(null) }} />
         </FormModal>
 
-        <div className="toolbar ops-client-detail-tabs">
-          <Tabs value={tab} onChange={setTab} style={{ border: 'none' }} items={[
-            { value: 'participants', label: t('client.participants'), count: participants.length, testId: 'admin-client-tab-participants' },
-            { value: 'subscriptions', label: t('client.subscriptions'), count: selectedSubscriptions.length, testId: 'admin-client-tab-subscriptions' },
-            { value: 'payments', label: t('payments.title'), count: selectedPayments.length + selectedCharges.length, testId: 'admin-client-tab-payments' },
-            { value: 'attendance', label: t('client.attendance'), count: selectedAttendance.length, testId: 'admin-client-tab-attendance' },
-            { value: 'consents', label: t('client.consents'), count: consents.length, testId: 'admin-client-tab-consents' },
-            { value: 'privacy', label: t('client.privacy'), testId: 'admin-client-tab-privacy' },
-          ]} />
-        </div>
-
+        <div key={tab} className="ops-client-section ops-motion-fade">
         {tab === 'participants' && (
           <div>
           <FormModal open={Boolean(editingParticipant)} title={t('client.editParticipant')} size="lg" busy={actionBusy != null} dirty={Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline)} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>{t('common.save')}</Button></>}>
@@ -1059,7 +1119,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           <Table
             rows={selectedSubscriptions}
             emptyLabel={t('client.noSubscriptions')}
-            onRowClick={accountArchived ? undefined : openSubscriptionEditor}
+            onRowClick={(subscription) => openSubscriptionDetails(subscription)}
             columns={[
               { key: 'type', header: t('common.type'), render: (row) => <span className="strong">{row.type}</span> },
               { key: 'participant', header: t('common.participant'), render: (row) => row.participant?.full_name || participantName(row.participant_id) },
@@ -1096,8 +1156,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 </div>
             </FormModal>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(320px, 1fr)', gap: 14 }}>
-            <div>
+            <div className="ops-mobile-payment-switch" role="tablist" aria-label={t('payments.title')} data-view={mobilePaymentView}>
+              <button type="button" role="tab" aria-selected={mobilePaymentView === 'topups'} onClick={() => setMobilePaymentView('topups')}>{t('finance.topups')}</button>
+              <button type="button" role="tab" aria-selected={mobilePaymentView === 'charges'} onClick={() => setMobilePaymentView('charges')}>{t('client.charges')}</button>
+            </div>
+            <div className="ops-client-payments-grid" data-mobile-view={mobilePaymentView}>
+            <div className="ops-client-payment-charges">
               <div className="eyebrow" style={{ marginBottom: 10 }}>{t('client.charges')}</div>
               <Table
                 rows={selectedCharges}
@@ -1112,7 +1176,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 ]}
               />
             </div>
-            <div>
+            <div className="ops-client-payment-topups">
               <div className="eyebrow" style={{ marginBottom: 10 }}>{t('payments.title')}</div>
               <Table
                 rows={selectedPayments}
@@ -1131,18 +1195,84 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         )}
 
         {tab === 'attendance' && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div className="ops-client-attendance-toolbar">
+              <div className="ops-client-attendance-actions">
+              {!attendanceEditing ? <Button data-testid="admin-client-attendance-edit" variant="secondary" disabled={accountArchived || !editableAttendance.length || actionBusy != null} onClick={() => {
+                setAttendanceEditing(true)
+                setAttendanceIds([])
+                setAttendanceSource(paymentSubscriptions.length ? 'subscription' : 'account')
+                setAttendanceSubscriptionId(paymentSubscriptions.length === 1 ? String(paymentSubscriptions[0].id) : '')
+                setAttendanceError(null)
+              }}>{t('common.edit')}</Button> : <>
+                <Button variant="secondary" disabled={actionBusy != null} onClick={() => { setAttendanceEditing(false); setAttendanceIds([]); setAttendanceError(null) }}>{t('common.cancel')}</Button>
+                <Button data-testid="admin-client-attendance-save" loading={actionBusy === 'attendance-payment'} disabled={actionBusy != null || !attendanceIds.length || (attendanceSource === 'subscription' && !paymentSubscription)} onClick={saveAttendancePayment}>{t('common.save')}</Button>
+              </>}
+            </div>
+              <Button data-testid="admin-client-attendance-filters" variant={attendanceFiltersOpen || attendancePaymentFilter.length || attendanceStatusFilter.length ? 'subtle' : 'secondary'} aria-expanded={attendanceFiltersOpen} aria-controls="admin-client-attendance-filters-panel" onClick={() => setAttendanceFiltersOpen((open) => !open)}>{t('schedule.filters')}</Button>
+            </div>
+            {attendanceFilterPresence.present && <section id="admin-client-attendance-filters-panel" className={`card card-pad ops-client-attendance-filters ops-motion-panel${attendanceFilterPresence.exiting ? ' is-exiting' : ''}`} aria-label={t('schedule.filters')} aria-hidden={attendanceFilterPresence.exiting || undefined} inert={attendanceFilterPresence.exiting || undefined}>
+              <div className="ops-form-grid">
+              {[
+                { id: 'source', label: t('finance.paymentSource'), values: attendancePaymentFilter, change: setAttendancePaymentFilter,
+                  options: [['account', t('finance.fromAccount')], ['subscription', t('finance.fromSubscription')], ['none', t('finance.sourceNotSpecified')]] },
+                { id: 'status', label: t('common.status'), values: attendanceStatusFilter, change: setAttendanceStatusFilter,
+                  options: [['present', t('attendance.present')], ['absent', t('attendance.absent')], ['rescheduled', t('attendance.rescheduled')]] },
+              ].map(({ id, label, values, change, options }) => {
+                const selectedLabel = options.filter(([value]) => values.includes(value)).map(([, text]) => text).join(', ') || t('finance.allVisits')
+                return <div key={id} className="ops-attendance-filter">
+                  <span>{label}</span>
+                  <details id={`admin-client-attendance-filter-${id}`}>
+                    <summary aria-label={`${label}: ${selectedLabel}`} title={selectedLabel}>{selectedLabel}</summary>
+                    <div className="ops-attendance-filter-options" role="group" aria-label={label}>
+                      <Button size="sm" variant="subtle" disabled={actionBusy != null} onClick={() => change([])}>{t('finance.allVisits')}</Button>
+                      {options.map(([value, text]) => <Checkbox key={value} label={text} checked={values.includes(value)} disabled={actionBusy != null} onChange={() => change(values.includes(value) ? values.filter((item) => item !== value) : [...values, value])} />)}
+                    </div>
+                  </details>
+                </div>
+              })}
+            </div>
+            </section>}
+            {attendancePaymentPresence.present && <section id="admin-client-attendance-payment-panel" className={`card card-pad ops-client-attendance-payment ops-motion-panel${attendancePaymentPresence.exiting ? ' is-exiting' : ''}`} aria-label={t('finance.paymentSource')} aria-hidden={attendancePaymentPresence.exiting || undefined} inert={attendancePaymentPresence.exiting || undefined}>
+              <span className="muted" aria-live="polite">{t('finance.attendanceSelected', { count: attendanceIds.length })}</span>
+              {attendanceError && <Banner tone="danger" onClose={() => setAttendanceError(null)}>{attendanceError}</Banner>}
+              <div className="ops-form-grid">
+              {selectedHistoricalAttendance && <div className="ops-grid-full"><Banner tone="warning">{t('finance.attendanceHistoryWarning')}</Banner></div>}
+              <Select id="admin-client-attendance-source" label={t('finance.paymentSource')} value={attendanceSource} disabled={actionBusy != null} onChange={(event) => setAttendanceSource(event.target.value)}>
+                <option value="account">{t('finance.fromAccount')}</option>
+                <option value="subscription" disabled={!paymentSubscriptions.length}>{t('finance.fromSubscription')}</option>
+              </Select>
+              {attendanceSource === 'subscription' && (paymentSubscriptions.length > 1
+                ? <Select id="admin-client-attendance-subscription" label={t('clients.subscription')} value={attendanceSubscriptionId} disabled={actionBusy != null} onChange={(event) => setAttendanceSubscriptionId(event.target.value)}>
+                  <option value="">{t('finance.selectSubscriptionError')}</option>
+                  {paymentSubscriptions.map((row) => <option key={row.id} value={row.id}>{subscriptionLabel(row)} · {t('field.remainingPrefix', { count: row.remaining_sessions ?? t('field.noLimit') })}</option>)}
+                </Select>
+                : <p className="muted">{subscriptionLabel(paymentSubscription)}</p>)}
+              {attendanceSource === 'subscription' && paymentRemaining < 0 && <div className="ops-grid-full"><Banner tone="warning">{t('finance.attendanceNegativeWarning', { remaining: paymentRemaining })}</Banner></div>}
+              </div>
+            </section>}
           <Table
-            rows={selectedAttendance}
+            rows={filteredAttendance}
             emptyLabel={t('client.noAttendance')}
             columns={[
+              ...(attendanceEditing ? [{ key: 'select', header: t('finance.attendanceSelection'), width: 60, render: (row) => row.deducts ? <Checkbox aria-label={t('finance.selectVisit', { date: formatLocalShortDate(row.session_start_at) })} checked={attendanceIds.includes(row.id)} disabled={actionBusy != null} onChange={() => setAttendanceIds((ids) => ids.includes(row.id) ? ids.filter((id) => id !== row.id) : [...ids, row.id])} /> : null }] : []),
               { key: 'participant', header: t('common.participant'), render: (row) => <span className="strong">{row.participant}</span> },
               { key: 'session_start_at', header: t('field.session'), render: (row) => <button type="button" className="ops-link-button" onClick={() => go?.('attendance', { sessionId: row.session_id })}>{formatLocalShortDate(row.session_start_at)} {formatTime(row.session_start_at)}-{formatTime(row.session_end_at)}</button> },
               { key: 'group', header: t('common.group'), muted: true },
               { key: 'trainer', header: t('common.trainer'), muted: true },
               { key: 'status', header: t('common.status'), width: 120, render: (row) => <StatusPill status={row.status} size="sm" /> },
-              { key: 'deducts', header: t('field.deduction'), width: 90, render: (row) => row.deducts ? <Badge tone="warning">-1</Badge> : <Badge tone="neutral">0</Badge> },
+              { key: 'payment_source', header: t('finance.paymentSource'), render: (row) => {
+                if (row.payment_source !== 'subscription') return row.payment_source === 'account' ? t('finance.fromAccount') : '—'
+                const label = subscriptionLabel(subscriptions.find((item) => String(item.id) === String(row.payment_subscription_id)))
+                return `${t('finance.fromSubscription')}${label ? `: ${label}` : ''}`
+              } },
+              { key: 'deducts', header: t('finance.sessionsDeducted'), width: 90, render: (row) => {
+                const delta = row.subscription_session_delta ?? (row.deducts ? -1 : 0)
+                return <Badge tone={delta < 0 ? 'warning' : 'neutral'}>{delta}</Badge>
+              } },
             ]}
           />
+          </div>
         )}
 
         {tab === 'consents' && (
@@ -1200,19 +1330,21 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           </div>
         )}
 
-        {confirmAction && (
-          <Dialog
-            title={confirmAction.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction.type === 'restore' ? t('client.restoreConfirmTitle') : confirmAction.type === 'revokeAccess' ? t('access.revokeConfirmTitle') : t('client.anonymizeConfirmTitle')}
-            description={confirmAction.type === 'archive'
+        </div>
+
+        <Dialog
+            open={Boolean(confirmAction)}
+            title={confirmAction?.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction?.type === 'restore' ? t('client.restoreConfirmTitle') : confirmAction?.type === 'revokeAccess' ? t('access.revokeConfirmTitle') : t('client.anonymizeConfirmTitle')}
+            description={confirmAction?.type === 'archive'
               ? t('client.archiveConfirmDescription')
-              : confirmAction.type === 'restore'
+              : confirmAction?.type === 'restore'
                 ? t('client.restoreConfirmDescription')
-                : confirmAction.type === 'revokeAccess'
+                : confirmAction?.type === 'revokeAccess'
                   ? t('access.revokeConfirmDescription')
                   : t('client.anonymizeConfirmDescription')}
-            tone={confirmAction.type === 'restore' ? 'default' : 'danger'}
-            irreversible={confirmAction.type === 'anonymize'}
-            confirmLabel={confirmAction.type === 'archive' ? t('client.blacklistAction') : confirmAction.type === 'restore' ? t('clients.restore') : confirmAction.type === 'revokeAccess' ? t('access.revoke') : t('client.anonymize')}
+            tone={confirmAction?.type === 'restore' ? 'default' : 'danger'}
+            irreversible={confirmAction?.type === 'anonymize'}
+            confirmLabel={confirmAction?.type === 'archive' ? t('client.blacklistAction') : confirmAction?.type === 'restore' ? t('clients.restore') : confirmAction?.type === 'revokeAccess' ? t('access.revoke') : t('client.anonymize')}
             onClose={() => actionBusy ? null : setConfirmAction(null)}
             onConfirm={runDangerAction}
           >
@@ -1220,7 +1352,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               {t('client.contextPrefix')} <span className="strong">{account.full_name || account.username || fallbackClientId}</span>
             </div>
           </Dialog>
-        )}
       </div>
     )
   }

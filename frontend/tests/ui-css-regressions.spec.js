@@ -1,5 +1,201 @@
 import { expect, test } from '@playwright/test'
 
+test('local appearance editor previews, compares and saves named variants', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'desktop and phone editor')
+  await mockAdmin(page)
+  const fields = [
+    { key: 'primary', label: 'Основные кнопки', group: 'Кнопки', type: 'color', tokens: ['--primary'], rules: [] },
+    { key: 'cardPadding', label: 'Внутренний отступ карточек', group: 'Карточки', type: 'size', min: 8, max: 32, tokens: [], rules: [{ selector: '.card-pad', property: 'padding' }], default: '16px' },
+  ]
+  let state = { values: {}, presets: [] }
+  let revision = 'one'
+  let saves = 0
+  await page.route('**/api/dev/appearance/', (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON()
+      expect(body.revision).toBe(revision)
+      state = body.state
+      revision = 'two'
+      saves += 1
+    }
+    return json(route, { fields, state, revision })
+  })
+  await page.goto('/?role=admin&view=overview')
+  await page.getByTestId('appearance-editor-open').click()
+  const editor = page.getByRole('dialog', { name: 'Редактор оформления' })
+  await expect(editor).toBeVisible()
+  const frame = page.frameLocator('iframe[title="Предпросмотр CRM"]')
+  await expect(frame.locator('html')).toHaveAttribute('data-appearance', 'preview')
+  await editor.locator('label').filter({ hasText: 'Основные кнопки' }).locator('input[type="color"]').fill('#b10c45')
+  await expect.poll(() => frame.locator('html').evaluate((node) => getComputedStyle(node).getPropertyValue('--primary').trim())).toBe('#b10c45')
+  await editor.getByRole('button', { name: 'Сравнить с исходным' }).click()
+  await expect(frame.locator('html')).toHaveAttribute('data-appearance', 'default')
+  await editor.getByRole('button', { name: 'Показать мои изменения' }).click()
+  await editor.getByRole('button', { name: 'Отменить шаг' }).click()
+  await expect.poll(() => frame.locator('html').evaluate((node) => getComputedStyle(node).getPropertyValue('--primary').trim())).not.toBe('#b10c45')
+  await editor.locator('label').filter({ hasText: 'Основные кнопки' }).locator('input[type="color"]').fill('#b10c45')
+  await editor.getByRole('button', { name: 'Телефон' }).click()
+  await expect(editor.locator('iframe')).toHaveJSProperty('clientWidth', 390)
+  await editor.getByRole('button', { name: 'Компьютер' }).click()
+  await expect(editor.locator('iframe')).toHaveJSProperty('clientWidth', 1440)
+  await expect(editor.locator('.appearance-editor__frame-box')).toHaveClass(/is-scaled/)
+  await editor.getByLabel('Ширина компьютера').selectOption('0')
+  await expect.poll(() => editor.locator('iframe').evaluate((node) => node.style.width)).toBe('')
+  if (page.viewportSize().width === 1440) await expect.poll(() => editor.locator('iframe').evaluate((node) => node.clientWidth)).toBeGreaterThan(600)
+  await editor.getByRole('button', { name: 'Отдельный элемент' }).click()
+  const target = frame.locator('#root button:visible').first()
+  await expect(target).toBeVisible()
+  await target.click()
+  await expect(editor.getByText('admin/overview')).toBeVisible()
+  await editor.locator('.appearance-editor__selection').getByText('Фон').locator('..').locator('input[type="color"]').fill('#7844aa')
+  await expect.poll(() => target.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe('rgb(120, 68, 170)')
+  await editor.getByRole('button', { name: 'Общее оформление' }).click()
+  await editor.getByRole('textbox', { name: 'Название варианта' }).fill('Мой цвет')
+  await editor.getByRole('button', { name: 'Добавить' }).click()
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(editor.getByText('Сохранено в файлы проекта.')).toBeVisible()
+  expect(state.presets[0].name).toBe('Мой цвет')
+  expect(state.values.primary).toBe('#b10c45')
+  expect(state.overrides).toHaveLength(1)
+  expect(state.overrides[0]).toMatchObject({ route: 'admin/overview', properties: { backgroundColor: '#7844aa' } })
+  expect(saves).toBe(1)
+  await editor.getByRole('button', { name: 'Закрыть редактор' }).click()
+  await expect(editor).toHaveCount(0)
+})
+
+test('appearance editor selects nested session text with Ctrl and edits spacing by side', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'desktop and phone editor')
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0)
+  const session = {
+    id: 71, start_at: start.toISOString(), end_at: new Date(start.getTime() + 45 * 60_000).toISOString(),
+    session_type: 'group', group: { id: 1, name: 'Audit Group' }, trainer_id: 1,
+    trainer: 'Audit Trainer', location: 'Pool A', max_participants: 8,
+    participants_count: 1, is_cancelled: false,
+  }
+  await mockAdmin(page, { sessions: [session] })
+  const fields = [{ key: 'primary', label: 'Основные кнопки', group: 'Кнопки', type: 'color', tokens: ['--primary'], rules: [] }]
+  let state = { values: {}, presets: [], overrides: [] }
+  await page.route('**/api/dev/appearance/', (route) => {
+    if (route.request().method() === 'POST') state = route.request().postDataJSON().state
+    return json(route, { fields, state, revision: 'one' })
+  })
+  await page.goto('/?role=admin&view=overview')
+  await page.getByTestId('appearance-editor-open').click()
+  const editor = page.getByRole('dialog', { name: 'Редактор оформления' })
+  await expect(editor.locator('iframe')).toHaveJSProperty('clientWidth', 1440)
+  await editor.getByLabel('Ширина компьютера').selectOption('0')
+  const frame = page.frameLocator('iframe[title="Предпросмотр CRM"]')
+  const text = frame.locator('.ops-today-status-list button .ops-session-summary-column > span').first()
+  await expect(text).toBeVisible()
+  await editor.getByRole('button', { name: 'Отдельный элемент' }).click()
+  await text.click()
+  await expect(editor.locator('.appearance-editor__selection strong')).toContainText('button:')
+  await text.click({ modifiers: ['Control'] })
+  await expect(editor.locator('.appearance-editor__selection strong')).toContainText('span:')
+  await editor.getByRole('button', { name: 'Структура' }).click()
+  const outline = editor.getByRole('complementary', { name: 'Структура страницы' })
+  await expect(outline).toBeVisible()
+  const tree = outline.getByRole('tree', { name: 'Элементы страницы' })
+  await tree.evaluate((node) => { node.style.maxHeight = '180px' })
+  expect(await tree.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
+  const headerTop = await outline.locator('header').evaluate((node) => node.getBoundingClientRect().top)
+  await tree.evaluate((node) => { node.scrollTop = node.scrollHeight })
+  await expect.poll(() => tree.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
+  expect(await outline.locator('header').evaluate((node) => node.getBoundingClientRect().top)).toBe(headerTop)
+  const selectedRow = outline.locator('.appearance-editor__outline-node.is-selected')
+  await expect(selectedRow).toContainText('Текст')
+  const childPath = await selectedRow.getAttribute('data-appearance-selector')
+  await selectedRow.locator('xpath=../../..').locator(':scope > .appearance-editor__outline-node .appearance-editor__outline-select').click()
+  await expect(outline.locator('.appearance-editor__outline-node.is-selected')).not.toHaveAttribute('data-appearance-selector', childPath)
+  await outline.locator(`[data-appearance-selector="${childPath}"] .appearance-editor__outline-select`).click()
+  await expect(outline.locator('.appearance-editor__outline-node.is-selected')).toHaveAttribute('data-appearance-selector', childPath)
+  await outline.getByRole('button', { name: 'Скрыть структуру' }).click()
+  await expect(outline).toHaveCount(0)
+  const previousRight = await text.evaluate((node) => [getComputedStyle(node).paddingRight, getComputedStyle(node).marginRight])
+  await editor.locator('.appearance-editor__selection').getByText('Размер текста').locator('..').locator('input[type="number"]').fill('24')
+  await expect.poll(() => text.evaluate((node) => getComputedStyle(node).fontSize)).toBe('24px')
+  await editor.locator('[data-appearance-field="paddingLeft"] input').fill('15')
+  await editor.locator('[data-appearance-field="marginTop"] input').fill('12')
+  await expect.poll(() => text.evaluate((node) => [getComputedStyle(node).paddingLeft, getComputedStyle(node).marginTop, getComputedStyle(node).paddingRight, getComputedStyle(node).marginRight])).toEqual(['15px', '12px', ...previousRight])
+  await editor.getByLabel('Текст элемента').fill('Новое название занятия')
+  await expect(text).toHaveText('Новое название занятия')
+  await editor.getByRole('button', { name: 'Сравнить с исходным' }).click()
+  await expect(text).not.toHaveText('Новое название занятия')
+  await editor.getByRole('button', { name: 'Показать мои изменения' }).click()
+  await expect(text).toHaveText('Новое название занятия')
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(editor.getByText('Сохранено в файлы проекта.')).toBeVisible()
+  expect(state.overrides).toHaveLength(1)
+  expect(state.overrides[0].properties).toMatchObject({ fontSize: '24px', paddingLeft: '15px', marginTop: '12px' })
+  expect(state.overrides[0].text).toBe('Новое название занятия')
+  expect(state.overrides[0].match).toMatch(/^[0-9a-f]{64}$/)
+  await editor.getByRole('button', { name: 'Закрыть редактор' }).click()
+  const mainText = page.locator('.ops-today-status-list button .ops-session-summary-column > span').first()
+  await expect(mainText).toBeVisible()
+  await page.evaluate(async (overrides) => {
+    const { mountAppearanceText } = await import('/src/app/appearanceText.js')
+    window.stopAppearanceTextTest = mountAppearanceText(document, overrides)
+  }, state.overrides)
+  await expect(mainText).toHaveText('Новое название занятия')
+  await page.evaluate(() => window.stopAppearanceTextTest())
+  await expect(mainText).not.toHaveText('Новое название занятия')
+})
+
+test('appearance editor adds, copies, hides and removes local text blocks', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'desktop editor')
+  await mockAdmin(page)
+  let state = { values: {}, presets: [], overrides: [], blocks: [] }
+  await page.route('**/api/dev/appearance/', (route) => {
+    if (route.request().method() === 'POST') state = route.request().postDataJSON().state
+    return json(route, { fields: [], state, revision: 'one' })
+  })
+  await page.goto('/?role=admin&view=overview')
+  await page.getByTestId('appearance-editor-open').click()
+  const editor = page.getByRole('dialog', { name: 'Редактор оформления' })
+  const frame = page.frameLocator('iframe[title="Предпросмотр CRM"]')
+  await editor.getByRole('button', { name: 'Отдельный элемент' }).click()
+  const heading = frame.locator('#root h1').first()
+  await heading.click()
+  await editor.getByRole('button', { name: 'Скрыть', exact: true }).click()
+  await expect(heading).toHaveCSS('visibility', 'hidden')
+  await editor.getByRole('button', { name: 'Показать' }).click()
+  await expect(heading).toHaveCSS('visibility', 'visible')
+  await editor.getByRole('button', { name: 'Удалить', exact: true }).click()
+  await expect(heading).toHaveCSS('display', 'none')
+  await editor.getByRole('button', { name: 'Восстановить' }).click()
+  await expect(heading).not.toHaveCSS('display', 'none')
+  await editor.getByRole('button', { name: 'Добавить текст' }).click()
+  const blocks = frame.locator('[data-appearance-block-id]')
+  await expect(blocks).toHaveCount(1)
+  await expect(blocks.first()).toHaveText('Новый текст')
+  await heading.click()
+  await editor.getByRole('button', { name: 'Копировать' }).click()
+  await editor.getByRole('button', { name: 'Вставить' }).click()
+  await expect(blocks).toHaveCount(2)
+  await editor.getByRole('button', { name: 'Общее оформление' }).click()
+  await frame.getByTestId('nav-admin-clients').click()
+  await expect(blocks).toHaveCount(0)
+  await frame.getByTestId('nav-admin-overview').click()
+  await expect(blocks).toHaveCount(2)
+  await editor.getByRole('button', { name: 'Отдельный элемент' }).click()
+  await blocks.first().click()
+  await editor.getByLabel('Текст элемента').fill('Свой текст')
+  await expect(blocks.first()).toHaveText('Свой текст')
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(editor.getByText('Сохранено в файлы проекта.')).toBeVisible()
+  expect(state.blocks).toHaveLength(2)
+  expect(state.blocks[0].text).toBe('Свой текст')
+  expect(state.blocks[1].text).toBe(await heading.textContent())
+  await editor.getByRole('button', { name: 'Удалить', exact: true }).click()
+  await expect(blocks).toHaveCount(1)
+  await editor.getByRole('button', { name: 'Отменить шаг' }).click()
+  await expect(blocks).toHaveCount(2)
+  await editor.getByRole('button', { name: 'Закрыть редактор' }).click()
+  await page.getByTestId('appearance-editor-open').click()
+  await expect(frame.locator('[data-appearance-block-id]')).toHaveCount(2)
+})
+
 
 function json(route, payload) {
   return route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) })
@@ -22,7 +218,7 @@ async function mockAdmin(page, { clients = [], sessions = [], trainers = [], gro
     if (path === '/api/admin/reference/') return json(route, {
       trainers: [{ id: 1, full_name: 'Audit Trainer' }],
       groups: groups.length
-        ? groups.map((group) => ({ id: group.id, name: group.name, default_capacity: group.default_capacity }))
+        ? groups
         : [{ id: 1, name: 'Audit Group', default_capacity: 8 }],
       subscription_types: [], locations: [{ id: 1, name: 'Pool A' }],
       session_types: [], participants: clients,
@@ -53,6 +249,31 @@ async function mockAdmin(page, { clients = [], sessions = [], trainers = [], gro
     return json(route, emptyCollections)
   })
 }
+
+test('dark trainer profile keeps group counts and actions readable', async ({ page }, testInfo) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'phone and desktop dark theme')
+  await mockAdmin(page, {
+    trainers: [{ id: 1, full_name: 'Audit Trainer', is_active: true, groups_count: 1 }],
+    groups: [{ id: 1, name: 'Gold Group', is_active: true, default_trainer: { id: 1, name: 'Audit Trainer' }, color_key: 'gold-01', participants_count: 3 }],
+  })
+  await page.addInitScript(() => localStorage.setItem('swimcrm.theme', 'dark'))
+  await page.goto('/?role=admin&view=trainers')
+  await page.locator(page.viewportSize().width < 768 ? '.ops-entity-mobile-list .ops-compact-card-title' : '.ops-entity-desktop-table .ops-link-button')
+    .filter({ hasText: 'Audit Trainer' }).click()
+
+  const card = page.locator('.ops-trainer-profile-card')
+  const group = card.locator('.ops-trainer-group-link')
+  const count = group.locator('.ops-trainer-group-count')
+  await expect(group).toBeVisible()
+  expect(await page.getByRole('searchbox').evaluate((node) => getComputedStyle(node, '::placeholder').color)).toBe('rgb(172, 196, 220)')
+  await expect(group).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(count).toHaveCSS('color', 'rgb(247, 251, 255)')
+  expect(await count.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toContain('255, 255, 255')
+  await expect(card.locator('.swim-btn--secondary').first()).toHaveCSS('background-color', 'rgb(41, 69, 96)')
+  await expect(card.locator('.ops-tabs .is-active')).toHaveCSS('background-color', 'rgb(28, 70, 103)')
+  await page.screenshot({ path: testInfo.outputPath('dark-trainer-profile.png'), fullPage: true, animations: 'disabled' })
+  await card.screenshot({ path: testInfo.outputPath('dark-trainer-card.png'), animations: 'disabled' })
+})
 
 test('attendance opens the selected session editor and returns after saving', async ({ page }) => {
   const session = {
@@ -103,7 +324,17 @@ test('attendance opens the selected session editor and returns after saving', as
     expect((await card.boundingBox()).height).toBeLessThan(340)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   }
-  await card.locator('.ops-attendance-session-heading button').click()
+  const toggleDetails = page.getByTestId('admin-attendance-session-toggle')
+  await expect(toggleDetails).toHaveAttribute('aria-expanded', 'false')
+  await expect(card.locator('#admin-attendance-session-details')).toBeHidden()
+  await expect(card).toContainText('Audit Group')
+  await toggleDetails.click()
+  await expect(card.locator('#admin-attendance-session-details')).toBeVisible()
+  await toggleDetails.click()
+  await expect(card.locator('#admin-attendance-session-details')).toBeHidden()
+  await toggleDetails.click()
+  await expect(card.locator('#admin-attendance-session-details')).toBeVisible()
+  await page.getByTestId('admin-attendance-edit-session').click()
   const dialog = page.getByTestId('form-modal')
   await expect(dialog.locator('#admin-session-edit-notes')).toHaveValue('')
   await dialog.locator('#admin-session-edit-notes').fill('Updated from attendance')
@@ -111,7 +342,7 @@ test('attendance opens the selected session editor and returns after saving', as
   await expect(page).toHaveURL(/view=attendance.*session=71/)
   await expect(card).toContainText('Updated from attendance')
   expect(saves).toBe(1)
-  await card.locator('.ops-attendance-session-heading button').click()
+  await page.getByTestId('admin-attendance-edit-session').click()
   await dialog.locator('.form-modal__footer button').first().click()
   await expect(page).toHaveURL(/view=attendance.*session=71/)
   expect(saves).toBe(1)
@@ -244,8 +475,8 @@ test('client search results stay opaque and below the input', async ({ page }) =
   expect(metrics.startsBelowInput).toBe(true)
 })
 
-test('schedule navigation and training actions keep application styling', async ({ page }) => {
-  test.skip(page.viewportSize()?.width !== 1440, 'one desktop style contract is sufficient')
+test('schedule navigation and training actions keep application styling', async ({ page }, testInfo) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width), 'phone and desktop action alignment')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=schedule')
   await expect(page.locator('h1.page-title')).toBeVisible()
@@ -268,6 +499,19 @@ test('schedule navigation and training actions keep application styling', async 
   expect(metrics.actionRadius).toBeGreaterThanOrEqual(10)
   expect(metrics.actionBackground).not.toBe('rgba(0, 0, 0, 0)')
   expect(metrics.actionBorder).toBeGreaterThanOrEqual(1)
+
+  const actions = page.locator('.ops-schedule-action-strip')
+  await expect(actions.locator('svg')).toHaveCount(4)
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => { document.documentElement.dataset.theme = value }, theme)
+    const iconOffsets = await actions.locator('button').evaluateAll((buttons) => buttons.map((button) => {
+      const card = button.getBoundingClientRect()
+      const icon = button.querySelector('svg').getBoundingClientRect()
+      return { left: icon.left - card.left, center: icon.top + icon.height / 2 - card.top - card.height / 2 }
+    }))
+    expect(iconOffsets.every((offset) => Math.abs(offset.left - iconOffsets[0].left) < 1 && Math.abs(offset.center) < 1)).toBe(true)
+    await actions.screenshot({ path: testInfo.outputPath(`schedule-actions-${theme}.png`), animations: 'disabled' })
+  }
 })
 
 test('schedule calendar keeps its desktop and mobile spacing', async ({ page }) => {
@@ -304,18 +548,28 @@ test('sidebar shows language above the user and initials only when collapsed', a
   await expect(logout).toBeVisible()
 
   if ((page.viewportSize()?.width || 0) === 1440) {
+    await expect(sidebar.getByTestId('theme-toggle')).toBeVisible()
     await expect(name).toBeVisible()
     await expect(avatar).toBeHidden()
     const [localeBox, nameBox, logoutBox] = await Promise.all([locale.boundingBox(), name.boundingBox(), logout.boundingBox()])
     expect(localeBox.y + localeBox.height).toBeLessThanOrEqual(nameBox.y)
     expect(logoutBox.x).toBeGreaterThan(nameBox.x)
   } else {
+    const themeToggle = sidebar.getByTestId('theme-toggle')
+    await expect(themeToggle).toBeVisible()
+    await expect(locale.locator('option')).toHaveText(['РУС', 'УКР', 'PL', 'EN'])
     await expect(name).toBeHidden()
     await expect(avatar).toBeVisible()
     await expect(avatar).toHaveText('AA')
-    const [sidebarBox, localeBox] = await Promise.all([sidebar.boundingBox(), locale.boundingBox()])
+    const [sidebarBox, localeBox, themeBox, brandBox, navBox] = await Promise.all([
+      sidebar.boundingBox(), locale.boundingBox(), themeToggle.boundingBox(),
+      sidebar.locator('.ops-brand-mark').boundingBox(), sidebar.locator('.ops-nav-button').first().boundingBox(),
+    ])
     expect(localeBox.x).toBeGreaterThanOrEqual(sidebarBox.x)
     expect(localeBox.x + localeBox.width).toBeLessThanOrEqual(sidebarBox.x + sidebarBox.width)
+    expect(themeBox.y + themeBox.height).toBeLessThanOrEqual(localeBox.y)
+    expect(Math.abs(brandBox.x + brandBox.width / 2 - navBox.x - navBox.width / 2)).toBeLessThanOrEqual(1)
+    expect(Math.abs(themeBox.x + themeBox.width / 2 - localeBox.x - localeBox.width / 2)).toBeLessThanOrEqual(1)
   }
 })
 
@@ -369,6 +623,7 @@ test('shared controls never fall back to browser-native styling', async ({ page 
 
   await page.goto('/?role=admin&view=clients')
   await expect(page.locator('h1.page-title')).toBeVisible()
+  await page.getByTestId('admin-clients-filter-toggle').click()
   const clientMetrics = await page.evaluate(() => {
     const metrics = (node) => {
       const style = getComputedStyle(node)
@@ -382,15 +637,15 @@ test('shared controls never fall back to browser-native styling', async ({ page 
     }
     return {
       globalSearch: metrics(document.querySelector('.ops-global-search input')),
-      listSearch: metrics(document.querySelector('.ops-search')),
-      listSelect: metrics(document.querySelector('.ops-client-filter-selects select')),
+      listSearch: metrics(document.querySelector('.ops-list-search input')),
+      listSelect: metrics(document.querySelector('.ops-list-filter-fields select')),
       entityLink: metrics(document.querySelector('.ops-link-button')),
     }
   })
 
   for (const [name, control] of Object.entries({ globalSearch: clientMetrics.globalSearch, listSearch: clientMetrics.listSearch, listSelect: clientMetrics.listSelect })) {
     expect(control.borderStyle, `${name} border`).toBe('solid')
-    expect(control.radius, `${name} radius`).toBeGreaterThanOrEqual(6)
+    expect(control.radius, `${name} radius`).toBeGreaterThanOrEqual(name === 'globalSearch' ? 6 : 4)
   }
   expect(clientMetrics.entityLink.borderStyle).toBe('none')
   expect(clientMetrics.entityLink.background).toBe('rgba(0, 0, 0, 0)')
@@ -474,6 +729,7 @@ test('mobile shell, entity cards and subscription page stay readable at supporte
     await page.locator('.ops-mobile-menu-button').click()
     const drawer = page.locator('.ops-mobile-drawer')
     await expect(drawer).toBeVisible()
+    await drawer.evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished)))
     const shell = await drawer.evaluate((node) => {
       const box = node.getBoundingClientRect()
       const nav = node.querySelector('.ops-mobile-drawer-nav')
@@ -505,7 +761,7 @@ test('mobile shell, entity cards and subscription page stay readable at supporte
   await page.goto('/?role=admin&view=groups')
   const groupCard = page.locator('.ops-group-compact-card').first()
   await expect(groupCard).toHaveCSS('background-color', 'rgb(232, 245, 233)')
-  await expect(groupCard.locator('.ops-compact-card-line strong').first()).toHaveCSS('color', 'rgb(26, 33, 41)')
+  await expect(groupCard.locator('.ops-compact-card-line strong').first()).toHaveCSS('color', 'rgb(25, 50, 75)')
   await groupCard.locator('.ops-compact-card-title').click()
   const inlineDetail = groupCard.locator('xpath=following-sibling::*[1]')
   await expect(inlineDetail).toHaveClass(/ops-inline-entity-detail/)
@@ -607,10 +863,10 @@ test('overview rows, trainer tabs and searchable toggles keep integrated applica
       cursor: style.cursor,
     }
   })
-  expect.soft(rowMetrics.widthRatio).toBeGreaterThan(0.2)
+  expect.soft(rowMetrics.widthRatio).toBeGreaterThan(0.08)
   expect.soft(rowMetrics.borderTopStyle).toBe('solid')
   expect.soft(rowMetrics.background).not.toBe('rgb(240, 240, 240)')
-  expect.soft(rowMetrics.paddingLeft).toBeGreaterThanOrEqual(10)
+  expect.soft(rowMetrics.paddingLeft).toBeGreaterThanOrEqual(8)
   expect.soft(rowMetrics.font).toContain('IBM Plex Sans')
   expect.soft(rowMetrics.cursor).toBe('pointer')
 

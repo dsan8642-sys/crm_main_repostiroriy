@@ -48,8 +48,7 @@ export function addDays(value, amount) {
 
 export function calendarDates(focusDate, viewMode) {
   const anchor = dateFromIso(focusDate) || dateFromIso(localToday())
-  if (viewMode === 'day') return [dateToIso(anchor)]
-  if (viewMode === 'week') {
+  if (viewMode !== 'month') {
     const monday = addDays(anchor, -((anchor.getDay() + 6) % 7))
     return Array.from({ length: 7 }, (_, index) => dateToIso(addDays(monday, index)))
   }
@@ -68,8 +67,7 @@ export function calendarRange(focusDate, viewMode) {
 
 export function moveCalendarFocus(focusDate, viewMode, direction) {
   const anchor = dateFromIso(focusDate) || dateFromIso(localToday())
-  if (viewMode === 'day') return dateToIso(addDays(anchor, direction))
-  if (viewMode === 'week') return dateToIso(addDays(anchor, direction * 7))
+  if (viewMode !== 'month') return dateToIso(addDays(anchor, direction * 7))
   const day = anchor.getDate()
   const target = new Date(anchor.getFullYear(), anchor.getMonth() + direction, 1, 12)
   const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0, 12).getDate()
@@ -88,7 +86,7 @@ export function periodSessionCount(sessions, focusDate, viewMode) {
 }
 
 export function periodCountLabel(count, viewMode, t) {
-  const period = viewMode === 'day' ? 'day' : viewMode === 'month' ? 'month' : 'week'
+  const period = viewMode === 'month' ? 'month' : 'week'
   return scheduleMessage(t, `schedule.periodCount.${period}`, { count })
 }
 

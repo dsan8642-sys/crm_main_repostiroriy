@@ -87,6 +87,12 @@ const resourceHelp = {
   locations: 'settings.help.locations',
   sessionTypes: 'settings.help.sessionTypes',
 }
+const resourceHints = {
+  templates: 'settings.hint.templates',
+  rules: 'settings.hint.rules',
+  quietHours: 'settings.hint.quietHours',
+  notificationTranslations: 'settings.hint.notificationTranslations',
+}
 
 const tabs = [
   ['catalog', 'settings.tab.catalog'], ['notifications', 'settings.tab.notifications'], ['payroll', 'settings.tab.payroll'], ['localization', 'settings.tab.localization'], ['control', 'settings.tab.control'], ['reports', 'settings.tab.reports'],
@@ -428,11 +434,13 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       <div className="ops-settings-workspace">
       <nav className="ops-settings-desktop-nav" aria-label={t('settings.categories')}>
         <div className="ops-settings-categories" role="tablist" aria-orientation="vertical">
-          {tabs.map(([value, label]) => <button key={value} type="button" role="tab" data-testid={`admin-settings-category-${value}`} aria-selected={tab === value} className={`ops-settings-category${tab === value ? ' is-active' : ''}`} onClick={() => selectTab(value)}>{t(label)}</button>)}
+          {tabs.map(([value, label]) => <React.Fragment key={value}>
+            <button type="button" role="tab" data-testid={`admin-settings-category-${value}`} aria-selected={tab === value} className={`ops-settings-category${tab === value ? ' is-active' : ''}`} onClick={() => selectTab(value)}>{t(label)}</button>
+            {tab === value && value !== 'reports' && <div className="ops-settings-resources" aria-label={t(label)}>
+              {tabResources.map((item) => <button type="button" key={item.id} data-testid={`admin-settings-resource-${item.id}`} className={`ops-settings-resource${resource.id === item.id ? ' is-active' : ''}`} aria-current={resource.id === item.id ? 'true' : undefined} onClick={() => selectResource(item)}>{t(item.title)}</button>)}
+            </div>}
+          </React.Fragment>)}
         </div>
-        {tab !== 'reports' && <div className="ops-settings-resources" aria-label={t(tabs.find(([value]) => value === tab)?.[1])}>
-          {tabResources.map((item) => <button type="button" key={item.id} data-testid={`admin-settings-resource-${item.id}`} className={`ops-settings-resource${resource.id === item.id ? ' is-active' : ''}`} aria-current={resource.id === item.id ? 'true' : undefined} onClick={() => selectResource(item)}>{t(item.title)}</button>)}
-        </div>}
       </nav>
       <div className="ops-settings-mobile-nav">
         {mobileLevel === 'categories' && <div className="ops-settings-mobile-list" aria-label={t('settings.categoriesAria')}>
@@ -441,7 +449,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         {mobileLevel === 'resources' && <>
           <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</ContextBackButton>
           <div className="ops-settings-mobile-list" aria-label={t(tabs.find(([value]) => value === tab)?.[1])}>
-            {tabResources.map((item) => <button key={item.id} type="button" data-testid={`admin-settings-resource-${item.id}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong><small>{t(item.readOnly ? 'settings.viewControl' : 'settings.createEdit')}</small></span><span aria-hidden="true">›</span></button>)}
+            {tabResources.map((item) => <button key={item.id} type="button" data-testid={`admin-settings-resource-${item.id}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong>{resourceHints[item.id] && <small>{t(resourceHints[item.id])}</small>}</span><span aria-hidden="true">›</span></button>)}
           </div>
         </>}
         {mobileLevel === 'detail' && <div className="ops-settings-mobile-back">
@@ -575,16 +583,16 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         {accessAction?.error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setAccessAction((current) => current && ({ ...current, error: null }))}>{accessAction.error}</Banner>}
         <Input id="admin-access-current-password" label={t('settings.currentPassword')} type="password" value={accessAction?.currentPassword || ''} onChange={(event) => setAccessAction((current) => current && ({ ...current, currentPassword: event.target.value, error: null }))} autoComplete="current-password" />
       </FormModal>
-      {pendingArchive && <Dialog
-        open
+      <Dialog
+        open={Boolean(pendingArchive)}
         title={t('settings.archiveTitle')}
-        description={t('settings.archiveDescription', { name: pendingArchive.name || pendingArchive.label || pendingArchive.code || pendingArchive.id })}
+        description={t('settings.archiveDescription', { name: pendingArchive?.name || pendingArchive?.label || pendingArchive?.code || pendingArchive?.id })}
         confirmLabel={t('settings.remove')}
         cancelLabel={t('common.cancel')}
         tone="danger"
         onClose={() => loading ? null : setPendingArchive(null)}
         onConfirm={() => archive(pendingArchive)}
-      />}
+      />
     </div>
   }
 }

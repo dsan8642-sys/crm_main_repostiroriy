@@ -116,6 +116,10 @@ SUBSCRIPTION_UPDATE_PATHS = {
     "/api/admin/subscriptions/{subscription_id}/",
 }
 
+SUBSCRIPTION_COMBINED_UPDATE_PATHS = {
+    "/api/admin/subscriptions/{subscription_id}/update/",
+}
+
 
 def _allowed_methods(view):
     methods = set()
@@ -207,6 +211,24 @@ def build_openapi_schema():
                 )
             if operation_parameters:
                 operation["parameters"] = operation_parameters
+            if method == "POST" and path == "/api/dev/appearance/":
+                appearance_schema = {
+                    "type": "object", "required": ["revision", "state"],
+                    "properties": {
+                        "revision": {"type": "string"},
+                        "state": {
+                            "type": "object", "required": ["values", "presets"],
+                            "properties": {
+                                "values": {"type": "object", "additionalProperties": {"type": "string"}},
+                                "presets": {"type": "array", "maxItems": 20, "items": {"type": "object"}},
+                            },
+                        },
+                    },
+                }
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": appearance_schema}},
+                }
             if method == "POST" and path in SUBSCRIPTION_OPERATION_PATHS:
                 operation["requestBody"] = {
                     "required": True,
@@ -219,6 +241,28 @@ def build_openapi_schema():
                     "required": True,
                     "content": {"application/json": {"schema": {
                         "$ref": "#/components/schemas/SubscriptionUpdate",
+                    }}},
+                }
+            if method == "POST" and path in SUBSCRIPTION_COMBINED_UPDATE_PATHS:
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "$ref": "#/components/schemas/SubscriptionCombinedUpdate",
+                    }}},
+                }
+            if method == "POST" and path == "/api/admin/participants/{participant_id}/attendance/payment/":
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object", "required": ["attendance_ids", "source"],
+                        "properties": {
+                            "attendance_ids": {"type": "array", "minItems": 1, "maxItems": 2000,
+                                               "uniqueItems": True, "items": {"type": "integer", "minimum": 1}},
+                            "source": {"type": "string", "enum": ["account", "subscription"]},
+                            "subscription_id": {"type": "integer", "minimum": 1,
+                                                "description": "Required if more than one eligible subscription is available. Eligible means not cancelled and either not expired (effective end date, Warsaw today) or has a positive session balance."},
+                        },
+                        "description": "Atomically reassign billable visits without changing payments. Explicit reassignment enables billing for selected history-only visits. Negative subscription balances and visits before the subscription start date are allowed.",
                     }}},
                 }
             if method == "POST" and path == "/api/admin/settings/session-types/":
@@ -328,6 +372,20 @@ def build_openapi_schema():
                         {"required": ["status"]},
                         {"required": ["effective_end_date"]},
                     ],
+                },
+                "SubscriptionCombinedUpdate": {
+                    "type": "object",
+                    "required": ["reason"],
+                    "properties": {
+                        "reason": {"type": "string", "minLength": 1, "maxLength": 255},
+                        "start_date": {"type": "string", "format": "date",
+                                       "description": "Independent from the end date; does not recalculate past attendance."},
+                        "effective_end_date": {"type": "string", "format": "date"},
+                        "remaining_sessions": {"type": "integer", "minimum": 0},
+                        "freeze": {"type": "object", "required": ["start_date", "end_date"],
+                                   "properties": {"start_date": {"type": "string", "format": "date"},
+                                                  "end_date": {"type": "string", "format": "date"}}},
+                    },
                 },
             },
         },

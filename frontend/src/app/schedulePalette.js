@@ -24,8 +24,8 @@ export function scheduleColorOption(value) {
 export function scheduleColorStyle(value) {
   const color = scheduleColorOption(value)
   return {
-    '--schedule-color-background': color.background,
-    '--schedule-color-border': color.border,
-    '--schedule-color-text': color.text,
+    '--schedule-color-background': `light-dark(${color.background}, color-mix(in srgb, ${color.border} 22%, var(--surface-card)))`,
+    '--schedule-color-border': `light-dark(${color.border}, color-mix(in srgb, ${color.border} 65%, var(--text-strong)))`,
+    '--schedule-color-text': `light-dark(${color.text}, var(--text-strong))`,
   }
 }

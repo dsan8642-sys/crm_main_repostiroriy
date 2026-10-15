@@ -14,6 +14,12 @@ class AttendanceStatus(models.TextChoices):
 DEDUCTING_STATUSES = {AttendanceStatus.PRESENT, AttendanceStatus.ABSENT}
 
 
+class AttendancePaymentSource(models.TextChoices):
+    AUTO = "", "Автоматически"
+    ACCOUNT = "account", "Со счёта"
+    SUBSCRIPTION = "subscription", "С абонемента"
+
+
 class AttendanceRecord(models.Model):
     """Rule 2: status of a student on a concrete Session. One record per (session, student)."""
     session = models.ForeignKey("scheduling.Session", on_delete=models.CASCADE, related_name="attendance")
@@ -23,6 +29,11 @@ class AttendanceRecord(models.Model):
     marked_by = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
     marked_at = models.DateTimeField(default=timezone.now)
     financial_effects_enabled = models.BooleanField(default=True, editable=False)
+    payment_source = models.CharField(
+        max_length=16, choices=AttendancePaymentSource.choices, blank=True, default="")
+    payment_subscription = models.ForeignKey(
+        "subscriptions.Subscription", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="paid_attendances")
 
     class Meta:
         constraints = [

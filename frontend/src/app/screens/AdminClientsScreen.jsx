@@ -15,7 +15,7 @@ import { clientSelectOption, SearchableSelect } from '../SearchableSelect.jsx'
 import { DateField } from '../DateTimeField.jsx'
 import { FormModal } from '../FormModal.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
-import { ListFeedback, useScreenList } from '../listFoundation.jsx'
+import { ListFeedback, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
 import { clientActivity, formatEntityDate, formatEntityMoney } from '../entityListContracts.js'
 import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
@@ -104,8 +104,9 @@ async function loadClientAccountOptions(query, requestOptions = {}) {
   }))
 }
 
-export function createAdminClientsScreen(components, reloadRoleData, adminData = {}) {
+export function createAdminClientsScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Badge, Money, Input, Dialog } = components
+  const I = icons
   return function ApiAdminClients({ go, currentUser, createClient: createClientShortcut }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
@@ -486,11 +487,11 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
 
         <div className="ops-action-strip">
           <button type="button" data-testid="admin-clients-new-client" className={`ops-action-card${quickAction === 'client' ? ' is-active' : ''}`} onClick={() => setQuickAction((current) => current === 'client' ? null : 'client')}>
-            <span>{t('clients.new')}</span>
+            <span className="ops-action-label"><I.UserPlus size={20} aria-hidden="true" />{t('clients.new')}</span>
             <small>{t('clients.openCreate')}</small>
           </button>
           <button type="button" className={`ops-action-card${quickAction === 'participant' ? ' is-active' : ''}`} onClick={() => setQuickAction((current) => current === 'participant' ? null : 'participant')}>
-            <span>{t('clients.participantToAccount')}</span>
+            <span className="ops-action-label"><I.Users size={20} aria-hidden="true" />{t('clients.participantToAccount')}</span>
             <small>{t('clients.addSecond')}</small>
           </button>
         </div>
@@ -593,51 +594,22 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
               </label>
             </div>
         </FormModal>
-        <div className="ops-command-row">
-          <div className="ops-client-list-tools">
-            <div className="seg" aria-label={t('clients.listMode')}>
-              <button type="button" data-testid="admin-clients-scope-active" className={scope === 'active' ? 'on' : ''} onClick={() => setScope('active')}>{t('clients.title')}</button>
-              <button type="button" data-testid="admin-clients-scope-blacklist" className={scope === 'blacklist' ? 'on' : ''} onClick={() => setScope('blacklist')}>{t('clients.blacklist')}</button>
-            </div>
-            <div className="ops-search">
-              <span aria-hidden="true">⌕</span>
-              <input id="admin-clients-search" aria-label={t('clients.search')} value={clientList.search} onChange={(event) => clientList.setSearch(event.target.value)} placeholder={t('clients.searchPlaceholder')} />
-            </div>
-            <div className="ops-client-filter-selects">
-              <label className="ops-client-filter-field">
-                <span>{t('clients.subscription')}</span>
-                <select data-testid="admin-clients-filter-subscription" aria-label={t('clients.subscription')} value={clientList.draftFilters.subscription} onChange={(event) => clientList.setDraftFilter('subscription', event.target.value)}>
-                  <option value="">{t('common.all')}</option>
-                  <option value="with">{t('clients.with')}</option>
-                  <option value="without">{t('clients.without')}</option>
-                </select>
-              </label>
-              <label className="ops-client-filter-field">
-                <span>{t('common.balance')}</span>
-                <select data-testid="admin-clients-filter-balance" aria-label={t('common.balance')} value={clientList.draftFilters.balance} onChange={(event) => clientList.setDraftFilter('balance', event.target.value)}>
-                  <option value="">{t('clients.any')}</option>
-                  <option value="positive">{t('clients.overpayment')}</option>
-                  <option value="negative">{t('clients.debt')}</option>
-                </select>
-              </label>
-              <label className="ops-client-filter-field">
-                <span>{t('clients.activity')}</span>
-                <select data-testid="admin-clients-filter-activity" aria-label={t('clients.activity')} value={clientList.draftFilters.activity} onChange={(event) => clientList.setDraftFilter('activity', event.target.value)}>
-                  <option value="">{t('common.all')}</option>
-                  <option value="active">{t('clients.active60')}</option>
-                  <option value="inactive">{t('common.inactive')}</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <div className="ops-client-command-actions">
-            <span className="muted" data-testid="admin-clients-found" data-count={clientList.pagination.total}>{t('clients.found', { count: clientList.pagination.total })}</span>
-            <Button size="sm" variant="secondary" data-testid="admin-clients-filter-apply" onClick={clientList.applyFilters}>{t('clients.applyFilters', { count: clientList.filterCount })}</Button>
-            {hasActiveFilter && (
-              <Button size="sm" variant="subtle" data-testid="admin-clients-filter-reset" onClick={clientList.resetFilters}>{t('clients.resetFilters')}</Button>
-            )}
-          </div>
+        <div className="seg ops-client-scope-tabs" role="group" aria-label={t('clients.listMode')}>
+          <button type="button" data-testid="admin-clients-scope-active" className={scope === 'active' ? 'on' : ''} onClick={() => setScope('active')}>{t('clients.title')}</button>
+          <button type="button" data-testid="admin-clients-scope-blacklist" className={scope === 'blacklist' ? 'on' : ''} onClick={() => setScope('blacklist')}>{t('clients.blacklist')}</button>
         </div>
+        <ListToolbar
+          list={clientList}
+          searchLabel={t('clients.search')}
+          searchPlaceholder={t('clients.searchPlaceholder')}
+          searchId="admin-clients-search"
+          testIdPrefix="admin-clients"
+          feedback={<span className="muted" data-testid="admin-clients-found" data-count={clientList.pagination.total} hidden={!hasActiveFilter}>{t('clients.found', { count: clientList.pagination.total })}</span>}
+        >
+          <label>{t('clients.subscription')}<select data-testid="admin-clients-filter-subscription" value={clientList.draftFilters.subscription} onChange={(event) => clientList.setDraftFilter('subscription', event.target.value)}><option value="">{t('common.all')}</option><option value="with">{t('clients.with')}</option><option value="without">{t('clients.without')}</option></select></label>
+          <label>{t('common.balance')}<select data-testid="admin-clients-filter-balance" value={clientList.draftFilters.balance} onChange={(event) => clientList.setDraftFilter('balance', event.target.value)}><option value="">{t('clients.any')}</option><option value="positive">{t('clients.overpayment')}</option><option value="negative">{t('clients.debt')}</option></select></label>
+          <label>{t('clients.activity')}<select data-testid="admin-clients-filter-activity" value={clientList.draftFilters.activity} onChange={(event) => clientList.setDraftFilter('activity', event.target.value)}><option value="">{t('common.all')}</option><option value="active">{t('clients.active60')}</option><option value="inactive">{t('common.inactive')}</option></select></label>
+        </ListToolbar>
         <ListFeedback
           list={clientList}
           emptyLabel={scope === 'blacklist' ? t('clients.emptyBlacklist') : t('clients.emptyActive')}
@@ -766,22 +738,21 @@ export function createAdminClientsScreen(components, reloadRoleData, adminData =
             </EntityMobileCard>
           ))}
         </div>}
-        {clientAction && (
-          <Dialog
-            title={clientAction.type === 'archive'
-              ? t('clients.archiveTitle', { name: `${clientAction.row.last} ${clientAction.row.first}` })
-              : t('clients.restoreTitle', { name: `${clientAction.row.last} ${clientAction.row.first}` })}
-            description={clientAction.type === 'archive'
+        <Dialog
+            open={Boolean(clientAction)}
+            title={clientAction?.type === 'archive'
+              ? t('clients.archiveTitle', { name: `${clientAction?.row?.last || ''} ${clientAction?.row?.first || ''}` })
+              : t('clients.restoreTitle', { name: `${clientAction?.row?.last || ''} ${clientAction?.row?.first || ''}` })}
+            description={clientAction?.type === 'archive'
               ? t('clients.archiveDescription')
               : t('clients.restoreDescription')}
-            tone={clientAction.type === 'archive' ? 'danger' : 'default'}
-            confirmLabel={clientAction.type === 'archive' ? t('clients.archive') : t('clients.restore')}
+            tone={clientAction?.type === 'archive' ? 'danger' : 'default'}
+            confirmLabel={clientAction?.type === 'archive' ? t('clients.archive') : t('clients.restore')}
             onClose={() => busy ? null : setClientAction(null)}
             onConfirm={applyClientAction}
           >
-            <div className="strong">{clientAction.row.last} {clientAction.row.first}</div>
+            <div className="strong">{clientAction?.row?.last} {clientAction?.row?.first}</div>
           </Dialog>
-        )}
       </div>
     )
   }

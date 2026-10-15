@@ -40,6 +40,11 @@ body {
 @keyframes swim-spin { to { transform: rotate(360deg); } }
 @keyframes swim-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes swim-pop { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes swim-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes swim-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(4px) scale(0.98); } }
+@media (prefers-reduced-motion: reduce) {
+  [data-motion-dialog], [data-motion-dialog] > div { animation: none !important; }
+}
 @keyframes swim-toast { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .swim-btn { position: relative; }
@@ -72,6 +77,8 @@ body {
   box-shadow: 0 0 0 3px rgba(214, 63, 54, 0.14) !important;
 }
 .swim-input::placeholder, .swim-textarea::placeholder { color: var(--text-faint); }
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder { color: var(--text-faint); opacity: 1; }
 
 /* Table rows */
 .swim-tr-hover:hover { background: var(--surface-hover) !important; }

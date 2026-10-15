@@ -58,54 +58,53 @@ export const ROLE_META = {
 export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
   if (role === 'admin') {
     return [
-      { key: 'overview', label: t('nav.admin.overview'), icon: <icons.Home size={17} /> },
-      { key: 'clients', label: t('nav.admin.clients'), icon: <icons.ClientFamily size={17} />, count: counts.clients ?? data.AdminData?.clients?.length },
-      { key: 'schedule', label: t('nav.admin.schedule'), icon: <icons.Calendar size={17} />, section: t('shell.operationsSection') },
-      { key: 'groups', label: t('nav.admin.groups'), icon: <icons.GroupMembers size={17} />, count: data.AdminData?.groups?.length, section: t('shell.operationsSection') },
-      { key: 'trainers', label: t('nav.admin.trainers'), icon: <icons.TrainerWhistle size={17} />, count: data.AdminData?.trainers?.length, section: t('shell.operationsSection') },
+      { key: 'overview', label: t('nav.admin.overview'), icon: <icons.Home size={20} /> },
+      { key: 'clients', label: t('nav.admin.clients'), icon: <icons.ClientFamily size={20} /> },
+      { key: 'schedule', label: t('nav.admin.schedule'), icon: <icons.Calendar size={20} />, section: t('shell.operationsSection') },
+      { key: 'groups', label: t('nav.admin.groups'), icon: <icons.GroupMembers size={20} />, section: t('shell.operationsSection') },
+      { key: 'trainers', label: t('nav.admin.trainers'), icon: <icons.Trainer size={20} />, section: t('shell.operationsSection') },
       {
         key: 'payments',
         label: t('nav.admin.payments'),
-        icon: <icons.Cash size={17} />,
-        count: counts.pendingPayments ?? data.AdminData?.payments?.filter((payment) => payment.status === 'pending').length,
+        icon: <icons.Wallet size={20} />,
+        count: (counts.pendingPayments ?? data.AdminData?.payments?.filter((payment) => payment.status === 'pending').length) || undefined,
         section: t('shell.financeSection'),
       },
       {
         key: 'debtors',
         label: t('nav.admin.debtors'),
-        icon: <icons.Alert size={17} />,
-        count: counts.debtors ?? data.AdminData?.debtors?.length,
+        icon: <icons.Alert size={20} />,
+        count: (counts.debtors ?? data.AdminData?.debtors?.length) || undefined,
         countTone: 'danger',
         section: t('shell.financeSection'),
       },
       {
         key: 'subscriptions',
         label: t('nav.admin.subscriptions'),
-        icon: <icons.Ticket size={17} />,
+        icon: <icons.Ticket size={20} />,
         section: t('shell.financeSection'),
       },
-      { key: 'settings', label: t('nav.admin.settings'), icon: <icons.Settings size={17} />, section: t('shell.systemSection') },
+      { key: 'settings', label: t('nav.admin.settings'), icon: <icons.Settings size={20} />, section: t('shell.systemSection') },
     ]
   }
 
   if (role === 'trainer') {
     return [
-      { key: 'sessions', label: t('nav.trainer.sessions'), icon: <icons.Calendar size={17} /> },
-      { key: 'schedule', label: t('nav.trainer.schedule'), icon: <icons.Calendar size={17} /> },
-      { key: 'session', label: t('nav.trainer.session'), icon: <icons.Check size={17} />, section: t('shell.operationsSection') },
-      { key: 'groups', label: t('nav.trainer.groups'), icon: <icons.Users size={17} />, section: t('shell.operationsSection') },
-      { key: 'history', label: t('nav.trainer.history'), icon: <icons.File size={17} />, section: t('shell.operationsSection') },
+      { key: 'sessions', label: t('nav.trainer.sessions'), icon: <icons.Swimmer size={20} /> },
+      { key: 'schedule', label: t('nav.trainer.schedule'), icon: <icons.Calendar size={20} /> },
+      { key: 'groups', label: t('nav.trainer.groups'), icon: <icons.GroupMembers size={20} />, section: t('shell.operationsSection') },
+      { key: 'history', label: t('nav.trainer.history'), icon: <icons.History size={20} />, section: t('shell.operationsSection') },
     ]
   }
 
   return [
-    { key: 'home', label: t('nav.client.home'), icon: <icons.Home size={17} /> },
-    { key: 'schedule', label: t('nav.client.schedule'), icon: <icons.Calendar size={17} /> },
-    { key: 'subscription', label: t('nav.client.subscription'), icon: <icons.Layers size={17} />, section: t('shell.accountSection') },
-    { key: 'payments', label: t('nav.client.payments'), icon: <icons.Wallet size={17} />, section: t('shell.accountSection') },
-    { key: 'history', label: t('nav.client.history'), icon: <icons.File size={17} />, section: t('shell.accountSection') },
-    { key: 'profile', label: t('nav.client.profile'), icon: <icons.User size={17} />, section: t('shell.settingsSection') },
-    { key: 'help', label: t('nav.client.help'), icon: <icons.File size={17} />, section: t('shell.settingsSection') },
+    { key: 'home', label: t('nav.client.home'), icon: <icons.Home size={20} /> },
+    { key: 'schedule', label: t('nav.client.schedule'), icon: <icons.Calendar size={20} /> },
+    { key: 'subscription', label: t('nav.client.subscription'), icon: <icons.Ticket size={20} />, section: t('shell.accountSection') },
+    { key: 'payments', label: t('nav.client.payments'), icon: <icons.Wallet size={20} />, section: t('shell.accountSection') },
+    { key: 'history', label: t('nav.client.history'), icon: <icons.History size={20} />, section: t('shell.accountSection') },
+    { key: 'profile', label: t('nav.client.profile'), icon: <icons.User size={20} />, section: t('shell.settingsSection') },
+    { key: 'help', label: t('nav.client.help'), icon: <icons.HelpCircle size={20} />, section: t('shell.settingsSection') },
   ]
 }
 

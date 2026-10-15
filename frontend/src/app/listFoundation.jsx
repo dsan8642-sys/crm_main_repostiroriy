@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiErrorMessage } from '../api.js'
 import { useLocale } from '../i18n.jsx'
+import { usePresence } from './usePresence.js'
 import {
   buildListUrl,
   createListRequestController,
@@ -12,6 +13,7 @@ import {
 
 const MOBILE_QUERY = '(max-width: 767px)'
 const IDENTITY_FILTERS = (filters) => filters
+const IDENTITY_ROWS = (rows) => rows
 const EMPTY_PAGINATION = {
   page: 1,
   page_size: 50,
@@ -58,7 +60,7 @@ function writeStoredState(key, value) {
 export function useScreenList({
   path,
   itemKey,
-  mapRows = (rows) => rows,
+  mapRows = IDENTITY_ROWS,
   role,
   route,
   userKey,
@@ -283,14 +285,16 @@ export function useScreenList({
   }
 }
 
-export function ListToolbar({ list, searchLabel, searchPlaceholder, children }) {
+export function ListToolbar({ list, searchLabel, searchPlaceholder, searchId, testIdPrefix = 'list', feedback, children }) {
   const { t } = useLocale()
   const [open, setOpen] = useState(false)
+  const filterPresence = usePresence(open)
   return (
     <div className="ops-list-tools">
       <label className="ops-list-search">
         <span>{searchLabel || t('list.search')}</span>
         <input
+          id={searchId}
           type="search"
           data-testid="list-search-input"
           value={list.search}
@@ -300,16 +304,17 @@ export function ListToolbar({ list, searchLabel, searchPlaceholder, children }) 
       </label>
       {children && (
         <>
-          <button type="button" data-testid="list-filter-toggle" className="ops-list-filter-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          <button type="button" data-testid={`${testIdPrefix}-filter-toggle`} className="ops-list-filter-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
             {t('list.filters', undefined, { count: list.filterCount })}
           </button>
-          {open && (
-            <div className="ops-list-filter-panel">
+          {filterPresence.present && (
+            <div className={`ops-list-filter-panel ops-motion-panel${filterPresence.exiting ? ' is-exiting' : ''}`} aria-hidden={filterPresence.exiting || undefined} inert={filterPresence.exiting || undefined}>
               <div className="ops-list-filter-fields">{children}</div>
               <div className="ops-list-filter-actions">
-                <button type="button" data-testid="list-filter-reset" onClick={list.resetFilters}>{t('list.reset')}</button>
-                <button type="button" data-testid="list-filter-apply" className="primary" onClick={list.applyFilters}>{t('list.apply')}</button>
+                <button type="button" data-testid={`${testIdPrefix}-filter-reset`} onClick={list.resetFilters}>{t('list.reset')}</button>
+                <button type="button" data-testid={`${testIdPrefix}-filter-apply`} className="primary" onClick={list.applyFilters}>{t('list.apply')}</button>
               </div>
+              {feedback && <div className="ops-list-filter-feedback">{feedback}</div>}
             </div>
           )}
         </>

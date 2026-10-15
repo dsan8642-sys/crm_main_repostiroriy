@@ -33,8 +33,9 @@ const today = () => new Date().toISOString().slice(0, 10)
 const monthStart = () => `${today().slice(0, 8)}01`
 const money = (minor = 0, currency = 'PLN', localeTag = 'ru-RU') => `${(Number(minor) / 100).toLocaleString(localeTag, { minimumFractionDigits: 2 })} ${currency}`
 
-export function createAdminTrainersScreen(components, reloadRoleData, adminData = {}) {
+export function createAdminTrainersScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Input, Badge, Select, Checkbox, Dialog } = components
+  const I = icons
 
   return function ApiAdminTrainers({ go, currentUser }) {
     const { locale } = useLocale()
@@ -302,7 +303,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
 
     return (
       <div className="page page-wide">
-        <div className="page-head"><div><h1 className="page-title">{t('trainers.title')}</h1><p className="page-desc">{t('trainers.description')}</p></div><Button variant="primary" onClick={() => { const next = { firstName: '', lastName: '', email: '', phone: '', username: '', isActive: true }; setCreating(true); setSelected(null); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('trainers.new')}</Button></div>
+        <div className="page-head"><div><h1 className="page-title">{t('trainers.title')}</h1><p className="page-desc">{t('trainers.description')}</p></div><Button variant="primary" iconLeft={<I.TrainerPlus size={18} aria-hidden="true" />} onClick={() => { const next = { firstName: '', lastName: '', email: '', phone: '', username: '', isActive: true }; setCreating(true); setSelected(null); setFieldErrors({}); setForm(next); setFormBaseline(next) }}>{t('trainers.new')}</Button></div>
         <ToastNotice id="admin-trainer-result" message={message} />
         {error && !creating && !editing && !payrollAction && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
         <BusyBanner Banner={Banner} show={busy}>{t('trainers.busy')}</BusyBanner>
@@ -375,7 +376,7 @@ export function createAdminTrainersScreen(components, reloadRoleData, adminData 
           ))}
         </div>
         <ListPagination list={trainerList} />
-        {deactivateConfirm && <Dialog title={t('trainers.archiveTitle', { name: selected?.name })} description={t('trainers.archiveDescription', { sessions: archivePreview?.future_sessions_count ?? 0, groups: archivePreview?.default_groups_count ?? 0 })} tone="danger" confirmLabel={t('trainers.archive')} onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>}
+        <Dialog open={Boolean(deactivateConfirm)} title={t('trainers.archiveTitle', { name: selected?.name })} description={t('trainers.archiveDescription', { sessions: archivePreview?.future_sessions_count ?? 0, groups: archivePreview?.default_groups_count ?? 0 })} tone="danger" confirmLabel={t('trainers.archive')} onClose={() => busy ? null : setDeactivateConfirm(false)} onConfirm={deactivateTrainer}><div className="strong">{selected?.name}</div></Dialog>
       </div>
     )
   }

@@ -803,7 +803,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             <Button data-testid="admin-finance-open-issue" variant="primary" disabled={busyId != null || participants.length === 0 || subscriptionTypes.length === 0} onClick={() => openFinanceAction('issue')}>{t('finance.issue')}</Button>
             <Button data-testid="admin-finance-open-renew" variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('renew')}>{t('finance.renew')}</Button>
             <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('charge')}>{t('finance.addCharge')}</Button>
-            <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('payment')}>{t('finance.addPayment')}</Button>
+            <Button variant="secondary" iconLeft={<I.Wallet size={18} aria-hidden="true" />} disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('payment')}>{t('finance.addPayment')}</Button>
             <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('freeze')}>{t('finance.freeze')}</Button>
             <Button variant="secondary" disabled={busyId != null || participants.length === 0} onClick={() => openFinanceAction('adjust')}>{t('finance.adjust')}</Button>
           </div>

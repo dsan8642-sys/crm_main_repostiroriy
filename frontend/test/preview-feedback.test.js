@@ -57,7 +57,7 @@ test('month range contains visible adjacent-month dates', () => {
 })
 
 test('calendar navigation moves exactly one selected period', () => {
-  assert.equal(moveCalendarFocus('2026-07-29', 'day', 1), '2026-07-30')
+  assert.equal(moveCalendarFocus('2026-07-29', 'week', 1), '2026-08-05')
   assert.equal(moveCalendarFocus('2026-07-29', 'week', -1), '2026-07-22')
   assert.equal(moveCalendarFocus('2026-01-31', 'month', 1), '2026-02-28')
 })

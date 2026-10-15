@@ -12,6 +12,7 @@ export function TodaySessionCard({
   onOpen,
   emptyTitle,
   emptyDetail,
+  emptyActionLabel,
   colorKey,
 }) {
   const hasSession = Boolean(title)
@@ -24,9 +25,9 @@ export function TodaySessionCard({
         <p>{hasSession ? detail : emptyDetail}</p>
         {hasSession && meta && <div className="ops-today-session__meta">{meta}</div>}
       </div>
-      {hasSession && (
+      {(hasSession || emptyActionLabel) && (
         <div className="ops-today-session__action">
-          <Button variant="primary" onClick={onOpen}>{actionLabel}</Button>
+          <Button variant="primary" onClick={onOpen}><span>{hasSession ? actionLabel : emptyActionLabel}</span></Button>
         </div>
       )}
     </section>
@@ -36,7 +37,6 @@ export function TodaySessionCard({
 export function QuickActions({ label, actions }) {
   return (
     <section className="ops-quick-actions" aria-label={label}>
-      <div className="eyebrow" aria-hidden="true">&nbsp;</div>
       <div className="ops-quick-actions__grid">
         {actions.map((action) => (
           <button key={action.key || action.label} type="button" data-testid={action.testId} onClick={action.onClick}>

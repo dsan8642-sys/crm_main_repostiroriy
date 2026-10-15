@@ -134,11 +134,6 @@ def client_overview(request):
             "current_subscription": {
                 **_subscription_payload(shown),
                 "sessions_available_now": bool(current),
-                "ledger": [{
-                    "delta": entry.delta,
-                    "reason": entry.reason,
-                    "created_at": timezone.localtime(entry.created_at).isoformat(),
-                } for entry in shown.ledger_entries.order_by("created_at", "id")],
             } if shown else None,
             "next_session": _role_session_payload(
                 next_session,

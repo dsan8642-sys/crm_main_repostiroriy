@@ -26,13 +26,13 @@ test('schedule color rendering accepts only manifest keys and safely falls back'
   assert.equal(normalizeScheduleColorKey('#ff0000'), 'standard')
   assert.equal(normalizeScheduleColorKey(null), 'standard')
   assert.deepEqual(scheduleColorStyle('forest-01'), {
-    '--schedule-color-background': '#E8F5E9',
-    '--schedule-color-border': '#2E7D32',
-    '--schedule-color-text': '#1B5E20',
+    '--schedule-color-background': 'light-dark(#E8F5E9, color-mix(in srgb, #2E7D32 22%, var(--surface-card)))',
+    '--schedule-color-border': 'light-dark(#2E7D32, color-mix(in srgb, #2E7D32 65%, var(--text-strong)))',
+    '--schedule-color-text': 'light-dark(#1B5E20, var(--text-strong))',
   })
   assert.deepEqual(scheduleColorStyle('url(javascript:alert(1))'), {
-    '--schedule-color-background': '#EEF6FD',
-    '--schedule-color-border': '#1A7DC4',
-    '--schedule-color-text': '#0F5285',
+    '--schedule-color-background': 'light-dark(#EEF6FD, color-mix(in srgb, #1A7DC4 22%, var(--surface-card)))',
+    '--schedule-color-border': 'light-dark(#1A7DC4, color-mix(in srgb, #1A7DC4 65%, var(--text-strong)))',
+    '--schedule-color-text': 'light-dark(#0F5285, var(--text-strong))',
   })
 })

@@ -16,6 +16,7 @@ test('login defaults to Ukrainian and supports Russian, Polish and English', asy
 
   const selector = page.locator('form select').first()
   await expect(selector).toHaveAccessibleName('Мова інтерфейсу')
+  await expect(selector.locator('option')).toHaveText(['Русский', 'Українська', 'Polski', 'English'])
   await expect(selector).toHaveValue('uk')
   await expect(page.getByText('Вхід до системи')).toBeVisible()
 

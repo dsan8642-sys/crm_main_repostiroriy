@@ -2,8 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { mapAdminClientRows } from '../mappers.js'
 import { ROLE_META, roleNav, screenFor } from './runtime.jsx'
-import { SUPPORTED_LOCALES, useLocale } from '../i18n.jsx'
+import { COMPACT_LOCALE_NAMES, NATIVE_LOCALE_NAMES, SUPPORTED_LOCALES, useLocale } from '../i18n.jsx'
 import { uiLocaleTag } from '../localeContracts.js'
+import appearanceState from '../design/appearance.json'
+import { mountAppearanceText } from './appearanceText.js'
+import { mountAppearanceBlocks } from './appearanceBlocks.js'
+import { applyTheme, readTheme } from './theme.js'
+import { usePresence } from './usePresence.js'
 import {
   clearSessionUiState,
   hasUnsavedChanges,
@@ -18,10 +23,13 @@ const ROLE_SCREEN_LOADERS = {
   client: () => import('./screens/ClientScreens.jsx'),
 }
 
+const AppearanceEditor = import.meta.env.DEV ? React.lazy(() => import('./AppearanceEditor.jsx')) : null
+
 function activeMobileKey(role, view) {
   if (role === 'admin' && view === 'clientDetail') return 'clients'
   if (role === 'admin' && view === 'attendance') return 'schedule'
   if (role === 'admin' && view === 'reports') return 'settings'
+  if (role === 'trainer' && view === 'session') return 'schedule'
   return view
 }
 
@@ -51,13 +59,14 @@ function LocaleSelector({ compact = false, dark = false, locale, setLocale, t })
     <label style={{ display: 'grid', gap: 3, minWidth: 0 }}>
       <span className="sr-only">{t('locale.label')}</span>
       <select
-        aria-label={t('locale.label')}
+        aria-label={compact ? `${t('locale.label')}: ${NATIVE_LOCALE_NAMES[locale]}` : t('locale.label')}
+        title={NATIVE_LOCALE_NAMES[locale]}
         value={locale}
         onChange={(event) => setLocale(event.target.value)}
-        style={{ width: '100%', minHeight: 42, padding: compact ? '0 4px' : '0 12px', border: dark ? '1px solid rgba(255,255,255,0.16)' : '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: dark ? '#18263a' : 'var(--surface-card)', color: dark ? '#f4f8ff' : 'var(--text-strong)', fontSize: compact ? 12 : undefined, fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-medium)', colorScheme: dark ? 'dark' : 'normal' }}
+        style={{ width: '100%', minHeight: 42, padding: compact ? 0 : '0 6px', border: dark ? '1px solid rgba(255,255,255,0.16)' : '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: dark ? '#18263a' : 'var(--surface-card)', color: dark ? '#f4f8ff' : 'var(--text-strong)', fontSize: compact ? 12 : 13, fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-medium)', colorScheme: dark ? 'dark' : 'normal' }}
       >
         {SUPPORTED_LOCALES.map((code) => (
-          <option key={code} value={code}>{compact ? code.toUpperCase() : t(`locale.${code}`)}</option>
+          <option key={code} value={code} lang={code}>{compact ? COMPACT_LOCALE_NAMES[code] : NATIVE_LOCALE_NAMES[code]}</option>
         ))}
       </select>
     </label>
@@ -124,6 +133,12 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const initialRoute = routeForRole(initialRole || 'admin')
   const [role, setRole] = useState(initialRole || 'admin')
   const [view, setView] = useState(initialRoute.view)
+  const [theme, setTheme] = useState(readTheme)
+  useEffect(() => mountAppearanceText(document, appearanceState.overrides || []), [])
+  useEffect(() => mountAppearanceBlocks(document, appearanceState.blocks || []), [])
+  useEffect(() => {
+    document.documentElement.dataset.appearanceRoute = `${role}/${view}`
+  }, [role, view])
   const [kid, setKid] = useState(initialRoute.kid || 'k1')
   const [selectedClientId, setSelectedClientId] = useState(initialRoute.clientId)
   const [selectedSessionId, setSelectedSessionId] = useState(initialRoute.sessionId)
@@ -143,8 +158,16 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     readSessionBoolean(sidebarStateKey(initialRole || 'admin', currentUser)) ?? defaultSidebarCollapsed()
   ))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [mobileMenuClosing, setMobileMenuClosing] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState(null)
+  const mobileSearchPresence = usePresence(isMobile && mobileSearchOpen)
+  const navigationGuardPresence = usePresence(Boolean(pendingNavigation))
+  const appearancePresence = usePresence(appearanceOpen)
+  const lastPendingNavigation = useRef(null)
+  if (pendingNavigation) lastPendingNavigation.current = pendingNavigation
+  const shownPendingNavigation = pendingNavigation || lastPendingNavigation.current
   const [logoutPending, setLogoutPending] = useState(false)
   const [adminListCounts, setAdminListCounts] = useState({})
   const [roleScreenBundle, setRoleScreenBundle] = useState({
@@ -183,10 +206,10 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       return {
         AdminScreens: {
           Overview: factories.createAdminOverviewScreen(components, icons, roleDataRefs.current.AdminData),
-          Clients: factories.createAdminClientsScreen(components, reloadRoleData, roleDataRefs.current.AdminData),
+          Clients: factories.createAdminClientsScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
           ClientDetail: factories.createAdminClientDetailScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
-          Trainers: factories.createAdminTrainersScreen(components, reloadRoleData, roleDataRefs.current.AdminData),
-          Groups: factories.createAdminGroupsScreen(components, reloadRoleData, roleDataRefs.current.AdminData),
+          Trainers: factories.createAdminTrainersScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
+          Groups: factories.createAdminGroupsScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
           Schedule: factories.createAdminScheduleScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
           Attendance: factories.createAdminAttendanceScreen(components, icons, reloadRoleData, roleDataRefs.current.AdminData),
           Subscriptions: factories.createAdminSubscriptionsScreen(components, roleDataRefs.current.AdminData),
@@ -265,6 +288,10 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     const groups = (data.AdminData?.groups || []).filter((row) => row.name.toLocaleLowerCase(localeTag).includes(needle)).map((row) => ({ key: `group-${row.groupId}`, label: row.name, hint: t('shell.groupHint'), view: 'groups', params: { groupId: row.groupId } }))
     return [...clients, ...groups]
   }, [searchQuery, role, data, remoteClientSearch, locale, t])
+  const desktopSearchPresence = usePresence(role === 'admin' && !isMobile && Boolean(searchQuery.trim()))
+  const lastSearchResults = useRef([])
+  if (searchQuery.trim()) lastSearchResults.current = searchResults
+  const shownSearchResults = desktopSearchPresence.exiting ? lastSearchResults.current : searchResults
 
   useEffect(() => {
     if (role !== 'admin') return undefined
@@ -275,15 +302,11 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       const controller = new AbortController()
       requestController = controller
       Promise.allSettled([
-        api.get('/api/admin/clients/?page=1&page_size=1&active=true', { signal: controller.signal }),
         api.get('/api/admin/payments/?page=1&page_size=1&status=pending&order=-date', { signal: controller.signal }),
         api.get('/api/admin/debtors/?page=1&page_size=1&order=-balance', { signal: controller.signal }),
-      ]).then(([clientsResult, paymentsResult, debtorsResult]) => {
+      ]).then(([paymentsResult, debtorsResult]) => {
         if (!alive || controller.signal.aborted || requestController !== controller) return
         setAdminListCounts((current) => ({
-          clients: clientsResult.status === 'fulfilled'
-            ? (clientsResult.value.pagination?.total ?? current.clients)
-            : current.clients,
           pendingPayments: paymentsResult.status === 'fulfilled'
             ? (paymentsResult.value.pagination?.total
               ?? (paymentsResult.value.payments || []).filter((payment) => payment.status === 'pending').length)
@@ -312,6 +335,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       const stored = readSessionBoolean(sidebarKey)
       setSidebarCollapsed(stored ?? compactDesktopMedia.matches)
       setMobileMenuOpen(false)
+      setMobileMenuClosing(false)
       setMobileSearchOpen(false)
     }
     update()
@@ -324,6 +348,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   }, [sidebarKey])
 
   function closeMobileMenu() {
+    setMobileMenuClosing(!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
     setMobileMenuOpen(false)
     return true
   }
@@ -518,10 +543,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   }
 
   function logout() {
-    const proceed = () => {
-      if (hasUnsavedChanges()) setPendingNavigation({ kind: 'logout' })
-      else performLogout()
-    }
+    const proceed = () => setPendingNavigation({ kind: 'logout', hasUnsavedChanges: hasUnsavedChanges() })
     if (mobileMenuOpen) drawerLifecycle.requestClose('logout', proceed)
     else proceed()
   }
@@ -557,6 +579,32 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   let sidebarLastSection = null
   let drawerLastSection = null
   const navActiveKey = activeMobileKey(role, view)
+  const themeToggle = (
+    <button type="button" className={`ops-theme-toggle${theme === 'dark' ? ' is-dark' : ''}`} data-testid="theme-toggle"
+      aria-label={t(theme === 'dark' ? 'shell.lightTheme' : 'shell.darkTheme')} aria-pressed={theme === 'dark'}
+      title={t(theme === 'dark' ? 'shell.lightTheme' : 'shell.darkTheme')}
+      onClick={() => setTheme(applyTheme(theme === 'dark' ? 'light' : 'dark'))}>
+      <span className="ops-theme-sky" aria-hidden="true">
+        <svg className="ops-theme-orb" viewBox="0 0 20 20" aria-hidden="true">
+          <defs>
+            <mask id="ops-theme-crescent">
+              <rect width="20" height="20" fill="white" />
+              <circle className="ops-theme-orb-cutout" cx="6.5" cy="10" r="9" fill="black" />
+            </mask>
+          </defs>
+          <circle className="ops-theme-orb-disc" cx="10" cy="10" r="10" mask="url(#ops-theme-crescent)" />
+        </svg>
+        <span className="ops-theme-cloud-ball ops-theme-cloud-left" />
+        <span className="ops-theme-cloud-ball ops-theme-cloud-middle" />
+        <span className="ops-theme-cloud-ball ops-theme-cloud-right" />
+        <span className="ops-theme-cloud-ball ops-theme-cloud-top" />
+        <span className="ops-theme-star ops-theme-star-1" />
+        <span className="ops-theme-star ops-theme-star-2" />
+        <span className="ops-theme-star ops-theme-star-3" />
+        <span className="ops-theme-star ops-theme-star-4" />
+      </span>
+    </button>
+  )
 
   return (
     <div className={`app${sidebarCollapsed && !isMobile ? ' is-sidebar-collapsed' : ''}`}>
@@ -575,14 +623,15 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               {role === 'admin' && (
                 <button
                   type="button"
-                  className="ops-mobile-search-button"
+                  className={`ops-mobile-search-button${mobileSearchOpen ? ' is-open' : ''}`}
                   data-testid="open-global-search"
                   aria-label={mobileSearchOpen ? t('shell.closeSearch') : t('shell.openSearch')}
                   aria-controls="ops-mobile-search"
                   aria-expanded={mobileSearchOpen}
                   onClick={() => (mobileSearchOpen ? searchLifecycle.requestClose('header-close') : setMobileSearchOpen(true))}
                 >
-                  {mobileSearchOpen ? <icons.X size={19} /> : <icons.Search size={19} />}
+                  <span className="ops-mobile-search-glyph ops-mobile-search-icon" aria-hidden="true"><icons.Search size={30} /></span>
+                  <span className="ops-mobile-search-glyph ops-mobile-search-close" aria-hidden="true"><icons.X size={30} /></span>
                 </button>
               )}
               <button
@@ -592,9 +641,16 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 aria-label={t('shell.openMenu')}
                 aria-controls="ops-mobile-drawer"
                 aria-expanded={mobileMenuOpen}
-                onClick={() => setMobileMenuOpen(true)}
+                onClick={() => {
+                  setMobileMenuClosing(false)
+                  setMobileMenuOpen(true)
+                }}
               >
-                <span aria-hidden="true"><i /><i /><i /><i /></span>
+                <svg width="26" height="22" viewBox="0 0 26 22" fill="currentColor" aria-hidden="true">
+                  <rect x="0" y="2" width="26" height="3" rx="1.5" />
+                  <rect x="0" y="9" width="26" height="3" rx="1.5" />
+                  <rect x="0" y="16" width="26" height="3" rx="1.5" />
+                </svg>
               </button>
             </div>
           )}
@@ -607,7 +663,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             sidebarLastSection = section
             return (
               <React.Fragment key={item.key}>
-                {showSection && <div className="ops-nav-section" style={{ margin: '8px 0 2px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
+                {showSection && <div className="ops-nav-section" style={{ margin: '8px 0 2px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: '18px' }}>{section}</div>}
                 <button
                   type="button"
                   className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
@@ -628,8 +684,11 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         </nav>
 
         <div className="ops-user-wrap">
-          <div className="ops-sidebar-locale">
-            <LocaleSelector compact={sidebarCollapsed} dark locale={locale} setLocale={setLocale} t={t} />
+          <div className="ops-appearance-controls">
+            {!isMobile && themeToggle}
+            <div className="ops-sidebar-locale">
+              <LocaleSelector compact dark locale={locale} setLocale={setLocale} t={t} />
+            </div>
           </div>
           <div className="ops-user-actions">
             <div className="ops-user">
@@ -654,9 +713,11 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         </div>
       </aside>
 
-      {isMobile && mobileMenuOpen && (
+      {isMobile && (mobileMenuOpen || mobileMenuClosing) && (
         <div
-          className="ops-mobile-drawer-layer"
+          className={`ops-mobile-drawer-layer${mobileMenuClosing ? ' is-closing' : ''}`}
+          aria-hidden={mobileMenuClosing || undefined}
+          inert={mobileMenuClosing}
           onClick={(event) => {
             if (event.target === event.currentTarget) drawerLifecycle.requestClose('backdrop')
           }}
@@ -665,17 +726,22 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             ref={drawerRef}
             id="ops-mobile-drawer"
             className="ops-mobile-drawer"
+            onAnimationEnd={(event) => {
+              if (mobileMenuClosing && event.target === event.currentTarget) setMobileMenuClosing(false)
+            }}
             data-testid="mobile-menu-dialog"
             role="dialog"
             aria-modal="true"
             aria-label={t('shell.menu')}
             tabIndex={-1}
-            style={{ background: '#0f1728', color: '#fff', borderLeftColor: 'rgba(255,255,255,0.12)' }}
+            style={{ background: 'var(--sidebar-background)', color: '#fff', borderLeftColor: 'rgba(255,255,255,0.12)' }}
           >
             <div className="ops-mobile-drawer-head" style={{ background: 'transparent', borderBottomColor: 'rgba(255,255,255,0.12)' }}>
               <strong>{t('shell.menu')}</strong>
               <button type="button" className="ops-mobile-drawer-close" aria-label={t('shell.closeMenu')} onClick={() => drawerLifecycle.requestClose('close-button')} style={{ borderColor: 'rgba(255,255,255,0.16)', background: '#18263a', color: '#fff' }}>
-                <span aria-hidden="true">×</span>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+                  <path d="M4.5 4.5 19.5 19.5M19.5 4.5 4.5 19.5" />
+                </svg>
               </button>
             </div>
             <nav className="ops-mobile-drawer-nav" aria-label={t('shell.menuNavigation')} style={{ background: 'transparent' }}>
@@ -685,7 +751,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                 drawerLastSection = section
                 return (
                   <React.Fragment key={`drawer-${item.key}`}>
-                    {showSection && <div className="ops-nav-section" style={{ margin: '8px 0 2px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: 1.2 }}>{section}</div>}
+                    {showSection && <div className="ops-nav-section" style={{ margin: '8px 0 2px', padding: '0 10px', color: '#fff', fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-semibold)', lineHeight: '18px' }}>{section}</div>}
                     <button
                       type="button"
                       className={`ops-nav-button${navActiveKey === item.key ? ' is-active' : ''}`}
@@ -693,7 +759,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
                       aria-current={navActiveKey === item.key ? 'page' : undefined}
                       onClick={() => navigate(item.key)}
                       title={item.label}
-                      style={{ color: navActiveKey === item.key ? '#fff' : '#cad5e4' }}
+                      style={{ color: navActiveKey === item.key ? 'var(--sidebar-active-text)' : '#cad5e4' }}
                     >
                       <span style={{ display: 'grid', width: 24, height: 24, placeItems: 'center' }}>{item.icon}</span>
                       <span>{t(`nav.${role}.${item.key}`, item.label)}</span>
@@ -706,8 +772,11 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               })}
             </nav>
             <div className="ops-mobile-drawer-user-wrap" style={{ background: 'transparent', borderTopColor: 'rgba(255,255,255,0.12)', color: '#fff' }}>
-              <div className="ops-sidebar-locale">
-                <LocaleSelector dark locale={locale} setLocale={setLocale} t={t} />
+              <div className="ops-appearance-controls">
+                <div className="ops-sidebar-locale">
+                  <LocaleSelector dark locale={locale} setLocale={setLocale} t={t} />
+                </div>
+                {themeToggle}
               </div>
               <div className="ops-user-actions">
                 <div className="ops-user">
@@ -721,12 +790,12 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         </div>
       )}
 
-      {isMobile && mobileSearchOpen && (
-        <div className="ops-mobile-search-layer">
+      {isMobile && mobileSearchPresence.present && (
+        <div className={`ops-mobile-search-layer ops-motion-fade${mobileSearchPresence.exiting ? ' is-exiting' : ''}`} aria-hidden={mobileSearchPresence.exiting || undefined} inert={mobileSearchPresence.exiting || undefined}>
           <section
             ref={searchOverlayRef}
             id="ops-mobile-search"
-            className="ops-mobile-search"
+            className={`ops-mobile-search ops-motion-panel${mobileSearchPresence.exiting ? ' is-exiting' : ''}`}
             data-testid="global-search-dialog"
             role="dialog"
             aria-modal="true"
@@ -758,11 +827,11 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
         </div>
       )}
 
-      {pendingNavigation && (
-        <div className="ops-navigation-guard-layer" data-backdrop-dismiss="false">
+      {navigationGuardPresence.present && shownPendingNavigation && (
+        <div className={`ops-navigation-guard-layer ops-motion-fade${navigationGuardPresence.exiting ? ' is-exiting' : ''}`} data-backdrop-dismiss="false" aria-hidden={navigationGuardPresence.exiting || undefined} inert={navigationGuardPresence.exiting || undefined}>
           <section
             ref={navigationGuardRef}
-            className="ops-navigation-guard"
+            className={`ops-navigation-guard ops-motion-panel${navigationGuardPresence.exiting ? ' is-exiting' : ''}`}
             data-testid="navigation-discard-dialog"
             role="alertdialog"
             aria-modal="true"
@@ -770,20 +839,20 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
             aria-describedby="ops-navigation-guard-description"
             tabIndex={-1}
           >
-            <h2 id="ops-navigation-guard-title">{t('shell.unsavedTitle')}</h2>
-            <p id="ops-navigation-guard-description">{t('shell.unsavedDescription')}</p>
+            <h2 id="ops-navigation-guard-title">{t(shownPendingNavigation.kind === 'logout' ? 'shell.logoutConfirmTitle' : 'shell.unsavedTitle')}</h2>
+            <p id="ops-navigation-guard-description">{t(shownPendingNavigation.kind === 'logout' ? shownPendingNavigation.hasUnsavedChanges ? 'shell.logoutUnsavedDescription' : 'shell.logoutConfirmDescription' : 'shell.unsavedDescription')}</p>
             <div>
-              <button type="button" data-testid="navigation-discard-stay" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>{t('shell.stay')}</button>
-              <button type="button" data-testid="navigation-discard-confirm" className="is-danger" onClick={confirmPendingNavigation}>{t('shell.leave')}</button>
+              <button type="button" data-testid="navigation-discard-stay" className="ops-navigation-stay" onClick={() => navigationGuardLifecycle.requestClose('stay')}>{t(shownPendingNavigation.kind === 'logout' ? 'shared.cancel' : 'shell.stay')}</button>
+              <button type="button" data-testid="navigation-discard-confirm" className="is-danger" onClick={confirmPendingNavigation}>{t(shownPendingNavigation.kind === 'logout' ? 'shell.logout' : 'shell.leave')}</button>
             </div>
           </section>
         </div>
       )}
 
       <div className="ops-main">
-        {role === 'admin' && !isMobile && (
+        {!isMobile && (
           <header className="topbar ops-topbar">
-          <div className="ops-global-search"><input data-testid="global-search-input" aria-label={t('shell.globalSearch')} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('shell.searchPlaceholder')} />{searchQuery && <div className="ops-search-results">{searchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!searchResults.length && <div className="empty">{t('shell.noResults')}</div>}</div>}</div>
+          {role === 'admin' ? <div className="ops-global-search"><input data-testid="global-search-input" aria-label={t('shell.globalSearch')} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('shell.searchPlaceholder')} />{desktopSearchPresence.present && <div className={`ops-search-results ops-motion-panel${desktopSearchPresence.exiting ? ' is-exiting' : ''}`} aria-hidden={desktopSearchPresence.exiting || undefined} inert={desktopSearchPresence.exiting || undefined}>{shownSearchResults.map((result) => <button type="button" key={result.key} onClick={() => navigate(result.view, result.params)}><strong>{result.label}</strong><span>{result.hint}</span></button>)}{!shownSearchResults.length && <div className="empty">{t('shell.noResults')}</div>}</div>}</div> : <span>{t(meta.userKey)}</span>}
             <div className="ops-topbar-statuses">
               <span className={`ops-status${health.state === 'ok' ? '' : ' is-bad'}`}>{t('shell.server')}</span>
               <span className={`ops-status${apiState.state === 'ok' ? '' : ' is-bad'}`}>{t('shell.data')}</span>
@@ -811,6 +880,12 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
           )}
         </main>
       </div>
+      {AppearanceEditor && role === 'admin' && window.self === window.top && (
+        <>
+          {!appearancePresence.present && <button type="button" data-testid="appearance-editor-open" aria-label="Открыть редактор оформления" onClick={() => setAppearanceOpen(true)} style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 38, minHeight: 40, padding: '7px 14px', border: '1px solid #1364a3', borderRadius: 7, background: '#1a7dc4', color: '#fff', boxShadow: '0 4px 12px #1a212930', cursor: 'pointer', fontWeight: 600 }}>Оформление</button>}
+          {appearancePresence.present && <React.Suspense fallback={null}><AppearanceEditor closing={appearancePresence.exiting} onClose={() => setAppearanceOpen(false)} /></React.Suspense>}
+        </>
+      )}
     </div>
   )
 }

@@ -85,6 +85,7 @@ test('archived accounts stay only in blacklist and client editing opens in a mod
   await mockAdmin(page, [...activeClients, archivedOwner, archivedChild])
 
   await page.goto('/?role=admin&view=clients')
+  await page.getByTestId('admin-clients-filter-toggle').click()
   await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '24')
   await expect(page.locator('.ops-client-desktop-table').getByText('Owner Archived', { exact: true })).toHaveCount(0)
   await expect(page.locator('.ops-client-desktop-table th')).toHaveCount(8)
@@ -220,6 +221,27 @@ test('untouched and reverted new-client fields close without a false dirty warni
   await expect(page.getByTestId('discard-dialog')).toHaveCount(0)
 })
 
+test('client filters and forms animate open and stay present through their exit', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 1440, 'one desktop motion contract is sufficient')
+  await mockAdmin(page, [])
+  await page.goto('/?role=admin&view=clients')
+
+  const filterButton = page.getByTestId('admin-clients-filter-toggle')
+  await filterButton.click()
+  const filters = page.locator('.ops-list-filter-panel')
+  await expect(filters).toHaveCSS('animation-name', 'ops-popup-in')
+  await filterButton.click()
+  await expect(filters).toHaveClass(/is-exiting/)
+  await expect(filters).toHaveCount(0)
+
+  await page.getByTestId('admin-clients-new-client').click()
+  const modal = page.getByTestId('form-modal')
+  await expect(modal).toHaveCSS('animation-name', 'ops-popup-in')
+  await modal.getByTestId('form-modal-close').click()
+  await expect(modal).toHaveClass(/is-exiting/)
+  await expect(modal).toHaveCount(0)
+})
+
 test('mobile client card exposes actions without a status pill', async ({ page }) => {
   test.skip((page.viewportSize()?.width || 0) !== 390, 'mobile client contract')
   await mockAdmin(page, [{
@@ -274,7 +296,7 @@ test('an archived client detail is read-only except for restoration', async ({ p
   await expect(page.getByTestId('admin-client-archived-banner')).toBeVisible()
   await expect(page.getByTestId('admin-client-edit-account')).toHaveCount(0)
   await expect(page.getByTestId('admin-client-restore')).toBeVisible()
-  await expect(page.locator('.ops-action-card:not([disabled])')).toHaveCount(0)
+  await expect(page.locator('.ops-client-quick-actions button:not([disabled])')).toHaveCount(0)
 
   await page.getByTestId('admin-client-tab-privacy').click()
   await expect(page.getByTestId('admin-client-privacy-export')).toBeEnabled()

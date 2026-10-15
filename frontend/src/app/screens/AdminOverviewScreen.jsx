@@ -96,7 +96,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
     const exceptions = sessions.filter((session) => session.isCancelled).slice(0, 3)
 
     return (
-      <div className="page">
+      <div className="page ops-overview">
         <div className="page-head">
           <div>
             <h1 className="page-title">{t('overview.title')}</h1>
@@ -120,10 +120,10 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
         <QuickActions
           label={t('overview.quickLinks')}
           actions={[
-            { key: 'payment', testId: 'overview-add-payment', label: financeT('finance.addPayment'), icon: <I.Cash size={18} />, onClick: () => go('payments', { financeAction: 'payment' }) },
-            { label: t('overview.createClient'), icon: <I.User size={18} />, onClick: () => go('clients', { createClient: '1' }) },
-            { label: t('overview.schedule'), icon: <I.Calendar size={18} />, onClick: () => go('schedule') },
-            { label: t('overview.individualSession'), icon: <I.Waves size={18} />, onClick: () => go('schedule', { createSession: 'individual' }) },
+            { key: 'payment', testId: 'overview-add-payment', label: financeT('finance.addPayment'), icon: <I.Wallet size={22} />, onClick: () => go('payments', { financeAction: 'payment' }) },
+            { label: t('overview.createClient'), icon: <I.UserPlus size={22} />, onClick: () => go('clients', { createClient: '1' }) },
+            { testId: 'overview-add-individual', label: t('overview.individualSession'), icon: <I.User size={22} />, onClick: () => go('schedule', { createSession: 'individual' }) },
+            { testId: 'overview-add-split', label: t('schedule.newSplit'), icon: <I.Users size={22} />, onClick: () => go('schedule', { createSession: 'split' }) },
           ]}
         />
 
@@ -134,10 +134,9 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
           </Banner>
         )}
 
-        <div className="eyebrow" aria-hidden="true" style={{ marginBottom: 10 }}>&nbsp;</div>
         <div className="kpi-grid ops-overview-kpi-grid" style={{ marginBottom: 20 }}>
-          <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={todaySessions.length} sub={t('overview.todaySessions')} onClick={() => go('schedule', { tab: 'day' })} />
-          <Kpi icon={<I.Alert size={15} />} label={t('overview.debtors')} value={debtorCount} sub={`${debtTotal.toLocaleString(localeTag)} zł`} tone="var(--money-debt)" onClick={() => go('debtors')} />
+          <Kpi icon={<I.Calendar size={15} />} label={t('overview.sessions')} value={todaySessions.length} sub={t('overview.todaySessions')} onClick={() => go('schedule')} />
+          <Kpi icon={<I.Alert size={15} />} label={t('overview.debtors')} value={debtorCount} sub={`${debtTotal.toLocaleString(localeTag)} zł`} tone={debtorCount > 0 ? 'var(--money-debt)' : undefined} onClick={() => go('debtors')} />
         </div>
 
         <div className="ops-section-head" style={{ margin: '20px 0 10px' }}>
@@ -147,7 +146,7 @@ export function createAdminOverviewScreen(components, icons, adminData = {}) {
         <CompactStatusRow
           items={todaySessions.slice(0, 5).map((session) => ({
             id: session.id,
-            primary: `${session.start}-${session.end} · ${session.group}`,
+            primary: <span className="ops-session-summary-column"><span>{session.start}-{session.end}</span><span>{session.group}</span></span>,
             secondary: `${session.trainer} · ${session.location}`,
             onClick: () => go('attendance', { sessionId: session.sessionId }),
           }))}

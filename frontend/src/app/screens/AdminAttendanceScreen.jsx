@@ -53,6 +53,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
     const [bulkPending, setBulkPending] = useState(false)
     const [promotePending, setPromotePending] = useState(null)
     const [formAction, setFormAction] = useState(null)
+    const [sessionDetailsCollapsed, setSessionDetailsCollapsed] = useState(true)
     const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
 
     useEffect(() => {
@@ -301,13 +302,13 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
       <div className="page page-wide ops-attendance-page">
         <div className="page-head">
           <div>
-            <ContextBackButton icon={<I.ArrowLeft size={14} />} onClick={() => back ? back('schedule') : go?.('schedule')}>{t('attendance.schedule')}</ContextBackButton>
+            <ContextBackButton icon={<I.ArrowLeft size={18} />} onClick={() => back ? back('schedule') : go?.('schedule')}>{t('attendance.schedule')}</ContextBackButton>
             <h1 className="page-title">{t('attendance.title')}</h1>
             <p className="page-desc">{t('attendance.description')}</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {nextSession && <Button variant="secondary" disabled={busyId != null} onClick={() => go?.('attendance', { sessionId: nextSession.sessionId })}>{t('attendance.nextSession')}</Button>}
-            <Button variant="primary" disabled={selectedStatus === 'cancelled' || !rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={() => setBulkPending(true)}>{t('attendance.allPresent')}</Button>
+            {nextSession && <Button variant="secondary" iconLeft={<I.ArrowLeft size={18} />} disabled={busyId != null} onClick={() => go?.('attendance', { sessionId: nextSession.sessionId })}>{t('attendance.nextSession')}</Button>}
+            <Button variant="primary" iconLeft={<I.CheckCheck size={18} />} disabled={selectedStatus === 'cancelled' || !rows.length || busyId != null} loading={busyId === 'mark-all'} onClick={() => setBulkPending(true)}>{t('attendance.allPresent')}</Button>
           </div>
         </div>
         <ToastNotice id="admin-attendance-result" message={message} />
@@ -318,11 +319,17 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
         <AttendanceSaveStatus busy={busyId != null} savingText={t('attendance.saving')} savedText={t('attendance.saved')} />
 
         <div className="ops-session-detail-grid">
-          <div className="card card-pad ops-attendance-session-card">
+          <div className={`card card-pad ops-attendance-session-card${sessionDetailsCollapsed ? ' is-collapsed' : ''}`}>
             <div className="ops-attendance-session-heading">
-              <div className="eyebrow">{t('attendance.selected')}</div>
-              <Button size="sm" variant="subtle" disabled={loading || !selectedSessionId || selectedStatus === 'cancelled' || busyId != null} onClick={() => go?.('schedule', { sessionId: selectedSessionId, tab: 'edit-session' })}>{t('groups.editAction')}</Button>
+              <button type="button" className="ops-attendance-session-toggle" data-testid="admin-attendance-session-toggle" aria-label={t(sessionDetailsCollapsed ? 'attendance.expandDetails' : 'attendance.collapseDetails')} aria-expanded={!sessionDetailsCollapsed} aria-controls="admin-attendance-session-details" onClick={() => setSessionDetailsCollapsed((current) => !current)}>
+                <span className="eyebrow">{t('attendance.selected')}</span>
+                {sessionDetailsCollapsed && <strong>{selectedSessionId ? `${selectedGroupName || sessionTypeLabel} · ${selectedStart || '–'}–${selectedEnd || '–'}` : t('attendance.choose')}</strong>}
+                <I.ChevronD size={18} aria-hidden="true" />
+              </button>
+              {!sessionDetailsCollapsed && <Button size="sm" variant="subtle" iconLeft={<I.Pencil size={16} />} data-testid="admin-attendance-edit-session" disabled={loading || !selectedSessionId || selectedStatus === 'cancelled' || busyId != null} onClick={() => go?.('schedule', { sessionId: selectedSessionId, tab: 'edit-session' })}>{t('groups.editAction')}</Button>}
             </div>
+            <div id="admin-attendance-session-details" aria-hidden={sessionDetailsCollapsed || undefined} inert={sessionDetailsCollapsed || undefined}>
+            <div className="ops-attendance-session-detail-content">
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 'var(--fs-sm)' }}>
               {t('attendance.title')}
               <select value={selectedSessionId} onChange={(event) => setSelectedSessionId(event.target.value)} style={{ minHeight: 38 }}>
@@ -359,8 +366,10 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 </span>
               </div>
             </div>
-            <div className="ops-button-row" style={{ marginTop: 12 }}><Button variant="primary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setSelectedStudentId(''); setStudentError(null); setFormAction('add') }}>{t('attendance.addParticipant')}</Button><Button variant="secondary" disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setCancelReason(''); setCancelReasonError(null); setFormAction('cancel') }}>{t('attendance.cancelSession')}</Button></div>
+            <div className="ops-button-row" style={{ marginTop: 12 }}><Button variant="primary" iconLeft={<I.UserPlus size={18} />} disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setSelectedStudentId(''); setStudentError(null); setFormAction('add') }}>{t('attendance.addParticipant')}</Button><Button variant="secondary" iconLeft={<I.X size={18} />} disabled={selectedStatus === 'cancelled' || !selectedSessionId || busyId != null} onClick={() => { setCancelReason(''); setCancelReasonError(null); setFormAction('cancel') }}>{t('attendance.cancelSession')}</Button></div>
             {selectedSession?.notes && <div className="ops-inline-note">{selectedSession.notes}</div>}
+            </div>
+            </div>
           </div>
         </div>
 

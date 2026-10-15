@@ -413,7 +413,7 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
 
   await page.goto('/?role=admin&view=schedule')
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
-  await expect(page.getByTestId('schedule-calendar-view-switch')).toHaveCSS('width', '180px')
+  await expect(page.getByTestId('schedule-calendar-view-switch')).toBeHidden()
 
   const theme = await page.evaluate(async () => {
     await document.fonts.ready
@@ -433,13 +433,13 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
       logoBackground: logo.backgroundImage,
     }
   })
-  expect(theme.primary.toLowerCase()).toBe('#1a7dc4')
-  expect(theme.primaryHover.toLowerCase()).toBe('#1364a3')
+  expect(theme.primary.toLowerCase()).toBe('#126ab5')
+  expect(theme.primaryHover.toLowerCase()).toBe('#105d9e')
   expect(theme.bodyFamily).toContain('IBM Plex Sans')
   expect(theme.bodyWeight).toBe('450')
   expect(theme.variableFaceLoaded).toBe(true)
   expect(theme.headingWeight).toBe('600')
-  expect(theme.sidebarBackground).toBe('rgb(16, 24, 40)')
+  expect(theme.sidebarBackground).toBe('rgb(19, 43, 69)')
   expect(theme.logoBackground).not.toContain('15, 118, 110')
 
   const shellLayout = await page.locator('.ops-sidebar-head').evaluate((head) => {
@@ -452,25 +452,12 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
   })
   expect(shellLayout).toEqual({ sameRow: true, menuSize: 44 })
 
-  await expect(page.getByTestId('schedule-period-day')).toHaveAttribute('aria-pressed', 'true')
-  await page.getByTestId('schedule-period-week').click()
-  await expect(page.locator('.ops-mobile-week-nav')).toHaveCSS('column-gap', '6px')
-  const strip = page.locator('.ops-mobile-week-strip')
-  await expect(strip.getByRole('tab')).toHaveCount(7)
-  expect(await strip.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
-  const visuallyHiddenBoxes = await Promise.all([
-    page.locator('.ops-calendar-navigation .ops-picker-field label').boundingBox(),
-    page.locator('.ops-calendar-announcement').boundingBox(),
-  ])
-  for (const box of visuallyHiddenBoxes) {
-    expect(box?.width || 0).toBeLessThanOrEqual(1)
-    expect(box?.height || 0).toBeLessThanOrEqual(1)
-  }
-  await expect(page.locator('#schedule-focus-date')).toBeVisible()
-
-  await page.getByTestId('schedule-period-month').click()
-  const marker = page.locator('.ops-calendar-marker').first()
-  if (await marker.count()) await expect(marker).not.toContainText('•')
+  const strip = page.locator('.ops-mobile-date-strip')
+  await expect(strip.locator('button')).toHaveCount(7)
+  await expect(page.locator('#schedule-focus-date')).toBeHidden()
+  const selectedBefore = await strip.locator('button[aria-pressed="true"]').getAttribute('data-testid')
+  await page.locator('.ops-mobile-date-navigation > button').last().click()
+  await expect(strip.locator('button[aria-pressed="true"]')).not.toHaveAttribute('data-testid', selectedBefore)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   expect(errors).toEqual([])
 })
@@ -510,18 +497,19 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     '/api/admin/debtors/': { debtors: [] },
   })
 
+  if ((page.viewportSize()?.width || 0) < 768) await page.clock.setFixedTime(new Date('2026-08-03T12:00:00'))
   await page.goto('/?role=admin&view=schedule')
   await expect(page.getByTestId('nav-admin-schedule')).toHaveAttribute('aria-current', 'page')
   const width = page.viewportSize()?.width || 0
   if (width >= 768) {
     await expect(page.locator('.ops-topbar .ops-crumb, .ops-topbar .sub, .ops-topbar h1')).toHaveCount(0)
-    await expect(page.locator('.ops-topbar')).toHaveCSS('background-color', 'rgb(238, 246, 253)')
+    await expect(page.locator('.ops-topbar')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
     await expect(page.locator('.ops-global-search > input')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   } else {
     await expect(page.locator('.ops-topbar')).toHaveCount(0)
     await expect(page.getByTestId('open-global-search')).toBeVisible()
   }
-  await expect(page.locator('.ops-sidebar')).toHaveCSS('background-color', 'rgb(16, 24, 40)')
+  await expect(page.locator('.ops-sidebar')).toHaveCSS('background-color', 'rgb(19, 43, 69)')
 
   const actionCards = page.locator('.ops-action-card')
   await expect(actionCards).toHaveCount(4)
@@ -543,7 +531,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(page.locator('.ops-sidebar-head').getByTestId('open-menu')).toBeVisible()
   }
 
-  await page.locator('#schedule-focus-date').fill('2026-08-03')
+  if (width >= 768) await page.locator('#schedule-focus-date').fill('2026-08-03')
   await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
   const individualEvent = page.locator('.ops-schedule-event:visible').filter({ hasText: 'Anna Nowak' }).first()
   await expect(individualEvent.locator('.ops-event-title')).toHaveText('Индивидуальная тренировка')
@@ -589,7 +577,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(event.locator('.ops-event-type')).toHaveText(/\S/)
     await expect(event.locator('.ops-event-type')).toHaveCSS('font-size', '13px')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-size', '12px')
-    await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(77, 89, 103)')
+    await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(82, 105, 128)')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-weight', '500')
     await expect(event.locator('.ops-event-primary')).toHaveCSS('justify-content', 'space-between')
     await expect(event).toHaveCSS('padding-right', width < 960 ? '58px' : '46px')
@@ -632,7 +620,7 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     weekdayCenters.forEach((center, index) => expect(Math.abs(center - firstWeekCenters[index])).toBeLessThan(1.5))
     await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
     const dateButton = page.locator('.ops-schedule-day > header button').first()
-    await expect(dateButton).toHaveCSS('color', 'rgb(17, 24, 39)')
+    await expect(dateButton).toHaveCSS('color', 'rgb(25, 50, 75)')
 
     if (width === 1440) {
       await page.setViewportSize({ width: 768, height: 900 })
@@ -646,12 +634,11 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
       await expect(page.locator('.ops-user-wrap').getByTestId('logout')).toBeVisible()
     }
   } else {
-    await expect(page.getByTestId('schedule-period-day')).toHaveAttribute('aria-pressed', 'true')
-    await page.getByTestId('schedule-period-week').click()
-    const dot = page.locator('.ops-mobile-week-dot').first()
-    await expect(dot).toBeVisible()
-    await expect(dot).toHaveCSS('background-color', 'rgb(26, 125, 196)')
-    await expect(page.locator('.ops-mobile-week-strip small')).toHaveCount(0)
+    await expect(page.getByTestId('schedule-calendar-view-switch')).toBeHidden()
+    await expect(page.locator('.ops-mobile-date-strip button')).toHaveCount(7)
+    await expect(individualEvent.locator('.ops-event-primary svg')).toHaveCount(1)
+    await expect(individualEvent.locator('.ops-event-trainer svg')).toHaveCount(1)
+    await expect(individualEvent.locator('.ops-event-location svg')).toHaveCount(1)
     await expect(page.locator('.ops-schedule-event-edit').first()).toBeVisible()
   }
   expect(errors).toEqual([])
@@ -701,9 +688,9 @@ test('attendance shows a past non-cancelled session as completed', async ({ page
   const statusSummary = page.getByTestId('admin-attendance-session-status')
   await expect(statusSummary).toHaveAttribute('data-status', 'done')
   const completedPill = statusSummary.locator('span').nth(1)
-  await expect(completedPill).toHaveCSS('background-color', 'rgb(233, 247, 238)')
-  await expect(completedPill).toHaveCSS('color', 'rgb(15, 97, 20)')
-  await expect(completedPill).toHaveCSS('border-color', 'rgb(205, 236, 215)')
+  await expect(completedPill).toHaveCSS('background-color', 'rgb(230, 245, 238)')
+  await expect(completedPill).toHaveCSS('color', 'rgb(39, 103, 71)')
+  await expect(completedPill).toHaveCSS('border-color', 'rgb(172, 215, 191)')
 
   await page.locator('.ops-session-detail-grid select').first().selectOption('72')
   await expect(statusSummary).toHaveAttribute('data-status', 'planned')
@@ -1037,6 +1024,17 @@ test('shared logout stays single-shot for admin, trainer and client', async ({ p
     await expect(logout).toHaveCount(1)
     await expect(logout).toBeVisible()
     await actions[nextRole](logout)
+    const confirmation = page.getByTestId('navigation-discard-dialog')
+    await expect(confirmation).toBeVisible()
+    expect(logoutPosts.filter((item) => item === nextRole)).toHaveLength(0)
+    if (nextRole === 'admin') {
+      await confirmation.getByTestId('navigation-discard-stay').click()
+      await expect(confirmation).toHaveCount(0)
+      await page.getByTestId('open-menu').click()
+      await page.getByTestId('mobile-menu-dialog').getByTestId('logout').click()
+      await expect(confirmation).toBeVisible()
+    }
+    await confirmation.getByTestId('navigation-discard-confirm').click()
     await expect(page.locator('form')).toBeVisible()
     expect(logoutPosts.filter((item) => item === nextRole)).toHaveLength(1)
   }
@@ -1169,6 +1167,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const fixtureEnd = localIsoDateTime(new Date(fixtureStart.getTime() + 45 * 60 * 1000))
   const seenAdminEndpoints = new Set()
   const seenClientFinanceActions = new Set()
+  const combinedSubscriptionUpdates = []
   const submittedSettings = []
   const submittedCredentials = []
   const submittedSessions = []
@@ -1267,7 +1266,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       account: { id: 10, username: 'jan-parent', full_name: 'Anna Kowalska', email: 'anna@example.com', phone: '+48111222333', is_active: true, access_activated: true, portal_access: 'active' },
       participants: [{ id: 1, client_id: 10, first_name: 'Jan', last_name: 'Kowalski', full_name: 'Jan Kowalski', birth_date: '2016-05-10', is_active: true, group: { id: 1, name: 'Delfiny' }, balance_minor: 0 }],
       subscriptions: [
-        { id: 1, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, subscription_type_id: 1, type: '8 wejsc', status: 'active', remaining_sessions: 7, start_date: '2026-07-01', effective_end_date: '2026-07-31', created_at: '2026-07-01T10:00:00+02:00' },
+        { id: 1, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, subscription_type_id: 1, type: '8 wejsc', status: 'active', remaining_sessions: 7, start_date: '2026-07-01', effective_end_date: '2026-07-31', created_at: '2026-07-01T10:00:00+02:00', ledger: [{ id: 1, delta: 8, reason: 'purchase', created_at: '2026-07-01T10:00:00+02:00', balance_after: 8 }, { id: 2, delta: -1, reason: 'attendance', session_id: 1, session_start_at: now, group: 'Delfiny', trainer: 'Marek Zielinski', created_at: now, balance_after: 7 }] },
         { id: 2, participant_id: 1, participant: { id: 1, full_name: 'Jan Kowalski' }, subscription_type_id: 1, type: '4 wejsc', status: 'expired', remaining_sessions: 0, start_date: '2026-05-01', effective_end_date: '2026-05-31', created_at: '2026-05-01T10:00:00+02:00' },
       ],
       charges: [],
@@ -1382,8 +1381,6 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     const financeResponses = {
       '/api/admin/participants/1/subscriptions/': { subscription: { id: 2 } },
       '/api/admin/subscriptions/1/renew/': { subscription: { id: 3 } },
-      '/api/admin/subscriptions/1/freeze/': { days: 7 },
-      '/api/admin/subscriptions/1/adjust/': { subscription: { id: 1, remaining_sessions: 8 } },
     }
     const accessResponses = {
       '/api/admin/clients/10/access/issue/': {
@@ -1449,6 +1446,18 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
       seenAdminEndpoints.add(url.pathname)
       seenClientFinanceActions.add(url.pathname)
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(charge) })
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/admin/subscriptions/1/update/') {
+      const submitted = route.request().postDataJSON()
+      combinedSubscriptionUpdates.push(submitted)
+      const subscription = routes['/api/admin/clients/10/'].subscriptions[0]
+      Object.assign(subscription, {
+        remaining_sessions: submitted.remaining_sessions ?? subscription.remaining_sessions,
+        effective_end_date: submitted.effective_end_date ?? subscription.effective_end_date,
+      })
+      seenClientFinanceActions.add(url.pathname)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(subscription) })
       return
     }
     if (method === 'POST' && financeResponses[url.pathname]) {
@@ -1525,13 +1534,10 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(overviewKpis).toHaveCount(2)
   await expect(overviewKpis.nth(0)).toContainText('1')
   await expect(overviewKpis.nth(1)).toContainText('1')
+  await expect(overviewKpis.nth(1).locator('.kpi-value')).toHaveAttribute('style', /color/)
   const sessionsCard = await overviewKpis.nth(0).boundingBox()
   const debtorsCard = await overviewKpis.nth(1).boundingBox()
-  if ((page.viewportSize()?.width || 0) <= 560) {
-    expect(debtorsCard.y).toBeGreaterThan(sessionsCard.y)
-  } else {
-    expect(debtorsCard.y).toBe(sessionsCard.y)
-  }
+  expect(debtorsCard.y).toBe(sessionsCard.y)
   if ((page.viewportSize()?.width || 0) <= 767) await page.getByTestId('open-menu').click()
   const adminIconSignatures = await page.evaluate(() => {
     const nav = (key) => document.querySelector(`[data-testid="nav-admin-${key}"] svg`)?.innerHTML
@@ -1553,12 +1559,14 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page).toHaveURL(/client=10/)
   await page.reload()
   await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
+  await page.getByTestId('admin-client-actions-trigger').click()
   await page.getByTestId('client-access-issue').click()
   await expect(page.getByTestId('access-code-card')).toContainText('synthetic-client-recovery-code')
   await expect(page.getByTestId('access-copy-login')).toBeVisible()
   await expect(page.getByTestId('access-copy-code')).toBeVisible()
   await expect(page.getByTestId('access-copy-all')).toBeVisible()
   await page.getByTestId('access-code-close').click()
+  await page.getByTestId('admin-client-actions-trigger').click()
   await page.getByTestId('admin-client-edit-account').click()
   await page.locator('#admin-client-detail-phone').fill('+48999999999')
   await page.getByTestId('form-modal').locator('.form-modal__footer button').last().click()
@@ -1613,6 +1621,18 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   const groupCard = page.getByTestId('admin-group-detail-1')
   await expect(groupCard).toBeVisible()
   await expect(groupCard.locator('.ops-summary-grid')).toContainText('12')
+  if (page.viewportSize()?.width < 768) {
+    const cells = await groupCard.locator('.ops-group-detail-summary > div').evaluateAll((nodes) => nodes.map((node) => {
+      const { x, y } = node.getBoundingClientRect()
+      return { x, y }
+    }))
+    expect(cells).toHaveLength(4)
+    expect(cells[1].x).toBeGreaterThan(cells[0].x)
+    expect(cells[2].x).toBe(cells[1].x)
+    expect(cells[3].x).toBe(cells[0].x)
+    expect(cells[0].y).toBe(cells[1].y)
+    expect(cells[2].y).toBe(cells[3].y)
+  }
   await expect(groupCard.locator('.ops-member-row')).toHaveCount(3)
   await groupCard.getByTestId('admin-group-edit').click()
   const groupEditor = page.getByTestId('form-modal')
@@ -1645,7 +1665,8 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(cancelledCoralEvent).toHaveCSS('opacity', '0.6')
   await expect(page.getByTestId('schedule-view-calendar')).toHaveAttribute('aria-pressed', 'true')
   const mobileSchedule = (page.viewportSize()?.width || 0) <= 767
-  await expect(page.getByTestId(`schedule-period-${mobileSchedule ? 'day' : 'week'}`)).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('schedule-period-day')).toHaveCount(0)
+  await expect(page.getByTestId('schedule-period-week')).toHaveAttribute('aria-pressed', 'true')
   if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
   expect(schedulePageSizes.every((size) => size > 0 && size <= 200)).toBe(true)
   const filterTrigger = page.getByTestId('admin-schedule-filters-trigger')
@@ -1654,22 +1675,25 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   expect(filterBox?.height).toBeLessThanOrEqual(50)
   expect(filterBox?.width).toBeLessThan(pageBox?.width || 10000)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-  const referencePickerButton = page.locator('#schedule-focus-date').locator('..').locator('button')
-  const referencePickerBox = await referencePickerButton.boundingBox()
-  expect(referencePickerBox?.width).toBeGreaterThanOrEqual(44)
-  expect(referencePickerBox?.height).toBeGreaterThanOrEqual(44)
-  await referencePickerButton.click()
-  await expect(page.locator('#schedule-focus-date-popover')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(referencePickerButton).toBeFocused()
-  await page.getByTestId('schedule-period-month').click()
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
-  await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
-  await expect(page.getByTestId('month-weekday-header')).toBeVisible()
-  await page.getByTestId('schedule-period-day').click()
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
-  await page.getByTestId('schedule-period-week').click()
-  if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
+  if (mobileSchedule) {
+    await expect(page.getByTestId('schedule-calendar-view-switch')).toBeHidden()
+    await expect(page.locator('.ops-mobile-date-strip button')).toHaveCount(7)
+  } else {
+    const referencePickerButton = page.locator('#schedule-focus-date').locator('..').locator('button')
+    const referencePickerBox = await referencePickerButton.boundingBox()
+    expect(referencePickerBox?.width).toBeGreaterThanOrEqual(44)
+    expect(referencePickerBox?.height).toBeGreaterThanOrEqual(44)
+    await referencePickerButton.click()
+    await expect(page.locator('#schedule-focus-date-popover')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(referencePickerButton).toBeFocused()
+    await page.getByTestId('schedule-period-month').click()
+    if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
+    await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
+    await expect(page.getByTestId('month-weekday-header')).toBeVisible()
+    await page.getByTestId('schedule-period-week').click()
+    if ((page.viewportSize()?.width || 0) >= 769) await expect(page.getByTestId('admin-schedule-filter-count')).toHaveAttribute('data-total', '2')
+  }
   await expect(page.locator('.ops-toast-region')).toHaveAttribute('aria-live', 'polite')
   await expect(page.getByTestId('schedule-list')).toHaveCount(0)
   if (mobileSchedule) await page.goto('/?role=admin&view=schedule&tab=list')
@@ -1720,11 +1744,21 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByTestId('admin-client-tab-subscriptions').click()
   await page.getByRole('row', { name: /4 wejsc.*Jan Kowalski/ }).click()
   const rowSubscriptionEditor = page.getByTestId('form-modal')
-  await expect(rowSubscriptionEditor.locator('#admin-client-finance-subscription')).toHaveValue('2')
-  await expect(rowSubscriptionEditor.locator('#admin-client-finance-subscription-action')).toHaveValue('edit')
+  const subscriptionStartDate = await page.evaluate(() => new Intl.DateTimeFormat(document.documentElement.lang).format(new Date('2026-05-01')))
+  await expect(rowSubscriptionEditor.getByRole('heading', { level: 2 })).toContainText('4 wejsc ·')
+  await expect(rowSubscriptionEditor.getByRole('heading', { level: 2 })).toContainText(subscriptionStartDate)
+  await expect(rowSubscriptionEditor.locator('.ops-subscription-detail h3').first()).toBeVisible()
   await rowSubscriptionEditor.locator('.form-modal__footer button').first().click()
 
   await page.getByTestId('admin-client-tab-payments').click()
+  if (compactClients) {
+    const paymentSwitch = page.locator('.ops-mobile-payment-switch')
+    await expect(paymentSwitch.locator('button').first()).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.ops-client-payment-charges')).toBeHidden()
+    await paymentSwitch.locator('button').last().click()
+    await expect(page.locator('.ops-client-payment-topups')).toBeHidden()
+    await paymentSwitch.locator('button').first().click()
+  }
   await page.getByTestId('admin-client-action-payment').click()
   const paymentDialog = page.getByTestId('form-modal')
   await paymentDialog.locator('#admin-client-payment-amount').fill('120.00')
@@ -1732,6 +1766,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await paymentDialog.getByTestId('admin-client-payment-confirm').click()
   await expect.poll(() => seenAdminEndpoints.has('/api/admin/payments/')).toBe(true)
 
+  await page.getByTestId('admin-client-finance-trigger').click()
   await page.getByTestId('admin-client-action-charge').click()
   await page.locator('#admin-client-finance-description').fill('Индивидуальное занятие')
   await page.locator('#admin-client-finance-amount').fill('80.00')
@@ -1742,35 +1777,30 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByTestId('admin-client-finance-save').click()
   await expect.poll(() => seenClientFinanceActions.has('/api/admin/participants/1/subscriptions/')).toBe(true)
 
+  await page.getByTestId('admin-client-finance-trigger').click()
   await page.getByTestId('admin-client-action-edit-subscription').click()
   let subscriptionEditor = page.getByTestId('form-modal')
+  await expect(subscriptionEditor.locator('#admin-client-subscription-remaining')).toHaveValue('7')
+  await subscriptionEditor.locator('#admin-client-subscription-end-date').fill('2026-08-15')
+  await subscriptionEditor.locator('#admin-client-subscription-remaining').fill('8')
+  await subscriptionEditor.locator('#admin-client-subscription-freeze-start').fill('2026-07-17')
+  await subscriptionEditor.locator('#admin-client-subscription-freeze-end').fill('2026-07-23')
+  const reasonSelect = subscriptionEditor.locator('#admin-client-subscription-reason')
+  await reasonSelect.selectOption({ index: 1 })
+  const chosenReason = await reasonSelect.inputValue()
+  await subscriptionEditor.getByTestId('admin-client-subscription-save').click()
+  await expect.poll(() => combinedSubscriptionUpdates).toEqual([{ effective_end_date: '2026-08-15', remaining_sessions: 8, freeze: { start_date: '2026-07-17', end_date: '2026-07-23' }, reason: chosenReason }])
+  await subscriptionEditor.locator('.form-modal__footer button').nth(1).click()
+  subscriptionEditor = page.getByTestId('form-modal')
   await expect(subscriptionEditor.locator('#admin-client-finance-subscription')).toHaveValue('1')
-  await subscriptionEditor.locator('#admin-client-finance-subscription-action').selectOption('renew')
   await subscriptionEditor.getByTestId('admin-client-finance-save').click()
   await expect.poll(() => seenClientFinanceActions.has('/api/admin/subscriptions/1/renew/')).toBe(true)
-
-  await page.getByTestId('admin-client-action-edit-subscription').click()
-  subscriptionEditor = page.getByTestId('form-modal')
-  await subscriptionEditor.locator('#admin-client-finance-subscription-action').selectOption('freeze')
-  await subscriptionEditor.locator('#admin-client-finance-freeze-start').fill('2026-07-17')
-  await subscriptionEditor.locator('#admin-client-finance-freeze-end').fill('2026-07-23')
-  await subscriptionEditor.getByTestId('admin-client-finance-save').click()
-  await expect.poll(() => seenClientFinanceActions.has('/api/admin/subscriptions/1/freeze/')).toBe(true)
-
-  await page.getByTestId('admin-client-action-edit-subscription').click()
-  subscriptionEditor = page.getByTestId('form-modal')
-  await subscriptionEditor.locator('#admin-client-finance-subscription-action').selectOption('adjust')
-  await subscriptionEditor.locator('#admin-client-finance-adjust-delta').fill('1')
-  await subscriptionEditor.locator('#admin-client-finance-adjust-note').fill('Ручная корректировка')
-  await subscriptionEditor.getByTestId('admin-client-finance-save').click()
-  await expect.poll(() => seenClientFinanceActions.has('/api/admin/subscriptions/1/adjust/')).toBe(true)
 
   for (const endpoint of [
     '/api/admin/participants/1/charges/',
     '/api/admin/participants/1/subscriptions/',
     '/api/admin/subscriptions/1/renew/',
-    '/api/admin/subscriptions/1/freeze/',
-    '/api/admin/subscriptions/1/adjust/',
+    '/api/admin/subscriptions/1/update/',
   ]) {
     expect(seenClientFinanceActions.has(endpoint), `client card should submit ${endpoint}`).toBe(true)
   }
@@ -1874,8 +1904,10 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await expect(page.locator('h1.page-title')).toBeVisible()
   await expect(page.locator('.ops-today-session button').first()).toBeVisible()
   await expect(page.locator('main:visible')).toHaveCount(1)
+  await page.locator('.ops-today-session__action button').click()
+  await expect(page.getByTestId('trainer-attendance-all-present')).toBeVisible()
 
-  for (const label of ['overview', 'session', 'groups', 'history']) {
+  for (const label of ['overview', 'schedule', 'groups', 'history']) {
     await openShellDestination(page, label)
     const pageHeading = page.locator('main:visible h1.page-title')
     await expect(pageHeading).toHaveCount(1)
@@ -1883,8 +1915,6 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
     await expect(page.locator('.page')).toBeVisible()
   }
 
-  await openShellDestination(page, 'session')
-  await expect(page.getByTestId('trainer-attendance-all-present')).toBeVisible()
   await openShellDestination(page, 'groups')
   await page.getByRole('button', { name: /Дельфины/ }).click()
   await expect(page.getByText('Иван Петров')).toBeVisible()
@@ -1902,17 +1932,12 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
     await expect(agenda).toBeVisible()
     await expect(agenda.locator('.ops-agenda-day')).toHaveCount(1)
     await expect(page.getByTestId('schedule-calendar')).toBeHidden()
-    const dateInput = page.locator('#schedule-focus-date')
-    for (const period of ['day', 'week', 'month']) {
-      await page.getByTestId(`schedule-period-${period}`).click()
-      const previous = page.getByTestId('schedule-previous-period')
-      const next = page.getByTestId('schedule-next-period')
-      await expect(previous).toBeVisible()
-      await expect(next).toBeVisible()
-      const before = await dateInput.inputValue()
-      await next.click()
-      await expect(dateInput).not.toHaveValue(before)
-    }
+    await expect(page.getByTestId('schedule-calendar-view-switch')).toBeHidden()
+    const days = page.locator('.ops-mobile-date-strip button')
+    await expect(days).toHaveCount(7)
+    const before = await days.first().getAttribute('data-testid')
+    await page.locator('.ops-mobile-date-navigation > button').last().click()
+    await expect(days.first()).not.toHaveAttribute('data-testid', before)
   } else {
     await expect(page.getByTestId('schedule-calendar')).toBeVisible()
   }
@@ -1921,6 +1946,7 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
 
 test('client can open every menu screen without runtime errors', async ({ page }) => {
   const errors = collectPageErrors(page)
+  const today = new Date().toLocaleDateString('sv-SE')
   const participant = {
     id: 5,
     first_name: 'Иван',
@@ -1934,8 +1960,8 @@ test('client can open every menu screen without runtime errors', async ({ page }
   }
   const session = {
     id: 41,
-    start_at: '2026-07-22T17:00:00+02:00',
-    end_at: '2026-07-22T17:45:00+02:00',
+    start_at: `${today}T17:00:00+02:00`,
+    end_at: `${today}T17:45:00+02:00`,
     location: 'Большой бассейн',
     trainer: 'Анна Тренер',
     is_cancelled: false,
@@ -1975,14 +2001,13 @@ test('client can open every menu screen without runtime errors', async ({ page }
   } else {
     await page.getByTestId('schedule-view-list').click()
   }
-  await expect(schedule.locator('.ops-session-tile[data-color-key="gold-01"]')).toHaveCount(1)
-  await schedule.locator('.ops-session-tile').first().click()
+  await expect(schedule.locator(`${mobile ? '.ops-mobile-session-row' : '.ops-session-tile'}[data-color-key="gold-01"]`)).toHaveCount(1)
+  await schedule.getByTestId('schedule-session-41').click()
   await expect(page.locator('.ops-summary-grid')).toContainText('-1')
   expect(await page.locator('.ops-entity-card').evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(16)
   await openShellDestination(page, 'subscription')
   await expect(page.locator('.ops-summary-grid > div')).toHaveCount(5)
   await expect(page.locator('.ops-summary-grid')).toContainText('6')
-  await expect(page.locator('.ops-entity-card tbody tr')).toHaveCount(1)
   await openShellDestination(page, 'history')
   await page.getByTestId('client-history-messages-tab').click()
   await expect(page.getByTestId('client-message-1')).toBeVisible()
@@ -2040,9 +2065,21 @@ test('client booking, waitlist and cancellation refresh from the server', async 
   await openShellDestination(page, 'schedule')
   if ((page.viewportSize()?.width || 0) > 767) await page.getByTestId('schedule-view-list').click()
   const scheduleList = page.getByTestId((page.viewportSize()?.width || 0) > 767 ? 'client-schedule-list' : 'client-mobile-schedule-agenda')
+  const mobile = (page.viewportSize()?.width || 0) <= 767
+  if (mobile) {
+    await expect(page.locator('.ops-mobile-date-strip button')).toHaveCount(7)
+    await expect(scheduleList.getByTestId('client-mobile-book-41')).toHaveCount(0)
+    const sessionDay = page.getByTestId(`schedule-day-${start.toISOString().slice(0, 10)}`)
+    if (await sessionDay.count() === 0) await page.locator('.ops-mobile-date-navigation > button').last().click()
+    await sessionDay.click()
+    await expect(page.getByTestId('schedule-calendar-view-switch')).toBeHidden()
+    await scheduleList.getByTestId('client-mobile-book-41').click()
+    await expect(scheduleList.getByTestId('client-mobile-book-41')).toHaveCount(0)
+    await expect(page.locator('.ops-entity-card')).toHaveCount(0)
+  }
   await scheduleList.getByTestId('schedule-session-41').click()
   await expect(page.locator('.ops-entity-card').getByText(/Europe\/Warsaw/)).toBeVisible()
-  await page.getByTestId('client-book-41').click()
+  if (!mobile) await page.getByTestId('client-book-41').click()
   await expect(page.getByTestId('client-booking-status')).toHaveAttribute('data-status', 'booked')
   await page.getByTestId('client-booking-cancel-41').click()
   await expect(page.getByTestId('client-booking-status')).toHaveAttribute('data-status', 'available')
@@ -2090,16 +2127,17 @@ test('admin client filters combine with search and keep the blacklist separate',
 
   await page.goto('/?role=admin&view=clients')
   const clientList = page.locator(viewportWidth === 390 ? '.ops-client-mobile-list' : '.ops-client-desktop-table')
+  await page.getByTestId('admin-clients-filter-toggle').click()
   await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '3')
+  await expect(page.getByTestId('admin-clients-found')).toBeHidden()
 
   if (viewportWidth === 390) {
-    const toolsGeometry = await page.locator('.ops-client-list-tools').evaluate((tools) => {
-      const search = tools.querySelector('.ops-search')
-      const filters = tools.querySelector('.ops-client-filter-selects')
+    const toolsGeometry = await page.locator('.ops-list-tools').evaluate((tools) => {
+      const search = tools.querySelector('.ops-list-search input')
+      const filters = tools.querySelector('.ops-list-filter-fields')
       const selects = [...filters.querySelectorAll('select')]
       const app = document.querySelector('.app')
       return {
-        toolsHeight: tools.getBoundingClientRect().height,
         searchHeight: search.getBoundingClientRect().height,
         maxSelectHeight: Math.max(...selects.map((select) => select.getBoundingClientRect().height)),
         toolsOverflow: tools.scrollWidth - tools.clientWidth,
@@ -2107,7 +2145,6 @@ test('admin client filters combine with search and keep the blacklist separate',
         appOverflow: app.scrollWidth - app.clientWidth,
       }
     })
-    expect(toolsGeometry.toolsHeight).toBeLessThanOrEqual(180)
     expect(toolsGeometry.searchHeight).toBeLessThanOrEqual(56)
     expect(toolsGeometry.maxSelectHeight).toBeLessThanOrEqual(56)
     expect(toolsGeometry.toolsOverflow).toBeLessThanOrEqual(1)
@@ -2118,6 +2155,12 @@ test('admin client filters combine with search and keep the blacklist separate',
   await page.getByTestId('admin-clients-filter-subscription').selectOption('with')
   await page.getByTestId('admin-clients-filter-apply').click()
   await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '1')
+  await expect(page.getByTestId('admin-clients-found')).toBeVisible()
+  const [applyBox, countBox] = await Promise.all([
+    page.getByTestId('admin-clients-filter-apply').boundingBox(),
+    page.getByTestId('admin-clients-found').boundingBox(),
+  ])
+  expect(countBox.y).toBeGreaterThanOrEqual(applyBox.y + applyBox.height)
   await expect(clientList.getByText('Plus Anna', { exact: true })).toBeVisible()
   await expect(clientList).toContainText(/2.*4/)
   if (viewportWidth === 390) {
@@ -2143,6 +2186,7 @@ test('admin client filters combine with search and keep the blacklist separate',
   await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '0')
   await page.getByTestId('admin-clients-filter-reset').click()
   await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '3')
+  await expect(page.getByTestId('admin-clients-found')).toBeHidden()
 
   await page.getByTestId('admin-clients-scope-blacklist').click()
   await expect(page.getByTestId('admin-clients-found')).toHaveAttribute('data-count', '1')

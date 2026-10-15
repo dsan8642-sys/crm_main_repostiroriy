@@ -41,10 +41,10 @@ const runtimeComponents = publicComponents.filter(([name]) => !new Set([
 ]).has(name))
 
 const runtimeIconNames = new Set([
-  'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'ChevronL',
-  'ChevronR', 'ClientFamily', 'Download', 'File', 'GroupMembers', 'Home',
+  'Alert', 'ArrowLeft', 'Bell', 'Calendar', 'Cash', 'Check', 'CheckCheck', 'ChevronD', 'ChevronL', 'Clock',
+  'ChevronR', 'ClientFamily', 'Copy', 'Download', 'File', 'GroupMembers', 'GroupMembersPlus', 'HelpCircle', 'History', 'Home',
   'Layers', 'Location', 'Logout', 'Pencil', 'Search', 'Settings', 'Ticket',
-  'TrainerWhistle', 'Upload', 'User', 'Users', 'Wallet', 'Waves', 'X',
+  'Swimmer', 'Trainer', 'TrainerPlus', 'Upload', 'User', 'UserPlus', 'Users', 'Wallet', 'Waves', 'X',
 ])
 
 // Dependencies must precede their importers. Demo UI kits are authoring-only;

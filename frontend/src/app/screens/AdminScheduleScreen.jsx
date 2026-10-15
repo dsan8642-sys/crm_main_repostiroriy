@@ -5,6 +5,7 @@ import { useLocale } from '../../i18n.jsx'
 import { formatTime, mapAdminClientRows } from '../../mappers.js'
 import { DateField, TimeField } from '../DateTimeField.jsx'
 import { FormModal } from '../FormModal.jsx'
+import { usePresence } from '../usePresence.js'
 import {
   CalendarNavigation,
   eventAccessibleLabel,
@@ -235,13 +236,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const [busy, setBusy] = useState(false)
     const [actionPanel, setActionPanel] = useState(null)
     const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(() => (
-      typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
-        ? 'day'
-        : DEFAULT_SCHEDULE_VIEW
-    ))
+    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
     const [focusDate, setFocusDate] = useState(localToday())
     const [filtersOpen, setFiltersOpen] = useState(false)
+    const filtersPresence = usePresence(filtersOpen)
     const [filters, setFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
     const [draftFilters, setDraftFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
     const filterPopoverRef = useRef(null)
@@ -295,7 +293,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     }, [filters, filtersOpen])
 
     useEffect(() => {
-      if (['day', 'week', 'month'].includes(initialTab)) setViewMode(initialTab)
+      if (['week', 'month'].includes(initialTab)) setViewMode(initialTab)
       if (['calendar', 'list'].includes(initialTab)) setDisplayMode(initialTab)
     }, [initialTab])
 
@@ -897,7 +895,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             onClick={() => go('attendance', { sessionId: session.sessionId })}
             style={scheduleColorStyle(session.colorKey)}
           >
-            <ScheduleEventContent session={session} />
+            <ScheduleEventContent session={session} icons={I} />
           </button>
           <button
             type="button"
@@ -925,23 +923,25 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
             <p className="page-desc">{t('schedule.description')}</p>
           </div>
           <div className="ops-schedule-head-actions" ref={filterPopoverRef}>
-            <button
-              type="button"
-              className="ops-filter-trigger"
-              data-testid="admin-schedule-filters-trigger"
-              aria-expanded={filtersOpen}
-              aria-controls="admin-schedule-filters"
-              onClick={() => {
-                setDraftFilters({ ...filters })
-                setFiltersOpen((current) => !current)
-              }}
-            >
-              <span>{t('schedule.filters')}{activeFilterCount ? ` · ${activeFilterCount}` : ''}</span>
-              <span className="ops-filter-period-count" data-testid="admin-schedule-filter-count" data-count={activeFilterCount} data-total={periodCount}><Badge tone={activeFilterCount ? 'primary' : 'neutral'}>{periodCountLabel(periodCount, viewMode, t)}</Badge></span>
-            </button>
-            <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
-            {filtersOpen && (
-              <div id="admin-schedule-filters" className="ops-filter-popover" role="dialog" aria-label={t('schedule.filtersAria')}>
+            <div className="ops-schedule-head-controls">
+              <button
+                type="button"
+                className="ops-filter-trigger"
+                data-testid="admin-schedule-filters-trigger"
+                aria-expanded={filtersOpen}
+                aria-controls="admin-schedule-filters"
+                onClick={() => {
+                  setDraftFilters({ ...filters })
+                  setFiltersOpen((current) => !current)
+                }}
+              >
+                <span>{t('schedule.filters')}{activeFilterCount ? ` · ${activeFilterCount}` : ''}</span>
+                <span className="ops-filter-period-count" data-testid="admin-schedule-filter-count" data-count={activeFilterCount} data-total={periodCount} hidden={!activeFilterCount}><Badge tone="primary">{periodCountLabel(periodCount, viewMode, t)}</Badge></span>
+              </button>
+              <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={I} />
+            </div>
+            {filtersPresence.present && (
+              <div id="admin-schedule-filters" className={`ops-filter-popover ops-motion-panel${filtersPresence.exiting ? ' is-exiting' : ''}`} role="dialog" aria-label={t('schedule.filtersAria')} aria-hidden={filtersPresence.exiting || undefined} inert={filtersPresence.exiting || undefined}>
                 <div className="ops-form-grid">
                   <label>{t('schedule.sessionType')}<select data-testid="admin-schedule-filter-type" value={draftFilters.sessionType} onChange={(event) => setDraftFilters({ ...draftFilters, sessionType: event.target.value })}><option value="">{t('common.all')}</option>{sessionTypeOptions.map((type) => <option key={type.code} value={type.code}>{type.label || type.code}</option>)}</select></label>
                   <label>{t('common.trainer')}<select data-testid="admin-schedule-filter-trainer" value={draftFilters.trainerId} onChange={(event) => setDraftFilters({ ...draftFilters, trainerId: event.target.value })}><option value="">{t('common.all')}</option>{trainers.map((trainer) => <option key={trainer.trainerId} value={trainer.trainerId}>{trainer.name}</option>)}</select></label>
@@ -965,10 +965,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
 
         <div className="ops-action-strip ops-schedule-action-strip">
           {[
-            ['group', t('schedule.newGroup')],
-            ['individual', t('schedule.newIndividual')],
-            ['split', t('schedule.newSplit')],
-          ].map(([type, label]) => (
+            ['group', t('schedule.newGroup'), I.GroupMembers],
+            ['individual', t('schedule.newIndividual'), I.User],
+            ['split', t('schedule.newSplit'), I.Users],
+          ].map(([type, label, Icon]) => (
             <button
               key={type}
               type="button"
@@ -976,10 +976,10 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
               className={`ops-action-card${actionPanel === 'session' && sessionForm.sessionType === type ? ' is-active' : ''}`}
               onClick={() => openSessionShortcut(type)}
             >
-              <span>{label}</span>
+              <span className="ops-action-label"><Icon size={20} aria-hidden="true" />{label}</span>
             </button>
           ))}
-          <button type="button" data-testid="admin-schedule-copy-period" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => { setActionPanel((current) => current === 'copy' ? null : 'copy'); setCopyFieldErrors({}) }}><span>{t('schedule.copyPeriod')}</span></button>
+          <button type="button" data-testid="admin-schedule-copy-period" className={`ops-action-card${actionPanel === 'copy' ? ' is-active' : ''}`} onClick={() => { setActionPanel((current) => current === 'copy' ? null : 'copy'); setCopyFieldErrors({}) }}><span className="ops-action-label"><I.Copy size={20} aria-hidden="true" />{t('schedule.copyPeriod')}</span></button>
         </div>
 
         <FormModal

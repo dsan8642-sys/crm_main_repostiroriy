@@ -2,6 +2,8 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react
 import './design/styles.css'
 import './design/ui_kits/shared/kit.css'
 import './app/ops-redesign.css'
+import './app/theme-layout.css'
+import './design/tokens/appearance.css'
 import {
   fetchAdminPortal,
   fetchClientPortal,
