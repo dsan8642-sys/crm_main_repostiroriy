@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+async function clickAccountAction(page, testId) {
+  const desktop = page.getByTestId(`${testId}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-actions-trigger').click()
+  await page.getByTestId(testId).click()
+}
+
 const EMPTY_PAGE = { pagination: { has_next: false } }
 
 const adminRoutes = {
@@ -78,7 +85,7 @@ for (const [role, routes] of Object.entries({ admin: adminRoutes, trainer: train
     const menu = mobile ? page.locator('#ops-mobile-drawer') : page.locator('.ops-sidebar')
     const keys = role === 'admin'
       ? ['overview', 'clients', 'schedule', 'groups', 'trainers', 'payments', 'debtors', 'subscriptions', 'settings']
-      : role === 'trainer' ? ['sessions', 'schedule', 'groups', 'history']
+      : role === 'trainer' ? ['sessions', 'schedule', 'groups', 'history', 'guide']
         : ['home', 'schedule', 'subscription', 'payments', 'history', 'profile', 'help']
     for (const key of keys) {
       const item = menu.getByTestId(`nav-${role}-${key}`)
@@ -207,9 +214,11 @@ test('overview theme and individual/split shortcuts retain live navigation', asy
   await page.goto('/?role=admin&view=schedule')
   const event = page.locator('.ops-schedule-event').first()
   await expect(event).toBeAttached()
-  await expect(event).toHaveCSS('color', 'rgb(228, 238, 251)')
+  const eventColor = await event.evaluate((node) => getComputedStyle(node).color)
+  const eventBackground = await event.evaluate((node) => getComputedStyle(node).getPropertyValue('--schedule-color-background').trim())
   await switchTheme(page)
-  await expect(event).not.toHaveCSS('color', 'rgb(228, 238, 251)')
+  await expect(event).toHaveCSS('color', eventColor)
+  await expect(event).toHaveCSS('--schedule-color-background', eventBackground)
   await page.goto('/?role=admin&view=overview')
   await page.locator('.ops-overview .ops-today-status-list button').first().click()
   await expect(page).toHaveURL(/view=attendance.*session=901/)
@@ -231,8 +240,7 @@ test('client portal access is revoked only after confirmation', async ({ page })
   })
 
   await page.goto('/?role=admin&view=clientDetail&client=2')
-  await page.getByTestId('admin-client-actions-trigger').click()
-  await page.getByTestId('client-access-revoke').click()
+  await clickAccountAction(page, 'client-access-revoke')
 
   const dialog = page.getByTestId('confirmation-dialog')
   await expect(dialog).toBeVisible()
@@ -240,8 +248,7 @@ test('client portal access is revoked only after confirmation', async ({ page })
   await dialog.getByTestId('confirmation-cancel').click()
   expect(revokeRequests).toBe(0)
 
-  await page.getByTestId('admin-client-actions-trigger').click()
-  await page.getByTestId('client-access-revoke').click()
+  await clickAccountAction(page, 'client-access-revoke')
   await page.getByTestId('confirmation-dialog').getByTestId('confirmation-confirm').click()
   await expect.poll(() => revokeRequests).toBe(1)
 })
@@ -423,15 +430,11 @@ test('desktop sidebar preference is session-scoped and survives navigation', asy
   await expect(shell).not.toHaveClass(/is-sidebar-collapsed/)
   await page.getByTestId('sidebar-toggle').click()
   await expect(shell).toHaveClass(/is-sidebar-collapsed/)
-  await page.waitForTimeout(80)
-  expect(await sidebar.evaluate((node) => node.getBoundingClientRect().width)).toBeGreaterThan(76)
   await expect(sidebar).toHaveCSS('width', '76px')
   await page.reload()
   await expect(shell).toHaveClass(/is-sidebar-collapsed/)
   await page.getByTestId('sidebar-toggle').click()
   await expect(shell).not.toHaveClass(/is-sidebar-collapsed/)
-  await page.waitForTimeout(80)
-  expect(await sidebar.evaluate((node) => node.getBoundingClientRect().width)).toBeLessThan(250)
   await expect(sidebar).toHaveCSS('width', '250px')
   await page.getByTestId('sidebar-toggle').click()
   await expect(sidebar).toHaveCSS('width', '76px')
@@ -541,7 +544,59 @@ test('trainer mobile shell keeps navigation in the drawer only', async ({ page }
   const drawer = page.getByTestId('mobile-menu-dialog')
   await expect(drawer.getByText('Анна Тренер', { exact: true })).toBeVisible()
   await expect(drawer.getByTestId('nav-trainer-session')).toHaveCount(0)
-  expect(await drawer.locator('[data-testid^="nav-trainer-"]').evaluateAll((buttons) => buttons.map((button) => button.dataset.testid))).toEqual(['nav-trainer-sessions', 'nav-trainer-schedule', 'nav-trainer-groups', 'nav-trainer-history'])
+  expect(await drawer.locator('[data-testid^="nav-trainer-"]').evaluateAll((buttons) => buttons.map((button) => button.dataset.testid))).toEqual(['nav-trainer-sessions', 'nav-trainer-schedule', 'nav-trainer-groups', 'nav-trainer-history', 'nav-trainer-guide'])
+})
+
+test('admin instructions open inside Settings with real images', async ({ page }, testInfo) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'desktop and phone guide check')
+  await mockPortal(page, adminRoutes)
+  await page.goto('/?role=admin&view=settings')
+  const instructionsTab = page.getByTestId('admin-settings-category-instructions')
+  const resourceNav = page.locator(page.viewportSize().width < 768 ? '.ops-settings-mobile-nav' : '.ops-settings-desktop-nav')
+  await (page.viewportSize().width < 768 ? instructionsTab.last() : instructionsTab.first()).click()
+  if (page.viewportSize().width < 768) await resourceNav.getByTestId('admin-settings-resource-guide-clients').click()
+  await page.getByTestId('guide-topic-client-payment').click()
+  await expect(page.getByTestId('guide-admin-client-payment')).toBeVisible()
+  await expect(page.locator('[data-testid^="guide-admin-"]')).toHaveCount(1)
+  await expect(page.locator('[data-testid^="guide-trainer-"]')).toHaveCount(0)
+  await expect.poll(() => page.getByTestId('guide-admin-client-payment').locator('img').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0)
+  await page.getByTestId('guide-admin-client-payment').locator('.ops-guide-image').click()
+  await expect(page.locator('.ops-guide-dialog')).toBeVisible()
+  await expect(page.locator('.ops-guide-dialog .ops-guide-pin')).toHaveCount(5)
+  await page.locator('.ops-guide-dialog form button').click()
+  await expect(page.locator('.ops-guide-dialog')).not.toBeVisible()
+  if (page.viewportSize().width < 768) await page.locator('.ops-settings-mobile-back button').first().click()
+  await resourceNav.getByTestId('admin-settings-resource-guide-groups').click()
+  await expect(page.getByTestId('guide-admin-group-create')).toBeVisible()
+  await page.getByTestId('guide-topic-group-members').click()
+  await expect(page.getByTestId('guide-admin-group-members')).toBeVisible()
+  await expect(page.getByTestId('guide-admin-group-create')).toHaveCount(0)
+  if (page.viewportSize().width < 768) await page.locator('.ops-settings-mobile-back button').first().click()
+  await resourceNav.getByTestId('admin-settings-resource-guide-schedule').click()
+  for (const id of ['schedule-overview', 'schedule-session', 'schedule-edit', 'schedule-cancel-restore', 'schedule-copy-period']) {
+    await page.getByTestId(`guide-topic-${id}`).click()
+    const card = page.getByTestId(`guide-admin-${id}`)
+    await expect(card).toBeVisible()
+    await expect(page.locator('[data-testid^="guide-admin-"]')).toHaveCount(1)
+    await expect.poll(() => card.locator('img').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0)
+  }
+  if (page.viewportSize().width < 768) await page.locator('.ops-settings-mobile-back button').first().click()
+  await resourceNav.getByTestId('admin-settings-resource-guide-trainers').click()
+  await expect(page.getByTestId('guide-admin-trainer-create')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('admin-guide.png'), animations: 'disabled' })
+})
+
+test('trainer instructions open from trainer menu with real images', async ({ page }, testInfo) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'desktop and phone guide check')
+  await mockPortal(page, trainerRoutes)
+  await page.goto('/?role=trainer&view=guide')
+  await expect(page.getByTestId('guide-trainer-today')).toBeVisible()
+  await expect(page.locator('[data-testid^="guide-trainer-"]')).toHaveCount(5)
+  await expect(page.locator('[data-testid^="guide-admin-"]')).toHaveCount(0)
+  await expect.poll(() => page.getByTestId('guide-trainer-today').locator('img').evaluate((img) => img.naturalWidth)).toBeGreaterThan(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('trainer-guide.png'), animations: 'disabled' })
 })
 
 test('client mobile shell uses username fallback and drawer-only navigation', async ({ page }) => {

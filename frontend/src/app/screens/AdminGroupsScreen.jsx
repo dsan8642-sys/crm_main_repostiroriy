@@ -315,7 +315,7 @@ export function createAdminGroupsScreen(components, icons, reloadRoleData, admin
           <Checkbox id="admin-group-selfBooking" label={t('groups.selfBooking')} checked={form.selfBookingEnabled} onChange={(event) => updateForm('selfBookingEnabled', event.target.checked)} />
           <Input id="admin-group-bookingCutoff" label={t('groups.bookingCutoff')} hint={t('groups.bookingCutoffHint')} inputMode="numeric" value={form.bookingCutoffHours} error={fieldErrors.bookingCutoffHours} onChange={(event) => updateForm('bookingCutoffHours', event.target.value)} />
         </div>
-        <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
+        <ScheduleColorPicker id="admin-group-colorKey" value={form.colorKey} error={fieldErrors.colorKey} allowCustom onChange={(colorKey) => updateForm('colorKey', colorKey || '')} />
       </>
     )
 
@@ -370,7 +370,7 @@ export function createAdminGroupsScreen(components, icons, reloadRoleData, admin
         </tbody></table></div>
         <div className="ops-entity-mobile-list">
           {rows.map((row) => (
-            <React.Fragment key={row.id}><EntityMobileCard className="ops-group-compact-card" labelledBy={`group-card-${row.id}`} style={groupListColorStyle(row)}>
+            <React.Fragment key={row.id}><EntityMobileCard className={`ops-group-compact-card${row.hasScheduleColor ? ' is-colored' : ''}`} labelledBy={`group-card-${row.id}`} style={groupListColorStyle(row)}>
               <div className="ops-compact-card-head">
                 <button type="button" className="ops-compact-card-title" aria-expanded={String(selected?.groupId) === String(row.groupId)} aria-controls={`group-detail-mobile-${row.groupId}`} onClick={() => String(selected?.groupId) === String(row.groupId) ? setSelected(null) : openGroup(row)}><strong id={`group-card-${row.id}`} title={row.name}>{row.name}</strong></button>
                 <ActionPopover label={t('common.actionsFor', { name: row.name })} actions={[

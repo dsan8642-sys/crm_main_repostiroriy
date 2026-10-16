@@ -1800,6 +1800,8 @@ class AdminPortalApiRule(TestCase):
         self.assertIn(("GET", "/api/client/overview/"), routes)
         self.assertIn(("POST", "/api/admin/subscriptions/<id>/update/"), routes)
         self.assertEqual(payload["openapi"], "3.1.0")
+        group_color = payload["paths"]["/api/admin/groups/{group_id}/"]["patch"]["requestBody"]["content"]["application/json"]["schema"]["properties"]["color_key"]
+        self.assertEqual(group_color["anyOf"][-1]["pattern"], r"^#[0-9A-Fa-f]{6}$")
         location_path = payload["paths"]["/api/admin/settings/locations/{location_id}/"]
         self.assertIn("patch", location_path)
         self.assertNotIn("post", location_path)
@@ -2205,7 +2207,7 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(rejected.status_code, 400)
         self.assertIn("sort_order", rejected.json()["errors"])
 
-    def test_admin_group_color_accepts_approved_key_or_null_only(self):
+    def test_admin_group_color_accepts_palette_custom_hex_or_null(self):
         created = self.client.post(
             "/api/admin/groups/",
             data=json.dumps({"name": "Palette group", "color_key": "forest-01"}),
@@ -2223,9 +2225,18 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(cleared.status_code, 200)
         self.assertIsNone(cleared.json()["color_key"])
 
+        custom = self.client.patch(
+            f"/api/admin/groups/{group_id}/",
+            data=json.dumps({"group": {"color_key": "#A1B2C3"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(custom.status_code, 200)
+        self.assertEqual(custom.json()["color_key"], "#a1b2c3")
+        self.assertEqual(self.client.get(f"/api/admin/groups/{group_id}/").json()["color_key"], "#a1b2c3")
+
         rejected = self.client.patch(
             f"/api/admin/groups/{group_id}/",
-            data=json.dumps({"group": {"color_key": "#ff0000"}}),
+            data=json.dumps({"group": {"color_key": "#ff00zz"}}),
             content_type="application/json",
         )
         self.assertEqual(rejected.status_code, 400)
@@ -2292,6 +2303,11 @@ class AdminPortalApiRule(TestCase):
         group_color = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
         self.assertEqual(group_color.json()["presentation_color_key"], "forest-01")
 
+        self.group.color_key = "#A1B2C3"
+        self.group.save(update_fields=["color_key"])
+        custom_group_color = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
+        self.assertEqual(custom_group_color.json()["presentation_color_key"], "#a1b2c3")
+
         self.group.color_key = "obsolete-key"
         self.group.save(update_fields=["color_key"])
         unknown_group = self.client.get(f"/api/admin/schedule/sessions/{session.id}/")
@@ -2309,7 +2325,7 @@ class AdminPortalApiRule(TestCase):
 
     def test_role_schedule_payloads_share_presentation_key_without_admin_color_fields(self):
         trainer = f.make_trainer(username="palette_roles_coach")
-        self.group.color_key = "coral-01"
+        self.group.color_key = "#4b82d2"
         self.group.save(update_fields=["color_key"])
         start = timezone.now() + timedelta(hours=1)
         session = create_session(
@@ -2337,7 +2353,7 @@ class AdminPortalApiRule(TestCase):
 
         self.assertEqual(
             {admin_row["presentation_color_key"], trainer_row["presentation_color_key"], client_row["presentation_color_key"]},
-            {"coral-01"},
+            {"#4b82d2"},
         )
         self.assertNotIn("color_key", trainer_row)
         self.assertNotIn("color_key", client_row)

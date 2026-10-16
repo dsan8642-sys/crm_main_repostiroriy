@@ -10,6 +10,7 @@ import { createAdminReportsPanel } from './AdminReportsPanel.jsx'
 import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
+import { GuideScreen } from './GuideScreen.jsx'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -81,6 +82,10 @@ const resources = [
   { tab: 'control', id: 'security', title: 'settings.resource.security', endpoint: '/api/admin/system/security/', response: 'users', panel: true, readOnly: true },
   { tab: 'control', id: 'logs', title: 'settings.resource.logs', endpoint: '/api/admin/notifications/logs/', response: 'logs', readOnly: true },
   { tab: 'reports', id: 'reports', title: 'settings.resource.reports', panel: true, readOnly: true },
+  { tab: 'instructions', id: 'guide-clients', title: 'settings.resource.guideClients', panel: true, readOnly: true },
+  { tab: 'instructions', id: 'guide-schedule', title: 'settings.resource.guideSchedule', panel: true, readOnly: true },
+  { tab: 'instructions', id: 'guide-groups', title: 'settings.resource.guideGroups', panel: true, readOnly: true },
+  { tab: 'instructions', id: 'guide-trainers', title: 'settings.resource.guideTrainers', panel: true, readOnly: true },
 ]
 
 const resourceHelp = {
@@ -95,7 +100,7 @@ const resourceHints = {
 }
 
 const tabs = [
-  ['catalog', 'settings.tab.catalog'], ['notifications', 'settings.tab.notifications'], ['payroll', 'settings.tab.payroll'], ['localization', 'settings.tab.localization'], ['control', 'settings.tab.control'], ['reports', 'settings.tab.reports'],
+  ['catalog', 'settings.tab.catalog'], ['notifications', 'settings.tab.notifications'], ['payroll', 'settings.tab.payroll'], ['localization', 'settings.tab.localization'], ['control', 'settings.tab.control'], ['reports', 'settings.tab.reports'], ['instructions', 'settings.tab.instructions'],
 ]
 
 function displayValue(value, t) {
@@ -444,7 +449,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       </nav>
       <div className="ops-settings-mobile-nav">
         {mobileLevel === 'categories' && <div className="ops-settings-mobile-list" aria-label={t('settings.categoriesAria')}>
-          {tabs.map(([value, label]) => <button key={value} type="button" data-testid={`admin-settings-category-${value}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => { selectTab(value); setMobileLevel('resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
+          {tabs.map(([value, label]) => <button key={value} type="button" data-testid={`admin-settings-category-${value}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => { selectTab(value); setMobileLevel(value === 'reports' ? 'detail' : 'resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
         </div>}
         {mobileLevel === 'resources' && <>
           <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</ContextBackButton>
@@ -458,7 +463,7 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         </div>}
       </div>
       <div className={`ops-settings-detail${mobileLevel === 'detail' ? ' is-mobile-visible' : ''}`}>
-      {tab !== 'reports' && <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{t(tabs.find(([value]) => value === tab)?.[1])}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{t(resource.title)}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{t(resourceHelp[resource.id])}</p>}</div>{!resource.readOnly && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>{t('settings.add')}</Button>}</div>}
+      {!['reports', 'instructions'].includes(tab) && <div className="ops-section-head" style={{ margin: '8px 0 12px' }}><div><div className="eyebrow">{t(tabs.find(([value]) => value === tab)?.[1])}</div><h3 className="section-title" style={{ margin: '3px 0' }}>{t(resource.title)}</h3>{resourceHelp[resource.id] && <p className="page-desc" style={{ margin: '5px 0 0' }}>{t(resourceHelp[resource.id])}</p>}</div>{!resource.readOnly && <Button variant="primary" disabled={loading} onClick={() => startEdit()}>{t('settings.add')}</Button>}</div>}
       {resource.id === 'credentials' && <div className="card card-pad ops-edit-panel">
         <p className="page-desc">{t('settings.credentialsDescription')}</p>
         <Button variant="primary" disabled={loading} onClick={openCredentials}>{t('settings.editCredentials')}</Button>
@@ -483,6 +488,8 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         ? <ImportExportPanel />
         : resource.panel && resource.id === 'reports'
           ? <ReportsPanel />
+          : resource.panel && resource.id.startsWith('guide-')
+            ? <GuideScreen role="admin" embedded sectionId={resource.id.slice('guide-'.length)} />
           : !resource.panel && <Table rows={rows} emptyLabel={loading ? t('common.loading') : t('settings.empty')} columns={columns} />}
       </div>
       </div>

@@ -864,15 +864,6 @@ body {
 .ops-debtors-list-heading + .ops-list-feedback + .ops-entity-desktop-table,
 .ops-debtors-list-heading + .ops-list-feedback + .ops-entity-mobile-list { margin-top: 0; }
 
-.ops-month-day-dot {
-  display: block;
-  width: 6px;
-  height: 6px;
-  margin: 3px auto 0;
-  border-radius: 999px;
-  background: var(--primary);
-}
-
 @media (max-width: 767px) {
   .ops-sidebar,
   .ops-sidebar-head,
@@ -978,6 +969,7 @@ body {
 .ops-client-compact .ops-contact-link { min-height: 40px; padding: 8px 12px; background: var(--primary); border-color: var(--primary); color: var(--text-on-solid); font-size: var(--fs-sm); }
 .ops-client-compact .ops-contact-link.is-disabled { background: var(--surface-card); border-color: var(--border-default); color: var(--text-link); }
 .ops-client-account-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 34px; }
+.ops-client-desktop-account-actions { display: none; }
 .ops-client-participant-context { color: var(--text-muted); font-size: var(--fs-sm); }
 .ops-client-participant-context label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .ops-client-participant-context select { min-height: 36px; max-width: 100%; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-card); color: var(--text-strong); font: inherit; }
@@ -1011,6 +1003,7 @@ body {
 .ops-client-hub .swim-tab:nth-child(n + 5) .ops-client-hub-content { align-content: center; }
 .ops-client-quick-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; margin-bottom: 16px; }
 .ops-client-quick-actions > button { min-width: 0; min-height: 40px; padding: 8px 10px; }
+.ops-client-desktop-finance-actions { display: none; }
 .ops-client-quick-actions > .ops-entity-actions-trigger { display: inline-flex; justify-content: center; align-items: center; gap: 5px; width: auto; height: 40px; padding: 8px 10px; font: inherit; background: var(--action-secondary-background, var(--surface-card)); border-color: var(--border-default); color: var(--text-body); }
 @media (min-width: 960px) {
   .ops-client-hub [role='tablist'] { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
@@ -1018,6 +1011,15 @@ body {
   .ops-client-hub .swim-tab:nth-child(4) { border-right: 0 !important; }
   .ops-client-hub .swim-tab:nth-child(n + 5) { grid-column: span 2; }
   .ops-client-quick-actions { grid-template-columns: auto auto auto; justify-content: start; }
+}
+@media (min-width: 1200px) {
+  .ops-client-account-actions { max-width: 70%; }
+  .ops-client-desktop-account-actions { display: grid; grid-template-columns: repeat(2, max-content); justify-content: end; gap: 8px; }
+  .ops-client-desktop-account-actions > button { min-height: 40px; padding: 8px 10px; }
+  .ops-client-account-actions > .ops-entity-actions-trigger { display: none; }
+  .ops-client-quick-actions { grid-template-columns: repeat(5, max-content); }
+  .ops-client-desktop-finance-actions { display: contents; }
+  .ops-client-quick-actions > .ops-entity-actions-trigger { display: none; }
 }
 @media (max-width: 767px) {
   .ops-client-compact { padding: 12px; }
@@ -1243,7 +1245,8 @@ body {
 .ops-session-row,
 .ops-session-tile,
 .ops-schedule-detail-row,
-.ops-schedule-event {
+.ops-schedule-event,
+.ops-mobile-session-row {
   --schedule-card-fill: color-mix(
     in srgb,
     var(--schedule-color-border, var(--primary)) 38%,
@@ -1254,6 +1257,19 @@ body {
     var(--schedule-color-border, var(--primary)) 46%,
     var(--schedule-color-background, var(--primary-soft))
   );
+}
+
+.ops-schedule-event,
+.ops-session-tile,
+.ops-mobile-session-row,
+.ops-today-session.has-schedule-color,
+.ops-group-compact-card.is-colored,
+.ops-groups-desktop-table tr[data-color-key]:not([data-color-key="uncolored"]),
+.ops-trainer-group-link[data-color-key]:not([data-color-key="uncolored"]) {
+  --text-strong: #19324b;
+  --text-body: #29435c;
+  --text-muted: #526980;
+  --text-subtle: #526980;
 }
 
 .ops-session-row {
@@ -1481,11 +1497,6 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   white-space: nowrap;
 }
 
-:root[data-theme="dark"] .ops-trainer-group-count {
-  background: color-mix(in srgb, var(--schedule-color-border, var(--border-default)) 24%, var(--surface-card));
-  color: var(--text-strong);
-}
-
 .ops-trainer-group-link:hover {
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
@@ -1612,6 +1623,29 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   width: 28px;
   height: 28px;
   place-items: center;
+}
+
+.ops-schedule-color-picker .ops-schedule-color-custom {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 54px;
+  margin-top: 10px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+}
+.ops-schedule-color-custom input[type="color"] {
+  width: 48px;
+  height: 44px;
+  padding: 2px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  cursor: pointer;
 }
 
 .ops-schedule-color-option {
@@ -2209,6 +2243,7 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
 
 .ops-schedule-event-wrap {
   position: relative;
+  --schedule-event-action-space: 44px;
 }
 
 .ops-schedule-event-edit {
@@ -2358,6 +2393,10 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   max-width: calc(100vw - 16px);
   overflow-y: auto;
   padding: 5px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-lg);
 
 & button {
   min-height: 44px;
@@ -2962,6 +3001,7 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
 
 .ops-schedule-event {
   display: grid;
+  container: schedule-event / inline-size;
   overflow: hidden;
   gap: 4px;
   width: 100%;
@@ -2974,8 +3014,8 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   text-align: left;
 }
 
-.ops-schedule-event-wrap .ops-schedule-event {
-  padding-right: 58px;
+.ops-schedule-event-wrap .ops-schedule-event > :nth-last-child(-n + 2) {
+  padding-right: var(--schedule-event-action-space);
 }
 
 .ops-schedule-event {
@@ -3007,6 +3047,8 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
 }
 }
 
+.ops-schedule-event small svg { flex: 0 0 auto; }
+
 .ops-event-primary {
   display: flex;
   align-items: baseline;
@@ -3025,9 +3067,23 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   flex: 0 0 auto;
 }
 
+.ops-event-time { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.ops-event-time svg { flex-shrink: 0; }
+.ops-event-duration { display: none; align-items: center; gap: 4px; color: var(--text-muted); font-size: 12px; line-height: 1.3; }
+@container schedule-event (max-width: 190px) {
+  .ops-event-primary.has-duration .ops-event-time-end { display: none; }
+  .ops-event-primary.has-duration .ops-event-time svg { display: none; }
+  .ops-event-duration { display: inline-flex; }
+}
+@container schedule-event (max-width: 100px) {
+  .ops-event-primary { flex-wrap: wrap; }
+}
+
 .ops-event-title {
   font-size: 14px;
 }
+.ops-event-month-title { display: none; }
+.ops-event-title.is-group { font-size: 13px; font-weight: var(--fw-medium); line-height: 1.3; }
 
 .ops-event-type {
   overflow: hidden;
@@ -3041,6 +3097,8 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   gap: 4px;
 }
 }
+
+.ops-event-title.is-group + .ops-event-type { color: var(--text-muted); font-size: 12px; }
 
 .ops-event-roster-names {
   min-width: 0;
@@ -3105,10 +3163,7 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
   }
 
   .ops-schedule-event-wrap {
-
-  & .ops-schedule-event {
-    padding-right: 46px;
-  }
+    --schedule-event-action-space: 34px;
 
   &:hover .ops-schedule-event-edit,&:focus-within .ops-schedule-event-edit {
     visibility: visible;
@@ -3133,8 +3188,8 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
     pointer-events: auto;
   }
 
-  .ops-schedule-event-wrap .ops-schedule-event {
-    padding-right: 58px;
+  .ops-schedule-event-wrap {
+    --schedule-event-action-space: 44px;
   }
 }
 
@@ -4641,11 +4696,11 @@ textarea[aria-invalid="true"] {
 .ops-compact-entity-card.ops-group-compact-card {
   border-color: var(--schedule-color-border, var(--border-subtle));
   background: var(--schedule-color-background, var(--surface-card));
-  color: var(--text-strong);
+  color: var(--schedule-color-text, var(--text-strong));
 }
 .ops-groups-desktop-table tbody tr:not(.ops-groups-detail-row) > td {
   background: var(--schedule-color-background, var(--surface-card));
-  color: var(--text-strong);
+  color: var(--schedule-color-text, var(--text-strong));
 }
 .ops-debtors-list-heading { margin-bottom: 10px; }
 .ops-groups-desktop-table ~ .ops-list-pagination { margin-top: 12px; margin-bottom: 20px; }
@@ -4755,4 +4810,93 @@ textarea[aria-invalid="true"] {
   .ops-schedule-calendar.is-month .ops-schedule-day,
   .ops-schedule-calendar.is-month .ops-schedule-day > header button { border-radius: var(--radius-md); }
   .ops-list-pagination { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+}
+
+/* Month view: dates belong to the cell, and every session has its own row. */
+.ops-schedule-calendar.is-month .ops-calendar-grid { gap: 6px; margin-top: 6px; }
+.ops-schedule-calendar.is-month .ops-schedule-day {
+  min-height: 140px;
+  padding: 5px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+}
+.ops-schedule-calendar.is-month .ops-schedule-day.is-outside { opacity: .68; }
+.ops-schedule-calendar.is-month .ops-schedule-day.is-today { border-color: var(--primary); }
+.ops-schedule-calendar.is-month .ops-schedule-day > header { justify-content: flex-start; padding: 0; }
+.ops-schedule-calendar.is-month .ops-schedule-day > header button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: var(--fw-medium);
+}
+.ops-schedule-calendar.is-month .ops-schedule-day.is-today > header button { color: var(--primary); }
+.ops-month-day-weekday,
+.ops-month-day-outside,
+.ops-calendar-month-label { display: none; }
+.ops-month-day-outside { color: var(--text-muted); font-size: 11px; font-weight: var(--fw-regular); }
+.ops-schedule-calendar.is-month .ops-schedule-day-events { gap: 4px; padding: 0; }
+.ops-schedule-calendar.is-month .ops-schedule-empty-day { display: none; }
+.ops-schedule-calendar.is-month .ops-schedule-event {
+  display: grid;
+  align-content: start;
+  min-height: 52px;
+  gap: 2px;
+  padding: 6px 7px;
+  border-radius: 5px;
+}
+.ops-schedule-calendar.is-month .ops-event-primary { flex: 0 0 auto; }
+.ops-schedule-calendar.is-month .ops-event-time { font-size: 12px; }
+.ops-schedule-calendar.is-month .ops-event-time svg,
+.ops-schedule-calendar.is-month .ops-event-time-end,
+.ops-schedule-calendar.is-month .ops-event-occupancy,
+.ops-schedule-calendar.is-month .ops-event-duration,
+.ops-schedule-calendar.is-month .ops-event-type,
+.ops-schedule-calendar.is-month .ops-event-secondary { display: none; }
+.ops-schedule-calendar.is-month .ops-event-title { display: none; }
+.ops-schedule-calendar.is-month .ops-event-month-title {
+  display: block;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.ops-schedule-calendar.is-month .ops-schedule-event-wrap .ops-schedule-event > :nth-last-child(-n + 2) { padding-right: 0; }
+.ops-schedule-calendar.is-month .ops-schedule-event-edit { width: 30px; height: 30px; top: 2px; bottom: auto; right: 2px; }
+
+@media (max-width: 1100px) {
+  .ops-schedule-calendar.is-month .ops-schedule-event-edit { width: 44px; height: 44px; }
+  .ops-schedule-calendar.is-month .ops-calendar-weekday-row { display: none; }
+  .ops-schedule-calendar.is-month .ops-calendar-month-label {
+    display: block;
+    text-align: center;
+    text-transform: capitalize;
+    font-weight: var(--fw-medium);
+  }
+  .ops-schedule-calendar.is-month .ops-calendar-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ops-schedule-calendar.is-month .ops-month-day-weekday,
+  .ops-schedule-calendar.is-month .ops-month-day-outside { display: inline; }
+}
+
+@media (max-width: 640px) {
+  .ops-schedule-calendar.is-month .ops-calendar-period-header { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+  .ops-schedule-calendar.is-month .ops-calendar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ops-schedule-calendar.is-month .ops-schedule-day { min-height: 110px; }
+  .ops-schedule-calendar.is-month .ops-schedule-day > header { display: flex; justify-content: flex-start; padding: 0; }
+  .ops-schedule-calendar.is-month .ops-schedule-day > header button { display: inline-flex; min-width: 44px; min-height: 40px; padding: 0 7px; }
+  .ops-schedule-calendar.is-month .ops-schedule-day-events { display: grid; }
+  .ops-schedule-calendar.is-month .ops-schedule-event { min-height: 44px; }
+  .ops-schedule-calendar.is-month .ops-schedule-event-edit { width: 44px; height: 44px; }
+}
+
+@media (max-width: 380px) {
+  .ops-schedule-calendar.is-month .ops-calendar-grid { grid-template-columns: minmax(0, 1fr); }
 }

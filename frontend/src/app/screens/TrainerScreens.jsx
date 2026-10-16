@@ -10,9 +10,14 @@ import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../lis
 import { formatEntityDate, groupRowsByDate } from '../entityListContracts.js'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
 import { AttendanceSaveStatus, CompactStatusRow, TodaySessionCard } from '../TodayPrimitives.jsx'
+import { GuideScreen } from './GuideScreen.jsx'
 import { useLocale } from '../../i18n.jsx'
 import { uiLocaleTag } from '../../localeContracts.js'
 import './TrainerScreens.css'
+
+export function createTrainerGuideScreen() {
+  return function TrainerGuideScreen() { return <GuideScreen role="trainer" /> }
+}
 
 const serializeTrainerHistoryFilters = (filters) => {
   const days = Number(filters.period || 0)

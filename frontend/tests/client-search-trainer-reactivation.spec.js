@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+async function clickFinanceAction(page, action) {
+  const desktop = page.getByTestId(`admin-client-action-${action}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-finance-trigger').click()
+  await page.getByTestId(`admin-client-action-${action}`).click()
+}
+
 const json = (route, body, status = 200) => route.fulfill({
   status,
   contentType: 'application/json',
@@ -271,8 +278,7 @@ test('global client search retargets payments to the newly opened client', async
   await expect.poll(() => submittedPayment?.participant_id).toBe('202')
   expect(submittedPayment.client_id).toBe(20)
 
-  await page.getByTestId('admin-client-finance-trigger').click()
-  await page.getByTestId('admin-client-action-charge').click()
+  await clickFinanceAction(page, 'charge')
   const chargeDialog = page.getByTestId('form-modal')
   await chargeDialog.locator('#admin-client-finance-description').fill('Проверка клиента')
   await chargeDialog.locator('#admin-client-finance-amount').fill('25')
@@ -432,8 +438,7 @@ test('client profile exposes contact links and opens routed individual and split
   }
   await page.getByTestId('admin-client-tab-participants').click()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
-  await page.getByTestId('admin-client-finance-trigger').click()
-  await page.getByTestId('admin-client-action-edit-subscription').click()
+  await clickFinanceAction(page, 'edit-subscription')
   const subscriptionDialog = page.getByTestId('form-modal')
   const subscriptionEndDateInput = subscriptionDialog.locator('#admin-client-subscription-end-date')
   await expect(subscriptionEndDateInput).toHaveValue('2026-09-26')

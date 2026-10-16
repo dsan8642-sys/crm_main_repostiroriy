@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+async function clickAccountAction(page, testId) {
+  const desktop = page.getByTestId(`${testId}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-actions-trigger').click()
+  await page.getByTestId(testId).click()
+}
+
 const PARTICIPANT = {
   id: 1,
   client_id: 101,
@@ -110,8 +117,7 @@ test('client detail localizes independently from its notification language', asy
 
   await selector.selectOption('en')
   await expect(page.getByRole('button', { name: /Top up balance/ })).toBeVisible()
-  await page.getByTestId('admin-client-actions-trigger').click()
-  await page.getByTestId('admin-client-edit-account').click()
+  await clickAccountAction(page, 'admin-client-edit-account')
 
   const notificationLanguage = page.getByRole('dialog', { name: 'Edit client' }).getByLabel('Notification language')
   await expect(notificationLanguage).toHaveValue('pl')

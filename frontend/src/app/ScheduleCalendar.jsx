@@ -159,6 +159,7 @@ export function scheduleOccupancyLabel(session, t = (_key, fallback) => fallback
 export function ScheduleEventContent({ session, icons }) {
   const { t } = useLocale()
   const occupancy = scheduleOccupancy(session)
+  const durationMinutes = Math.round((Date.parse(session.endAt) - Date.parse(session.startAt)) / 60000)
   const supportingLabel = scheduleEventSupportingLabel(session, t)
   const splitRosterNames = session.sessionType === 'split'
     ? session.roster?.slice(0, 2).map((participant) => participant.full_name).join(' · ')
@@ -168,11 +169,13 @@ export function ScheduleEventContent({ session, icons }) {
     : 0
   return (
     <>
-      <span className="ops-event-primary">
-        <span className="mono">{icons?.Clock && <icons.Clock size={14} aria-hidden="true" />}{session.start}-{session.end}</span>
+      <span className={`ops-event-primary${durationMinutes > 0 ? ' has-duration' : ''}`}>
+        <span className="mono ops-event-time">{icons?.Clock && <icons.Clock size={14} aria-hidden="true" />}<span>{session.start}<span className="ops-event-time-end">-{session.end}</span></span></span>
         {occupancy && <span className="ops-event-occupancy" aria-label={scheduleOccupancyLabel(session)}>{occupancy}</span>}
       </span>
-      <strong className="ops-event-title">{scheduleEventHeading(session, t)}</strong>
+      {durationMinutes > 0 && <span className="ops-event-duration">{icons?.Clock && <icons.Clock size={14} aria-hidden="true" />}{t('calendar.durationShort', undefined, { minutes: durationMinutes })}</span>}
+      <strong className="ops-event-month-title">{session.sessionType === 'group' ? scheduleEventTitle(session, t) : supportingLabel || scheduleEventTitle(session, t)}</strong>
+      <strong className={`ops-event-title${session.sessionType === 'group' ? ' is-group' : ''}`}>{scheduleEventHeading(session, t)}</strong>
       {supportingLabel && (splitRosterNames
         ? <span className="ops-event-type is-split-roster"><span className="ops-event-roster-names">{splitRosterNames}</span>{hiddenSplitCount > 0 && <span className="ops-event-roster-count">· +{hiddenSplitCount}</span>}</span>
         : <span className="ops-event-type">{supportingLabel}</span>)}
@@ -288,6 +291,7 @@ export function ScheduleCalendar({
             )
           })}
         </div>
+        {viewMode === 'month' && <span className="ops-calendar-month-label">{dateFromIso(focusDate).toLocaleDateString(localeTag, { month: 'long', year: 'numeric' })}</span>}
         <PeriodArrow direction="next" focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} />
       </div>
       {viewMode === 'week' && (
@@ -315,8 +319,9 @@ export function ScheduleCalendar({
                     aria-label={`${parsed.toLocaleDateString(localeTag, { dateStyle: 'long' })}. ${t('calendar.sessionCount', undefined, { count: daySessions.length })}`}
                     onClick={() => chooseDate(date)}
                   >
-                    {parsed.getDate()}
-                    {daySessions.length > 0 && <span className="ops-month-day-dot" aria-hidden="true" />}
+                    <span className="ops-month-day-weekday">{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</span>
+                    <span>{parsed.getDate()}</span>
+                    {outside && <span className="ops-month-day-outside">{parsed.toLocaleDateString(localeTag, { month: 'short' })}</span>}
                   </button>
                 )}
               </header>

@@ -669,7 +669,7 @@ def _group_payload(group):
         "booking_cutoff_hours": group.booking_cutoff_hours,
         "booking_excluded_sessions": getattr(group, "booking_excluded_sessions", 0),
         "sort_order": group.sort_order,
-        "color_key": stored_schedule_color_key(group.color_key),
+        "color_key": stored_schedule_color_key(group.color_key, allow_custom=True),
         "is_active": group.is_active,
         "participants_count": getattr(group, "participants_count", None),
     }
@@ -1386,7 +1386,7 @@ def _apply_group_data(group, data):
         group.sort_order = _nullable_nonnegative_int(
             group_data.get("sort_order"), "sort_order")
     if "color_key" in group_data:
-        group.color_key = validate_schedule_color_key(group_data.get("color_key"))
+        group.color_key = validate_schedule_color_key(group_data.get("color_key"), allow_custom=True)
     if "is_active" in group_data:
         group.is_active = _bool_value(group_data.get("is_active"), True)
     if not group.name:

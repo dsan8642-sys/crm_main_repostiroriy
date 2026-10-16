@@ -128,12 +128,12 @@ test('schedule mappers normalize the server presentation key for every role', ()
     id: 1,
     start_at: '2026-08-02T10:00:00+02:00',
     end_at: '2026-08-02T11:00:00+02:00',
-    presentation_color_key: 'coral-01',
+    presentation_color_key: '#4B82D2',
     presentation_type_label: 'Персональная тренировка',
     participants_count: 6,
     max_participants: 15,
   })
-  assert.equal(trainer.colorKey, 'coral-01')
+  assert.equal(trainer.colorKey, '#4b82d2')
   assert.equal(trainer.sessionTypeLabel, 'Персональная тренировка')
   assert.equal(trainer.count, 6)
   assert.equal(trainer.limit, 15)

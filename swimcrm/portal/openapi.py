@@ -1,10 +1,19 @@
 import re
 
+from common.schedule_palette import SCHEDULE_COLOR_KEYS
+
 
 OPENAPI_VERSION = "3.1.0"
-API_VERSION = "2026-10-05"
+API_VERSION = "2026-10-16"
 PATH_PARAMETER = re.compile(r"<(?:(?P<converter>\w+):)?(?P<name>\w+)>")
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
+GROUP_COLOR_KEY_SCHEMA = {
+    "anyOf": [
+        {"type": "null"},
+        {"type": "string", "enum": sorted(SCHEDULE_COLOR_KEYS)},
+        {"type": "string", "pattern": r"^#[0-9A-Fa-f]{6}$"},
+    ],
+}
 
 BASE_LIST_PARAMETERS = [
     {"name": "page", "in": "query", "schema": {"type": "integer", "minimum": 1}},
@@ -211,6 +220,21 @@ def build_openapi_schema():
                 )
             if operation_parameters:
                 operation["parameters"] = operation_parameters
+            if method in {"POST", "PATCH"} and path in {
+                "/api/admin/groups/", "/api/admin/groups/{group_id}/",
+            }:
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "color_key": GROUP_COLOR_KEY_SCHEMA,
+                            "group": {"type": "object", "properties": {
+                                "color_key": GROUP_COLOR_KEY_SCHEMA,
+                            }},
+                        },
+                    }}},
+                }
             if method == "POST" and path == "/api/dev/appearance/":
                 appearance_schema = {
                     "type": "object", "required": ["revision", "state"],

@@ -1,6 +1,6 @@
 # SwimCRM API contract
 
-Last updated: 2026-10-05
+Last updated: 2026-10-16
 
 This document is the human-readable companion to:
 
@@ -525,6 +525,10 @@ payroll calculation results remain Django-owned.
 
 ## Validation Notes
 
+- Admin group `color_key` accepts a preset palette key, a custom `#RRGGBB` colour,
+  or `null`. Custom HEX values are stored lowercase and used for the group's
+  sessions in admin, trainer, and client schedules. Session type colours remain
+  limited to preset keys.
 - `participant_id` is the preferred public field name. Some old internal paths may still use `student_id`.
 - A client can have at most one `is_account_holder=true` participant.
 - A schedule session must be either group-based or individual, not both.

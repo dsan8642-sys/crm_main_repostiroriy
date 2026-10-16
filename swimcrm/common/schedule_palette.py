@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from django.core.exceptions import ValidationError
@@ -12,6 +13,11 @@ with _MANIFEST_PATH.open(encoding="utf-8") as manifest_file:
 SCHEDULE_COLOR_KEYS = frozenset(
     color["key"] for color in SCHEDULE_PALETTE["colors"]
 )
+CUSTOM_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _custom_color(value):
+    return isinstance(value, str) and bool(CUSTOM_COLOR_PATTERN.fullmatch(value))
 
 
 class SessionTypeColorKeys(dict):
@@ -21,19 +27,29 @@ class SessionTypeColorKeys(dict):
         self.labels = {code: label for code, _color_key, label in rows}
 
 
-def validate_schedule_color_key(value, field_name="color_key"):
+def validate_schedule_color_key(value, field_name="color_key", *, allow_custom=False):
     if value in (None, ""):
         return None
+    if allow_custom and _custom_color(value):
+        return value.lower()
     if not isinstance(value, str) or value not in SCHEDULE_COLOR_KEYS:
-        raise ValidationError({field_name: ["Выберите цвет из утверждённой палитры."]})
+        message = (
+            "Выберите готовый цвет или укажите HEX в формате #RRGGBB."
+            if allow_custom else "Выберите цвет из утверждённой палитры."
+        )
+        raise ValidationError({field_name: [message]})
     return value
 
 
-def safe_schedule_color_key(value):
+def safe_schedule_color_key(value, *, allow_custom=False):
+    if allow_custom and _custom_color(value):
+        return value.lower()
     return value if value in SCHEDULE_COLOR_KEYS else STANDARD_COLOR_KEY
 
 
-def stored_schedule_color_key(value):
+def stored_schedule_color_key(value, *, allow_custom=False):
+    if allow_custom and _custom_color(value):
+        return value.lower()
     return value if value in SCHEDULE_COLOR_KEYS else None
 
 
@@ -47,7 +63,7 @@ def session_type_color_keys():
 def resolve_session_color_key(session, type_color_keys=None):
     group_color = getattr(getattr(session, "group", None), "color_key", None)
     if group_color is not None:
-        return safe_schedule_color_key(group_color)
+        return safe_schedule_color_key(group_color, allow_custom=True)
     if type_color_keys is None:
         type_color_keys = session_type_color_keys()
     if session.session_type_config_id:

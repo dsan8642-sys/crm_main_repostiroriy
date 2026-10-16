@@ -227,6 +227,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
           Session: factories.createTrainerSessionScreen(components, icons, roleDataRefs.current.TrainerData),
           Groups: factories.createTrainerGroupsScreen(components, icons, roleDataRefs.current.TrainerData),
           History: factories.createTrainerHistoryScreen(components, icons, roleDataRefs.current.TrainerData),
+          Guide: factories.createTrainerGuideScreen(),
         },
       }
     }

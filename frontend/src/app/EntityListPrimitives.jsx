@@ -113,14 +113,14 @@ export function ActionPopover({ label, actions, disabled = false, testId, childr
             border: `1px solid ${danger ? 'var(--red-500)' : primary ? 'var(--primary)' : 'var(--border-default)'}`,
             borderRadius: 'var(--radius-md)',
             background: danger ? 'var(--status-overdue-bg)' : primary ? 'var(--primary)' : 'var(--surface-card)',
-            color: danger ? 'var(--red-600)' : primary ? 'var(--text-on-solid)' : 'var(--text-body)',
+            color: action.disabled ? 'var(--text-muted)' : danger ? 'var(--red-600)' : primary ? 'var(--text-on-solid)' : 'var(--text-body)',
             cursor: action.disabled ? 'not-allowed' : 'pointer',
             font: 'inherit',
             fontFamily: 'var(--font-sans)',
             fontSize: 'var(--fs-sm)',
             fontWeight: 'var(--fw-medium)',
             textAlign: 'left',
-            opacity: action.disabled ? 0.5 : 1,
+            opacity: 1,
           }}
           onClick={() => {
             close(false)

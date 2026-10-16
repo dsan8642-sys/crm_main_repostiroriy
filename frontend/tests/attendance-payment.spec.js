@@ -1,5 +1,19 @@
 import { expect, test } from '@playwright/test'
 
+async function clickFinanceAction(page, action) {
+  const desktop = page.getByTestId(`admin-client-action-${action}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-finance-trigger').click()
+  await page.getByTestId(`admin-client-action-${action}`).click()
+}
+
+async function clickAccountAction(page, testId) {
+  const desktop = page.getByTestId(`${testId}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-actions-trigger').click()
+  await page.getByTestId(testId).click()
+}
+
 async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false } = {}) {
   const participant = { id: 11, client_id: 101, first_name: 'Anna', last_name: 'Test', full_name: 'Anna Test', is_active: true }
   const subscription = { id: 77, participant_id: 11, type: 'Test pass', status: 'active', start_date: '2026-06-10', effective_end_date: '2026-07-10', remaining_sessions: 1, can_assign_attendance: true, ledger: [], charges: [], freezes: [] }
@@ -238,8 +252,7 @@ test('visit source and status filters combine and clear selection before changin
 test('subscription start and end can be edited independently', async ({ page }) => {
   const changes = await mockAttendance(page)
   await page.goto('/?role=admin&view=clientDetail&client=101')
-  await page.getByTestId('admin-client-finance-trigger').click()
-  await page.getByTestId('admin-client-action-edit-subscription').click()
+  await clickFinanceAction(page, 'edit-subscription')
   const dialog = page.getByTestId('form-modal')
   await expect(dialog.getByRole('heading', { level: 2 })).toHaveText('Test pass · с 10.06.2026')
   await dialog.locator('#admin-client-subscription-start-date').fill('2026-06-01')
@@ -286,18 +299,28 @@ test('client summary is the navigation and keeps contacts and finance actions av
   await page.getByTestId('admin-client-tab-attendance').click()
   await expect(page.getByTestId('admin-client-action-payment')).toBeVisible()
   await expect(page.getByTestId('admin-client-action-sell-subscription')).toBeVisible()
-  await expect(page.getByTestId('admin-client-finance-trigger')).toHaveText('Ещё')
-  const actionHeights = await page.locator('.ops-client-quick-actions > button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height))
-  expect(Math.max(...actionHeights) - Math.min(...actionHeights)).toBeLessThanOrEqual(1)
-  await expect(page.getByTestId('admin-client-action-charge')).toHaveCount(0)
-  await page.getByTestId('admin-client-finance-trigger').click()
-  await expect(page.getByTestId('admin-client-action-charge')).toBeVisible()
-  await expect(page.getByTestId('admin-client-action-remind')).toBeVisible()
-  await page.getByTestId('admin-client-action-edit-subscription').click()
+  if ((page.viewportSize()?.width || 0) >= 1200) {
+    const buttons = page.locator('.ops-client-quick-actions button:visible')
+    await expect(buttons).toHaveCount(5)
+    const tops = await buttons.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().top))
+    expect(new Set(tops).size).toBe(1)
+    await expect(page.getByTestId('admin-client-finance-trigger')).toBeHidden()
+  } else {
+    await expect(page.getByTestId('admin-client-finance-trigger')).toHaveText('Ещё')
+  }
+  await clickFinanceAction(page, 'edit-subscription')
   await expect(page.getByTestId('form-modal')).toContainText('Test pass · с 10.06.2026')
   await page.getByTestId('form-modal').locator('.form-modal__footer button').first().click()
-  await page.getByTestId('admin-client-actions-trigger').click()
-  await page.getByTestId('admin-client-edit-account').click()
+  if ((page.viewportSize()?.width || 0) >= 1200) {
+    const accountButtons = page.locator('.ops-client-desktop-account-actions > button')
+    await expect(accountButtons).toHaveCount(4)
+    const tops = await accountButtons.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().top))
+    expect(tops[0]).toBe(tops[1])
+    expect(tops[2]).toBe(tops[3])
+    expect(tops[2]).toBeGreaterThan(tops[0])
+    await expect(page.getByTestId('admin-client-actions-trigger')).toBeHidden()
+  }
+  await clickAccountAction(page, 'admin-client-edit-account')
   await expect(page.locator('#admin-client-detail-phone')).toHaveValue('+48555010000')
   await page.getByTestId('form-modal').locator('.form-modal__footer button').first().click()
   await page.screenshot({ path: `../.local-run/client-compact-${test.info().project.name}.png`, fullPage: true, animations: 'disabled' })

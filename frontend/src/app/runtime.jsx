@@ -34,6 +34,7 @@ export const ROLE_META = {
       session: ['runtime.trainer.session.title', 'runtime.trainer.session.desc'],
       groups: ['runtime.trainer.groups.title', 'runtime.trainer.groups.desc'],
       history: ['runtime.trainer.history.title', 'runtime.trainer.history.desc'],
+      guide: ['runtime.trainer.guide.title', 'runtime.trainer.guide.desc'],
     },
   },
   client: {
@@ -94,6 +95,7 @@ export function roleNav(role, icons, data, counts = {}, t = (key) => key) {
       { key: 'schedule', label: t('nav.trainer.schedule'), icon: <icons.Calendar size={20} /> },
       { key: 'groups', label: t('nav.trainer.groups'), icon: <icons.GroupMembers size={20} />, section: t('shell.operationsSection') },
       { key: 'history', label: t('nav.trainer.history'), icon: <icons.History size={20} />, section: t('shell.operationsSection') },
+      { key: 'guide', label: t('nav.trainer.guide'), icon: <icons.HelpCircle size={20} />, section: t('shell.systemSection') },
     ]
   }
 

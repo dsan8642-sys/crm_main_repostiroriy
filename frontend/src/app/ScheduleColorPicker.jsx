@@ -19,6 +19,7 @@ export function ScheduleColorPicker({
   name,
   id,
   error,
+  allowCustom = false,
 }) {
   const { locale } = useLocale()
   const t = adminTranslator(locale)
@@ -27,6 +28,10 @@ export function ScheduleColorPicker({
   const panelPresence = usePresence(expanded)
   const selectedKey = normalizeScheduleColorKey(value)
   const selectedOption = scheduleColorOption(selectedKey)
+  const customSelected = selectedKey.startsWith('#')
+  const selectedLabel = customSelected
+    ? t('scheduleColor.customValue', { color: selectedKey.toUpperCase() })
+    : t(`scheduleColor.${selectedOption.key}`)
   const groupName = name || `schedule-color-${generatedName}`
   const panelId = `${groupName}-options`
 
@@ -37,22 +42,22 @@ export function ScheduleColorPicker({
         id={id}
         aria-controls={panelId}
         aria-expanded={expanded}
-        aria-label={t('scheduleColor.choose', { color: t(`scheduleColor.${selectedOption.key}`) })}
+        aria-label={t('scheduleColor.choose', { color: selectedLabel })}
         className="ops-schedule-color-trigger"
         onClick={() => setExpanded((current) => !current)}
         style={{ ...scheduleColorStyle(selectedKey), background: 'var(--schedule-color-background)', border: '1px solid var(--schedule-color-border)', borderRadius: 'var(--radius-md)', color: 'var(--schedule-color-text)' }}
         type="button"
       >
-        <span className="ops-schedule-color-swatch" style={{ background: 'var(--schedule-color-border)', borderRadius: 'var(--radius-sm)' }} aria-hidden="true"><span>✓</span></span>
+        <span className="ops-schedule-color-swatch" style={{ background: customSelected ? selectedKey : 'var(--schedule-color-border)', borderRadius: 'var(--radius-sm)' }} aria-hidden="true"><span>✓</span></span>
         <span className="ops-schedule-color-trigger-copy">
           <small>{t('scheduleColor.selected')}</small>
-          <strong>{t(`scheduleColor.${selectedOption.key}`)}</strong>
+          <strong>{selectedLabel}</strong>
         </span>
         <span className="ops-schedule-color-chevron" aria-hidden="true">⌄</span>
       </button>
       {panelPresence.present && (
         <div className={`ops-schedule-color-panel ops-motion-panel${panelPresence.exiting ? ' is-exiting' : ''}`} id={panelId} aria-hidden={panelPresence.exiting || undefined} inert={panelPresence.exiting || undefined}>
-          <span className="ops-schedule-color-hint">{t('scheduleColor.hint')}</span>
+          <span className="ops-schedule-color-hint">{t(allowCustom ? 'scheduleColor.hintCustom' : 'scheduleColor.hint')}</span>
           <div className="ops-schedule-color-grid">
             {schedulePaletteOptions.map((option) => {
               const selected = option.key === selectedKey
@@ -81,6 +86,16 @@ export function ScheduleColorPicker({
               )
             })}
           </div>
+          {allowCustom && (
+            <label className="ops-schedule-color-custom">
+              <span>{t('scheduleColor.custom')}</span>
+              <input
+                type="color"
+                value={customSelected ? selectedKey : '#1a7dc4'}
+                onChange={(event) => onChange?.(event.target.value)}
+              />
+            </label>
+          )}
         </div>
       )}
       {error && <small id={`${panelId}-error`} className="ops-field-error" role="alert">{error}</small>}

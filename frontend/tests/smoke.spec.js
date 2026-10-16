@@ -1,5 +1,19 @@
 import { expect, test } from '@playwright/test'
 
+async function clickFinanceAction(page, action) {
+  const desktop = page.getByTestId(`admin-client-action-${action}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-finance-trigger').click()
+  await page.getByTestId(`admin-client-action-${action}`).click()
+}
+
+async function clickAccountAction(page, testId) {
+  const desktop = page.getByTestId(`${testId}-desktop`)
+  if ((page.viewportSize()?.width || 0) >= 1200) return desktop.click()
+  await page.getByTestId('admin-client-actions-trigger').click()
+  await page.getByTestId(testId).click()
+}
+
 async function mockPortal(page, routes) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
@@ -462,7 +476,111 @@ test('shared shell and calendar keep mobile controls compact and accessible', as
   expect(errors).toEqual([])
 })
 
+test('schedule cards adapt time to their width without reserving a full action column', async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('swimcrm.ui.locale.1.admin', 'ru'))
+  await page.clock.setFixedTime(new Date('2026-08-03T12:00:00+02:00'))
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin', full_name: 'Test Admin' },
+    '/api/admin/dashboard/': { metrics: { clients: 0, active_subscriptions: 0, debtors: 0 } },
+    '/api/admin/reference/': { trainers: [], groups: [], subscription_types: [], locations: [], session_types: [], participants: [], choices: { payment_methods: [], notification_channels: [] }, notification_settings: {} },
+    '/api/admin/clients/': { clients: [] },
+    '/api/admin/trainers/': { trainers: [] },
+    '/api/admin/groups/': { groups: [] },
+    '/api/admin/subscription-types/': { subscription_types: [] },
+    '/api/admin/settings/session-types/': { session_types: [] },
+    '/api/admin/payments/': { payments: [] },
+    '/api/admin/debtors/': { debtors: [] },
+    '/api/admin/schedule/sessions/': { sessions: [{
+      id: 1, start_at: '2026-08-03T08:00:00+02:00', end_at: '2026-08-03T08:45:00+02:00',
+      group: { id: 1, name: 'Masters Demo' }, session_type: 'group', trainer: 'Maksym Voroncov', location: 'Test pool',
+      max_participants: 25, participants_count: 3, presentation_color_key: 'forest-01',
+    }] },
+  })
+  await page.goto('/?role=admin&view=schedule')
+  const card = page.locator('.ops-schedule-event:visible').first()
+  await expect(card).toHaveAttribute('aria-label', /08:00-08:45/)
+  await expect(card.locator('.ops-event-duration')).toHaveText('45 мин')
+  await expect(card.locator('.ops-event-title')).toHaveCSS('font-weight', '500')
+  const lightColors = await card.evaluate((node) => ({
+    background: getComputedStyle(node).backgroundColor,
+    text: getComputedStyle(node).color,
+    time: getComputedStyle(node.querySelector('.ops-event-time')).color,
+    secondary: getComputedStyle(node.querySelector('.ops-event-trainer')).color,
+  }))
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  await expect(card).toHaveCSS('background-color', lightColors.background)
+  await expect(card).toHaveCSS('color', lightColors.text)
+  await expect(card.locator('.ops-event-time')).toHaveCSS('color', lightColors.time)
+  await expect(card.locator('.ops-event-trainer')).toHaveCSS('color', lightColors.secondary)
+  const trainerIconWidth = await card.locator('.ops-event-trainer svg').evaluate((icon) => icon.getBoundingClientRect().width)
+  expect(trainerIconWidth).toBeGreaterThanOrEqual(14)
+  const geometry = await card.evaluate((node) => {
+    const style = getComputedStyle(node)
+    const time = node.querySelector('.ops-event-time').getBoundingClientRect()
+    const occupancy = node.querySelector('.ops-event-occupancy').getBoundingClientRect()
+    return { compact: node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) <= 190,
+      paddingLeft: style.paddingLeft, paddingRight: style.paddingRight, cardRight: node.getBoundingClientRect().right,
+      timeRight: time.right, timeBottom: time.bottom,
+      occupancyLeft: occupancy.left, occupancyRight: occupancy.right, occupancyTop: occupancy.top }
+  })
+  expect(geometry.paddingRight).toBe(geometry.paddingLeft)
+  expect(geometry.timeRight).toBeLessThanOrEqual(geometry.cardRight - parseFloat(geometry.paddingRight) + 1)
+  expect(geometry.occupancyRight).toBeLessThanOrEqual(geometry.cardRight - parseFloat(geometry.paddingRight) + 1)
+  if (geometry.occupancyTop < geometry.timeBottom) {
+    expect(geometry.timeRight).toBeLessThanOrEqual(geometry.occupancyLeft - 3)
+  }
+  if (geometry.compact) {
+    await expect(card.locator('.ops-event-time-end')).toBeHidden()
+    await expect(card.locator('.ops-event-duration')).toBeVisible()
+    await expect(card.locator('.ops-event-time svg')).toBeHidden()
+    await expect(card.locator('.ops-event-duration svg')).toBeVisible()
+  } else {
+    await expect(card.locator('.ops-event-time-end')).toBeVisible()
+    await expect(card.locator('.ops-event-duration')).toBeHidden()
+    await expect(card.locator('.ops-event-time svg')).toBeVisible()
+  }
+  await card.screenshot({ path: testInfo.outputPath('schedule-card.png') })
+})
+
+test('month grid keeps every session visible on desktop and narrow screens', async ({ page }) => {
+  const sessions = Array.from({ length: 4 }, (_, index) => ({
+    id: index + 1,
+    start_at: `2026-08-03T${String(8 + index).padStart(2, '0')}:00:00+02:00`,
+    end_at: `2026-08-03T${String(9 + index).padStart(2, '0')}:00:00+02:00`,
+    session_type: 'group', group: { id: 1, name: index === 0 ? 'Очень длинное название группы для проверки переноса' : `Группа ${index + 1}` },
+    trainer_id: 1, trainer: 'Marek', max_participants: 15, participants_count: 6,
+  }))
+  await mockPortal(page, {
+    '/api/me/': { id: 1, username: 'admin', role: 'admin' },
+    '/api/admin/reference/': {
+      trainers: [{ id: 1, name: 'Marek' }], groups: [{ id: 1, name: 'Группа 1' }],
+      subscription_types: [], locations: [], session_types: [], participants: [],
+      choices: { payment_methods: [], notification_channels: [] }, notification_settings: {},
+    },
+    '/api/admin/schedule/sessions/': { sessions },
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/?role=admin&view=schedule')
+  await page.locator('#schedule-focus-date').fill('2026-08-03')
+  await page.getByTestId('schedule-period-month').click()
+  const month = page.locator('.ops-schedule-calendar.is-month')
+  await expect(month.locator('.ops-schedule-event:visible')).toHaveCount(4)
+  await expect(month.locator('.ops-month-day-dot')).toHaveCount(0)
+  const firstEvent = month.locator('.ops-schedule-event:visible').first()
+  await expect(firstEvent.locator('.ops-event-month-title')).toHaveCSS('white-space', 'normal')
+  expect(await firstEvent.evaluate((node) => {
+    const time = node.querySelector('.ops-event-time').getBoundingClientRect()
+    const title = node.querySelector('.ops-event-month-title').getBoundingClientRect()
+    return title.top > time.top && title.height > parseFloat(getComputedStyle(node.querySelector('.ops-event-month-title')).lineHeight)
+  })).toBe(true)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(month.locator('.ops-schedule-event:visible')).toHaveCount(4)
+  await expect(month.locator('.ops-calendar-month-label')).toBeVisible()
+  expect(await month.locator('.ops-calendar-grid').evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').length)).toBe(2)
+})
+
 test('approved preview follow-ups define the responsive shell and calendar', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('swimcrm.ui.locale.1.admin', 'ru'))
   const errors = collectPageErrors(page)
   const sessions = [
     {
@@ -573,14 +691,26 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(event.locator('.ops-event-occupancy')).toHaveAttribute('aria-label', 'Записано 6 из 15')
     await expect(event).toHaveAttribute('aria-label', /Записано 6 из 15/)
     await expect(event.locator('.ops-event-title')).toHaveText('Delfiny')
-    await expect(event.locator('.ops-event-title')).toHaveCSS('font-size', '14px')
+    await expect(event.locator('.ops-event-title')).toHaveCSS('font-size', '13px')
+    await expect(event.locator('.ops-event-title')).toHaveCSS('font-weight', '500')
     await expect(event.locator('.ops-event-type')).toHaveText(/\S/)
-    await expect(event.locator('.ops-event-type')).toHaveCSS('font-size', '13px')
+    await expect(event.locator('.ops-event-type')).toHaveCSS('font-size', '12px')
+    await expect(event.locator('.ops-event-type')).toHaveCSS('color', 'rgb(82, 105, 128)')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-size', '12px')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('color', 'rgb(82, 105, 128)')
     await expect(event.locator('.ops-event-secondary').first()).toHaveCSS('font-weight', '500')
     await expect(event.locator('.ops-event-primary')).toHaveCSS('justify-content', 'space-between')
-    await expect(event).toHaveCSS('padding-right', width < 960 ? '58px' : '46px')
+    await expect(event.locator('.ops-event-time')).toHaveCSS('white-space', 'nowrap')
+    await expect(event.locator('.ops-event-duration')).toHaveText('60 мин')
+    const compactTime = await event.evaluate((node) => node.clientWidth - parseFloat(getComputedStyle(node).paddingLeft) - parseFloat(getComputedStyle(node).paddingRight) <= 190)
+    if (compactTime) {
+      await expect(event.locator('.ops-event-time-end')).toBeHidden()
+      await expect(event.locator('.ops-event-duration')).toBeVisible()
+    } else {
+      await expect(event.locator('.ops-event-time-end')).toBeVisible()
+      await expect(event.locator('.ops-event-duration')).toBeHidden()
+    }
+    await expect(event).toHaveCSS('padding-right', '9px')
     expect((await event.boundingBox())?.height || 0).toBeGreaterThanOrEqual(92)
     await expect(event).toHaveCSS('border-top-width', '0px')
     await expect(event).toHaveCSS('border-right-width', '0px')
@@ -603,24 +733,31 @@ test('approved preview follow-ups define the responsive shell and calendar', asy
     await expect(weekdayHeader).toBeVisible()
     await expect(weekdayHeader.locator('.ops-calendar-weekday')).toHaveCount(7)
     await expect(weekdayHeader.locator('.ops-calendar-weekday strong').first()).toHaveCSS('font-size', '13px')
-    await expect(page.locator('.ops-schedule-event:visible .ops-event-type').first()).toBeVisible()
+    await expect(page.locator('.ops-schedule-event:visible .ops-event-type').first()).toBeHidden()
     await expect(page.locator('.ops-schedule-event:visible .ops-event-trainer').first()).toBeHidden()
-    const weekdayCenters = await weekdayHeader.locator('.ops-calendar-weekday').evaluateAll((nodes) => (
-      nodes.map((node) => {
-        const box = node.getBoundingClientRect()
-        return box.left + box.width / 2
-      })
-    ))
-    const firstWeekCenters = await page.locator('.ops-calendar-grid > .ops-schedule-day').evaluateAll((nodes) => (
-      nodes.slice(0, 7).map((node) => {
-        const box = node.getBoundingClientRect()
-        return box.left + box.width / 2
-      })
-    ))
-    // The weekday strip reserves space for the previous/next arrows.
-    expect(weekdayCenters[0]).toBeGreaterThan(firstWeekCenters[0])
-    expect(weekdayCenters.at(-1)).toBeLessThan(firstWeekCenters.at(-1))
-    expect(weekdayCenters.every((center, index) => index === 0 || center > weekdayCenters[index - 1])).toBe(true)
+    await expect(page.locator('.ops-schedule-event:visible .ops-event-month-title').filter({ hasText: 'Anna Nowak' })).toBeVisible()
+    await expect(page.locator('.ops-schedule-event:visible')).toHaveCount(2)
+    await expect(page.locator('.ops-schedule-day > header button').first()).toHaveCSS('border-top-width', '0px')
+    if (width > 1100) {
+      const weekdayCenters = await weekdayHeader.locator('.ops-calendar-weekday').evaluateAll((nodes) => (
+        nodes.map((node) => {
+          const box = node.getBoundingClientRect()
+          return box.left + box.width / 2
+        })
+      ))
+      const firstWeekCenters = await page.locator('.ops-calendar-grid > .ops-schedule-day').evaluateAll((nodes) => (
+        nodes.slice(0, 7).map((node) => {
+          const box = node.getBoundingClientRect()
+          return box.left + box.width / 2
+        })
+      ))
+      // The weekday strip reserves space for the previous/next arrows.
+      expect(weekdayCenters[0]).toBeGreaterThan(firstWeekCenters[0])
+      expect(weekdayCenters.at(-1)).toBeLessThan(firstWeekCenters.at(-1))
+      expect(weekdayCenters.every((center, index) => index === 0 || center > weekdayCenters[index - 1])).toBe(true)
+    } else {
+      await expect(weekdayHeader.locator('.ops-calendar-month-label')).toBeVisible()
+    }
     await expect(page.locator('.ops-calendar-marker')).toHaveCount(0)
     const dateButton = page.locator('.ops-schedule-day > header button').first()
     await expect(dateButton).toHaveCSS('color', 'rgb(25, 50, 75)')
@@ -910,7 +1047,7 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
     '/api/admin/clients/': { clients: [] },
     '/api/admin/trainers/': { trainers: [] },
     '/api/admin/groups/': {
-      groups: [{ id: 1, name: 'Delfiny', description: '', default_capacity: 10, color_key: null, participants_count: 0, is_active: true }],
+      groups: [{ id: 1, name: 'Delfiny', description: '', default_capacity: 10, color_key: 'forest-01', participants_count: 0, is_active: true }],
     },
     '/api/admin/settings/session-types/': {
       session_types: [{ id: 1, code: 'group', label: 'Групповое', default_capacity: 10, default_duration_minutes: 60, color_key: null, is_active: true, configured: true }],
@@ -931,16 +1068,30 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
 
   await page.goto('/')
   await openShellDestination(page, 'groups')
+  const coloredGroup = (page.viewportSize()?.width || 0) <= 767
+    ? page.locator('.ops-group-compact-card.is-colored').first()
+    : page.locator('.ops-groups-desktop-table tr[data-color-key="forest-01"] > td').first()
+  const groupColors = await coloredGroup.evaluate((node) => ({ background: getComputedStyle(node).backgroundColor, text: getComputedStyle(node).color }))
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  await expect(coloredGroup).toHaveCSS('background-color', groupColors.background)
+  await expect(coloredGroup).toHaveCSS('color', groupColors.text)
   await page.getByRole('button', { name: 'Delfiny', exact: true }).click()
   await page.getByTestId('admin-group-edit').click()
   const groupEditor = page.getByTestId('form-modal')
   const groupPicker = groupEditor.locator('.ops-schedule-color-picker')
   const groupTrigger = groupPicker.locator('.ops-schedule-color-trigger')
+  await expect(groupTrigger).toHaveCSS('background-color', 'rgb(232, 245, 233)')
   await expect(groupTrigger).toHaveAttribute('aria-expanded', 'false')
   await expect(groupPicker.getByRole('radio')).toHaveCount(0)
   await groupTrigger.click()
   await expect(groupTrigger).toHaveAttribute('aria-expanded', 'true')
   await expect(groupPicker.getByRole('radio')).toHaveCount(31)
+  const customColor = groupPicker.locator('input[type="color"]')
+  await expect(customColor).toBeVisible()
+  await customColor.fill('#4b82d2')
+  await expect(groupTrigger).toContainText('#4B82D2')
+  await groupPicker.locator('input[type="radio"][value="forest-01"]').focus()
+  await page.keyboard.press('Space')
   await groupEditor.getByTestId('form-modal-close').click()
   await expect(groupEditor).toHaveCount(0)
 
@@ -960,6 +1111,7 @@ test('admin schedule color pickers stay compact and reveal the approved palette 
   await typeTrigger.click()
   await expect(typeTrigger).toHaveAttribute('aria-expanded', 'true')
   await expect(typePicker.getByRole('radio')).toHaveCount(31)
+  await expect(typePicker.locator('input[type="color"]')).toHaveCount(0)
   const forest = typePicker.locator('input[type="radio"][value="forest-01"]')
   const pickerFits = await typePicker.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
   expect(pickerFits).toBe(true)
@@ -1562,15 +1714,13 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page).toHaveURL(/client=10/)
   await page.reload()
   await expect(page.locator('h1.page-title', { hasText: 'Anna Kowalska' })).toBeVisible()
-  await page.getByTestId('admin-client-actions-trigger').click()
-  await page.getByTestId('client-access-issue').click()
+  await clickAccountAction(page, 'client-access-issue')
   await expect(page.getByTestId('access-code-card')).toContainText('synthetic-client-recovery-code')
   await expect(page.getByTestId('access-copy-login')).toBeVisible()
   await expect(page.getByTestId('access-copy-code')).toBeVisible()
   await expect(page.getByTestId('access-copy-all')).toBeVisible()
   await page.getByTestId('access-code-close').click()
-  await page.getByTestId('admin-client-actions-trigger').click()
-  await page.getByTestId('admin-client-edit-account').click()
+  await clickAccountAction(page, 'admin-client-edit-account')
   await page.locator('#admin-client-detail-phone').fill('+48999999999')
   await page.getByTestId('form-modal').locator('.form-modal__footer button').last().click()
   await expect(page.locator('.ops-toast-region .ops-toast.is-success').first()).toBeVisible()
@@ -1661,8 +1811,15 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect(page.getByTestId('schedule-calendar')).toBeVisible()
   const forestEvent = page.locator('.ops-schedule-event[data-color-key="forest-01"]:visible').first()
   const cancelledCoralEvent = page.locator('.ops-schedule-event.is-cancelled[data-color-key="coral-01"]:visible').first()
-  expect(await forestEvent.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(232, 245, 233)')
-  expect(await cancelledCoralEvent.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(255, 240, 236)')
+  await page.mouse.move(0, 0)
+  const originalTheme = await page.locator('html').getAttribute('data-theme')
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+  const forestFill = await forestEvent.evaluate((node) => getComputedStyle(node).backgroundColor)
+  const coralFill = await cancelledCoralEvent.evaluate((node) => getComputedStyle(node).backgroundColor)
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  await expect(forestEvent).toHaveCSS('background-color', forestFill)
+  await expect(cancelledCoralEvent).toHaveCSS('background-color', coralFill)
+  await page.evaluate((theme) => { document.documentElement.dataset.theme = theme }, originalTheme)
   await expect(forestEvent).toHaveCSS('border-left-width', '0px')
   await expect(cancelledCoralEvent).toHaveCSS('border-left-width', '0px')
   await expect(cancelledCoralEvent).toHaveCSS('opacity', '0.6')
@@ -1771,8 +1928,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await paymentDialog.getByTestId('admin-client-payment-confirm').click()
   await expect.poll(() => seenAdminEndpoints.has('/api/admin/payments/')).toBe(true)
 
-  await page.getByTestId('admin-client-finance-trigger').click()
-  await page.getByTestId('admin-client-action-charge').click()
+  await clickFinanceAction(page, 'charge')
   await page.locator('#admin-client-finance-description').fill('Индивидуальное занятие')
   await page.locator('#admin-client-finance-amount').fill('80.00')
   await page.getByTestId('admin-client-finance-save').click()
@@ -1782,8 +1938,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await page.getByTestId('admin-client-finance-save').click()
   await expect.poll(() => seenClientFinanceActions.has('/api/admin/participants/1/subscriptions/')).toBe(true)
 
-  await page.getByTestId('admin-client-finance-trigger').click()
-  await page.getByTestId('admin-client-action-edit-subscription').click()
+  await clickFinanceAction(page, 'edit-subscription')
   let subscriptionEditor = page.getByTestId('form-modal')
   await expect(subscriptionEditor.locator('#admin-client-subscription-remaining')).toHaveValue('7')
   await subscriptionEditor.locator('#admin-client-subscription-end-date').fill('2026-08-15')
