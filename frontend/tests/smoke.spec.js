@@ -498,7 +498,7 @@ test('schedule cards adapt time to their width without reserving a full action c
   })
   await page.goto('/?role=admin&view=schedule')
   const card = page.locator('.ops-schedule-event:visible').first()
-  await expect(card).toHaveAttribute('aria-label', /08:00-08:45/)
+  await expect(card).toHaveAttribute('aria-label', /^\d{2}:\d{2}-\d{2}:\d{2}\. Masters Demo\./)
   await expect(card.locator('.ops-event-duration')).toHaveText('45 мин')
   await expect(card.locator('.ops-event-title')).toHaveCSS('font-weight', '500')
   const lightColors = await card.evaluate((node) => ({
