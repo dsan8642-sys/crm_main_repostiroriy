@@ -9,6 +9,7 @@ import {
   assertChargeReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
+  summarizeAttendanceCharges,
   subscriptionPaymentFields,
 } from '../financialContracts.js'
 import { asAccountBalance, asMoneyMajor, formatTime } from '../../mappers.js'
@@ -197,7 +198,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
     ), [selectedParticipantId, subscriptions])
     const openedSubscription = subscriptions.find((row) => String(row.id) === String(openedSubscriptionId))
-    const selectedCharges = charges
+    const { totals: attendanceCharges, visible: selectedCharges } = summarizeAttendanceCharges(charges)
     const selectedPayments = payments
     const selectedAttendance = useMemo(() => attendance.filter(
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
@@ -1273,9 +1274,13 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 const label = subscriptionLabel(subscriptions.find((item) => String(item.id) === String(row.payment_subscription_id)))
                 return `${t('finance.fromSubscription')}${label ? `: ${label}` : ''}`
               } },
-              { key: 'deducts', header: t('finance.sessionsDeducted'), width: 90, render: (row) => {
+              { key: 'deducts', header: t('finance.deducted'), width: 110, render: (row) => {
+                if (row.payment_source === 'account') {
+                  const charge = attendanceCharges.get(String(row.id))
+                  return charge?.amount_minor > 0 ? <Money amount={-money(charge.amount_minor)} currency={charge.currency} signed /> : '—'
+                }
                 const delta = row.subscription_session_delta ?? (row.deducts ? -1 : 0)
-                return <Badge tone={delta < 0 ? 'warning' : 'neutral'}>{delta}</Badge>
+                return delta < 0 ? <Badge tone="warning">{delta}</Badge> : '—'
               } },
             ]}
           />

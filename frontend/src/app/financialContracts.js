@@ -6,6 +6,28 @@ export function moneyMajorToMinor(value) {
   return Number.isSafeInteger(amount) && amount > 0 ? amount : null
 }
 
+export function summarizeAttendanceCharges(charges) {
+  const totals = new Map()
+  for (const charge of charges) {
+    if (!charge.attendance_id) continue
+    const key = String(charge.attendance_id)
+    const total = totals.get(key) || { amount_minor: 0, currency: charge.currency }
+    total.amount_minor += charge.amount_minor
+    totals.set(key, total)
+  }
+  const shown = new Set()
+  const visible = charges.filter((charge) => {
+    if (!charge.attendance_id) return true
+    const key = String(charge.attendance_id)
+    if (charge.amount_minor <= 0 || shown.has(key) || totals.get(key).amount_minor <= 0) return false
+    shown.add(key)
+    return true
+  }).map((charge) => charge.attendance_id
+    ? { ...charge, amount_minor: totals.get(String(charge.attendance_id)).amount_minor }
+    : charge)
+  return { totals, visible }
+}
+
 export function createPaymentAttemptKey(prefix = 'payment') {
   const randomPart = globalThis.crypto?.randomUUID?.()
     || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`

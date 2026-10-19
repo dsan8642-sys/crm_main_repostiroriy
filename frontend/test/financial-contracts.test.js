@@ -7,6 +7,7 @@ import {
   createPaymentAttemptKey,
   moneyMajorToMinor,
   rebasePassiveFormUpdate,
+  summarizeAttendanceCharges,
   subscriptionPaymentFields,
 } from '../src/app/financialContracts.js'
 
@@ -18,6 +19,20 @@ test('money conversion uses exact minor units without rounding', () => {
   assert.equal(moneyMajorToMinor('1.005'), null)
   assert.equal(moneyMajorToMinor('-1'), null)
   assert.equal(moneyMajorToMinor('not money'), null)
+})
+
+test('visit charge history shows only the current net account deduction', () => {
+  const original = { id: 1, attendance_id: 7, amount_minor: 6500, currency: 'PLN' }
+  const correction = { ...original, id: 2, amount_minor: -6500 }
+  const restored = { ...original, id: 3 }
+  const manual = { id: 4, attendance_id: null, amount_minor: 1000, currency: 'PLN' }
+  const covered = summarizeAttendanceCharges([correction, original, manual])
+  assert.equal(covered.totals.get('7').amount_minor, 0)
+  assert.deepEqual(covered.visible, [manual])
+
+  const account = summarizeAttendanceCharges([restored, correction, original, manual])
+  assert.equal(account.totals.get('7').amount_minor, 6500)
+  assert.deepEqual(account.visible, [restored, manual])
 })
 
 test('payment attempt keys are namespaced and unique', () => {

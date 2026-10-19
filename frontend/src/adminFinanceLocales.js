@@ -68,6 +68,7 @@ export const ADMIN_FINANCE_MESSAGE_ROWS = Object.freeze({
   'finance.allVisits': ['Все посещения', 'Усі відвідування', 'Wszystkie wizyty', 'All visits'],
   'finance.sourceNotSpecified': ['Не указан', 'Не вказано', 'Nie wskazano', 'Not specified'],
   'finance.sessionsDeducted': ['Списано занятий', 'Списано занять', 'Odliczone zajęcia', 'Sessions deducted'],
+  'finance.deducted': ['Списано', 'Списано', 'Pobrano', 'Deducted'],
   'finance.fromAccount': ['Со счёта', 'З рахунку', 'Z konta', 'Account'],
   'finance.fromSubscription': ['С абонемента', 'З абонемента', 'Z karnetu', 'Subscription'],
   'finance.subscriptionStarted': ['{name} · с {date}', '{name} · з {date}', '{name} · od {date}', '{name} · from {date}'],

@@ -14,7 +14,7 @@ async function clickAccountAction(page, testId) {
   await page.getByTestId(testId).click()
 }
 
-async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false } = {}) {
+async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false, withCharges = false } = {}) {
   const participant = { id: 11, client_id: 101, first_name: 'Anna', last_name: 'Test', full_name: 'Anna Test', is_active: true }
   const subscription = { id: 77, participant_id: 11, type: 'Test pass', status: 'active', start_date: '2026-06-10', effective_end_date: '2026-07-10', remaining_sessions: 1, can_assign_attendance: true, ledger: [], charges: [], freezes: [] }
   const detail = {
@@ -30,6 +30,10 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
       subscription_session_delta: 0,
     })),
   }
+  if (withCharges) detail.charges = detail.attendance.map((row) => ({
+    id: row.id, attendance_id: row.id, participant: row.participant, description: 'Разовое занятие',
+    amount_minor: 6500, currency: 'PLN', due_date: '2026-06-01', status: 'active', can_reverse: false,
+  }))
   if (withOldSubscription) detail.subscriptions.push({ ...subscription, id: 79, status: 'expired', effective_end_date: '2025-05-01', remaining_sessions: 0, can_assign_attendance: false })
   if (family) {
     detail.participants.push({ ...participant, id: 12, first_name: 'Boris', full_name: 'Boris Test' })
@@ -62,6 +66,11 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
       const data = request.postDataJSON()
       changes.push(data)
       for (const row of detail.attendance.filter((item) => data.attendance_ids.includes(item.id))) {
+        if (withCharges && row.payment_source !== data.source) detail.charges.unshift({
+          ...detail.charges.find((charge) => charge.attendance_id === row.id),
+          id: detail.charges.length + 1, amount_minor: data.source === 'subscription' ? -6500 : 6500,
+          description: data.source === 'subscription' ? 'Сторно разового занятия' : 'Разовое занятие',
+        })
         row.payment_source = data.source
         row.payment_subscription_id = data.subscription_id || null
         row.subscription_session_delta = data.source === 'subscription' ? -1 : 0
@@ -80,12 +89,12 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
 }
 
 test('visit source can be changed in both directions with hidden selection and a negative warning', async ({ page }) => {
-  const changes = await mockAttendance(page)
+  const changes = await mockAttendance(page, { withCharges: true })
   await page.goto('/?role=admin&view=clientDetail&client=101&tab=attendance')
   const edit = page.getByTestId('admin-client-attendance-edit')
   await expect(edit).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
-  await expect(page.locator('tbody tr').first().locator('td').last()).toHaveText('0')
+  await expect(page.locator('tbody tr').first().locator('td').last()).toContainText('−65,00')
   await edit.click()
   const paymentPanel = page.locator('#admin-client-attendance-payment-panel')
   await expect(paymentPanel).toBeVisible()
@@ -107,12 +116,21 @@ test('visit source can be changed in both directions with hidden selection and a
   await page.screenshot({ path: `../.local-run/attendance-subscription-label-${test.info().project.name}.png`, fullPage: true, animations: 'disabled' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   await expect(page.locator('tbody tr').first().locator('td').last()).toHaveText('-1')
+  await page.getByTestId('admin-client-tab-payments').click()
+  if (await page.locator('.ops-mobile-payment-switch').isVisible()) await page.getByRole('tab', { name: 'Начисления' }).click()
+  await expect(page.locator('.ops-client-payment-charges tbody')).toContainText('Начислений нет')
+  await page.getByTestId('admin-client-tab-attendance').click()
   await edit.click()
   await page.getByRole('checkbox', { name: /Выбрать посещение:/ }).first().check()
   await page.locator('#admin-client-attendance-source').selectOption('account')
   await page.getByTestId('admin-client-attendance-save').click()
   await expect.poll(() => changes[1]).toEqual({ attendance_ids: [1], source: 'account' })
   await expect(page.locator('tbody').getByText('Со счёта', { exact: true })).toHaveCount(1)
+  await expect(page.locator('tbody tr').first().locator('td').last()).toContainText('−65,00')
+  await page.getByTestId('admin-client-tab-payments').click()
+  if (await page.locator('.ops-mobile-payment-switch').isVisible()) await page.getByRole('tab', { name: 'Начисления' }).click()
+  await expect(page.locator('.ops-client-payment-charges tbody tr')).toHaveCount(1)
+  await expect(page.locator('.ops-client-payment-charges tbody tr').first()).toContainText('65,00')
 })
 
 test('multiple subscriptions require a choice and cancellation does not submit', async ({ page }) => {
