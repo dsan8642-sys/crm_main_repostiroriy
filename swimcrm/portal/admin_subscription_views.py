@@ -11,7 +11,7 @@ from billing.services import payment_reference_id
 from subscriptions.models import SessionLedgerEntry
 
 from .admin_support import _admin_required
-from subscriptions.services import update_subscription_dates
+from subscriptions.services import cancel_subscription_sale, can_cancel_sale, update_subscription_dates, validate_sale_price
 from .pagination import choice_param, paginated_payload, positive_int_param, search_param
 
 
@@ -183,9 +183,10 @@ def _operation_key(data):
 
 def _operation_fingerprint(*, operation, student_id, source_subscription_id,
                            subscription_type_id, start_date, due_date,
+                           price_minor=None,
                            payment_received=False, payment_method=None,
                            payment_date=None):
-    canonical = json.dumps({
+    operation_data = {
         "operation": operation,
         "student_id": student_id,
         "source_subscription_id": source_subscription_id,
@@ -195,7 +196,10 @@ def _operation_fingerprint(*, operation, student_id, source_subscription_id,
         "payment_received": bool(payment_received),
         "payment_method": payment_method if payment_received else None,
         "payment_date": str(payment_date) if payment_received else None,
-    }, sort_keys=True, separators=(",", ":"))
+    }
+    if price_minor is not None:
+        operation_data["price_minor"] = price_minor
+    canonical = json.dumps(operation_data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -238,7 +242,7 @@ def _create_subscription_payment(subscription, *, actor, operation_key,
     payment, _created = create_admin_payment(
         student=subscription.student,
         actor=actor,
-        amount_minor=subscription.subscription_type.price_minor,
+        amount_minor=subscription.charges.get().amount_minor,
         currency=subscription.subscription_type.currency,
         paid_at=paid_at,
         method=method,
@@ -247,6 +251,17 @@ def _create_subscription_payment(subscription, *, actor, operation_key,
         desired_status=PaymentStatus.CONFIRMED,
     )
     return payment
+
+
+def _sale_price(data, subscription_type):
+    price = (_required_int(data["price_minor"], "price_minor")
+             if "price_minor" in data else subscription_type.price_minor)
+    price = validate_sale_price(subscription_type, price)
+    if price == 0 and _bool_value(data.get("payment_received"), False):
+        raise _field_validation_error(
+            "payment_received", "Для бесплатного абонемента оплата не создаётся.",
+            code="invalid")
+    return price
 
 
 def _operation_payload(subscription, *, replayed, actor=None,
@@ -290,6 +305,8 @@ def admin_participant_subscriptions(request, participant_id):
         due_date = _parse_date(data.get("due_date"), "due_date") or start_date
         key = _operation_key(data)
         payment_received, payment_method, payment_date = _payment_options(data)
+        requested_price = (_required_int(data["price_minor"], "price_minor")
+                           if "price_minor" in data else None)
         fingerprint = _operation_fingerprint(
             operation="purchase",
             student_id=participant.id,
@@ -297,6 +314,7 @@ def admin_participant_subscriptions(request, participant_id):
             subscription_type_id=subscription_type_id,
             start_date=(data.get("start_date") or "__default__"),
             due_date=(data.get("due_date") or "__default__"),
+            price_minor=requested_price,
             payment_received=payment_received,
             payment_method=payment_method,
             payment_date=payment_date,
@@ -314,6 +332,7 @@ def admin_participant_subscriptions(request, participant_id):
                 SubscriptionType.objects.filter(is_active=True),
                 subscription_type_id, "subscription_type_id",
                 "тип абонемента")
+            price_minor = _sale_price(data, subscription_type)
             try:
                 with transaction.atomic():
                     subscription = create_subscription(
@@ -325,7 +344,8 @@ def admin_participant_subscriptions(request, participant_id):
                         subscription.save(update_fields=[
                             "idempotency_key", "idempotency_fingerprint"])
                     _create_subscription_charge(
-                        subscription, actor=user, due_date=due_date)
+                        subscription, actor=user, due_date=due_date,
+                        amount_minor=price_minor)
                     if payment_received:
                         _create_subscription_payment(
                             subscription, actor=user, operation_key=key,
@@ -375,10 +395,21 @@ def admin_subscription_detail(request, subscription_id):
                 raise _field_validation_error(
                     "status", "Выберите допустимый статус абонемента.",
                     code="invalid_choice")
+            if status == SubscriptionStatus.CANCELLED or subscription.status == SubscriptionStatus.CANCELLED:
+                raise _field_validation_error("status", "Для отмены продажи используйте отдельное действие.", code="invalid")
             subscription.status = status
             subscription.save(update_fields=["status"])
             audit(user, "subscription.updated", subscription, {"status": status})
     return JsonResponse(_subscription_detail_payload(subscription))
+
+
+@require_POST
+def admin_subscription_cancel_sale(request, subscription_id):
+    user = _admin_required(request)
+    subscription = get_object_or_404(Subscription, pk=subscription_id)
+    subscription = cancel_subscription_sale(subscription=subscription, actor=user)
+    return JsonResponse({"subscription": _subscription_detail_payload(subscription),
+                         "balance_minor": family_balance(subscription.student.parent).amount_minor})
 
 
 @require_POST
@@ -453,6 +484,8 @@ def admin_subscription_renew(request, subscription_id):
     due_date = _parse_date(data.get("due_date"), "due_date") or start_date
     key = _operation_key(data)
     payment_received, payment_method, payment_date = _payment_options(data)
+    requested_price = (_required_int(data["price_minor"], "price_minor")
+                       if "price_minor" in data else None)
     fingerprint = _operation_fingerprint(
         operation="renewal",
         student_id=subscription.student_id,
@@ -460,6 +493,7 @@ def admin_subscription_renew(request, subscription_id):
         subscription_type_id=subscription_type_id,
         start_date=(data.get("start_date") or "__default__"),
         due_date=(data.get("due_date") or "__default__"),
+        price_minor=requested_price,
         payment_received=payment_received,
         payment_method=payment_method,
         payment_date=payment_date,
@@ -476,6 +510,7 @@ def admin_subscription_renew(request, subscription_id):
             SubscriptionType.objects.filter(is_active=True),
             subscription_type_id, "subscription_type_id",
             "тип абонемента")
+        price_minor = _sale_price(data, subscription_type)
         try:
             with transaction.atomic():
                 new_subscription = renew_subscription(
@@ -487,7 +522,8 @@ def admin_subscription_renew(request, subscription_id):
                     new_subscription.save(update_fields=[
                         "idempotency_key", "idempotency_fingerprint"])
                 _create_subscription_charge(
-                    new_subscription, actor=user, due_date=due_date)
+                    new_subscription, actor=user, due_date=due_date,
+                    amount_minor=price_minor)
                 if payment_received:
                     _create_subscription_payment(
                         new_subscription, actor=user, operation_key=key,

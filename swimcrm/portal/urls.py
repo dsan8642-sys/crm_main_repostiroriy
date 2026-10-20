@@ -90,6 +90,8 @@ urlpatterns = [
          name="api-admin-subscription-detail"),
     path("admin/subscriptions/<int:subscription_id>/update/", views.admin_subscription_update,
          name="api-admin-subscription-update"),
+    path("admin/subscriptions/<int:subscription_id>/cancel-sale/", views.admin_subscription_cancel_sale,
+         name="api-admin-subscription-cancel-sale"),
     path("admin/subscriptions/<int:subscription_id>/renew/", views.admin_subscription_renew,
          name="api-admin-subscription-renew"),
     path("admin/subscriptions/<int:subscription_id>/freeze/", views.admin_subscription_freeze,

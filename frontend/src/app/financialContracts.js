@@ -1,9 +1,14 @@
 export function moneyMajorToMinor(value) {
+  const amount = nonnegativeMoneyMajorToMinor(value)
+  return amount > 0 ? amount : null
+}
+
+export function nonnegativeMoneyMajorToMinor(value) {
   const normalized = String(value ?? '').trim().replace(',', '.')
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null
   const [major, fraction = ''] = normalized.split('.')
   const amount = Number(major) * 100 + Number(fraction.padEnd(2, '0'))
-  return Number.isSafeInteger(amount) && amount > 0 ? amount : null
+  return Number.isSafeInteger(amount) ? amount : null
 }
 
 export function summarizeAttendanceCharges(charges) {

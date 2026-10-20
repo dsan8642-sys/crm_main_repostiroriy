@@ -140,11 +140,16 @@ for (const [role, routes] of Object.entries({ admin: adminRoutes, trainer: train
     await expect(language.locator('option')).toHaveText(mobile
       ? ['Русский', 'Українська', 'Polski', 'English']
       : ['РУС', 'УКР', 'PL', 'EN'])
-    const [languageBox, toggleBox] = await Promise.all([language.boundingBox(), toggle.boundingBox()])
-    if (mobile) expect(languageBox.x + languageBox.width).toBeLessThanOrEqual(toggleBox.x + 1)
-    else expect(toggleBox.x + toggleBox.width).toBeLessThanOrEqual(languageBox.x + 1)
-    expect(Math.abs(languageBox.y + languageBox.height / 2 - toggleBox.y - toggleBox.height / 2)).toBeLessThanOrEqual(1)
-    expect(Math.abs(languageBox.height - toggleBox.height)).toBeLessThanOrEqual(1)
+    await expect.poll(async () => {
+      const [languageBox, toggleBox] = await Promise.all([language.boundingBox(), toggle.boundingBox()])
+      return {
+        ordered: mobile
+          ? languageBox.x + languageBox.width <= toggleBox.x + 1
+          : toggleBox.x + toggleBox.width <= languageBox.x + 1,
+        aligned: Math.abs(languageBox.y + languageBox.height / 2 - toggleBox.y - toggleBox.height / 2) <= 1,
+        sameHeight: Math.abs(languageBox.height - toggleBox.height) <= 1,
+      }
+    }).toEqual({ ordered: true, aligned: true, sameHeight: true })
     await expect(toggle.locator('.ops-theme-label')).toHaveCount(0)
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
     await toggle.click()

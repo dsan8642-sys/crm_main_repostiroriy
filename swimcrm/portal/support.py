@@ -26,6 +26,7 @@ from billing.services import (
     family_charge_statuses, confirm_payment,
     create_admin_payment, create_client_top_up_request,
     create_manual_charge, reject_payment, reverse_manual_charge,
+    within_manual_charge_reversal_window,
     student_balance,
 )
 from catalog.models import Group, SubscriptionType
@@ -52,7 +53,7 @@ from scheduling.services import sync_split_second_student
 from students.models import Student
 from students.services import ensure_account_holder_participant, set_student_groups
 from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription, SubscriptionStatus
-from subscriptions.services import (can_assign_attendance, create_subscription, freeze_subscription,
+from subscriptions.services import (can_assign_attendance, can_cancel_sale, create_subscription, freeze_subscription,
                                     manual_adjust, renew_subscription,
                                     update_subscription_end_date)
 
@@ -633,12 +634,15 @@ def _subscription_payload(subscription):
         )
     else:
         remaining_sessions = subscription.remaining_sessions
+    status = subscription.status
+    if status in (SubscriptionStatus.ACTIVE, SubscriptionStatus.FROZEN) and subscription.effective_end_date < timezone.localdate():
+        status = SubscriptionStatus.EXPIRED
     return {
         "id": subscription.id,
         "participant_id": subscription.student_id,
         "subscription_type_id": subscription.subscription_type_id,
         "type": subscription.subscription_type.name,
-        "status": subscription.status,
+        "status": status,
         "start_date": subscription.start_date.isoformat(),
         "base_end_date": subscription.base_end_date.isoformat(),
         "effective_end_date": subscription.effective_end_date.isoformat(),
@@ -716,7 +720,7 @@ def _charge_payload(charge):
         "created_by": str(charge.created_by) if charge.created_by_id else None,
         "created_at": timezone.localtime(charge.created_at).isoformat(),
         "status": "reversed" if reversal else "active",
-        "can_reverse": is_manual and reversal is None,
+        "can_reverse": is_manual and reversal is None and within_manual_charge_reversal_window(charge),
         "reversal": ({
             "id": reversal.id,
             "amount_minor": reversal.amount_minor,
@@ -849,6 +853,7 @@ def _subscription_detail_payload(subscription, end_date_changes=None):
     return {
         **_subscription_payload(subscription),
         "can_assign_attendance": can_assign_attendance(subscription),
+        "can_cancel_sale": can_cancel_sale(subscription),
         "participant": _student_payload(subscription.student),
         "ledger": ledger,
         "end_date_changes": [{
@@ -946,13 +951,14 @@ def _client_detail_payload(account):
         "ledger_entries", "charges", "student__subscriptions__subscription_type",
         "student__subscriptions__freeze_periods").order_by("-session__start_at", "-id")
     balance = family_balance(account).amount_minor
+    subscription_rows = [_subscription_detail_payload(
+        subscription, end_date_changes.get(str(subscription.id), []))
+        for subscription in subscriptions]
 
     return {
         "account": _client_account_payload(account),
         "participants": [{**_student_payload(student), "balance_minor": balance} for student in participants],
-        "subscriptions": [_subscription_detail_payload(
-            subscription, end_date_changes.get(str(subscription.id), []))
-            for subscription in subscriptions],
+        "subscriptions": subscription_rows,
         "charges": [_charge_payload(charge) for charge in charges],
         "payments": [_payment_payload(payment) for payment in payments],
         "attendance": [_attendance_payload(record) for record in attendance[:MAX_LIST_ROWS]],
@@ -961,7 +967,7 @@ def _client_detail_payload(account):
             "participants_count": len(participants),
             "active_participants": sum(1 for student in participants if student.is_active),
             "balance_minor": balance,
-            "active_subscriptions": sum(1 for subscription in subscriptions if subscription.status == SubscriptionStatus.ACTIVE),
+            "active_subscriptions": sum(1 for row in subscription_rows if row["status"] == SubscriptionStatus.ACTIVE and row["start_date"] <= timezone.localdate().isoformat()),
             "pending_payments": sum(1 for payment in payments if payment.status == PaymentStatus.PENDING),
         },
     }
@@ -1491,14 +1497,16 @@ def _create_charge_for_participant(participant, data, *, actor=None, subscriptio
     return charge
 
 
-def _create_subscription_charge(subscription, *, actor=None, due_date=None):
+def _create_subscription_charge(subscription, *, actor=None, due_date=None,
+                                amount_minor=None):
     subscription_type = subscription.subscription_type
     charge, created = Charge.objects.get_or_create(
         subscription=subscription,
         defaults={
             "student": subscription.student,
             "description": subscription_type.name,
-            "amount_minor": subscription_type.price_minor,
+            "amount_minor": (subscription_type.price_minor if amount_minor is None
+                             else amount_minor),
             "currency": subscription_type.currency,
             "due_date": due_date or subscription.start_date,
             "created_by": actor,

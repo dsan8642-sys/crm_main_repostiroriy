@@ -6,6 +6,7 @@ import {
   assertPaymentReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
+  nonnegativeMoneyMajorToMinor,
   rebasePassiveFormUpdate,
   summarizeAttendanceCharges,
   subscriptionPaymentFields,
@@ -19,6 +20,9 @@ test('money conversion uses exact minor units without rounding', () => {
   assert.equal(moneyMajorToMinor('1.005'), null)
   assert.equal(moneyMajorToMinor('-1'), null)
   assert.equal(moneyMajorToMinor('not money'), null)
+  assert.equal(nonnegativeMoneyMajorToMinor('0'), 0)
+  assert.equal(nonnegativeMoneyMajorToMinor('200,50'), 20050)
+  assert.equal(nonnegativeMoneyMajorToMinor('1.005'), null)
 })
 
 test('visit charge history shows only the current net account deduction', () => {

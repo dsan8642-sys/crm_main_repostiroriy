@@ -489,6 +489,51 @@ textarea {
 }
 }
 
+.ops-client-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.ops-client-sort-button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ops-client-sort-button span:last-child {
+  flex: none;
+}
+
+.ops-client-sort-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.ops-client-sort-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: var(--fs-sm);
+}
+
+.ops-client-sort-picker select {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+}
+
 .ops-ellipsis-value {
   position: relative;
   display: block;

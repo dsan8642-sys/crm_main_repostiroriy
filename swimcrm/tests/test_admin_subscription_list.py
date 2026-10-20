@@ -97,6 +97,19 @@ class AdminSubscriptionListApiTest(TestCase):
         self.assertNotIn(
             cancelled.id, [row["id"] for row in active.json()["subscriptions"]])
 
+    def test_client_detail_marks_past_end_expired_and_counts_current_pass(self):
+        expired = self.make_subscription(start_offset=-31)
+        manual_adjust(subscription=expired, delta=-8, note="used", created_by=self.admin)
+        current = self.make_subscription(start_offset=-5)
+        manual_adjust(subscription=current, delta=-6, note="used", created_by=self.admin)
+
+        detail = self.client.get(f"/api/admin/clients/{self.parent.id}/").json()
+        rows = {row["id"]: row for row in detail["subscriptions"]}
+        self.assertEqual(rows[expired.id]["status"], SubscriptionStatus.EXPIRED)
+        self.assertEqual(rows[current.id]["status"], SubscriptionStatus.ACTIVE)
+        self.assertEqual(rows[current.id]["remaining_sessions"], 2)
+        self.assertEqual(detail["summary"]["active_subscriptions"], 1)
+
     def test_non_admin_cannot_list_subscriptions(self):
         self.client.force_login(self.parent.user)
         response = self.client.get("/api/admin/subscriptions/")

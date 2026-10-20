@@ -9,6 +9,7 @@ import {
   assertChargeReadback,
   createPaymentAttemptKey,
   moneyMajorToMinor,
+  nonnegativeMoneyMajorToMinor,
   summarizeAttendanceCharges,
   subscriptionPaymentFields,
 } from '../financialContracts.js'
@@ -47,6 +48,7 @@ const FINANCE_FIELD_IDS = {
   participantId: 'admin-client-finance-participant',
   subscriptionId: 'admin-client-finance-subscription',
   subscriptionTypeId: 'admin-client-finance-subscription-type',
+  salePrice: 'admin-client-finance-sale-price',
   amount: 'admin-client-finance-amount', description: 'admin-client-finance-description',
   startDate: 'admin-client-finance-start-date', dueDate: 'admin-client-finance-due-date',
   paymentReceived: 'admin-client-finance-payment-received',
@@ -132,8 +134,10 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       participantId: '',
       subscriptionId: '',
       subscriptionTypeId: '',
+      salePrice: '',
       amount: '',
       description: '',
+      chargeReasonPreset: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
       paymentReceived: false,
@@ -253,7 +257,13 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setPaymentFieldErrors((current) => clearFieldError(current, field))
     }
     const updateFinanceForm = (field, value) => {
-      setFinanceForm((current) => ({ ...current, [field]: value }))
+      setFinanceForm((current) => field === 'subscriptionTypeId'
+        ? { ...current, subscriptionTypeId: value,
+            salePrice: String(subscriptionTypes.find((type) => String(type.typeId) === String(value))?.price ?? ''),
+            paymentReceived: false }
+        : { ...current, [field]: value,
+            ...(field === 'salePrice' && nonnegativeMoneyMajorToMinor(value) === 0
+              ? { paymentReceived: false } : {}) })
       setFinanceFieldErrors((current) => clearFieldError(current, field))
     }
     const updateFinanceSubscription = (subscriptionId) => {
@@ -264,6 +274,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         subscriptionTypeId: subscription?.subscription_type_id
           ? String(subscription.subscription_type_id)
           : current.subscriptionTypeId,
+        salePrice: String(subscriptionTypes.find((type) => String(type.typeId) === String(subscription?.subscription_type_id || current.subscriptionTypeId))?.price ?? ''),
       }))
       setFinanceFieldErrors((current) => clearFieldError(current, 'subscriptionId'))
     }
@@ -422,6 +433,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           || '',
         ),
         subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
+        salePrice: String(subscriptionTypes.find((type) => String(type.typeId) === String(selectedSubscription?.subscription_type_id || financeForm.subscriptionTypeId || subscriptionTypes[0]?.typeId))?.price ?? ''),
         paymentReceived: false,
       }
       setFinanceForm(next)
@@ -534,6 +546,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         subscriptionId: String(selectedSubscription?.id || ''),
         subscriptionTypeId: String(
           selectedSubscription?.subscription_type_id || subscriptionTypes[0]?.typeId || ''),
+        salePrice: String(subscriptionTypes.find((type) => String(type.typeId) === String(selectedSubscription?.subscription_type_id || subscriptionTypes[0]?.typeId))?.price ?? ''),
         subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'),
         paymentReceived: false,
       }
@@ -616,6 +629,15 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       const next = { firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupIds: (participant.groups || []).map((group) => String(group.id)), isActive: participant.is_active }
       setParticipantForm(next)
       setParticipantBaseline(next)
+    }
+
+    function openParticipantCreate() {
+      const next = { firstName: '', lastName: '', birthDate: '', email: '', groupIds: [], isActive: true }
+      setTab('participants')
+      setParticipantForm(next)
+      setParticipantBaseline(next)
+      setParticipantFieldErrors({})
+      setEditingParticipant({ id: null })
     }
 
     function openAccountEdit() {
@@ -702,8 +724,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       }
       setActionBusy('participant'); setError(null); setParticipantFieldErrors({})
       try {
-        await api.post(`/api/admin/participants/${editingParticipant.id}/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_ids: participantForm.groupIds, is_active: participantForm.isActive } })
-        setMessage(t('client.participantUpdated')); setEditingParticipant(null); setParticipantBaseline(null); refreshDetail()
+        await api.post(editingParticipant.id ? `/api/admin/participants/${editingParticipant.id}/` : `/api/admin/clients/${fallbackClientId}/participants/`, { participant: { first_name: participantForm.firstName, last_name: participantForm.lastName, birth_date: participantForm.birthDate || null, email: participantForm.email, group_ids: participantForm.groupIds, is_active: participantForm.isActive } })
+        setMessage(t(editingParticipant.id ? 'client.participantUpdated' : 'clients.participantAdded')); setEditingParticipant(null); setParticipantBaseline(null); refreshDetail()
       } catch (err) {
         const nextFieldErrors = fieldErrorsFromApi(err, {
           'participant.first_name': 'firstName', first_name: 'firstName',
@@ -744,6 +766,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
       }
       if (financeAction === 'issue' || financeAction === 'renew') {
+        const catalogPriceMinor = subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.priceMinor
+        const salePriceMinor = nonnegativeMoneyMajorToMinor(financeForm.salePrice)
+        if (salePriceMinor === null || salePriceMinor > catalogPriceMinor) nextErrors.salePrice = t('finance.salePriceError')
         if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
         if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
         if (financeForm.paymentReceived && !financeForm.paymentMethod) nextErrors.paymentMethod = t('finance.paymentMethodError')
@@ -778,6 +803,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         if (financeAction === 'issue') {
           await api.post(`/api/admin/participants/${financeForm.participantId}/subscriptions/`, {
             subscription_type_id: financeForm.subscriptionTypeId,
+            price_minor: nonnegativeMoneyMajorToMinor(financeForm.salePrice),
             start_date: financeForm.startDate,
             due_date: financeForm.dueDate,
             idempotency_key: financeForm.subscriptionIdempotencyKey,
@@ -788,6 +814,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         if (financeAction === 'renew') {
           await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/renew/`, {
             subscription_type_id: financeForm.subscriptionTypeId,
+            price_minor: nonnegativeMoneyMajorToMinor(financeForm.salePrice),
             start_date: financeForm.startDate,
             due_date: financeForm.dueDate,
             idempotency_key: financeForm.subscriptionIdempotencyKey,
@@ -802,6 +829,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         const nextFieldErrors = fieldErrorsFromApi(err, {
           participant_id: 'participantId', subscription_id: 'subscriptionId',
           subscription_type_id: 'subscriptionTypeId', amount_minor: 'amount',
+          price_minor: 'salePrice', payment_received: 'salePrice',
           description: 'description', start_date: 'startDate',
           due_date: 'dueDate',
           payment_method: 'paymentMethod', payment_date: 'paymentDate',
@@ -858,6 +886,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
           setMessage(t('access.revoked'))
           refreshDetail()
         }
+        if (confirmAction.type === 'cancelSale') {
+          await api.post(`/api/admin/subscriptions/${confirmAction.subscriptionId}/cancel-sale/`, {})
+          setOpenedSubscriptionId(null)
+          setMessage(t('finance.saleCancelled'))
+          refreshDetail()
+        }
         setConfirmAction(null)
       } catch (err) {
         setError(apiErrorMessage(err, t('client.actionError')))
@@ -883,7 +917,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
     const subscriptionEditorOpen = SUBSCRIPTION_EDIT_ACTIONS.includes(financeAction)
     const activeSubscriptions = selectedSubscriptions.filter((row) => row.status === 'active')
-    const currentSubscription = activeSubscriptions[0] || selectedSubscriptions.find((row) => row.status === 'frozen')
+    const currentSubscription = activeSubscriptions.find((row) => row.remaining_sessions == null || row.remaining_sessions > 0)
+      || activeSubscriptions[0] || selectedSubscriptions.find((row) => row.status === 'frozen')
     const pendingPayments = summary.pending_payments ?? selectedPayments.filter((row) => row.status === 'pending').length
     const hubSections = [
       { value: 'payments', label: t('payments.title'), Icon: I.Wallet, count: selectedPayments.length + selectedCharges.length,
@@ -901,7 +936,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     ]
     const accountActions = [
       !accountArchived && { key: 'edit', testId: 'admin-client-edit-account', label: t('client.edit'), disabled: loading || actionBusy != null, onSelect: openAccountEdit },
-      { key: 'refresh', label: t('client.refresh'), disabled: loading, onSelect: refreshDetail },
+      !accountArchived && { key: 'add-participant', testId: 'admin-client-add-family-member', label: t('client.addFamilyMember'), disabled: loading || actionBusy != null, onSelect: openParticipantCreate },
       !accountArchived && !loading && (account.portal_access === 'revoked'
         ? { key: 'restore-access', testId: 'client-access-restore', label: t('access.restore'), disabled: Boolean(actionBusy), onSelect: () => accessAction('restore') }
         : { key: 'issue-access', testId: 'client-access-issue', label: t(account.access_activated ? 'access.recover' : 'access.issue'), disabled: Boolean(actionBusy), onSelect: () => accessAction('issue') }),
@@ -909,7 +944,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     ]
     const extraFinanceActions = [
       { key: 'edit-subscription', testId: 'admin-client-action-edit-subscription', label: t('client.editPass'), disabled: !selectedSubscriptions.length, onSelect: () => openSubscriptionDetails(selectedSubscription || selectedSubscriptions[0], true) },
-      { key: 'charge', testId: 'admin-client-action-charge', label: t('client.addCharge'), onSelect: () => { const next = { ...financeForm, chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }; setFinanceForm(next); setFinanceAction('charge'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) } },
+      { key: 'charge', testId: 'admin-client-action-charge', label: t('client.addCharge'), onSelect: () => { const next = { ...financeForm, description: '', chargeReasonPreset: '', chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }; setFinanceForm(next); setFinanceAction('charge'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) } },
       { key: 'remind', testId: 'admin-client-action-remind', label: t('client.remind'), disabled: actionBusy != null, onSelect: sendReminder },
     ]
 
@@ -975,7 +1010,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         <div className="ops-client-quick-actions" aria-label={t('client.financeActionsAria')}>
           <Button data-testid="admin-client-action-payment" variant="primary" disabled={accountArchived || loading} onClick={openPaymentPanel}>{t('client.topUp')}</Button>
-          <Button data-testid="admin-client-action-sell-subscription" variant="secondary" disabled={accountArchived || loading} onClick={() => { const next = { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), paymentReceived: false, paymentMethod: 'cash', paymentDate: new Date().toISOString().slice(0, 10) }; setFinanceForm(next); setFinanceAction('issue'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}>{t('client.sellPass')}</Button>
+          <Button data-testid="admin-client-action-sell-subscription" variant="secondary" disabled={accountArchived || loading} onClick={() => { const next = { ...financeForm, salePrice: String(subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.price ?? ''), subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), paymentReceived: false, paymentMethod: 'cash', paymentDate: new Date().toISOString().slice(0, 10) }; setFinanceForm(next); setFinanceAction('issue'); setFinanceBaseline(next); setFinanceFieldErrors({}); setPaymentPanelOpen(false); setPaymentBaseline(null) }}>{t('client.sellPass')}</Button>
           <div className="ops-client-desktop-finance-actions">
             {extraFinanceActions.map((action) => <Button key={action.key} data-testid={`${action.testId}-desktop`} variant="secondary" disabled={accountArchived || loading || action.disabled} onClick={action.onSelect}>{action.label}</Button>)}
           </div>
@@ -1010,21 +1045,29 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                       <option value="">{t('field.selectType')}</option>
                       {subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price} {type.currency}</option>)}
                   </Select>
+                  <Input id={FINANCE_FIELD_IDS.salePrice} label={t('finance.salePrice', { currency: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.currency || 'PLN' })} value={financeForm.salePrice} error={financeFieldErrors.salePrice} onChange={(event) => updateFinanceForm('salePrice', event.target.value)} inputMode="decimal" />
                   <DateField id={FINANCE_FIELD_IDS.startDate} label={t('field.startDate')} value={financeForm.startDate} error={financeFieldErrors.startDate} onChange={(value) => updateFinanceForm('startDate', value)} />
                   <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                   <p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p>
-                  <Checkbox id={FINANCE_FIELD_IDS.paymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.paymentReceived} onChange={(event) => updateFinanceForm('paymentReceived', event.target.checked)} />
+                  <Checkbox id={FINANCE_FIELD_IDS.paymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.paymentReceived} disabled={nonnegativeMoneyMajorToMinor(financeForm.salePrice) === 0} onChange={(event) => updateFinanceForm('paymentReceived', event.target.checked)} />
                   {financeForm.paymentReceived && <>
                     <Select id={FINANCE_FIELD_IDS.paymentMethod} label={t('field.paymentMethod')} value={financeForm.paymentMethod} error={financeFieldErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select>
                     <DateField id={FINANCE_FIELD_IDS.paymentDate} label={t('field.paymentDate')} value={financeForm.paymentDate} error={financeFieldErrors.paymentDate} onChange={(value) => updateFinanceForm('paymentDate', value)} />
-                    <p className="ops-grid-full strong" style={{ margin: 0 }}>{t('finance.subscriptionPaymentAmount', { amount: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.price ?? '—', currency: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.currency ?? '' })}</p>
+                    <p className="ops-grid-full strong" style={{ margin: 0 }}>{t('finance.subscriptionPaymentAmount', { amount: financeForm.salePrice, currency: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.currency ?? '' })}</p>
                     <p className="ops-grid-full ops-subscription-payment-warning">{t('finance.subscriptionPaymentWarning')}</p>
                   </>}
                 </>
               )}
               {financeAction === 'charge' && (
                 <>
-                  <Input id={FINANCE_FIELD_IDS.description} label={t('common.description')} value={financeForm.description} error={financeFieldErrors.description} onChange={(event) => updateFinanceForm('description', event.target.value)} />
+                  <Select id="admin-client-charge-reason" label={t('field.reason')} value={financeForm.chargeReasonPreset} onChange={(event) => { const reasonPreset = event.target.value; updateFinanceForm('chargeReasonPreset', reasonPreset); updateFinanceForm('description', reasonPreset && reasonPreset !== 'other' ? t(reasonPreset) : '') }}>
+                    <option value="">{t('finance.selectReason')}</option>
+                    <option value="finance.reasonMistake">{t('finance.reasonMistake')}</option>
+                    <option value="finance.reasonCompensation">{t('finance.reasonCompensation')}</option>
+                    <option value="finance.reasonBonus">{t('finance.reasonBonus')}</option>
+                    <option value="other">{t('finance.reasonOther')}</option>
+                  </Select>
+                  {financeForm.chargeReasonPreset === 'other' && <Input id={FINANCE_FIELD_IDS.description} label={t('common.description')} value={financeForm.description} error={financeFieldErrors.description} onChange={(event) => updateFinanceForm('description', event.target.value)} />}
                   <Input id={FINANCE_FIELD_IDS.amount} label={t('common.amount')} value={financeForm.amount} error={financeFieldErrors.amount} onChange={(event) => updateFinanceForm('amount', event.target.value)} placeholder="240.00" />
                   <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                   <div className="ops-financial-context ops-grid-full" role="status" aria-label={t('finance.chargeReview')}><div><span>{t('finance.balanceNow')}</span><strong>{chargeBalanceBefore.toFixed(2)} zł</strong></div><div><span>{t('finance.chargePreview')}</span><strong>-{asMoneyMajor(chargePreviewMinor).toFixed(2)} zł</strong></div><div><span>{t('finance.balanceAfter')}</span><strong>{chargeBalanceAfter.toFixed(2)} zł</strong></div></div>
@@ -1035,7 +1078,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         <FormModal open={Boolean(openedSubscription)} title={subscriptionLabel(openedSubscription)} size="lg" busy={actionBusy === 'combined-subscription'} dirty={subscriptionEditing && Boolean(subscriptionDraft) && (subscriptionDraft.startDate !== openedSubscription?.start_date || subscriptionDraft.endDate !== openedSubscription?.effective_end_date || subscriptionDraft.remaining !== String(openedSubscription?.remaining_sessions ?? '') || Boolean(subscriptionDraft.freezeStart || subscriptionDraft.freezeEnd))} onRequestClose={() => { setOpenedSubscriptionId(null); setSubscriptionEditing(false); setSubscriptionError(null) }} footer={({ requestClose }) => <>
           <Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('close')}>{t('common.close')}</Button>
-          {!accountArchived && openedSubscription && !subscriptionEditing && <><Button variant="secondary" onClick={() => { setOpenedSubscriptionId(null); openSubscriptionEditor(openedSubscription) }}>{t('finance.renewPass')}</Button><Button variant="primary" onClick={() => openSubscriptionDetails(openedSubscription, true)}>{t('finance.editPass')}</Button></>}
+          {!accountArchived && openedSubscription && openedSubscription.status !== 'cancelled' && !subscriptionEditing && <><Button variant="secondary" onClick={() => { setOpenedSubscriptionId(null); openSubscriptionEditor(openedSubscription) }}>{t('finance.renewPass')}</Button><Button variant="primary" onClick={() => openSubscriptionDetails(openedSubscription, true)}>{t('finance.editPass')}</Button>{openedSubscription.can_cancel_sale && <Button variant="danger" disabled={actionBusy != null} onClick={() => setConfirmAction({ type: 'cancelSale', subscriptionId: openedSubscription.id })}>{t('finance.cancelSale')}</Button>}</>}
           {subscriptionEditing && <Button variant="primary" data-testid="admin-client-subscription-save" loading={actionBusy === 'combined-subscription'} disabled={actionBusy != null} onClick={saveSubscriptionDetails}>{t('common.save')}</Button>}
         </>}>
           {openedSubscription && <div className="ops-subscription-detail">
@@ -1097,7 +1140,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <div key={tab} className="ops-client-section ops-motion-fade">
         {tab === 'participants' && (
           <div>
-          <FormModal open={Boolean(editingParticipant)} title={t('client.editParticipant')} size="lg" busy={actionBusy != null} dirty={Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline)} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>{t('common.save')}</Button></>}>
+          <FormModal open={Boolean(editingParticipant)} title={t(editingParticipant?.id ? 'client.editParticipant' : 'client.addFamilyMember')} size="lg" busy={actionBusy != null} dirty={Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline)} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>{t(editingParticipant?.id ? 'common.save' : 'client.addFamilyMember')}</Button></>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
               <Input id={PARTICIPANT_FIELD_IDS.firstName} label={t('field.firstName')} value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
@@ -1180,7 +1223,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   { key: 'due_date', header: t('field.dueDate'), muted: true },
                   { key: 'amount', header: t('common.amount'), align: 'right', width: 100, render: (row) => <Money amount={money(row.amount_minor)} /> },
                   { key: 'status', header: t('common.status'), width: 110, render: (row) => <StatusPill status={status(row.status)} size="sm" /> },
-                  { key: 'actions', header: '', width: 150, render: (row) => row.can_reverse ? <Button size="sm" variant="danger" disabled={actionBusy != null} onClick={() => openChargeReversal(row)}>{t('finance.reverseCharge')}</Button> : null },
+                  { key: 'actions', header: '', width: 150, render: (row) => {
+                    if (row.can_reverse) return <Button size="sm" variant="danger" disabled={actionBusy != null} onClick={() => openChargeReversal(row)}>{t('finance.reverseCharge')}</Button>
+                    const subscription = subscriptions.find((item) => String(item.id) === String(row.subscription_id))
+                    return subscription?.can_cancel_sale && row.status !== 'reversed' ? <Button size="sm" variant="danger" disabled={actionBusy != null} onClick={() => setConfirmAction({ type: 'cancelSale', subscriptionId: subscription.id })}>{t('finance.cancelSale')}</Button> : null
+                  } },
                 ]}
               />
             </div>
@@ -1346,9 +1393,11 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
         <Dialog
             open={Boolean(confirmAction)}
-            title={confirmAction?.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction?.type === 'restore' ? t('client.restoreConfirmTitle') : confirmAction?.type === 'revokeAccess' ? t('access.revokeConfirmTitle') : t('client.anonymizeConfirmTitle')}
+            title={confirmAction?.type === 'cancelSale' ? t('finance.cancelSale') : confirmAction?.type === 'archive' ? t('client.archiveConfirmTitle') : confirmAction?.type === 'restore' ? t('client.restoreConfirmTitle') : confirmAction?.type === 'revokeAccess' ? t('access.revokeConfirmTitle') : t('client.anonymizeConfirmTitle')}
             description={confirmAction?.type === 'archive'
               ? t('client.archiveConfirmDescription')
+              : confirmAction?.type === 'cancelSale'
+                ? t('finance.cancelSaleDescription')
               : confirmAction?.type === 'restore'
                 ? t('client.restoreConfirmDescription')
                 : confirmAction?.type === 'revokeAccess'
@@ -1356,7 +1405,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   : t('client.anonymizeConfirmDescription')}
             tone={confirmAction?.type === 'restore' ? 'default' : 'danger'}
             irreversible={confirmAction?.type === 'anonymize'}
-            confirmLabel={confirmAction?.type === 'archive' ? t('client.blacklistAction') : confirmAction?.type === 'restore' ? t('clients.restore') : confirmAction?.type === 'revokeAccess' ? t('access.revoke') : t('client.anonymize')}
+            confirmLabel={confirmAction?.type === 'cancelSale' ? t('finance.cancelSale') : confirmAction?.type === 'archive' ? t('client.blacklistAction') : confirmAction?.type === 'restore' ? t('clients.restore') : confirmAction?.type === 'revokeAccess' ? t('access.revoke') : t('client.anonymize')}
             onClose={() => actionBusy ? null : setConfirmAction(null)}
             onConfirm={runDangerAction}
           >

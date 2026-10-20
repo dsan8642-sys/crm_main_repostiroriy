@@ -274,6 +274,10 @@ def build_openapi_schema():
                         "$ref": "#/components/schemas/SubscriptionCombinedUpdate",
                     }}},
                 }
+            if method == "POST" and path == "/api/admin/subscriptions/{subscription_id}/cancel-sale/":
+                operation["description"] = "Cancel an unused subscription sale, reverse its charge, and credit paid funds to the family balance atomically."
+            if method == "POST" and path == "/api/admin/charges/{charge_id}/reverse/":
+                operation["description"] = "Reverse a manual charge within 48 hours of its creation. Exact idempotent replays remain valid afterward."
             if method == "POST" and path == "/api/admin/participants/{participant_id}/attendance/payment/":
                 operation["requestBody"] = {
                     "required": True,
@@ -364,6 +368,7 @@ def build_openapi_schema():
                     "required": ["subscription_type_id", "idempotency_key"],
                     "properties": {
                         "subscription_type_id": {"type": "integer", "minimum": 1},
+                        "price_minor": {"type": "integer", "minimum": 0, "description": "Final sale price in minor units; cannot exceed the current catalog price. Defaults to catalog price."},
                         "start_date": {"type": "string", "format": "date"},
                         "due_date": {"type": "string", "format": "date"},
                         "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -388,7 +393,7 @@ def build_openapi_schema():
                     "properties": {
                         "status": {
                             "type": "string",
-                            "enum": ["active", "frozen", "expired", "cancelled"],
+                            "enum": ["active", "frozen", "expired"],
                         },
                         "effective_end_date": {"type": "string", "format": "date"},
                     },

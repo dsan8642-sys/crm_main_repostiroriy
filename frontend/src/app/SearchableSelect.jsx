@@ -19,10 +19,11 @@ export function clientSelectOption(client, {
   const first = client.first || client.first_name || ''
   const last = client.last || client.last_name || ''
   const fullName = client.full_name || `${last} ${first}`.trim()
+  const detail = description?.(client) || client.phone || client.email || client.group || ''
   return {
     value: client[valueKey] ?? client.id,
     label: label?.(client) || fullName,
-    description: description?.(client) || client.phone || client.email || client.group || '',
+    description: typeof detail === 'object' ? detail.name || '' : detail,
     searchText: [
       first, last, fullName, `${first} ${last}`, `${last} ${first}`,
       client.phone, client.email,

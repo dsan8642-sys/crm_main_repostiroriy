@@ -1929,6 +1929,7 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   await expect.poll(() => seenAdminEndpoints.has('/api/admin/payments/')).toBe(true)
 
   await clickFinanceAction(page, 'charge')
+  await page.locator('#admin-client-charge-reason').selectOption('other')
   await page.locator('#admin-client-finance-description').fill('Индивидуальное занятие')
   await page.locator('#admin-client-finance-amount').fill('80.00')
   await page.getByTestId('admin-client-finance-save').click()
@@ -2036,7 +2037,8 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
 
 test('trainer can open every menu screen without runtime errors', async ({ page }) => {
   const errors = collectPageErrors(page)
-  const trainerSessionStart = new Date(Date.now() + 60 * 60 * 1000)
+  await page.clock.setFixedTime(new Date('2026-10-20T10:00:00+02:00'))
+  const trainerSessionStart = new Date('2026-10-20T11:00:00+02:00')
   const session = {
     id: 41,
     start_at: localIsoDateTime(trainerSessionStart),

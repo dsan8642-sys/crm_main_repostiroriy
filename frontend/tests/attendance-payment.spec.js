@@ -14,9 +14,19 @@ async function clickAccountAction(page, testId) {
   await page.getByTestId(testId).click()
 }
 
-async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false, withCharges = false } = {}) {
+async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false, withCharges = false, expiredAndRemaining = false, wideSubscription = false, changedSubscriptionBalance = null, saleType = false } = {}) {
   const participant = { id: 11, client_id: 101, first_name: 'Anna', last_name: 'Test', full_name: 'Anna Test', is_active: true }
   const subscription = { id: 77, participant_id: 11, type: 'Test pass', status: 'active', start_date: '2026-06-10', effective_end_date: '2026-07-10', remaining_sessions: 1, can_assign_attendance: true, ledger: [], charges: [], freezes: [] }
+  if (wideSubscription) {
+    subscription.type = 'Абонемент на индивидуальные тренировки'
+    subscription.remaining_sessions = 4
+    subscription.can_cancel_sale = true
+    subscription.ledger = [{ id: 1, reason: 'purchase', delta: 4, balance_after: 4, created_at: '2026-10-19T12:00:00+02:00', note: 'Покупка: 4 тренировки', created_by: 'admin (Администратор)' }]
+  }
+  if (changedSubscriptionBalance !== null) {
+    subscription.remaining_sessions = changedSubscriptionBalance
+    subscription.can_cancel_sale = false
+  }
   const detail = {
     account: { id: 101, full_name: 'Anna Test', username: 'anna', phone: '+48555010000', email: 'demo@example.test', preferred_language: 'ru', is_active: true },
     participants: [participant],
@@ -30,13 +40,21 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
       subscription_session_delta: 0,
     })),
   }
+  if (wideSubscription) detail.charges = [{
+    id: 500, subscription_id: 77, participant: 'Anna Test', description: 'Абонемент на индивидуальные тренировки',
+    amount_minor: 28000, currency: 'PLN', due_date: '2026-10-19', status: 'active', can_reverse: false,
+  }]
   if (withCharges) detail.charges = detail.attendance.map((row) => ({
     id: row.id, attendance_id: row.id, participant: row.participant, description: 'Разовое занятие',
     amount_minor: 6500, currency: 'PLN', due_date: '2026-06-01', status: 'active', can_reverse: false,
   }))
   if (withOldSubscription) detail.subscriptions.push({ ...subscription, id: 79, status: 'expired', effective_end_date: '2025-05-01', remaining_sessions: 0, can_assign_attendance: false })
+  if (expiredAndRemaining) detail.subscriptions = [
+    { ...subscription, id: 79, start_date: '2026-10-18', effective_end_date: '2026-10-18', status: 'expired', remaining_sessions: 0 },
+    { ...subscription, id: 78, start_date: '2026-10-14', effective_end_date: '2026-11-18', remaining_sessions: 2 },
+  ]
   if (family) {
-    detail.participants.push({ ...participant, id: 12, first_name: 'Boris', full_name: 'Boris Test' })
+    detail.participants.push({ ...participant, id: 12, first_name: 'Boris', full_name: 'Boris Test', group: { id: 8, name: 'Test group' } })
     detail.subscriptions.push({ ...subscription, id: 78, participant_id: 12, remaining_sessions: 3 })
     detail.attendance.push({ ...detail.attendance[0], id: 3, participant_id: 12, participant: 'Boris Test' })
   }
@@ -59,9 +77,27 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
     let payload = {}
     if (path === '/api/me/') payload = { id: 1, username: 'admin', role: 'admin' }
     else if (path === '/api/health/') payload = { status: 'ok' }
-    else if (path === '/api/admin/reference/') payload = { trainers: [], groups: [], subscription_types: [], participants: detail.participants, choices: {} }
+    else if (path === '/api/admin/reference/') payload = { trainers: [], groups: [], subscription_types: saleType ? [{ id: 1, name: 'Test pass', price_minor: 28000, currency: 'PLN', duration_days: 30, sessions_count: 4, is_unlimited: false, is_individual: false, is_active: true }] : [], participants: detail.participants, choices: {} }
     else if (path === '/api/admin/clients/') payload = { clients: [participant] }
     else if (path === '/api/admin/clients/101/') payload = detail
+    else if (path === '/api/admin/subscriptions/77/cancel-sale/' && request.method() === 'POST') {
+      changes.push({ action: 'cancel-sale', subscription_id: 77 })
+      subscription.status = 'cancelled'
+      subscription.can_cancel_sale = false
+      detail.charges.find((row) => row.subscription_id === 77).status = 'reversed'
+      payload = { subscription, balance_minor: -28000 }
+    }
+    else if (path === '/api/admin/clients/101/participants/' && request.method() === 'POST') {
+      const data = request.postDataJSON()
+      changes.push(data)
+      const created = { id: 13, client_id: 101, ...data.participant, full_name: `${data.participant.first_name} ${data.participant.last_name}`.trim(), is_active: true }
+      detail.participants.push(created)
+      payload = created
+    }
+    else if (path === '/api/admin/participants/11/subscriptions/' && request.method() === 'POST') {
+      changes.push(request.postDataJSON())
+      payload = { subscription: { id: 90 } }
+    }
     else if (path === '/api/admin/participants/11/attendance/payment/') {
       const data = request.postDataJSON()
       changes.push(data)
@@ -160,6 +196,15 @@ test('the sole eligible subscription is automatic while old empty ones remain in
   await expect.poll(() => changes[0]).toEqual({ attendance_ids: [1], source: 'subscription', subscription_id: 77 })
   await page.getByTestId('admin-client-tab-subscriptions').click()
   await expect(page.locator('tbody tr')).toHaveCount(2)
+})
+
+test('client navigation shows sessions from the current pass', async ({ page }) => {
+  await mockAttendance(page, { expiredAndRemaining: true })
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=subscriptions')
+  const tab = page.getByTestId('admin-client-tab-subscriptions')
+  await expect(tab).toContainText('остаток 2')
+  await expect(tab).toContainText('Активны: 1')
+  await expect(page.locator('tbody tr').first()).toContainText('Истёк')
 })
 
 test('historical visits remain selectable and warn before enabling billing', async ({ page }) => {
@@ -359,4 +404,100 @@ test('family participant selection updates the summary and history without losin
   await expect(page.locator('tbody')).toContainText('Boris Test')
   await expect(page.getByTestId('admin-client-tab-payments')).toContainText('100,00')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+})
+
+test('subscription details fit a narrow mobile viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 })
+  await mockAttendance(page, { wideSubscription: true })
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=subscriptions')
+  await page.locator('tbody tr').first().click()
+  const modal = page.getByTestId('form-modal')
+  await expect(modal).toBeVisible()
+  const bounds = await modal.boundingBox()
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(361)
+  const footerFits = await modal.locator('.form-modal__footer').evaluate((node) => node.scrollWidth <= node.clientWidth + 1)
+  expect(footerFits).toBe(true)
+  const buttonsFit = await modal.locator('.form-modal__footer button').evaluateAll((nodes) => nodes.every((node) => {
+    const bounds = node.getBoundingClientRect()
+    return bounds.left >= 0 && bounds.right <= window.innerWidth && node.scrollWidth <= node.clientWidth + 1
+  }))
+  expect(buttonsFit).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: '../.local-run/subscription-details-mobile.png', animations: 'disabled' })
+})
+
+test('eligible sale charge can be cancelled from payment history', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 })
+  const changes = await mockAttendance(page, { wideSubscription: true })
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=payments')
+  await page.getByRole('tab', { name: 'Начисления' }).click()
+  const charge = page.locator('.ops-client-payment-charges tbody tr').first()
+  await charge.getByRole('button', { name: 'Отменить продажу' }).click()
+  await page.getByRole('button', { name: 'Отменить продажу' }).last().click()
+  await expect.poll(() => changes).toContainEqual({ action: 'cancel-sale', subscription_id: 77 })
+  await expect(charge).toContainText('Отменено')
+  await expect(charge.getByRole('button', { name: 'Отменить продажу' })).toHaveCount(0)
+})
+
+for (const remaining of [3, 5]) {
+  test(`subscription sale cancellation is hidden when ${remaining} of 4 sessions remain`, async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 })
+    await mockAttendance(page, { wideSubscription: true, changedSubscriptionBalance: remaining })
+    await page.goto('/?role=admin&view=clientDetail&client=101&tab=subscriptions')
+    await page.locator('tbody tr').first().click()
+    const modal = page.getByTestId('form-modal')
+    await expect(modal).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Отменить продажу' })).toHaveCount(0)
+    await page.getByTestId('form-modal-close').click()
+    await page.getByTestId('admin-client-tab-payments').click()
+    await page.getByRole('tab', { name: 'Начисления' }).click()
+    await expect(page.locator('.ops-client-payment-charges tbody').getByRole('button', { name: 'Отменить продажу' })).toHaveCount(0)
+  })
+}
+
+test('selling a pass can select another family member with a group', async ({ page }) => {
+  await mockAttendance(page, { family: true })
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.goto('/?role=admin&view=clientDetail&client=101&participant=11')
+  await page.getByTestId('admin-client-action-sell-subscription').click()
+  await page.locator('#admin-client-finance-participant').click()
+  await page.locator('.ops-search-select-list').getByRole('option', { name: /Boris Test/ }).click()
+  await expect(page.getByTestId('form-modal')).toBeVisible()
+  await expect(page.locator('#admin-client-finance-participant')).toHaveValue('Boris Test')
+  expect(pageErrors).toEqual([])
+})
+
+test('sale price on a narrow screen is capped at catalog price and sent in minor units', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const changes = await mockAttendance(page, { saleType: true })
+  await page.goto('/?role=admin&view=clientDetail&client=101&participant=11')
+  await page.getByTestId('admin-client-action-sell-subscription').click()
+  const price = page.locator('#admin-client-finance-sale-price')
+  await expect(price).toHaveValue('280')
+  await price.fill('281')
+  await page.getByTestId('admin-client-finance-save').click()
+  await expect(price).toHaveAttribute('aria-invalid', 'true')
+  expect(changes).toHaveLength(0)
+  await price.fill('200,50')
+  await page.getByTestId('admin-client-finance-save').click()
+  await expect.poll(() => changes[0]?.price_minor).toBe(20050)
+})
+
+test('client page adds a family member from the account actions', async ({ page }) => {
+  const changes = await mockAttendance(page)
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=payments')
+  if (page.viewportSize().width >= 1200) await page.getByTestId('admin-client-add-family-member-desktop').click()
+  else {
+    await page.getByTestId('admin-client-actions-trigger').click()
+    await page.getByTestId('admin-client-add-family-member').click()
+  }
+  const dialog = page.getByTestId('form-modal')
+  await expect(dialog).toContainText('Добавить члена семьи')
+  await dialog.locator('#admin-client-participant-first-name').fill('Boris')
+  await dialog.locator('#admin-client-participant-last-name').fill('Test')
+  await dialog.getByRole('button', { name: 'Добавить члена семьи' }).click()
+  await expect.poll(() => changes[0]?.participant?.first_name).toBe('Boris')
+  await expect(page.locator('tbody').getByText('Boris Test')).toBeVisible()
 })

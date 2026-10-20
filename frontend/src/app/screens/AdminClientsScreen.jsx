@@ -70,6 +70,32 @@ const PARTICIPANT_FIELD_MAP = {
 
 const mapActiveClientRows = (rows) => mapAdminClientRows(rows).active
 const mapBlacklistedClientRows = (rows) => mapAdminClientRows(rows).blacklisted
+const CLIENT_SORT_KEYS = ['name', 'phone', 'email', 'group', 'subscription', 'balance', 'activity']
+
+function sortClientRows(rows, sort, locale) {
+  if (!sort) return rows
+  const collator = new Intl.Collator(locale, { sensitivity: 'base', numeric: true })
+  const value = (row) => {
+    switch (sort.key) {
+      case 'name': return `${row.last || ''} ${row.first || ''}`.trim()
+      case 'phone': return Number(Boolean(row.phone?.trim()))
+      case 'email': return Number(Boolean(row.email?.trim()))
+      case 'group': return Number(Boolean(row.groupIds?.length))
+      case 'subscription': return Number(row.hasCurrentSubscription)
+      case 'balance': return Number(row.balance) || 0
+      case 'activity': return Number(clientActivity(row.lastPresentAt).state === 'active')
+      default: return 0
+    }
+  }
+  const descending = sort.key !== 'name'
+  const direction = (sort.direction === 'reverse' ? -1 : 1) * (descending ? -1 : 1)
+  return rows.map((row, index) => ({ row, index, value: value(row) }))
+    .sort((a, b) => {
+      const result = sort.key === 'name' ? collator.compare(a.value, b.value) : a.value - b.value
+      return result * direction || a.index - b.index
+    })
+    .map(({ row }) => row)
+}
 
 function hasMeaningfulFormValue(value) {
   if (Array.isArray(value)) return value.length > 0
@@ -114,6 +140,7 @@ export function createAdminClientsScreen(components, icons, reloadRoleData, admi
     const clientListLayout = useClientListLayout()
     const groups = adminData.groups || []
     const [scope, setScope] = useState('active')
+    const [sort, setSort] = useState(null)
     const clientList = useScreenList({
       path: '/api/admin/clients/',
       itemKey: 'clients',
@@ -174,7 +201,27 @@ export function createAdminClientsScreen(components, icons, reloadRoleData, admi
     useEffect(() => {
       if (createClientShortcut === '1') setQuickAction('client')
     }, [createClientShortcut])
-    const filteredRows = rows
+    const filteredRows = useMemo(() => sortClientRows(rows, sort, localeTag), [rows, sort, localeTag])
+    const sortLabels = {
+      name: t('common.participant'), phone: t('common.phone'), email: 'Email',
+      group: t('common.group'), subscription: t('clients.subscription'),
+      balance: t('common.balance'), activity: t('clients.activity'),
+    }
+    const directionLabels = (key) => {
+      if (key === 'name') return [t('clients.sortAZ'), t('clients.sortZA')]
+      if (key === 'group') return [`${t('common.group')} → ${t('clients.individual')}`, `${t('clients.individual')} → ${t('common.group')}`]
+      if (key === 'balance') return ['+ → −', '− → +']
+      if (key === 'activity') return [`${t('clients.activeStatus')} → ${t('clients.inactiveStatus')}`, `${t('clients.inactiveStatus')} → ${t('clients.activeStatus')}`]
+      return [`${t('clients.with')} → ${t('clients.without')}`, `${t('clients.without')} → ${t('clients.with')}`]
+    }
+    const sortHeader = (key) => {
+      const label = sortLabels[key]
+      const direction = sort?.key === key ? sort.direction : null
+      const [forward, reverse] = directionLabels(key)
+      return <button type="button" className="ops-client-sort-button" data-testid={`admin-clients-sort-${key}`} onClick={() => setSort(direction === 'forward' ? { key, direction: 'reverse' } : direction === 'reverse' ? null : { key, direction: 'forward' })} aria-label={`${label}: ${direction === 'forward' ? forward : direction === 'reverse' ? reverse : t('clients.defaultOrder')}`}>
+        <span>{label}</span><span aria-hidden="true">{direction === 'forward' ? '▲' : direction === 'reverse' ? '▼' : '↕'}</span>
+      </button>
+    }
     const hasActiveFilter = Boolean(clientList.search.trim()) || clientList.filterCount > 0
     const emptyLabel = hasActiveFilter
       ? t('clients.emptyFiltered')
@@ -615,23 +662,24 @@ export function createAdminClientsScreen(components, icons, reloadRoleData, admi
           emptyLabel={scope === 'blacklist' ? t('clients.emptyBlacklist') : t('clients.emptyActive')}
           noResultsLabel={t('clients.emptyFiltered')}
         />
+        {clientListLayout !== 'desktop' && filteredRows.length > 0 && <label className="ops-client-sort-picker"><span>{t('clients.sortBy')}</span><select data-testid="admin-clients-sort" value={sort ? `${sort.key}:${sort.direction}` : ''} onChange={(event) => { const [key, direction] = event.target.value.split(':'); setSort(CLIENT_SORT_KEYS.includes(key) && ['forward', 'reverse'].includes(direction) ? { key, direction } : null) }}><option value="">{t('clients.defaultOrder')}</option>{CLIENT_SORT_KEYS.flatMap((key) => directionLabels(key).map((description, index) => <option key={`${key}-${index}`} value={`${key}:${index ? 'reverse' : 'forward'}`}>{sortLabels[key]}: {description}</option>))}</select></label>}
         {filteredRows.length > 0 && clientListLayout === 'desktop' && <div className="ops-client-desktop-table">
           <Table
             rows={filteredRows}
             emptyLabel={emptyLabel}
             columns={[
-              { key: 'name', header: t('common.participant'), render: (row) => (
+              { key: 'name', header: sortHeader('name'), render: (row) => (
                 <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={`${row.last} ${row.first}`} title={`${row.last} ${row.first}`} disabled={!row.clientId} onClick={() => go?.('clientDetail', { clientId: row.clientId })}>
                   <Avatar name={`${row.first} ${row.last}`} size={28} />
                   <span className="strong ops-ellipsis-text">{row.last} {row.first}</span>
                 </button>
               ) },
-              { key: 'phone', header: t('common.phone'), muted: true, render: (row) => <span className="mono ops-ellipsis-value" data-full-value={row.phone || '-'} title={row.phone || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.phone || '-'}</span></span> },
-              { key: 'email', header: 'Email', muted: true, render: (row) => <span className="ops-ellipsis-value" data-full-value={row.email || '-'} title={row.email || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.email || '-'}</span></span> },
-              { key: 'group', header: t('common.group'), render: (row) => row.groupId ? <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} onClick={() => go?.('groups', { groupId: row.groupId })}><span className="ops-ellipsis-text">{row.group}</span></button> : <span className="ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.group || '-'}</span></span> },
-              { key: 'subscription', header: t('clients.subscription'), width: 105, render: (row) => <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge> },
-              { key: 'balance', header: t('common.balance'), align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
-              { key: 'activity', header: t('clients.activity'), width: 150, render: (row) => (
+              { key: 'phone', header: sortHeader('phone'), muted: true, render: (row) => <span className="mono ops-ellipsis-value" data-full-value={row.phone || '-'} title={row.phone || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.phone || '-'}</span></span> },
+              { key: 'email', header: sortHeader('email'), muted: true, render: (row) => <span className="ops-ellipsis-value" data-full-value={row.email || '-'} title={row.email || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.email || '-'}</span></span> },
+              { key: 'group', header: sortHeader('group'), render: (row) => row.groupId ? <button type="button" className="ops-link-button ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} onClick={() => go?.('groups', { groupId: row.groupId })}><span className="ops-ellipsis-text">{row.group}</span></button> : <span className="ops-ellipsis-value" data-full-value={row.group || '-'} title={row.group || '-'} tabIndex={0}><span className="ops-ellipsis-text">{row.group || '-'}</span></span> },
+              { key: 'subscription', header: sortHeader('subscription'), width: 105, render: (row) => <Badge tone={row.hasCurrentSubscription ? 'success' : 'neutral'}>{subscriptionUsage(row)}</Badge> },
+              { key: 'balance', header: sortHeader('balance'), align: 'right', width: 105, render: (row) => <Money amount={row.balance} signed currency="zł" /> },
+              { key: 'activity', header: sortHeader('activity'), width: 150, render: (row) => (
                 <span className="ops-client-activity">
                   <StatusPill status={activity(row).state} label={activity(row).statusLabel} size="sm" />
                   <small className="ops-ellipsis-value" style={{ minWidth: 0, width: '100%' }} data-full-value={activity(row).detail} title={activity(row).detail} tabIndex={0}><span className="ops-ellipsis-text">{activity(row).detail}</span></small>

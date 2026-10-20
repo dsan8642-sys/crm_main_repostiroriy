@@ -1,10 +1,11 @@
 import json
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from billing.models import (
     Charge, ChargeReversal, Payment, PaymentEventType, PaymentMethod,
@@ -188,6 +189,10 @@ class Wave4FinancialSafetyRule(TestCase):
         self.assertEqual(ChargeReversal.objects.count(), 1)
         self.assertEqual(student_balance(self.student).amount_minor, 0)
 
+        Charge.objects.filter(pk=charge["id"]).update(
+            created_at=timezone.now() - timedelta(hours=49))
+        self.assertEqual(self.post_json(path, payload).status_code, 200)
+
         changed = self.post_json(path, {**payload, "reason": "Другая причина"})
         self.assertEqual(changed.status_code, 409)
         self.assertEqual(ChargeReversal.objects.count(), 1)
@@ -201,6 +206,24 @@ class Wave4FinancialSafetyRule(TestCase):
         self.assertEqual(history_charge["status"], "reversed")
         self.assertEqual(history_charge["outstanding_minor"], 0)
         self.assertEqual(history_charge["reversal"]["reason"], payload["reason"])
+
+    def test_manual_charge_reversal_expires_after_48_hours(self):
+        self.client.force_login(self.admin)
+        charge = self.admin_charge(key="wave4-admin-charge-expired").json()
+        Charge.objects.filter(pk=charge["id"]).update(
+            created_at=timezone.now() - timedelta(hours=48, seconds=1))
+
+        detail = self.client.get(f"/api/admin/clients/{self.parent.id}/").json()
+        row = next(row for row in detail["charges"] if row["id"] == charge["id"])
+        self.assertFalse(row["can_reverse"])
+
+        response = self.post_json(f"/api/admin/charges/{charge['id']}/reverse/", {
+            "reason": "Поздняя отмена",
+            "idempotency_key": "wave4-charge-reversal-expired",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["charge"][0]["code"], "reversal_window_expired")
+        self.assertEqual(ChargeReversal.objects.count(), 0)
 
     def test_subscription_charge_cannot_use_manual_reversal_endpoint(self):
         self.client.force_login(self.admin)

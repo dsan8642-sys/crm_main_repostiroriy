@@ -280,6 +280,7 @@ test('global client search retargets payments to the newly opened client', async
 
   await clickFinanceAction(page, 'charge')
   const chargeDialog = page.getByTestId('form-modal')
+  await chargeDialog.locator('#admin-client-charge-reason').selectOption('other')
   await chargeDialog.locator('#admin-client-finance-description').fill('Проверка клиента')
   await chargeDialog.locator('#admin-client-finance-amount').fill('25')
   await chargeDialog.getByTestId('admin-client-finance-save').click()

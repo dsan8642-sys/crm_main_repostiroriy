@@ -6,10 +6,20 @@ from django.db import transaction
 from django.utils import timezone
 
 from audit.models import audit
+from attendance.models import AttendanceRecord
+from billing.models import Charge, ChargeReversal
 from students.models import Student
 
 from .models import (FreezePeriod, LedgerReason, SessionLedgerEntry,
                      Subscription, SubscriptionStatus)
+
+
+def validate_sale_price(subscription_type, price_minor):
+    if price_minor < 0 or price_minor > subscription_type.price_minor:
+        raise ValidationError({
+            "price_minor": "Цена продажи должна быть от 0 до цены по каталогу."
+        })
+    return price_minor
 
 
 def can_assign_attendance(subscription):
@@ -18,6 +28,52 @@ def can_assign_attendance(subscription):
         subscription.effective_end_date >= timezone.localdate()
         or (subscription.remaining_sessions or 0) > 0
     )
+
+
+def can_cancel_sale(subscription):
+    if subscription.status == SubscriptionStatus.CANCELLED:
+        return False
+    charge = Charge.objects.filter(subscription=subscription).first()
+    if charge is None or ChargeReversal.objects.filter(charge=charge).exists():
+        return False
+    if AttendanceRecord.objects.filter(payment_subscription=subscription).exists():
+        return False
+    entries = list(subscription.ledger_entries.all())
+    if any(entry.attendance_id or entry.reason in {
+        LedgerReason.ATTENDANCE, LedgerReason.CORRECTION, LedgerReason.CARRYOVER,
+    } for entry in entries):
+        return False
+    if subscription.subscription_type.is_unlimited:
+        return not entries
+    purchases = [entry for entry in entries if entry.reason == LedgerReason.PURCHASE]
+    return len(purchases) == 1 and subscription.remaining_sessions == purchases[0].delta
+
+
+@transaction.atomic
+def cancel_subscription_sale(*, subscription, actor):
+    Student.objects.select_for_update(no_key=True).get(pk=subscription.student_id)
+    subscription = Subscription.objects.select_for_update().select_related("subscription_type").get(pk=subscription.pk)
+    if not can_cancel_sale(subscription):
+        raise ValidationError("Продажу можно отменить только до использования занятий и при полном остатке абонемента.")
+    charge = Charge.objects.select_for_update().get(subscription=subscription)
+    remaining = subscription.remaining_sessions
+    if remaining:
+        SessionLedgerEntry.objects.create(
+            subscription=subscription, delta=-remaining, reason=LedgerReason.MANUAL,
+            created_by=actor, note="Отмена продажи абонемента",
+        )
+    reversal = ChargeReversal.objects.create(
+        charge=charge, amount_minor=charge.amount_minor, currency=charge.currency,
+        reason="Отмена продажи абонемента", reference_id=f"subscription-sale-cancel-{subscription.pk}",
+        created_by=actor,
+    )
+    subscription.status = SubscriptionStatus.CANCELLED
+    subscription.save(update_fields=["status"])
+    audit(actor, "subscription.sale_cancelled", subscription, {
+        "charge_id": charge.pk, "reversal_id": reversal.pk,
+        "amount_minor": charge.amount_minor, "currency": charge.currency,
+    })
+    return subscription
 
 
 @transaction.atomic
@@ -59,6 +115,8 @@ def renew_subscription(*, subscription, subscription_type=None, start_date=None,
     """
     Student.objects.select_for_update(no_key=True).get(pk=subscription.student_id)
     subscription = Subscription.objects.select_for_update(no_key=True).get(pk=subscription.pk)
+    if subscription.status == SubscriptionStatus.CANCELLED:
+        raise ValidationError("Отменённый абонемент нельзя продлить.")
     subscription_type = subscription_type or subscription.subscription_type
     start_date = start_date or timezone.localdate()
 

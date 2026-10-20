@@ -157,6 +157,10 @@ test('issuing a subscription always creates its charge through one idempotent op
   await expect(modal.locator('#admin-finance-create-charge')).toHaveCount(0)
   const paid = modal.locator('#admin-finance-subscription-payment-received')
   await expect(paid).not.toBeChecked()
+  await expect(modal.locator('#admin-finance-sale-price')).toHaveValue('240')
+  await modal.locator('#admin-finance-sale-price').fill('0')
+  await expect(paid).toBeDisabled()
+  await modal.locator('#admin-finance-sale-price').fill('200')
   await paid.check()
   await modal.locator('#admin-finance-subscription-payment-method').selectOption('bank_transfer')
   await modal.locator('#admin-finance-subscription-payment-date').fill('2026-09-15')
@@ -167,6 +171,7 @@ test('issuing a subscription always creates its charge through one idempotent op
   expect(mock.requests[0].path).toBe('/api/admin/participants/1/subscriptions/')
   expect(mock.requests[0].body).not.toHaveProperty('create_charge')
   expect(mock.requests[0].body).toMatchObject({
+    price_minor: 20000,
     payment_received: true,
     payment_method: 'bank_transfer',
     payment_date: '2026-09-15',

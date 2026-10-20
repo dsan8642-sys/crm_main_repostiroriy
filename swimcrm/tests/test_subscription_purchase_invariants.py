@@ -4,8 +4,9 @@ from datetime import date
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
-from billing.models import Charge, Payment, PaymentStatus
-from subscriptions.models import Subscription
+from billing.models import Charge, ChargeReversal, Payment, PaymentStatus
+from billing.services import family_balance
+from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription
 
 from . import factories as f
 
@@ -21,6 +22,88 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
             price_minor=28000,
         )
         self.client.force_login(self.admin)
+
+    def test_cancel_paid_unused_sale_credits_family_account_once(self):
+        sale = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "payment_received": True, "payment_method": "cash",
+                             "payment_date": "2026-08-26", "idempotency_key": "cancel-paid-sale"}),
+            content_type="application/json",
+        )
+        self.assertEqual(sale.status_code, 201)
+        subscription_id = sale.json()["subscription"]["id"]
+        url = f"/api/admin/subscriptions/{subscription_id}/cancel-sale/"
+        self.assertEqual(family_balance(self.student.parent).amount_minor, 0)
+        self.assertTrue(self.client.get(f"/api/admin/subscriptions/{subscription_id}/").json()["can_cancel_sale"])
+        cancelled = self.client.post(url, data="{}", content_type="application/json")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.json()["balance_minor"], -28000)
+        self.assertEqual(cancelled.json()["subscription"]["status"], "cancelled")
+        self.assertEqual(cancelled.json()["subscription"]["remaining_sessions"], 0)
+        self.assertEqual(ChargeReversal.objects.filter(charge__subscription_id=subscription_id).count(), 1)
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(self.client.post(url, data="{}", content_type="application/json").status_code, 400)
+        self.assertEqual(family_balance(self.student.parent).amount_minor, -28000)
+
+    def test_cancel_unpaid_sale_removes_debt_without_payment(self):
+        sale = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "idempotency_key": "cancel-unpaid-sale"}),
+            content_type="application/json",
+        )
+        subscription_id = sale.json()["subscription"]["id"]
+        self.assertEqual(family_balance(self.student.parent).amount_minor, 28000)
+        self.assertEqual(self.client.post(
+            f"/api/admin/subscriptions/{subscription_id}/cancel-sale/",
+            data="{}", content_type="application/json").status_code, 200)
+        self.assertEqual(family_balance(self.student.parent).amount_minor, 0)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_cancel_rejects_used_then_restored_sessions_and_generic_status_bypass(self):
+        sale = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "idempotency_key": "cancel-used-sale"}),
+            content_type="application/json",
+        )
+        subscription = Subscription.objects.get(pk=sale.json()["subscription"]["id"])
+        SessionLedgerEntry.objects.create(subscription=subscription, delta=-1, reason=LedgerReason.ATTENDANCE)
+        SessionLedgerEntry.objects.create(subscription=subscription, delta=1, reason=LedgerReason.MANUAL)
+        self.assertEqual(subscription.remaining_sessions, 4)
+        self.assertEqual(self.client.post(
+            f"/api/admin/subscriptions/{subscription.pk}/cancel-sale/",
+            data="{}", content_type="application/json").status_code, 400)
+        self.assertEqual(self.client.post(
+            f"/api/admin/subscriptions/{subscription.pk}/",
+            data=json.dumps({"status": "cancelled"}),
+            content_type="application/json").status_code, 400)
+        self.assertEqual(ChargeReversal.objects.count(), 0)
+
+    def test_cancel_rejects_any_change_from_sold_session_count(self):
+        for delta in (-1, 1):
+            with self.subTest(delta=delta):
+                sale = self.client.post(
+                    f"/api/admin/participants/{self.student.id}/subscriptions/",
+                    data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                                     "idempotency_key": f"cancel-balance-{delta}"}),
+                    content_type="application/json",
+                )
+                self.assertEqual(sale.status_code, 201)
+                subscription = Subscription.objects.get(pk=sale.json()["subscription"]["id"])
+                SessionLedgerEntry.objects.create(
+                    subscription=subscription, delta=delta, reason=LedgerReason.MANUAL,
+                )
+                url = f"/api/admin/subscriptions/{subscription.pk}/"
+                self.assertEqual(subscription.remaining_sessions, 4 + delta)
+                self.assertFalse(self.client.get(url).json()["can_cancel_sale"])
+                self.assertEqual(self.client.post(
+                    f"{url}cancel-sale/", data="{}", content_type="application/json",
+                ).status_code, 400)
+                self.assertFalse(ChargeReversal.objects.filter(charge__subscription=subscription).exists())
+                subscription.refresh_from_db()
+                self.assertNotEqual(subscription.status, "cancelled")
 
     def test_create_charge_false_still_creates_the_subscription_charge(self):
         response = self.client.post(
@@ -103,6 +186,53 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
         self.assertEqual(first.json()["payment"]["method"], "bank_transfer")
         self.assertEqual(replay.json()["payment"]["id"], first.json()["payment"]["id"])
         self.assertEqual(Payment.objects.filter(student=self.student).count(), 1)
+
+    def test_discounted_sale_charges_and_pays_sale_price_and_replays(self):
+        data = {
+            "subscription_type_id": self.subscription_type.id,
+            "price_minor": 20000,
+            "payment_received": True,
+            "payment_method": "cash",
+            "payment_date": "2026-10-20",
+            "idempotency_key": "discounted-sale",
+        }
+        url = f"/api/admin/participants/{self.student.id}/subscriptions/"
+        first = self.client.post(url, data=json.dumps(data), content_type="application/json")
+        replay = self.client.post(url, data=json.dumps(data), content_type="application/json")
+        conflict = self.client.post(url, data=json.dumps({**data, "price_minor": 19000}), content_type="application/json")
+        self.assertEqual((first.status_code, replay.status_code, conflict.status_code), (201, 200, 409))
+        self.assertEqual(first.json()["charge"]["amount_minor"], 20000)
+        self.assertEqual(first.json()["payment"]["amount_minor"], 20000)
+        self.assertEqual(self.subscription_type.price_minor, 28000)
+        subscription_id = first.json()["subscription"]["id"]
+        cancelled = self.client.post(f"/api/admin/subscriptions/{subscription_id}/cancel-sale/", data="{}", content_type="application/json")
+        self.assertEqual(cancelled.json()["balance_minor"], -20000)
+
+    def test_sale_price_bounds_and_free_sale_cancellation(self):
+        url = f"/api/admin/participants/{self.student.id}/subscriptions/"
+        for price in (-1, 28001, "oops"):
+            response = self.client.post(url, data=json.dumps({
+                "subscription_type_id": self.subscription_type.id,
+                "price_minor": price, "idempotency_key": f"invalid-{price}",
+            }), content_type="application/json")
+            self.assertEqual(response.status_code, 400)
+        self.assertFalse(Subscription.objects.filter(student=self.student).exists())
+        free = self.client.post(url, data=json.dumps({
+            "subscription_type_id": self.subscription_type.id,
+            "price_minor": 0, "idempotency_key": "free-sale",
+        }), content_type="application/json")
+        self.assertEqual(free.status_code, 201)
+        self.assertEqual(free.json()["charge"]["amount_minor"], 0)
+        subscription_id = free.json()["subscription"]["id"]
+        self.assertEqual(self.client.post(f"/api/admin/subscriptions/{subscription_id}/cancel-sale/", data="{}", content_type="application/json").status_code, 200)
+        self.assertEqual(ChargeReversal.objects.get(charge__subscription_id=subscription_id).amount_minor, 0)
+        rejected = self.client.post(url, data=json.dumps({
+            "subscription_type_id": self.subscription_type.id,
+            "price_minor": 0, "payment_received": True,
+            "payment_method": "cash", "payment_date": "2026-10-20",
+            "idempotency_key": "free-with-payment",
+        }), content_type="application/json")
+        self.assertEqual(rejected.status_code, 400)
 
     def test_payment_fields_are_part_of_subscription_idempotency(self):
         request_data = {
@@ -255,6 +385,23 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["payment"]["amount_minor"], 28000)
         self.assertEqual(response.json()["payment"]["method"], "card")
+
+    def test_renewal_uses_custom_sale_price(self):
+        original = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "idempotency_key": "custom-renew-original"}),
+            content_type="application/json").json()
+        response = self.client.post(
+            f"/api/admin/subscriptions/{original['subscription']['id']}/renew/",
+            data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "price_minor": 15000, "payment_received": True,
+                             "payment_method": "card", "payment_date": "2026-10-20",
+                             "idempotency_key": "custom-renew"}),
+            content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["charge"]["amount_minor"], 15000)
+        self.assertEqual(response.json()["payment"]["amount_minor"], 15000)
 
     def test_database_rejects_a_second_charge_for_one_subscription(self):
         purchased = self.client.post(

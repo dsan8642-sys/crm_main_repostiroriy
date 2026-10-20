@@ -227,6 +227,10 @@ def _validate_charge_reversal_replay(reversal, *, charge, reason):
     return reversal
 
 
+def within_manual_charge_reversal_window(charge, now=None):
+    return (now or timezone.now()) < charge.created_at + timedelta(hours=48)
+
+
 @transaction.atomic
 def reverse_manual_charge(*, charge, actor, reason, idempotency_key):
     """Append one full reversal for a manual charge; never mutate the charge."""
@@ -258,6 +262,13 @@ def reverse_manual_charge(*, charge, actor, reason, idempotency_key):
 
     if ChargeReversal.objects.filter(charge=locked_charge).exists():
         raise IdempotencyConflict
+    if not within_manual_charge_reversal_window(locked_charge):
+        raise ValidationError({
+            "charge": ValidationError(
+                "Отменить начисление можно только в течение 48 часов после создания.",
+                code="reversal_window_expired",
+            ),
+        })
 
     try:
         with transaction.atomic():

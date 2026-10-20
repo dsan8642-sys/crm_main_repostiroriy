@@ -275,6 +275,7 @@ Creates a client account and an account-holder participant with `is_account_hold
 ```json
 {
   "subscription_type_id": 1,
+  "price_minor": 20000,
   "start_date": "2026-07-06",
   "due_date": "2026-07-06",
   "idempotency_key": "subscription-sale-unique-attempt",
@@ -284,13 +285,15 @@ Creates a client account and an account-holder participant with `is_account_hold
 }
 ```
 
-Always creates the subscription charge. When `payment_received` is true, the
-server also creates one immediately confirmed payment for exactly the pass
-price and currency. `payment_method` and `payment_date` are then required. The
+Always creates the subscription charge for `price_minor` (defaults to the
+catalog price). The final sale price must be between zero and the catalog
+price. When `payment_received` is true, the server also creates one immediately
+confirmed payment for exactly that price and currency; payment is unavailable
+for a zero-price sale. `payment_method` and `payment_date` are then required. The
 same optional fields are accepted by
 `POST /api/admin/subscriptions/<id>/renew/`. Replaying an identical request with
 the same idempotency key returns the original subscription, charge and payment;
-changing payment details produces an idempotency conflict.
+changing payment details or the sale price produces an idempotency conflict.
 
 ### Edit Subscription End Date
 
@@ -534,6 +537,9 @@ payroll calculation results remain Django-owned.
 - A schedule session must be either group-based or individual, not both.
 - A trainer cannot have overlapping non-cancelled sessions.
 - Ledger entries are append-only. The admin client card uses `POST /api/admin/subscriptions/<id>/update/` with `reason` and any combination of `start_date`, `effective_end_date`, `remaining_sessions` (absolute target), and `freeze` (`start_date`, `end_date`). Start and end are independent; the final end cannot precede the start. Changing dates does not rebill attendance. All changes commit atomically. The older `adjust/` endpoint remains available for existing integrations.
+- Subscription payload `status` reports `expired` after `effective_end_date` for active/frozen records, without changing the stored lifecycle status or attendance eligibility. The admin client detail summary counts only currently dated active subscriptions.
+- `POST /api/admin/subscriptions/<id>/cancel-sale/` cancels a sale only when the original session count remains intact and the subscription has no attendance or carryover history. The subscription becomes `cancelled`, remaining sessions are retired in the ledger, and its full charge is reversed. Confirmed payments stay in history and become credit on the family account. The detail payload includes `can_cancel_sale`. Generic status updates cannot set or undo `cancelled`.
+- `POST /api/admin/charges/<id>/reverse/` reverses a manual charge only within 48 hours of its `created_at`. Later requests return `charge: reversal_window_expired`; exact idempotent replays of an earlier reversal still succeed. Charge payload `can_reverse` becomes false when the window closes.
 
 ### Reassign attendance billing source
 

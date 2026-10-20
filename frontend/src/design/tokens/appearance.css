@@ -2,3 +2,10 @@
 :root[data-appearance="custom"] {
 
 }
+:root[data-appearance="custom"][data-appearance-route="admin/clients"] #root > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) { margin-top: 8px !important; }
+:root[data-appearance="custom"][data-appearance-route="admin/clients"] #root > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) > button:nth-of-type(1) { margin-bottom: 5px !important; }
+:root[data-appearance="custom"][data-appearance-route="admin/subscriptions"] #root > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > label:nth-of-type(1) > span:nth-of-type(1) {  display: none !important; }
+:root[data-appearance="custom"][data-appearance-route="admin/clientDetail"] #root > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > section:nth-of-type(1) > div:nth-of-type(1) {  display: none !important; }
+:root[data-appearance="custom"][data-appearance-route="admin/settings"] #root > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) { background-color: #126ab5 !important; color: #ffffff !important; border-radius: 5px !important; }
+:root[data-appearance="custom"][data-appearance-route="admin/settings"] #root > div:nth-of-type(1) > div:nth-of-type(1) { margin-left: 0px !important; }
+:root[data-appearance="custom"][data-appearance-route="admin/schedule"] #root > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) { margin-top: 16px !important; }

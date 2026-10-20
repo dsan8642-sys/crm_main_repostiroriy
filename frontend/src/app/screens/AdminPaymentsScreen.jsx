@@ -19,7 +19,7 @@ import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
-import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor, rebasePassiveFormUpdate, subscriptionPaymentFields } from '../financialContracts.js'
+import { assertPaymentReadback, createPaymentAttemptKey, moneyMajorToMinor, nonnegativeMoneyMajorToMinor, rebasePassiveFormUpdate, subscriptionPaymentFields } from '../financialContracts.js'
 
 const TYPE_FIELD_MAP = {
   name: 'name', price_minor: 'price', currency: 'currency',
@@ -51,6 +51,7 @@ const TYPE_EDIT_FIELD_IDS = Object.fromEntries(
 const FINANCE_FIELD_IDS = {
   participantId: 'admin-finance-participant',
   subscriptionTypeId: 'admin-finance-subscription-type',
+  salePrice: 'admin-finance-sale-price',
   subscriptionId: 'admin-finance-subscription',
   startDate: 'admin-finance-start-date', dueDate: 'admin-finance-due-date',
   subscriptionPaymentReceived: 'admin-finance-subscription-payment-received',
@@ -121,6 +122,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
     const [financeForm, setFinanceForm] = useState({
       participantId: participants[0]?.studentId || '',
       subscriptionTypeId: subscriptionTypes[0]?.typeId || '',
+      salePrice: String(subscriptionTypes[0]?.price ?? ''),
       subscriptionId: '',
       startDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date().toISOString().slice(0, 10),
@@ -128,6 +130,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       subscriptionPaymentMethod: 'cash',
       subscriptionPaymentDate: new Date().toISOString().slice(0, 10),
       chargeDescription: '',
+      chargeReasonPreset: '',
       chargeAmount: '',
       chargeIdempotencyKey: createPaymentAttemptKey('admin-charge'),
       paymentAmount: '',
@@ -202,9 +205,14 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
         return {
           ...current,
           subscriptionTypeId: value,
+          salePrice: nextAmount,
+          subscriptionPaymentReceived: false,
           chargeAmount: current.chargeAmount || nextAmount,
           paymentAmount: current.paymentAmount || nextAmount,
         }
+      }
+      if (field === 'salePrice' && nonnegativeMoneyMajorToMinor(value) === 0) {
+        return { ...current, salePrice: value, subscriptionPaymentReceived: false }
       }
       return { ...current, [field]: value }
       })
@@ -492,6 +500,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
 
     async function createSubscription() {
       const nextErrors = {}
+      const salePriceMinor = nonnegativeMoneyMajorToMinor(financeForm.salePrice)
+      if (salePriceMinor === null || salePriceMinor > selectedType?.priceMinor) nextErrors.salePrice = t('finance.salePriceError')
       if (!financeForm.participantId) nextErrors.participantId = t('finance.selectParticipantError')
       if (!financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = t('finance.selectTypeError')
       if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
@@ -504,6 +514,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       try {
         const result = await api.post(`/api/admin/participants/${financeForm.participantId}/subscriptions/`, {
           subscription_type_id: financeForm.subscriptionTypeId,
+          price_minor: salePriceMinor,
           start_date: financeForm.startDate,
           due_date: financeForm.dueDate,
           idempotency_key: financeForm.subscriptionIdempotencyKey,
@@ -518,6 +529,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       } catch (err) {
         showApiFieldErrors(err, {
           participant_id: 'participantId', subscription_type_id: 'subscriptionTypeId',
+          price_minor: 'salePrice', payment_received: 'salePrice',
           start_date: 'startDate', due_date: 'dueDate', idempotency_key: 'subscriptionTypeId',
           payment_method: 'subscriptionPaymentMethod', payment_date: 'subscriptionPaymentDate',
         }, setFinanceErrors, FINANCE_FIELD_IDS, t('finance.issueError'))
@@ -670,6 +682,8 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
 
     async function renewSubscription() {
       const nextErrors = {}
+      const salePriceMinor = nonnegativeMoneyMajorToMinor(financeForm.salePrice)
+      if (salePriceMinor === null || salePriceMinor > selectedType?.priceMinor) nextErrors.salePrice = t('finance.salePriceError')
       if (!financeForm.subscriptionId) nextErrors.subscriptionId = t('finance.selectSubscriptionError')
       if (!financeForm.subscriptionTypeId) nextErrors.subscriptionTypeId = t('finance.selectRenewTypeError')
       if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
@@ -682,6 +696,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       try {
         const result = await api.post(`/api/admin/subscriptions/${financeForm.subscriptionId}/renew/`, {
           subscription_type_id: financeForm.subscriptionTypeId,
+          price_minor: salePriceMinor,
           start_date: financeForm.startDate,
           due_date: financeForm.dueDate,
           idempotency_key: financeForm.subscriptionIdempotencyKey,
@@ -696,6 +711,7 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       } catch (err) {
         showApiFieldErrors(err, {
           subscription_id: 'subscriptionId', subscription_type_id: 'subscriptionTypeId',
+          price_minor: 'salePrice', payment_received: 'salePrice',
           start_date: 'startDate', due_date: 'dueDate', idempotency_key: 'subscriptionTypeId',
           payment_method: 'subscriptionPaymentMethod', payment_date: 'subscriptionPaymentDate',
         }, setFinanceErrors, FINANCE_FIELD_IDS, t('finance.renewError'))
@@ -715,9 +731,9 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
       const next = action === 'payment'
         ? { ...financeForm, paymentIdempotencyKey: createPaymentAttemptKey('admin-payment') }
         : ['issue', 'renew'].includes(action)
-          ? { ...financeForm, subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), subscriptionPaymentReceived: false, subscriptionPaymentMethod: 'cash', subscriptionPaymentDate: new Date().toISOString().slice(0, 10) }
+          ? { ...financeForm, salePrice: String(selectedType?.price ?? ''), subscriptionIdempotencyKey: createPaymentAttemptKey('admin-subscription'), subscriptionPaymentReceived: false, subscriptionPaymentMethod: 'cash', subscriptionPaymentDate: new Date().toISOString().slice(0, 10) }
         : action === 'charge'
-          ? { ...financeForm, chargeDescription: financeForm.chargeDescription || t('finance.manualCharge'), chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }
+          ? { ...financeForm, chargeDescription: '', chargeReasonPreset: '', chargeIdempotencyKey: createPaymentAttemptKey('admin-charge') }
             : financeForm
       if (next !== financeForm) setFinanceForm(next)
       setFinanceAction(action)
@@ -921,9 +937,10 @@ export function createAdminPaymentsScreen(components, icons, reloadRoleData, adm
             {financeAction === 'payment' && <p className="muted ops-grid-full">{t('finance.familyPaymentHint')}</p>}
             <SearchableSelect inputId={FINANCE_FIELD_IDS.participantId} label={t('common.participant')} value={financeForm.participantId} error={financeErrors.participantId} onChange={(value) => updateFinanceForm('participantId', value)} options={participants.map((participant) => clientSelectOption(participant, { description: (row) => row.phone || row.email || row.group }))} loadOptions={loadAdminParticipantOptions} />
             {(financeAction === 'issue' || financeAction === 'renew') && <Select id={FINANCE_FIELD_IDS.subscriptionTypeId} label={t('field.subscriptionType')} value={financeForm.subscriptionTypeId} error={financeErrors.subscriptionTypeId} onChange={(event) => updateFinanceForm('subscriptionTypeId', event.target.value)}><option value="">{t('field.selectType')}</option>{subscriptionTypes.map((type) => <option key={type.typeId} value={type.typeId}>{type.name} · {type.price.toLocaleString(localeTag)} {type.currency}</option>)}</Select>}
+            {(financeAction === 'issue' || financeAction === 'renew') && <Input id={FINANCE_FIELD_IDS.salePrice} label={t('finance.salePrice', { currency: selectedType?.currency || 'PLN' })} value={financeForm.salePrice} error={financeErrors.salePrice} onChange={(event) => updateFinanceForm('salePrice', event.target.value)} inputMode="decimal" />}
             {(financeAction === 'renew' || financeAction === 'freeze' || financeAction === 'adjust') && <Select id={FINANCE_FIELD_IDS.subscriptionId} label={t('field.participantSubscription')} value={financeForm.subscriptionId} error={financeErrors.subscriptionId} disabled={subscriptionsLoading} onChange={(event) => updateFinanceForm('subscriptionId', event.target.value)}><option value="">{subscriptionsLoading ? t('field.loadingSubscriptions') : t('field.selectSubscription')}</option>{subscriptions.map((subscription) => <option key={subscription.id} value={subscription.id}>#{subscription.id} · {subscription.type} · {subscriptionStatusLabel(subscription.status)} · {subscription.remaining_sessions ?? t('field.unlimitedLower')}</option>)}</Select>}
-            {(financeAction === 'issue' || financeAction === 'renew') && <><Input id={FINANCE_FIELD_IDS.startDate} label={t('field.subscriptionStart')} value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p><Checkbox id={FINANCE_FIELD_IDS.subscriptionPaymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.subscriptionPaymentReceived} onChange={(event) => updateFinanceForm('subscriptionPaymentReceived', event.target.checked)} />{financeForm.subscriptionPaymentReceived && <><Select id={FINANCE_FIELD_IDS.subscriptionPaymentMethod} label={t('field.paymentMethod')} value={financeForm.subscriptionPaymentMethod} error={financeErrors.subscriptionPaymentMethod} onChange={(event) => updateFinanceForm('subscriptionPaymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select><Input id={FINANCE_FIELD_IDS.subscriptionPaymentDate} label={t('field.paymentDate')} value={financeForm.subscriptionPaymentDate} error={financeErrors.subscriptionPaymentDate} onChange={(event) => updateFinanceForm('subscriptionPaymentDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full strong" style={{ margin: 0 }}>{t('finance.subscriptionPaymentAmount', { amount: selectedType?.price ?? '—', currency: selectedType?.currency ?? '' })}</p><p className="ops-grid-full ops-subscription-payment-warning">{t('finance.subscriptionPaymentWarning')}</p></>}</>}
-            {financeAction === 'charge' && <><Input id={FINANCE_FIELD_IDS.chargeDescription} label={t('field.chargeDescription')} value={financeForm.chargeDescription} error={financeErrors.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} /><Input id={FINANCE_FIELD_IDS.chargeAmount} label={t('field.chargeAmount')} value={financeForm.chargeAmount} error={financeErrors.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /></>}
+            {(financeAction === 'issue' || financeAction === 'renew') && <><Input id={FINANCE_FIELD_IDS.startDate} label={t('field.subscriptionStart')} value={financeForm.startDate} error={financeErrors.startDate} onChange={(event) => updateFinanceForm('startDate', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p><Checkbox id={FINANCE_FIELD_IDS.subscriptionPaymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.subscriptionPaymentReceived} disabled={nonnegativeMoneyMajorToMinor(financeForm.salePrice) === 0} onChange={(event) => updateFinanceForm('subscriptionPaymentReceived', event.target.checked)} />{financeForm.subscriptionPaymentReceived && <><Select id={FINANCE_FIELD_IDS.subscriptionPaymentMethod} label={t('field.paymentMethod')} value={financeForm.subscriptionPaymentMethod} error={financeErrors.subscriptionPaymentMethod} onChange={(event) => updateFinanceForm('subscriptionPaymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select><Input id={FINANCE_FIELD_IDS.subscriptionPaymentDate} label={t('field.paymentDate')} value={financeForm.subscriptionPaymentDate} error={financeErrors.subscriptionPaymentDate} onChange={(event) => updateFinanceForm('subscriptionPaymentDate', event.target.value)} placeholder={t('field.dateFormat')} /><p className="ops-grid-full strong" style={{ margin: 0 }}>{t('finance.subscriptionPaymentAmount', { amount: financeForm.salePrice, currency: selectedType?.currency ?? '' })}</p><p className="ops-grid-full ops-subscription-payment-warning">{t('finance.subscriptionPaymentWarning')}</p></>}</>}
+            {financeAction === 'charge' && <><Select id="admin-finance-charge-reason" label={t('field.reason')} value={financeForm.chargeReasonPreset} onChange={(event) => { const reasonPreset = event.target.value; updateFinanceForm('chargeReasonPreset', reasonPreset); updateFinanceForm('chargeDescription', reasonPreset && reasonPreset !== 'other' ? t(reasonPreset) : '') }}><option value="">{t('finance.selectReason')}</option><option value="finance.reasonMistake">{t('finance.reasonMistake')}</option><option value="finance.reasonCompensation">{t('finance.reasonCompensation')}</option><option value="finance.reasonBonus">{t('finance.reasonBonus')}</option><option value="other">{t('finance.reasonOther')}</option></Select>{financeForm.chargeReasonPreset === 'other' && <Input id={FINANCE_FIELD_IDS.chargeDescription} label={t('field.chargeDescription')} value={financeForm.chargeDescription} error={financeErrors.chargeDescription} onChange={(event) => updateFinanceForm('chargeDescription', event.target.value)} />}<Input id={FINANCE_FIELD_IDS.chargeAmount} label={t('field.chargeAmount')} value={financeForm.chargeAmount} error={financeErrors.chargeAmount} onChange={(event) => updateFinanceForm('chargeAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240.00'} /><Input id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeErrors.dueDate} onChange={(event) => updateFinanceForm('dueDate', event.target.value)} placeholder={t('field.dateFormat')} /></>}
             {financeAction === 'payment' && <><Input id={FINANCE_FIELD_IDS.paymentAmount} label={t('field.paymentAmount')} value={financeForm.paymentAmount} error={financeErrors.paymentAmount} onChange={(event) => updateFinanceForm('paymentAmount', event.target.value)} placeholder={selectedType ? String(selectedType.price) : '240,00'} inputMode="decimal" /><Input id={FINANCE_FIELD_IDS.paymentDate} label={t('field.paymentDate')} value={financeForm.paymentDate} error={financeErrors.paymentDate} onChange={(event) => updateFinanceForm('paymentDate', event.target.value)} placeholder={t('field.dateFormat')} /><Select id={FINANCE_FIELD_IDS.paymentMethod} label={t('field.paymentMethod')} value={financeForm.paymentMethod} error={financeErrors.paymentMethod} onChange={(event) => updateFinanceForm('paymentMethod', event.target.value)}><option value="cash">{t('paymentMethod.cash')}</option><option value="bank_transfer">{t('paymentMethod.bankTransfer')}</option><option value="card">{t('paymentMethod.card')}</option><option value="other">{t('paymentMethod.other')}</option></Select><Input id={FINANCE_FIELD_IDS.paymentComment} label={t('field.comment')} value={financeForm.paymentComment} error={financeErrors.paymentComment} onChange={(event) => updateFinanceForm('paymentComment', event.target.value)} placeholder={t('common.optional')} /></>}
             {financeAction === 'freeze' && <><Input id={FINANCE_FIELD_IDS.freezeStart} label={t('field.freezeFrom')} value={financeForm.freezeStart} error={financeErrors.freezeStart} onChange={(event) => updateFinanceForm('freezeStart', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.freezeEnd} label={t('field.freezeTo')} value={financeForm.freezeEnd} error={financeErrors.freezeEnd} onChange={(event) => updateFinanceForm('freezeEnd', event.target.value)} placeholder={t('field.dateFormat')} /><Input id={FINANCE_FIELD_IDS.freezeReason} label={t('field.freezeReason')} value={financeForm.freezeReason} error={financeErrors.freezeReason} onChange={(event) => updateFinanceForm('freezeReason', event.target.value)} /></>}
             {financeAction === 'adjust' && <><Input id={FINANCE_FIELD_IDS.adjustDelta} label={t('field.adjustSessions')} value={financeForm.adjustDelta} error={financeErrors.adjustDelta} onChange={(event) => updateFinanceForm('adjustDelta', event.target.value)} /><Input id={FINANCE_FIELD_IDS.adjustNote} label={t('field.adjustNote')} value={financeForm.adjustNote} error={financeErrors.adjustNote} onChange={(event) => updateFinanceForm('adjustNote', event.target.value)} /></>}

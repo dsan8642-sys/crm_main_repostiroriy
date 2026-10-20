@@ -64,7 +64,7 @@ class ChargeReversal(models.Model):
         on_delete=models.PROTECT,
         related_name="reversal",
     )
-    amount_minor = models.BigIntegerField(validators=[MinValueValidator(1)])
+    amount_minor = models.BigIntegerField(validators=[MinValueValidator(0)])
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES)
     reason = models.TextField()
     reference_id = models.CharField(max_length=128, blank=True, db_index=True)
