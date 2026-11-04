@@ -81,7 +81,7 @@ export function clampedPopoverPosition({ anchor, menu, viewport, padding = 8, ga
   const below = anchor.bottom + gap
   const above = anchor.top - gap - height
   const top = below + height <= viewport.height - padding
-    ? below
+    ? Math.max(padding, below)
     : Math.max(padding, above)
   const preferredLeft = anchor.right - width
   const left = Math.min(

@@ -113,4 +113,39 @@ test('admin reports share the current-month period, filter trainers, show income
   expect(requests).toContain(`/api/admin/reports/session-counts/?date_from=${expectedPeriod.from}&date_to=${expectedPeriod.to}`)
   expect(requests).toContain(`/api/admin/reports/session-counts/xlsx/?date_from=${expectedPeriod.from}&date_to=${expectedPeriod.to}&trainer_id=2`)
   expect(requests).toContain(`/api/admin/reports/income/xlsx/?date_from=${expectedPeriod.from}&date_to=${expectedPeriod.to}&currency=PLN`)
+
+  await page.locator('#admin-reports-date-from').fill('2026-09-01')
+  await page.locator('#admin-report-currency').selectOption('EUR')
+  await page.getByTestId('nav-admin-schedule').first().click()
+  await page.goBack()
+  await expect(page.getByTestId('admin-settings-category-reports').first()).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('#admin-reports-date-from')).toHaveValue('2026-09-01')
+  await expect(page.locator('#admin-report-currency')).toHaveValue('EUR')
+  await page.locator('.ops-reports-panel [role="tab"]').first().click()
+  await expect(page.locator('#admin-report-trainer')).toHaveValue('2')
+})
+
+test('mobile reports reopen with the selected period and currency', async ({ page }) => {
+  test.skip((page.viewportSize()?.width || 0) !== 390)
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    const payload = url.pathname === '/api/me/'
+      ? { id: 1, username: 'admin', role: 'admin' }
+      : url.pathname === '/api/admin/reports/session-counts/'
+        ? { rows: [] }
+        : url.pathname === '/api/admin/reports/income/'
+          ? { currency: url.searchParams.get('currency') || 'PLN', available_currencies: ['PLN', 'EUR'], payments: [], pagination: { page: 1, pages: 1 } }
+          : EMPTY_ADMIN[url.pathname] || {}
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) })
+  })
+  await page.goto('/?role=admin&view=settings')
+  await page.locator('.ops-settings-mobile-nav').getByTestId('admin-settings-category-reports').click()
+  await page.locator('#admin-reports-date-from').fill('2026-09-01')
+  await page.locator('.ops-reports-panel [role="tab"]').nth(1).click()
+  await page.locator('#admin-report-currency').selectOption('EUR')
+  await page.goto('/?role=admin&view=schedule')
+  await page.goto('/?role=admin&view=settings')
+  await expect(page.locator('.ops-reports-panel')).toBeVisible()
+  await expect(page.locator('#admin-reports-date-from')).toHaveValue('2026-09-01')
+  await expect(page.locator('#admin-report-currency')).toHaveValue('EUR')
 })

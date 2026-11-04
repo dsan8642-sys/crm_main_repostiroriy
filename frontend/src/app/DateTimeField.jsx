@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   calendarDates,
   dateFromIso,
@@ -10,6 +11,7 @@ import {
 import { useLocale } from '../i18n.jsx'
 import { uiLocaleTag } from '../localeContracts.js'
 import { usePresence } from './usePresence.js'
+import { clampedPopoverPosition } from './entityListContracts.js'
 
 function FieldShell({
   id,
@@ -26,17 +28,66 @@ function FieldShell({
 }) {
   const buttonRef = useRef(null)
   const popoverRef = useRef(null)
+  const outsidePointerRef = useRef(false)
   const popoverPresence = usePresence(open)
+  const [position, setPosition] = useState(null)
+  const portalHost = buttonRef.current?.closest('.form-modal-layer') || document.body
+
+  const updatePosition = useCallback(() => {
+    if (!buttonRef.current || !popoverRef.current) return
+    setPosition(clampedPopoverPosition({
+      anchor: buttonRef.current.getBoundingClientRect(),
+      menu: popoverRef.current.getBoundingClientRect(),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    }))
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open || !popoverPresence.present) return undefined
+    updatePosition()
+    const observer = new ResizeObserver(updatePosition)
+    observer.observe(popoverRef.current)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [open, popoverPresence.present, updatePosition])
 
   useEffect(() => {
-    if (!open) return undefined
-    popoverRef.current?.querySelector('button:not([disabled])')?.focus()
-    return undefined
-  }, [open])
+    if (!open || !popoverPresence.present || !position) return undefined
+    outsidePointerRef.current = false
+    popoverRef.current?.querySelector('button:not([disabled])')?.focus({ preventScroll: true })
+    const closeOutside = (event) => {
+      if (buttonRef.current?.contains(event.target) || popoverRef.current?.contains(event.target)) return
+      outsidePointerRef.current = true
+      setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside, true)
+    return () => document.removeEventListener('pointerdown', closeOutside, true)
+  }, [open, popoverPresence.present, position, setOpen])
 
-  function closeOnEscape(event) {
+  useLayoutEffect(() => {
+    if (open || !popoverPresence.exiting) return undefined
+    if (!outsidePointerRef.current) buttonRef.current?.focus({ preventScroll: true })
+    return undefined
+  }, [open, popoverPresence.exiting])
+
+  function handlePopoverKeys(event) {
+    if (event.key === 'Tab') {
+      const buttons = Array.from(popoverRef.current?.querySelectorAll('button:not([disabled])') || [])
+      if (!buttons.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      const current = buttons.indexOf(document.activeElement)
+      buttons[(current + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus()
+      return
+    }
     if (event.key !== 'Escape') return
     event.preventDefault()
+    event.stopPropagation()
     setOpen(false)
     buttonRef.current?.focus()
   }
@@ -58,6 +109,7 @@ function FieldShell({
           ref={buttonRef}
           type="button"
           aria-label={buttonLabel}
+          aria-haspopup="dialog"
           aria-expanded={open}
           aria-controls={`${id}-popover`}
           onClick={() => setOpen((current) => !current)}
@@ -66,10 +118,11 @@ function FieldShell({
         </button>
       </div>
       {error && <small id={`${id}-error`} className="ops-field-error" role="alert">{error}</small>}
-      {popoverPresence.present && (
-        <div ref={popoverRef} id={`${id}-popover`} className={`ops-picker-popover ops-motion-fade${popoverPresence.exiting ? ' is-exiting' : ''}`} role="dialog" aria-label={buttonLabel} aria-hidden={popoverPresence.exiting || undefined} inert={popoverPresence.exiting || undefined} onKeyDown={closeOnEscape}>
+      {popoverPresence.present && createPortal(
+        <div ref={popoverRef} id={`${id}-popover`} className={`ops-picker-popover ops-motion-fade${popoverPresence.exiting ? ' is-exiting' : ''}`} role="dialog" aria-label={buttonLabel} aria-hidden={popoverPresence.exiting || undefined} inert={popoverPresence.exiting || undefined} onKeyDown={handlePopoverKeys} style={position ? { top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight, visibility: 'visible' } : { top: 0, left: 0, visibility: 'hidden' }}>
           {children}
-        </div>
+        </div>,
+        portalHost,
       )}
     </div>
   )

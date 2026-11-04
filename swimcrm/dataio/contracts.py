@@ -98,7 +98,7 @@ CONTRACTS = {
         F("emergency_contact_name", "Экстренный контакт"),
         F("emergency_contact_phone", "Телефон экстренного контакта", value_type="phone"),
         F("is_active", "Активен", "active", value_type="boolean", default="true"),
-        F("admin_comments", "Комментарий администратора", "Комментарий"),
+        F("admin_comments", "Внутренние заметки", "Комментарий"),
         F("subscription_type_name", "Абонемент", "subscription", relation="subscription_type",
           matching="exact name"),
     ), dependencies=("groups",)),

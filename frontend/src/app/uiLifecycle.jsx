@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 const SESSION_UI_PREFIX = 'swimcrm.ui.'
 const OVERLAY_STATE_KEY = '__swimcrmOverlay'
@@ -316,6 +316,28 @@ export function useUnsavedChanges(dirty, label = 'form') {
 
 export function hasUnsavedChanges() {
   return dirtySources.size > 0
+}
+
+export function useSessionViewState(key, initialState) {
+  const storageKey = `${SESSION_UI_PREFIX}view.${key}`
+  const [state, setState] = useState(() => {
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(storageKey) || 'null')
+      return stored && typeof stored === 'object' && !Array.isArray(stored)
+        ? { ...initialState, ...stored }
+        : initialState
+    } catch {
+      return initialState
+    }
+  })
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(state))
+    } catch {
+      // The screen remains usable when storage is unavailable.
+    }
+  }, [storageKey, state])
+  return [state, setState]
 }
 
 export function readSessionBoolean(key) {

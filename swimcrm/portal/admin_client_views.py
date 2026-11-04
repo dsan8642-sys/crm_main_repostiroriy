@@ -266,7 +266,8 @@ def admin_client_detail(request, client_id):
     if request.method == "GET":
         account = get_object_or_404(
             ParentAccount.objects.select_related("user"), pk=client_id)
-        return JsonResponse(_client_detail_payload(account))
+        return JsonResponse(_client_detail_payload(
+            account, include_unmarked=request.GET.get("include_unmarked") == "1"))
     if request.method == "DELETE":
         account = archive_client_account(client_id, actor=user)
         return JsonResponse(_client_detail_payload(account))

@@ -286,7 +286,8 @@ test('attendance opens the selected session editor and returns after saving', as
   const trainers = [{ id: 1, full_name: 'Audit Trainer', is_active: true }]
   const groups = [{ id: 1, name: 'Audit Group', is_active: true, default_capacity: 8 }]
   await mockAdmin(page, { sessions: [session], trainers, groups })
-  let participant = { id: 5, client_id: 3, full_name: 'Long Participant Name', balance_minor: 0, currency: 'PLN', attendance: null, group: null, can_add_to_group: true, can_remove_from_session: true }
+  let participant = { id: 5, client_id: 3, full_name: 'Long Participant Name', photo_version: 'v1', balance_minor: 0, currency: 'PLN', attendance: null, group: null, can_add_to_group: true, can_remove_from_session: true }
+  await page.route('**/api/admin/participants/5/photo/**', (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64') }))
   await page.route('**/api/admin/schedule/sessions/71/attendance/', (route) => json(route, {
     session, history: [], students: [participant],
   }))
@@ -306,6 +307,9 @@ test('attendance opens the selected session editor and returns after saving', as
   })
   await page.route('**/api/admin/schedule/check-conflict/', (route) => json(route, { has_conflict: false }))
   await page.goto('/?role=admin&view=attendance&session=71')
+  await page.locator('button[aria-label$=": Long Participant Name"]').click()
+  await expect(page.getByRole('dialog', { name: 'Long Participant Name' })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Long Participant Name' }).locator('[data-dialog-cancel]').click()
   const card = page.locator('.ops-attendance-session-card')
   await expect(page.locator('.ops-attendance-actions button')).toHaveCount(3)
   await expect(page.locator('.ops-attendance-actions button').last()).toHaveText(/Перенос|Перенесення|Przeniesienie|Rescheduled/)
@@ -408,7 +412,7 @@ test('schedule form keeps shared control sizing and vertical rhythm', async ({ p
   expect(metrics.selectRadius).toBeGreaterThanOrEqual(6)
 
   await dialog.locator('#admin-session-date').locator('..').locator('button').click()
-  const calendarMetrics = await dialog.locator('.ops-picker-popover').evaluate((node) => {
+  const calendarMetrics = await page.locator('#admin-session-date-popover').evaluate((node) => {
     const arrows = [...node.querySelectorAll('.ops-picker-head button')]
     const grid = node.querySelector('.ops-date-grid')
     const today = node.querySelector('.ops-date-grid + .ops-picker-today')
@@ -426,10 +430,10 @@ test('schedule form keeps shared control sizing and vertical rhythm', async ({ p
   expect(calendarMetrics.todayRadius).toBeGreaterThanOrEqual(8)
   expect(calendarMetrics.todayBackground).not.toBe('rgb(255, 255, 255)')
   expect(calendarMetrics.todayGap).toBeGreaterThanOrEqual(8)
-  await dialog.locator('.ops-date-grid + .ops-picker-today').click()
+  await page.locator('#admin-session-date-popover .ops-date-grid + .ops-picker-today').click()
 
   await dialog.locator('#admin-session-start').locator('..').locator('button').click()
-  const doneMetrics = await dialog.locator('.ops-picker-done').evaluate((node) => {
+  const doneMetrics = await page.locator('#admin-session-start-popover .ops-picker-done').evaluate((node) => {
     const style = getComputedStyle(node)
     return {
       background: style.backgroundColor,
@@ -442,6 +446,71 @@ test('schedule form keeps shared control sizing and vertical rhythm', async ({ p
   expect(doneMetrics.color).toBe('rgb(255, 255, 255)')
   expect(doneMetrics.fontWeight).toBeGreaterThanOrEqual(600)
   expect(doneMetrics.radius).toBeGreaterThanOrEqual(6)
+})
+
+test('date and time pickers escape clipped forms and stay usable', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0), 'phone and desktop picker layout')
+  await page.setViewportSize({ width: page.viewportSize().width, height: 594 })
+  await mockAdmin(page)
+  await page.goto('/?role=admin&view=schedule')
+  await page.getByTestId('admin-schedule-create-individual').click()
+
+  const modal = page.getByTestId('form-modal')
+  await modal.evaluate((node) => { node.style.maxHeight = '360px' })
+  const dateTrigger = modal.locator('#admin-session-date').locator('..').locator('button')
+  await dateTrigger.click()
+  const calendar = page.locator('#admin-session-date-popover')
+  await expect(calendar).toBeVisible()
+  expect(await calendar.evaluate((node) => node.parentElement.classList.contains('form-modal-layer'))).toBe(true)
+  const bounds = await calendar.boundingBox()
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.y).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(page.viewportSize().width + 1)
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(page.viewportSize().height + 1)
+  const firstDay = calendar.locator('.ops-date-grid button:not([disabled])').first()
+  await firstDay.click()
+  await expect(calendar).toHaveCount(0)
+  await expect(dateTrigger).toBeFocused()
+
+  const timeTrigger = modal.locator('#admin-session-start').locator('..').locator('button')
+  await timeTrigger.click()
+  const timePicker = page.locator('#admin-session-start-popover')
+  await expect(timePicker).toBeVisible()
+  expect(await timePicker.evaluate((node) => node.parentElement.classList.contains('form-modal-layer'))).toBe(true)
+  const firstTimeButton = timePicker.locator('button:not([disabled])').first()
+  await expect(firstTimeButton).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(timePicker.locator('button:not([disabled])').nth(1)).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(firstTimeButton).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(timePicker).toHaveCount(0)
+  await expect(timeTrigger).toBeFocused()
+  await timeTrigger.click()
+  await expect(timePicker).toBeVisible()
+  await modal.locator('.form-modal__body').evaluate((node) => { node.scrollTop = node.scrollHeight })
+  const timeBounds = await timePicker.boundingBox()
+  expect(timeBounds.y).toBeGreaterThanOrEqual(0)
+  expect(timeBounds.y + timeBounds.height).toBeLessThanOrEqual(page.viewportSize().height + 1)
+  await timePicker.locator('.ops-picker-done').click()
+  await expect(timePicker).toHaveCount(0)
+  await expect(timeTrigger).toBeFocused()
+
+  if (page.viewportSize().width === 1440) {
+    await page.goto('/?role=admin&view=schedule')
+    const pageTrigger = page.locator('#schedule-focus-date').locator('..').locator('button')
+    await pageTrigger.click()
+    const pageCalendar = page.locator('#schedule-focus-date-popover')
+    await expect(pageCalendar).toBeVisible()
+    expect(await pageCalendar.evaluate((node) => node.parentElement === document.body)).toBe(true)
+    const pageBounds = await pageCalendar.boundingBox()
+    const triggerBounds = await pageTrigger.boundingBox()
+    expect(pageBounds.y).toBeLessThan(triggerBounds.y)
+    expect(pageBounds.y).toBeGreaterThanOrEqual(0)
+    expect(pageBounds.y + pageBounds.height).toBeLessThanOrEqual(page.viewportSize().height + 1)
+    await pageCalendar.locator('.ops-date-grid button:not([disabled])').last().click()
+    await expect(pageCalendar).toHaveCount(0)
+  }
 })
 
 test('client search results stay opaque and below the input', async ({ page }) => {

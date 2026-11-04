@@ -528,6 +528,7 @@ test('desktop logout waits for confirmation', async ({ page }) => {
   await page.getByTestId('logout').click()
   const confirmation = page.getByTestId('navigation-discard-dialog')
   await expect(confirmation).toBeVisible()
+  expect(await confirmation.evaluate((dialog) => getComputedStyle(dialog).backgroundColor)).toMatch(/^rgb\(\d+, \d+, \d+\)$/)
   expect(logoutRequests).toBe(0)
   await confirmation.getByTestId('navigation-discard-stay').click()
   await expect(confirmation).toHaveCount(0)

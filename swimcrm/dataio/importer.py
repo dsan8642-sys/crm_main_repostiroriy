@@ -14,7 +14,7 @@ from accounts.models import ParentAccount, User
 from accounts.social import normalize_instagram_username
 from audit.models import audit
 from catalog.models import Group, SubscriptionType
-from students.models import Student
+from students.models import ParticipantNote, Student
 from students.services import set_student_groups
 from subscriptions.models import allow_subscription_history_delete
 from subscriptions.services import create_subscription
@@ -337,13 +337,15 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Fa
             "emergency_contact_name": str(d.get("emergency_contact_name") or ""),
             "emergency_contact_phone": str(d.get("emergency_contact_phone") or ""),
             "is_active": import_bool(d.get("is_active"), True),
-            "admin_comments": str(d.get("admin_comments") or ""),
         }
         raw_student_id = d.get("record_id")
         if (raw_student_id not in (None, "") and
                 not Student.objects.filter(pk=raw_student_id).exists()):
             student_kwargs["id"] = int(raw_student_id)
         student = Student.objects.create(**student_kwargs)
+        legacy_note = str(d.get("admin_comments") or "").strip()
+        if legacy_note:
+            ParticipantNote.objects.create(student=student, body=legacy_note, imported=True)
         set_student_groups(student, [group.id for group in resolved_groups])
         created_students.append(student.id)
         audit(actor, "client.created", student, {"source": "import"})

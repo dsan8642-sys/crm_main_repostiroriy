@@ -460,6 +460,32 @@ class TrainerPortalApiRule(TestCase):
         self.assertIn(self.session.id, ids)
         self.assertNotIn(self.other_session.id, ids)
 
+    def test_trainer_sessions_pagination_preserves_legacy_response(self):
+        next_session = create_session(
+            trainer=self.trainer, group=self.group,
+            start_at=timezone.now() + timedelta(days=1), duration_minutes=60,
+            location="B", max_participants=10)
+        cancelled = create_session(
+            trainer=self.trainer, group=self.group,
+            start_at=timezone.now() + timedelta(days=2), duration_minutes=60,
+            location="C", max_participants=10)
+        cancelled.is_cancelled = True
+        cancelled.save(update_fields=["is_cancelled"])
+
+        legacy = self.client.get("/api/trainer/sessions/").json()
+        self.assertNotIn("pagination", legacy)
+        self.assertEqual([row["id"] for row in legacy["sessions"]],
+                         [self.session.id, next_session.id, cancelled.id])
+
+        params = {"date_from": timezone.localdate().isoformat(), "status": "active", "page_size": 1}
+        first = self.client.get("/api/trainer/sessions/", {**params, "page": 1}).json()
+        second = self.client.get("/api/trainer/sessions/", {**params, "page": 2}).json()
+        self.assertEqual([row["id"] for row in first["sessions"]], [self.session.id])
+        self.assertEqual([row["id"] for row in second["sessions"]], [next_session.id])
+        self.assertTrue(first["pagination"]["has_next"])
+        self.assertFalse(second["pagination"]["has_next"])
+        self.assertEqual(self.client.get("/api/trainer/sessions/", {"page": 0}).status_code, 400)
+
     def test_substitute_trainer_sees_session_and_can_mark_attendance(self):
         self.session.substitute_trainer = self.other_trainer
         self.session.save(update_fields=["substitute_trainer"])
@@ -1161,7 +1187,6 @@ class AdminPortalApiRule(TestCase):
                 "contraindications": "No cold water",
                 "emergency_contact_name": "Emergency Person",
                 "emergency_contact_phone": "+48123123123",
-                "admin_comments": "VIP",
                 "group_id": None,
                 "is_active": False,
             }}),
@@ -1199,13 +1224,13 @@ class AdminPortalApiRule(TestCase):
         self.assertEqual(self.student.contraindications, "No cold water")
         self.assertEqual(self.student.emergency_contact_name, "Emergency Person")
         self.assertEqual(self.student.emergency_contact_phone, "+48123123123")
-        self.assertEqual(self.student.admin_comments, "VIP")
+        self.assertEqual(self.student.admin_comments, "")
         self.assertIsNone(self.student.group)
         self.assertFalse(self.student.is_active)
         self.assertEqual(account_response.json()["account"]["username"], "updated_client_api")
         self.assertTrue(account_response.json()["account"]["is_active"])
         self.assertEqual(participant_response.json()["medical_info"], "Asthma")
-        self.assertEqual(participant_response.json()["admin_comments"], "VIP")
+        self.assertNotIn("admin_comments", participant_response.json())
 
     def test_admin_can_change_existing_client_login_without_contact_overwrite(self):
         account = self.student.parent
@@ -1757,6 +1782,78 @@ class AdminPortalApiRule(TestCase):
         self.assertTrue(any(row["session_id"] == session.id for row in payload["attendance"]))
         self.assertTrue(any(row["type"] == ConsentType.EMAIL for row in payload["consents"]))
         self.assertIn("balance_minor", payload["summary"])
+
+    def test_admin_client_unmarked_filter_only_returns_completed_roster_sessions(self):
+        trainer = f.make_trainer()
+        now = timezone.now()
+        account = self.student.parent
+        sibling = f.make_student(parent=account, first="Другой", last="Участник")
+
+        def session(hours, *, student=None):
+            return create_session(
+                trainer=trainer, group=None if student else self.group,
+                individual_student=student,
+                session_type=SessionType.INDIVIDUAL if student else SessionType.GROUP,
+                start_at=now + timedelta(hours=hours), duration_minutes=60,
+                location="Pool", max_participants=8,
+            )
+
+        group = session(-10)
+        individual = session(-8, student=self.student)
+        cleared = session(-6)
+        set_attendance(session_id=cleared.id, student=self.student,
+                       status=AttendanceStatus.PRESENT, apply_financial_effects=False)
+        set_attendance(session_id=cleared.id, student=self.student, status=None)
+        null_record = AttendanceRecord.objects.get(session=cleared, student=self.student)
+        marked = session(-4)
+        set_attendance(session_id=marked.id, student=self.student,
+                       status=AttendanceStatus.ABSENT, apply_financial_effects=False)
+        cancelled = session(-2)
+        cancelled.is_cancelled = True
+        cancelled.save(update_fields=["is_cancelled"])
+        in_progress = session(-0.5)
+        future = session(2)
+        self.group.self_booking_enabled = True
+        self.group.save(update_fields=["self_booking_enabled"])
+        booking_without_student = session(-12)
+        booking_with_student = session(-14)
+        SessionParticipant.objects.create(session=booking_with_student, student=self.student)
+        late_group = f.make_group("Later membership")
+        GroupMembership.objects.create(student=sibling, group=late_group, effective_from=now)
+        too_early_for_sibling = create_session(
+            trainer=trainer, group=late_group, start_at=now - timedelta(hours=16),
+            duration_minutes=60, location="Pool B", max_participants=8,
+        )
+
+        url = f"/api/admin/clients/{account.id}/"
+        ordinary = self.client.get(url).json()
+        self.assertNotIn("unmarked_attendance", ordinary)
+        self.assertEqual([row["session_id"] for row in ordinary["attendance"]], [marked.id])
+
+        payload = self.client.get(url, {"include_unmarked": "1"}).json()
+        self.assertEqual(payload["attendance"], ordinary["attendance"])
+        self.assertEqual(payload["summary"], ordinary["summary"])
+        rows = payload["unmarked_attendance"]
+        self.assertEqual({row["session_id"] for row in rows},
+                         {group.id, individual.id, cleared.id, booking_with_student.id})
+        self.assertEqual({row["participant_id"] for row in rows}, {self.student.id})
+        self.assertEqual(next(row["id"] for row in rows if row["session_id"] == cleared.id), null_record.id)
+        self.assertIsNone(next(row["id"] for row in rows if row["session_id"] == group.id))
+        self.assertTrue(all(row["status"] is None and row["payment_source"] == "none"
+                            and not row["deducts"] for row in rows))
+        self.assertFalse({cancelled.id, in_progress.id, future.id,
+                          booking_without_student.id, too_early_for_sibling.id}
+                         & {row["session_id"] for row in rows})
+        self.assertFalse(any(row["participant_id"] == sibling.id for row in rows))
+
+        set_attendance(session_id=group.id, student=self.student,
+                       status=AttendanceStatus.PRESENT, apply_financial_effects=False)
+        refreshed = self.client.get(url, {"include_unmarked": "1"}).json()
+        self.assertNotIn(group.id, {row["session_id"] for row in refreshed["unmarked_attendance"]})
+        self.assertIn(group.id, {row["session_id"] for row in refreshed["attendance"]})
+
+        self.client.force_login(account.user)
+        self.assertEqual(self.client.get(url, {"include_unmarked": "1"}).status_code, 403)
 
     def test_admin_can_add_account_holder_participant_once(self):
         account = f.make_parent(username="client_without_participant", phone="+48555333333")
@@ -4242,8 +4339,11 @@ class AdminPortalApiRule(TestCase):
 
         export = self.client.get(f"/api/admin/privacy/clients/{parent.id}/export/")
         self.assertEqual(export.status_code, 200)
-        self.assertEqual(export["Content-Type"], "application/json; charset=utf-8")
-        exported = json.loads(export.content.decode("utf-8"))
+        from io import BytesIO
+        from zipfile import ZipFile
+        self.assertEqual(export["Content-Type"], "application/zip")
+        with ZipFile(BytesIO(export.content)) as archive:
+            exported = json.loads(archive.read("client-data.json"))
         self.assertEqual(exported["account"]["instagram_username"], "family_profile")
 
         response = self.client.post(f"/api/admin/privacy/clients/{parent.id}/anonymize/")

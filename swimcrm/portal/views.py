@@ -6,5 +6,7 @@ from .dev_views import *
 from .admin_settings_views import *
 from .public_views import *
 from .trainer_views import *
+from .participant_photo_views import *
+from .participant_note_views import *
 
 __all__ = [name for name in globals() if not name.startswith("__")]

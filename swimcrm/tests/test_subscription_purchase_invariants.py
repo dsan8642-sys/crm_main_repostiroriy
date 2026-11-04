@@ -1,9 +1,11 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.utils import timezone
 
+from analytics.debtors import debtors
 from billing.models import Charge, ChargeReversal, Payment, PaymentStatus
 from billing.services import family_balance
 from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription
@@ -60,6 +62,19 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
             data="{}", content_type="application/json").status_code, 200)
         self.assertEqual(family_balance(self.student.parent).amount_minor, 0)
         self.assertEqual(Payment.objects.count(), 0)
+
+    def test_unpaid_sale_with_future_start_is_owed_today(self):
+        today = timezone.localdate()
+        response = self.client.post(
+            f"/api/admin/participants/{self.student.id}/subscriptions/",
+            data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "start_date": (today + timedelta(days=7)).isoformat(),
+                             "idempotency_key": "unpaid-sale-today"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["charge"]["due_date"], today.isoformat())
+        self.assertEqual(debtors()[0].balance_minor, 28000)
 
     def test_cancel_rejects_used_then_restored_sessions_and_generic_status_bypass(self):
         sale = self.client.post(
@@ -395,12 +410,14 @@ class SubscriptionPurchaseApiInvariantTest(TestCase):
         response = self.client.post(
             f"/api/admin/subscriptions/{original['subscription']['id']}/renew/",
             data=json.dumps({"subscription_type_id": self.subscription_type.id,
+                             "start_date": (timezone.localdate() + timedelta(days=7)).isoformat(),
                              "price_minor": 15000, "payment_received": True,
                              "payment_method": "card", "payment_date": "2026-10-20",
                              "idempotency_key": "custom-renew"}),
             content_type="application/json")
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["charge"]["amount_minor"], 15000)
+        self.assertEqual(response.json()["charge"]["due_date"], timezone.localdate().isoformat())
         self.assertEqual(response.json()["payment"]["amount_minor"], 15000)
 
     def test_database_rejects_a_second_charge_for_one_subscription(self):

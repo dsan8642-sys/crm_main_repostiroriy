@@ -155,6 +155,7 @@ test('issuing a subscription always creates its charge through one idempotent op
 
   const modal = page.getByTestId('form-modal')
   await expect(modal.locator('#admin-finance-create-charge')).toHaveCount(0)
+  await expect(modal.locator('#admin-finance-due-date')).toHaveCount(0)
   const paid = modal.locator('#admin-finance-subscription-payment-received')
   await expect(paid).not.toBeChecked()
   await expect(modal.locator('#admin-finance-sale-price')).toHaveValue('240')
@@ -170,6 +171,7 @@ test('issuing a subscription always creates its charge through one idempotent op
   await expect.poll(() => mock.requests).toHaveLength(1)
   expect(mock.requests[0].path).toBe('/api/admin/participants/1/subscriptions/')
   expect(mock.requests[0].body).not.toHaveProperty('create_charge')
+  expect(mock.requests[0].body).not.toHaveProperty('due_date')
   expect(mock.requests[0].body).toMatchObject({
     price_minor: 20000,
     payment_received: true,

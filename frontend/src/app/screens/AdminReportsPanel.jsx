@@ -3,6 +3,7 @@ import { adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { useLocale } from '../../i18n.jsx'
 import { DateField } from '../DateTimeField.jsx'
+import { useSessionViewState } from '../uiLifecycle.jsx'
 import './AdminReportsPanel.css'
 
 
@@ -82,19 +83,29 @@ function Kpi({ label, value }) {
 export function createAdminReportsPanel(components) {
   const { Banner, Button, Select, Table, Tabs } = components
 
-  return function AdminReportsPanel() {
+  return function AdminReportsPanel({ currentUser }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
     const initialRange = useMemo(currentMonthRange, [])
-    const [subtab, setSubtab] = useState('sessions')
-    const [dateFrom, setDateFrom] = useState(initialRange.dateFrom)
-    const [dateTo, setDateTo] = useState(initialRange.dateTo)
-    const [trainerId, setTrainerId] = useState('')
-    const [currency, setCurrency] = useState('')
+    const [reportView, setReportView] = useSessionViewState(`admin.${currentUser?.id || currentUser?.username || 'session'}.reports`, {
+      subtab: 'sessions', dateFrom: initialRange.dateFrom, dateTo: initialRange.dateTo,
+      trainerId: '', currency: '', incomePage: 1,
+    })
+    const subtab = reportView.subtab === 'income' ? 'income' : 'sessions'
+    const dateFrom = typeof reportView.dateFrom === 'string' ? reportView.dateFrom : initialRange.dateFrom
+    const dateTo = typeof reportView.dateTo === 'string' ? reportView.dateTo : initialRange.dateTo
+    const trainerId = String(reportView.trainerId || '')
+    const currency = String(reportView.currency || '')
+    const incomePage = Math.max(1, Number(reportView.incomePage) || 1)
+    const setSubtab = (value) => setReportView((current) => ({ ...current, subtab: value }))
+    const setDateFrom = (value) => setReportView((current) => ({ ...current, dateFrom: value, incomePage: 1 }))
+    const setDateTo = (value) => setReportView((current) => ({ ...current, dateTo: value, incomePage: 1 }))
+    const setTrainerId = (value) => setReportView((current) => ({ ...current, trainerId: value }))
+    const setCurrency = (value) => setReportView((current) => ({ ...current, currency: value, incomePage: 1 }))
+    const setIncomePage = (value) => setReportView((current) => ({ ...current, incomePage: typeof value === 'function' ? value(current.incomePage) : value }))
     const [currencies, setCurrencies] = useState([])
     const [sessionReport, setSessionReport] = useState(null)
     const [incomeReport, setIncomeReport] = useState(null)
-    const [incomePage, setIncomePage] = useState(1)
     const [sessionLoading, setSessionLoading] = useState(false)
     const [incomeLoading, setIncomeLoading] = useState(false)
     const [downloading, setDownloading] = useState(false)
@@ -111,8 +122,6 @@ export function createAdminReportsPanel(components) {
         .finally(() => { if (active) setSessionLoading(false) })
       return () => { active = false }
     }, [dateFrom, dateTo, t])
-
-    useEffect(() => { setIncomePage(1) }, [dateFrom, dateTo, currency])
 
     useEffect(() => {
       let active = true

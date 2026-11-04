@@ -13,3 +13,82 @@
     min-height: 44px;
   }
 }
+
+@media (max-width: 800px) {
+  .ops-trainer-schedule-page .ops-schedule-desktop-content,
+  .ops-trainer-schedule-page .ops-trainer-desktop-controls { display: none; }
+  .ops-trainer-schedule-head { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: 8px; }
+  .ops-trainer-schedule-head > div:first-child { min-width: 0; flex: 1 1 auto; }
+  .ops-trainer-view-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 6px 12px;
+    border: 1px solid var(--ops-line);
+    border-radius: 8px;
+    background: var(--surface-card);
+    color: var(--text-strong);
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .ops-trainer-view-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .ops-trainer-schedule-page .ops-schedule-mobile-content { display: block; }
+  .ops-trainer-mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    position: sticky;
+    top: var(--trainer-shell-offset, 0px);
+    z-index: 20;
+    padding: 6px 0;
+    background: var(--ops-bg);
+  }
+  .ops-trainer-mobile-header > strong {
+    font-size: var(--fs-lg);
+    text-transform: capitalize;
+  }
+  .ops-trainer-mobile-navigation .ops-calendar-navigation { display: block; }
+  .ops-trainer-mobile-navigation .ops-calendar-navigation > .seg,
+  .ops-trainer-mobile-navigation .ops-calendar-date-controls { display: none; }
+  .ops-trainer-mobile-navigation .ops-mobile-date-navigation {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    align-items: center;
+    border: 1px solid var(--ops-line);
+    border-radius: 12px;
+    background: var(--surface-card);
+  }
+  .ops-trainer-mobile-navigation .ops-mobile-date-navigation > button { min-width: 44px; min-height: 64px; }
+  .ops-trainer-mobile-navigation .ops-mobile-date-strip { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .ops-trainer-mobile-navigation .ops-mobile-date-strip button {
+    display: grid;
+    flex: 1 0 43px;
+    justify-items: center;
+    gap: 2px;
+    min-height: 64px;
+    padding: 4px 2px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+  }
+  .ops-trainer-mobile-navigation .ops-mobile-date-strip button.is-selected { border-bottom-color: var(--primary); color: var(--text-strong); }
+  .ops-trainer-mobile-navigation .ops-mobile-date-strip button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  .ops-trainer-day-marker { width: 7px; height: 7px; border-radius: 50%; }
+  .ops-trainer-day-marker.is-active { background: var(--primary); }
+  .ops-trainer-list-start { margin: 10px 0; max-width: 320px; }
+  .ops-trainer-schedule-page .ops-agenda-day { scroll-margin-top: calc(var(--trainer-shell-offset, 0px) + 110px); }
+}
+
+@media (max-width: 430px) {
+  .ops-trainer-view-toggle svg { display: none; }
+  .ops-trainer-view-toggle { padding-inline: 10px; }
+}

@@ -4,7 +4,7 @@ from common.schedule_palette import SCHEDULE_COLOR_KEYS
 
 
 OPENAPI_VERSION = "3.1.0"
-API_VERSION = "2026-10-16"
+API_VERSION = "2026-11-03"
 PATH_PARAMETER = re.compile(r"<(?:(?P<converter>\w+):)?(?P<name>\w+)>")
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 GROUP_COLOR_KEY_SCHEMA = {
@@ -218,8 +218,77 @@ def build_openapi_schema():
                 operation["x-page-size-500"] = (
                     "blocked pending endpoint query and payload budgets"
                 )
+            if method == "GET" and path == "/api/admin/clients/{client_id}/":
+                operation_parameters.append(_query_parameter(
+                    "include_unmarked", values=("1",),
+                    description="Include completed unmarked roster sessions in a separate unmarked_attendance array."))
+            if method == "GET" and path == "/api/trainer/sessions/":
+                operation_parameters.extend([
+                    _query_parameter("date_from"), _query_parameter("date_to"),
+                    _query_parameter("status", values=("active", "cancelled")),
+                    _query_parameter("page", value_type="integer", minimum=1),
+                    _query_parameter("page_size", value_type="integer", minimum=1,
+                                     description="Maximum 200; supplying page or page_size adds pagination to the response."),
+                ])
             if operation_parameters:
                 operation["parameters"] = operation_parameters
+            if "/notes/" in path and "/participants/" in path:
+                operation["description"] = (
+                    "Internal participant notes. Admins may access any participant; trainers must be assigned "
+                    "to the specified session and the participant must be on its roster. Cancelled sessions "
+                    "allow GET only. Client accounts have no access."
+                )
+                if method in {"POST", "PATCH"}:
+                    operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {
+                        "type": "object", "required": ["body"], "properties": {
+                            "body": {"type": "string", "minLength": 1, "maxLength": 4000},
+                        },
+                    }}}}
+                if method == "GET" or method in {"POST", "PATCH"}:
+                    note_schema = {"type": "object", "properties": {
+                        "id": {"type": "integer"}, "body": {"type": "string"},
+                        "author": {"type": ["string", "null"]}, "imported": {"type": "boolean"},
+                        "created_at": {"type": "string", "format": "date-time"},
+                        "updated_at": {"type": "string", "format": "date-time"},
+                        "edited": {"type": "boolean"}, "can_manage": {"type": "boolean"},
+                    }}
+                    response_schema = {"type": "object", "properties": {"notes": {"type": "array", "items": note_schema}}} if method == "GET" else note_schema
+                    operation["responses"]["200" if method == "GET" or method == "PATCH" else "201"] = {
+                        "description": "Private response; Cache-Control: private, no-store",
+                        "content": {"application/json": {"schema": response_schema}},
+                    }
+            if path in {"/api/admin/payroll/rates/", "/api/admin/payroll/rates/{rate_id}/"} and method in {"POST", "PATCH"}:
+                operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {
+                    "type": "object", "properties": {
+                        "name": {"type": "string"}, "session_type": {"enum": ["group", "individual", "split"]},
+                        "base_amount_minor": {"type": "integer", "minimum": 0},
+                        "currency": {"enum": ["PLN", "EUR", "USD"]},
+                        "min_clients_threshold": {"type": ["integer", "null"], "minimum": 0},
+                        "extra_client_amount_minor": {"type": ["integer", "null"], "minimum": 0},
+                        "effective_from": {"type": "string", "format": "date"},
+                    },
+                }}}}
+            if path == "/api/admin/payroll/assign-rates/" and method == "POST":
+                operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {
+                    "type": "object", "required": ["rate_id", "trainer_ids", "effective_from"],
+                    "properties": {"rate_id": {"type": "integer"},
+                                   "trainer_ids": {"type": "array", "items": {"type": "integer"}},
+                                   "location": {"type": "string"},
+                                   "effective_from": {"type": "string", "format": "date"}},
+                }}}}
+            if method == "POST" and path == "/api/admin/participants/{participant_id}/photo/":
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"multipart/form-data": {"schema": {
+                        "type": "object", "required": ["photo"],
+                        "properties": {"photo": {"type": "string", "format": "binary"}},
+                    }}},
+                }
+            if method == "GET" and path.endswith("/photo/"):
+                operation["responses"]["200"] = {
+                    "description": "Protected JPEG; private, no-store",
+                    "content": {"image/jpeg": {"schema": {"type": "string", "format": "binary"}}},
+                }
             if method in {"POST", "PATCH"} and path in {
                 "/api/admin/groups/", "/api/admin/groups/{group_id}/",
             }:

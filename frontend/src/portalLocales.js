@@ -252,6 +252,12 @@ export const PORTAL_MESSAGE_ROWS = Object.freeze({
   'calendar.weekdays': ['Дни недели', 'Дні тижня', 'Dni tygodnia', 'Days of the week'],
   'calendar.sessionCount': ['Занятий: {count}', 'Занять: {count}', 'Zajęcia: {count}', 'Sessions: {count}'],
   'calendar.noSessions': ['Нет занятий', 'Немає занять', 'Brak zajęć', 'No sessions'],
+  'calendar.hasSessions': ['Есть занятия', 'Є заняття', 'Są zajęcia', 'Has sessions'],
+  'calendar.activityLoading': ['Загрузка занятий…', 'Завантаження занять…', 'Wczytywanie zajęć…', 'Loading sessions…'],
+  'calendar.activityUnavailable': ['Данные о занятиях недоступны', 'Дані про заняття недоступні', 'Dane o zajęciach są niedostępne', 'Session data unavailable'],
+  'calendar.listStartDate': ['Список с даты', 'Список від дати', 'Lista od daty', 'List from date'],
+  'calendar.showMore': ['Показать ещё', 'Показати ще', 'Pokaż więcej', 'Show more'],
+  'calendar.retry': ['Повторить', 'Повторити', 'Ponów', 'Retry'],
   'calendar.empty': ['Занятий пока нет.', 'Занять поки немає.', 'Brak zajęć.', 'No sessions yet.'],
 
   'toast.close': ['Закрыть уведомление', 'Закрити сповіщення', 'Zamknij powiadomienie', 'Close notification'],

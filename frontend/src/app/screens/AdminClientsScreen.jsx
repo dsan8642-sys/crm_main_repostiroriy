@@ -19,6 +19,7 @@ import { ListFeedback, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, EntityMobileCard } from '../EntityListPrimitives.jsx'
 import { clientActivity, formatEntityDate, formatEntityMoney } from '../entityListContracts.js'
 import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
+import { useSessionViewState } from '../uiLifecycle.jsx'
 
 const CLIENT_FIELD_MAP = {
   'account.first_name': 'firstName',
@@ -139,8 +140,11 @@ export function createAdminClientsScreen(components, icons, reloadRoleData, admi
     const localeTag = adminLocaleTag(locale)
     const clientListLayout = useClientListLayout()
     const groups = adminData.groups || []
-    const [scope, setScope] = useState('active')
-    const [sort, setSort] = useState(null)
+    const [listView, setListView] = useSessionViewState(`admin.${currentUser?.id || currentUser?.username || 'session'}.clients`, { scope: 'active', sort: null })
+    const scope = listView.scope === 'blacklist' ? 'blacklist' : 'active'
+    const sort = CLIENT_SORT_KEYS.includes(listView.sort?.key) && ['forward', 'reverse'].includes(listView.sort?.direction) ? listView.sort : null
+    const setScope = (value) => setListView((current) => ({ ...current, scope: value }))
+    const setSort = (value) => setListView((current) => ({ ...current, sort: value }))
     const clientList = useScreenList({
       path: '/api/admin/clients/',
       itemKey: 'clients',

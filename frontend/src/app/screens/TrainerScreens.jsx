@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiErrorMessage } from '../../api.js'
 import { formatDate, formatShortDate, formatTime, mapTrainerHistoryRows, mapTrainerSession } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
-import { calendarRange, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday, sessionIsoDate } from '../scheduleContracts.js'
+import { calendarRange, dateFromIso, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday, sessionIsoDate, validIsoDate } from '../scheduleContracts.js'
+import { DateField } from '../DateTimeField.jsx'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
@@ -11,6 +12,8 @@ import { formatEntityDate, groupRowsByDate } from '../entityListContracts.js'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
 import { AttendanceSaveStatus, CompactStatusRow, TodaySessionCard } from '../TodayPrimitives.jsx'
 import { GuideScreen } from './GuideScreen.jsx'
+import { PhotoAvatar, photoUrl } from '../ParticipantPhoto.jsx'
+import { ParticipantNotes } from '../ParticipantNotes.jsx'
 import { useLocale } from '../../i18n.jsx'
 import { uiLocaleTag } from '../../localeContracts.js'
 import './TrainerScreens.css'
@@ -89,6 +92,10 @@ export function createTrainerSessionScreen(components, icons, trainerData = {}) 
             id: String(student.id),
             studentId: student.id,
             name: student.full_name,
+            birthDate: student.birth_date,
+            hasNotes: Boolean(student.has_internal_notes),
+            canWriteNotes: Boolean(student.can_write_notes),
+            photoVersion: student.photo_version,
             emergency: student.emergency_contact_name || student.client_phone || '',
             med: '',
             status: student.attendance?.status || null,
@@ -189,11 +196,12 @@ export function createTrainerSessionScreen(components, icons, trainerData = {}) 
         <div className="card ops-attendance-list" style={{ overflow: 'hidden' }}>
           {rows.map((row, index) => (
             <div key={row.id} className="ops-attendance-card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none', background: row.status ? 'transparent' : 'var(--amber-50)' }}>
-              <Avatar name={row.name} size={32} />
+              <PhotoAvatar Avatar={Avatar} Dialog={Dialog} name={row.name} src={photoUrl(row.studentId, row.photoVersion, sessionId)} size={40} avatarStyle={{ borderRadius: 12 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="strong">{row.name}</div>
                 <div className="muted" style={{ fontSize: 'var(--fs-2xs)' }}>{t('trainer.attendance.sessionScope')}</div>
               </div>
+              <ParticipantNotes participantId={row.studentId} name={row.name} birthDate={row.birthDate} hasNotes={row.hasNotes} showAge readOnly={!row.canWriteNotes || sessionMeta.cancelled} endpoint={`/api/trainer/sessions/${sessionId}/participants/${row.studentId}/notes/`} />
               {!sessionMeta.cancelled ? <div id={`trainer-attendance-row-${row.id}`} className="ops-attendance-actions" role="group" aria-describedby={rowErrors[row.id] ? `trainer-attendance-row-${row.id}-error` : undefined} style={{ display: 'flex', gap: 6 }}>
                 {options.map((status) => {
                   const on = row.status === status
@@ -206,6 +214,7 @@ export function createTrainerSessionScreen(components, icons, trainerData = {}) 
                       variant={on ? 'primary' : 'secondary'}
                       loading={busyId === row.id}
                       disabled={sessionMeta.cancelled || busyId === row.id}
+                      style={{ minWidth: 0, minHeight: 44, height: 'auto', padding: '6px 8px', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.2 }}
                       aria-pressed={on}
                       onClick={() => mark(row, status)}
                     >
@@ -312,40 +321,147 @@ export function createTrainerSessionsScreen(components, icons, trainerData = {})
 }
 
 export function createTrainerScheduleScreen(components, icons) {
-  const { Banner } = components
-  return function ApiTrainerSchedule({ go }) {
-    const { t } = useLocale()
-    const [sessions, setSessions] = useState([])
-    const [error, setError] = useState(null)
-    const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
-    const [focusDate, setFocusDate] = useState(localToday())
-    const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])
+  const { Banner, Button } = components
+  return function ApiTrainerSchedule({ go, scheduleRoute = {}, replaceScheduleQuery }) {
+    const { locale, t } = useLocale()
+    const pageRef = useRef(null)
+    const listRef = useRef(null)
+    const [calendarResult, setCalendarResult] = useState({ key: null, sessions: [], error: null })
+    const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 800px)').matches)
+    const [listRows, setListRows] = useState([])
+    const [listPage, setListPage] = useState(1)
+    const [listHasNext, setListHasNext] = useState(false)
+    const [listLoading, setListLoading] = useState(false)
+    const [listError, setListError] = useState(null)
+    const [listRetry, setListRetry] = useState(0)
+    const [visibleListDate, setVisibleListDate] = useState(null)
+    const displayMode = ['calendar', 'list'].includes(scheduleRoute.display) ? scheduleRoute.display : 'calendar'
+    const viewMode = ['week', 'month'].includes(scheduleRoute.mode) ? scheduleRoute.mode : DEFAULT_SCHEDULE_VIEW
+    const focusDate = validIsoDate(scheduleRoute.date) ? scheduleRoute.date : localToday()
+    const setDisplayMode = (value) => replaceScheduleQuery?.(
+      value === 'calendar' && mobile && visibleListDate ? { display: value, date: visibleListDate } : { display: value },
+    )
+    const setViewMode = (value) => replaceScheduleQuery?.({ mode: value })
+    const setFocusDate = (value) => replaceScheduleQuery?.({ date: value })
+    const range = useMemo(() => calendarRange(focusDate, mobile ? 'week' : viewMode), [focusDate, mobile, viewMode])
+    const rangeKey = `${range.dateFrom}:${range.dateTo}`
+    const calendarLoading = calendarResult.key !== rangeKey
+    const sessions = calendarLoading ? [] : calendarResult.sessions
+    const error = calendarLoading ? null : calendarResult.error
+    const activityDates = useMemo(() => new Set(sessions.filter((session) => !session.isCancelled && session.status !== 'cancelled').map(sessionIsoDate)), [sessions])
+
+    useEffect(() => {
+      const query = window.matchMedia('(max-width: 800px)')
+      const update = () => setMobile(query.matches)
+      query.addEventListener('change', update)
+      return () => query.removeEventListener('change', update)
+    }, [])
+
+    useEffect(() => {
+      if (!mobile || !pageRef.current) return undefined
+      const sidebar = document.querySelector('.ops-sidebar')
+      if (!sidebar) return undefined
+      const update = () => {
+        const rect = sidebar.getBoundingClientRect()
+        pageRef.current?.style.setProperty('--trainer-shell-offset', `${rect.width >= window.innerWidth - 1 ? rect.height : 0}px`)
+      }
+      const observer = new ResizeObserver(update)
+      observer.observe(sidebar)
+      window.addEventListener('resize', update)
+      update()
+      return () => { observer.disconnect(); window.removeEventListener('resize', update) }
+    }, [mobile])
 
     useEffect(() => {
       let active = true
       const query = new URLSearchParams({ date_from: range.dateFrom, date_to: range.dateTo })
       api.get(`/api/trainer/sessions/?${query}`)
-        .then((payload) => { if (active) setSessions((payload.sessions || []).map(mapTrainerSession)) })
-        .catch((err) => { if (active) setError(apiErrorMessage(err, t('trainer.sessions.loadFailed'))) })
+        .then((payload) => { if (active) setCalendarResult({ key: rangeKey, sessions: (payload.sessions || []).map(mapTrainerSession), error: null }) })
+        .catch((err) => { if (active) setCalendarResult({ key: rangeKey, sessions: [], error: apiErrorMessage(err, t('trainer.sessions.loadFailed')) }) })
       return () => { active = false }
-    }, [range.dateFrom, range.dateTo, t])
+    }, [range.dateFrom, range.dateTo, rangeKey, t])
 
-    return <div className="page page-wide">
-      <div className="page-head">
+    useEffect(() => {
+      setListRows([])
+      setListPage(1)
+      setListHasNext(false)
+      setVisibleListDate(null)
+    }, [focusDate])
+
+    useEffect(() => {
+      if (!mobile || displayMode !== 'list') return undefined
+      let active = true
+      setListLoading(true)
+      setListError(null)
+      const query = new URLSearchParams({ date_from: focusDate, status: 'active', page: String(listPage), page_size: '50' })
+      api.get(`/api/trainer/sessions/?${query}`)
+        .then((payload) => {
+          if (!active) return
+          const incoming = (payload.sessions || []).map(mapTrainerSession)
+          setListRows((current) => {
+            const previous = listPage === 1 ? [] : current
+            const seen = new Set(previous.map((row) => row.id))
+            return [...previous, ...incoming.filter((row) => !seen.has(row.id))]
+          })
+          setListHasNext(Boolean(payload.pagination?.has_next))
+          setListLoading(false)
+        })
+        .catch((err) => { if (active) { setListError(apiErrorMessage(err, t('trainer.sessions.loadFailed'))); setListLoading(false) } })
+      return () => { active = false }
+    }, [mobile, displayMode, focusDate, listPage, listRetry, t])
+
+    useEffect(() => {
+      if (!mobile || displayMode !== 'list') return undefined
+      const update = () => {
+        const threshold = (pageRef.current?.querySelector('.ops-trainer-mobile-header')?.getBoundingClientRect().bottom || 0) + 4
+        const first = [...(listRef.current?.querySelectorAll('.ops-agenda-day[data-date]') || [])]
+          .find((day) => day.getBoundingClientRect().bottom > threshold)
+        if (first) setVisibleListDate(first.dataset.date)
+      }
+      window.addEventListener('scroll', update, { passive: true })
+      window.addEventListener('resize', update)
+      update()
+      return () => { window.removeEventListener('scroll', update); window.removeEventListener('resize', update) }
+    }, [mobile, displayMode, listRows])
+
+    const monthDate = displayMode === 'list' ? visibleListDate || focusDate : focusDate
+    const monthLabel = dateFromIso(monthDate).toLocaleDateString(uiLocaleTag(locale), { month: 'long' })
+
+    return <div className="page page-wide ops-trainer-schedule-page" ref={pageRef}>
+      <div className="page-head ops-trainer-schedule-head">
         <div><h1 className="page-title">{t('runtime.trainer.schedule.title')}</h1><p className="page-desc">{t('runtime.trainer.schedule.desc')}</p></div>
-        <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={icons} />
+        {mobile && displayMode === 'calendar' ? <button type="button" className="ops-trainer-view-toggle" data-testid="trainer-mobile-view-list" onClick={() => setDisplayMode('list')}>
+          {icons?.List && <icons.List size={16} aria-hidden="true" />}{t('calendar.list')}
+        </button> : !mobile && <ScheduleViewSwitcher displayMode={displayMode} setDisplayMode={setDisplayMode} icons={icons} />}
       </div>
-      {error && <Banner tone="danger" style={{ marginBottom: 14 }} onClose={() => setError(null)}>{error}</Banner>}
-      <div className="ops-calendar-toolbar"><CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} mobileArrows /></div>
+      {error && (!mobile || displayMode === 'calendar') && <Banner tone="danger" style={{ marginBottom: 14 }}>{error}</Banner>}
+      {!mobile && <><div className="ops-calendar-toolbar ops-trainer-desktop-controls"><CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode={viewMode} setViewMode={setViewMode} mobileArrows /></div>
       <div className="ops-schedule-desktop-content">
         {displayMode === 'calendar'
           ? <ScheduleCalendar sessions={sessions} focusDate={focusDate} viewMode={viewMode} setFocusDate={setFocusDate} setViewMode={setViewMode} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} ariaLabel={t('trainer.sessions.calendarLabel')} />
           : <ScheduleList sessions={sessions} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-schedule-list" emptyLabel={t('trainer.sessions.empty')} />}
-      </div>
-      <div className="ops-schedule-mobile-content">
-        <ScheduleList groupByDate icons={icons} sessions={sessions.filter((session) => sessionIsoDate(session) === focusDate)} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-mobile-schedule-agenda" emptyLabel={t('trainer.sessions.empty')} />
-      </div>
+      </div></>}
+      {mobile && <div className="ops-schedule-mobile-content">
+        <div className="ops-trainer-mobile-header">
+          <strong data-testid="trainer-mobile-month">{monthLabel}</strong>
+          {displayMode === 'list' && <button type="button" className="ops-trainer-view-toggle" data-testid="trainer-mobile-view-calendar" onClick={() => setDisplayMode('calendar')}>
+            {icons?.Calendar && <icons.Calendar size={16} aria-hidden="true" />}{t('calendar.calendar')}
+          </button>}
+        </div>
+        {displayMode === 'calendar' ? <>
+          <div className="ops-trainer-mobile-navigation" aria-busy={calendarLoading}>
+            <CalendarNavigation focusDate={focusDate} setFocusDate={setFocusDate} viewMode="week" setViewMode={setViewMode} activityDates={activityDates} activityLoading={calendarLoading} activityError={Boolean(error)} />
+          </div>
+          {calendarLoading ? <div className="empty" role="status">{t('calendar.activityLoading')}</div>
+            : !error && <ScheduleList groupByDate icons={icons} sessions={sessions.filter((session) => sessionIsoDate(session) === focusDate)} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-mobile-schedule-agenda" emptyLabel={t('trainer.sessions.empty')} />}
+        </> : <>
+          <div className="ops-trainer-list-start"><DateField id="trainer-list-start-date" label={t('calendar.listStartDate')} value={focusDate} onChange={setFocusDate} required /></div>
+          {listError && <Banner tone="danger">{listError}</Banner>}
+          <div ref={listRef}>{(listRows.length || (!listLoading && !listError)) && <ScheduleList groupByDate icons={icons} sessions={listRows} onOpenSession={(session) => go('session', { trainerSessionId: session.sessionId })} testId="trainer-mobile-schedule-list" emptyLabel={t('trainer.sessions.empty')} />}</div>
+          {listLoading && <div className="empty" role="status">{t('calendar.activityLoading')}</div>}
+          {!listLoading && (listHasNext || listError) && <Button onClick={() => listError ? setListRetry((value) => value + 1) : setListPage((page) => page + 1)}>{listError ? t('calendar.retry') : t('calendar.showMore')}</Button>}
+        </>}
+      </div>}
     </div>
   }
 }

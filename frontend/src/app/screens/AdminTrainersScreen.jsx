@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { adminLocaleTag, adminTranslator } from '../../adminLocales.js'
+import { adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage } from '../../api.js'
 import { useLocale } from '../../i18n.jsx'
 import { clearFieldError, fieldErrorsFromApi, focusFirstFieldError, formErrorMessage } from '../formErrors.js'
@@ -9,7 +9,6 @@ import { DateField } from '../DateTimeField.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { AccessButtons, AccessCodeCard } from '../AccessControls.jsx'
 import { scheduleColorStyle } from '../schedulePalette.js'
-import { validIsoDate } from '../scheduleContracts.js'
 import { mapAdminTrainerRows } from '../../mappers.js'
 import { ListFeedback, ListPagination, ListToolbar, useScreenList } from '../listFoundation.jsx'
 import { ActionPopover, ContextBackButton, EntityMobileCard } from '../EntityListPrimitives.jsx'
@@ -19,19 +18,7 @@ const TRAINER_FIELD_IDS = {
   username: 'admin-trainer-username', email: 'admin-trainer-email',
   phone: 'admin-trainer-phone', isActive: 'admin-trainer-active',
 }
-const RULE_FIELD_IDS = {
-  schemeId: 'admin-trainer-payroll-scheme', sessionType: 'admin-trainer-payroll-session-type',
-  baseAmount: 'admin-trainer-payroll-base', threshold: 'admin-trainer-payroll-threshold',
-  extraAmount: 'admin-trainer-payroll-extra',
-}
-const PERIOD_FIELD_IDS = {
-  dateFrom: 'admin-trainer-payroll-date-from',
-  dateTo: 'admin-trainer-payroll-date-to', location: 'admin-trainer-payroll-location',
-}
-
-const today = () => new Date().toISOString().slice(0, 10)
-const monthStart = () => `${today().slice(0, 8)}01`
-const money = (minor = 0, currency = 'PLN', localeTag = 'ru-RU') => `${(Number(minor) / 100).toLocaleString(localeTag, { minimumFractionDigits: 2 })} ${currency}`
+const today = () => new Date().toLocaleDateString('en-CA')
 
 export function createAdminTrainersScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Table, StatusPill, Avatar, Button, Banner, Input, Badge, Select, Checkbox, Dialog } = components
@@ -40,7 +27,6 @@ export function createAdminTrainersScreen(components, icons, reloadRoleData, adm
   return function ApiAdminTrainers({ go, currentUser }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
-    const localeTag = adminLocaleTag(locale)
     const trainerList = useScreenList({
       path: '/api/admin/trainers/',
       itemKey: 'trainers',
@@ -54,6 +40,7 @@ export function createAdminTrainersScreen(components, icons, reloadRoleData, adm
     const rows = trainerList.rows
     const groups = adminData.groups || []
     const sessions = adminData.sessions || []
+    const locations = (adminData.locations || []).filter((location) => location.isActive !== false && location.is_active !== false)
     const [selected, setSelected] = useState(null)
     const [tab, setTab] = useState('profile')
     const [creating, setCreating] = useState(false)
@@ -65,33 +52,25 @@ export function createAdminTrainersScreen(components, icons, reloadRoleData, adm
     const [error, setError] = useState(null)
     const [busy, setBusy] = useState(false)
     const [accessInfo, setAccessInfo] = useState(null)
-    const [payroll, setPayroll] = useState({ schemes: [], rules: [], assignments: [], periods: [] })
-    const [period, setPeriod] = useState({ dateFrom: monthStart(), dateTo: today(), location: '' })
-    const [periodErrors, setPeriodErrors] = useState({})
-    const [rule, setRule] = useState({ schemeId: '', sessionType: 'group', baseAmount: '', threshold: '0', extraAmount: '' })
-    const [ruleErrors, setRuleErrors] = useState({})
+    const [payroll, setPayroll] = useState({ rates: [], assignments: [] })
+    const [rateAssignment, setRateAssignment] = useState({ rateId: '', location: '', effectiveFrom: today(), confirmed: false })
     const [payrollAction, setPayrollAction] = useState(null)
-    const [payrollBaseline, setPayrollBaseline] = useState(null)
     const [deactivateConfirm, setDeactivateConfirm] = useState(false)
     const [archivePreview, setArchivePreview] = useState(null)
 
     const trainerGroups = useMemo(() => groups.filter((group) => String(group.defaultTrainerId) === String(selected?.trainerId)), [groups, selected])
     const trainerSessions = useMemo(() => sessions.filter((session) => String(session.trainerId) === String(selected?.trainerId)), [sessions, selected])
     const trainerAssignments = payroll.assignments.filter((item) => String(item.trainer_id) === String(selected?.trainerId))
-    const trainerTotals = payroll.periods.map((item) => ({ ...item, total: item.totals_by_trainer?.find((row) => String(row.trainer_id) === String(selected?.trainerId)) }))
-      .filter((item) => item.total)
 
     useEffect(() => {
       if (!selected || tab !== 'payroll') return
       let active = true
       Promise.all([
-        api.get('/api/admin/payroll/schemes/'),
-        api.get('/api/admin/payroll/rules/'),
+        api.get('/api/admin/payroll/rates/'),
         api.get(`/api/admin/payroll/assignments/?trainer_id=${selected.trainerId}`),
-        api.get('/api/admin/payroll/periods/'),
-      ]).then(([schemes, rules, assignments, periods]) => {
+      ]).then(([rates, assignments]) => {
         if (!active) return
-        setPayroll({ schemes: schemes.schemes || [], rules: rules.rules || [], assignments: assignments.assignments || [], periods: periods.periods || [] })
+        setPayroll({ rates: rates.rates || [], assignments: assignments.assignments || [] })
       }).catch((err) => active && setError(apiErrorMessage(err, t('trainers.loadPayrollError'))))
       return () => { active = false }
     }, [selected, tab, t])
@@ -141,92 +120,24 @@ export function createAdminTrainersScreen(components, icons, reloadRoleData, adm
       setForm((current) => ({ ...current, [field]: value }))
     }
 
-    function updateRule(field, value) {
-      setRule((current) => ({ ...current, [field]: value }))
-      setRuleErrors((current) => clearFieldError(current, field))
-    }
-
-    function updatePeriod(field, value) {
-      setPeriod((current) => ({ ...current, [field]: value }))
-      setPeriodErrors((current) => clearFieldError(current, field))
-    }
-
-    async function createSchemeAndRule() {
-      const nextErrors = {}
-      const baseAmount = Number(String(rule.baseAmount || '').replace(',', '.'))
-      const threshold = Number(rule.threshold)
-      const extraAmount = Number(String(rule.extraAmount || '').replace(',', '.'))
-      if (!Number.isFinite(baseAmount) || baseAmount < 0) nextErrors.baseAmount = t('trainers.baseInvalid')
-      if (rule.sessionType === 'group' && (!Number.isInteger(threshold) || threshold < 0)) nextErrors.threshold = t('trainers.thresholdInvalid')
-      if (rule.sessionType === 'group' && (!Number.isFinite(extraAmount) || extraAmount < 0)) nextErrors.extraAmount = t('trainers.extraInvalid')
-      if (Object.keys(nextErrors).length) {
-        setRuleErrors(nextErrors); setError(null)
-        focusFirstFieldError(nextErrors, RULE_FIELD_IDS)
+    async function assignExistingRate() {
+      const type = payroll.rates.find((rate) => String(rate.id) === String(rateAssignment.rateId))?.session_type
+      if (!rateAssignment.confirmed && trainerAssignments.some((item) => item.session_type === type && item.location === rateAssignment.location && (!item.effective_to || item.effective_to >= rateAssignment.effectiveFrom))) {
+        setRateAssignment((current) => ({ ...current, confirmed: true }))
         return
       }
-      setBusy(true); setError(null); setRuleErrors({})
+      setBusy(true); setError(null)
       try {
-        let schemeId = rule.schemeId
-        if (!schemeId) {
-          const scheme = await api.post('/api/admin/payroll/schemes/', { name: t('trainers.schemeName', { name: selected.name }), location: '' })
-          schemeId = scheme.id
-          await api.post('/api/admin/payroll/assignments/', { trainer_id: selected.trainerId, scheme_id: schemeId, effective_from: today() })
-        }
-        await api.post('/api/admin/payroll/rules/', {
-          scheme_id: schemeId,
-          session_type: rule.sessionType,
-          rule_type: rule.sessionType,
-          base_amount_minor: Math.round(baseAmount * 100),
-          currency: 'PLN',
-          min_clients_threshold: rule.sessionType === 'group' ? threshold : null,
-          extra_client_amount_minor: rule.sessionType === 'group' ? Math.round(extraAmount * 100) : null,
+        await api.post('/api/admin/payroll/assign-rates/', {
+          rate_id: Number(rateAssignment.rateId), trainer_ids: [selected.trainerId],
+          location: rateAssignment.location, effective_from: rateAssignment.effectiveFrom,
         })
-        setMessage(t('trainers.rateSaved'))
-        setRule((current) => ({ ...current, schemeId, baseAmount: '', extraAmount: '' }))
+        const assignments = await api.get(`/api/admin/payroll/assignments/?trainer_id=${selected.trainerId}`)
+        setPayroll((current) => ({ ...current, assignments: assignments.assignments || [] }))
         setPayrollAction(null)
-        setPayrollBaseline(null)
-        const [rulesPayload, assignmentsPayload] = await Promise.all([
-          api.get('/api/admin/payroll/rules/'),
-          api.get(`/api/admin/payroll/assignments/?trainer_id=${selected.trainerId}`),
-        ])
-        setPayroll((current) => ({ ...current, rules: rulesPayload.rules || [], assignments: assignmentsPayload.assignments || [] }))
-      } catch (err) {
-        const nextFieldErrors = fieldErrorsFromApi(err, {
-          scheme_id: 'schemeId', session_type: 'sessionType', rule_type: 'sessionType',
-          base_amount_minor: 'baseAmount', min_clients_threshold: 'threshold',
-          extra_client_amount_minor: 'extraAmount',
-        })
-        setRuleErrors(nextFieldErrors)
-        setError(formErrorMessage(err, t('trainers.rateError')))
-        focusFirstFieldError(nextFieldErrors, RULE_FIELD_IDS)
-      } finally { setBusy(false) }
-    }
-
-    async function calculatePayroll() {
-      const nextErrors = {}
-      if (!validIsoDate(period.dateFrom)) nextErrors.dateFrom = t('trainers.startDateInvalid')
-      if (!validIsoDate(period.dateTo)) nextErrors.dateTo = t('trainers.endDateInvalid')
-      if (validIsoDate(period.dateFrom) && validIsoDate(period.dateTo) && period.dateTo < period.dateFrom) nextErrors.dateTo = t('trainers.dateOrderInvalid')
-      if (Object.keys(nextErrors).length) {
-        setPeriodErrors(nextErrors); setError(null)
-        focusFirstFieldError(nextErrors, PERIOD_FIELD_IDS)
-        return
-      }
-      setBusy(true); setError(null); setPeriodErrors({})
-      try {
-        const result = await api.post('/api/admin/payroll/periods/', { date_from: period.dateFrom, date_to: period.dateTo, location: period.location })
-        setMessage(t('trainers.payrollCreated', { amount: money(result.summary?.total_amount_minor, result.summary?.currency, localeTag) }))
-        setPayroll((current) => ({ ...current, periods: [result, ...current.periods.filter((item) => item.id !== result.id)] }))
-        setPayrollAction(null)
-        setPayrollBaseline(null)
-      } catch (err) {
-        const nextFieldErrors = fieldErrorsFromApi(err, {
-          date_from: 'dateFrom', date_to: 'dateTo', location: 'location',
-        })
-        setPeriodErrors(nextFieldErrors)
-        setError(formErrorMessage(err, t('trainers.payrollError')))
-        focusFirstFieldError(nextFieldErrors, PERIOD_FIELD_IDS)
-      } finally { setBusy(false) }
+        setMessage(t('trainers.rateAssigned'))
+      } catch (err) { setError(formErrorMessage(err, t('trainers.assignError'))) }
+      finally { setBusy(false) }
     }
 
     async function accessAction(action) {
@@ -322,32 +233,23 @@ export function createAdminTrainersScreen(components, icons, reloadRoleData, adm
             <div className="ops-tabs" role="tablist">{[['profile', t('trainers.overview')], ['schedule', t('trainers.scheduleCount', { count: trainerSessions.length })], ['payroll', t('trainers.payrollTab')]].map(([value, label]) => <button key={value} type="button" data-testid={`admin-trainer-tab-${value}`} role="tab" aria-selected={tab === value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>{label}</button>)}</div>
             {tab === 'profile' && <div className="ops-detail-grid"><div><div className="eyebrow">{t('common.groups')}</div><div className="ops-trainer-group-list">{trainerGroups.map((group) => <button key={group.id} className="ops-detail-row ops-trainer-group-link" type="button" data-color-key={group.hasScheduleColor ? group.colorKey : 'uncolored'} style={group.hasScheduleColor ? scheduleColorStyle(group.colorKey) : undefined} onClick={() => go?.('groups', { groupId: group.groupId })}><strong>{group.name}</strong><span className="ops-trainer-group-count">{t('trainers.groupCount', { count: group.students })}</span></button>)}{!trainerGroups.length && <div className="empty">{t('trainers.noGroups')}</div>}</div></div><div><div className="eyebrow">{t('trainers.upcoming')}</div>{trainerSessions.slice(0, 5).map((session) => <button key={session.id} type="button" className="ops-detail-row" onClick={() => go?.('attendance', { sessionId: session.sessionId })}><strong>{session.date} · {session.start}</strong><span>{session.group} · {session.location}</span></button>)}{!trainerSessions.length && <div className="empty">{t('trainers.noSessions')}</div>}</div></div>}
             {tab === 'schedule' && <div className="ops-card-list">{trainerSessions.map((session) => <button key={session.id} type="button" className={`ops-session-tile${session.isCancelled ? ' is-cancelled' : ''}`} data-color-key={session.colorKey} style={scheduleColorStyle(session.colorKey)} onClick={() => go?.('attendance', { sessionId: session.sessionId })}><span><strong>{session.date} · {session.start}-{session.end}</strong><small>{session.group} · {session.location}</small></span><Badge tone={session.isCancelled ? 'danger' : 'primary'}>{session.isCancelled ? t('trainers.cancelled') : t('trainers.openSession')}</Badge></button>)}{!trainerSessions.length && <div className="empty">{t('trainers.scheduleEmpty')}</div>}</div>}
-            {tab === 'payroll' && <div className="ops-detail-grid">
-              <div><div className="ops-section-head"><div className="eyebrow">{t('trainers.rates')}</div><Button size="sm" variant="primary" onClick={() => { setPayrollAction('rule'); setPayrollBaseline({ ...rule }) }}>{t('trainers.createRate')}</Button></div>{payroll.rules.filter((item) => trainerAssignments.some((assignment) => assignment.scheme_id === item.scheme_id)).map((item) => <div className="ops-detail-row" key={item.id}><strong>{{ group: t('trainers.typeGroup'), individual: t('trainers.typeIndividual'), split: t('trainers.typeSplit') }[item.session_type]}</strong><span>{money(item.base_amount_minor, item.currency, localeTag)}{item.session_type === 'group' ? t('trainers.extraAfter', { amount: money(item.extra_client_amount_minor, item.currency, localeTag), threshold: item.min_clients_threshold }) : ''}</span></div>)}</div>
-              <div><div className="ops-section-head"><div className="eyebrow">{t('trainers.payrollCalculations')}</div><Button size="sm" variant="primary" onClick={() => { setPayrollAction('period'); setPayrollBaseline({ ...period }) }}>{t('trainers.calculatePeriod')}</Button></div>{trainerTotals.map((item) => <div className="ops-detail-row" key={item.id}><strong>{item.date_from} - {item.date_to}</strong><span>{money(item.total.total_amount_minor, item.total.currency, localeTag)}</span></div>)}</div>
+            {tab === 'payroll' && <div className="ops-form-stack">
+              <div className="ops-section-head"><strong>{t('trainers.assignedRates')}</strong><Button size="sm" variant="primary" onClick={() => { setRateAssignment({ rateId: '', location: '', effectiveFrom: today(), confirmed: false }); setPayrollAction('assign') }}>{t('trainers.assignRate')}</Button></div>
+              {trainerAssignments.map((item) => <div className="ops-detail-row" key={item.id}><strong>{item.rate} · {t(`trainers.type${item.session_type === 'group' ? 'Group' : item.session_type === 'individual' ? 'Individual' : 'Split'}`)}</strong><span>{item.location || t('trainers.allLocations')} · {item.effective_from}{item.effective_to ? ` — ${item.effective_to}` : ''}</span></div>)}
+              {!trainerAssignments.length && <p className="muted">{t('trainers.noRate')}</p>}
             </div>}
           </section>
         )}
 
-        <FormModal open={payrollAction === 'rule'} title={t('trainers.rateTitle')} size="sm" busy={busy} dirty={Boolean(payrollBaseline) && JSON.stringify(rule) !== JSON.stringify(payrollBaseline)} onRequestClose={() => { if (payrollBaseline) setRule(payrollBaseline); setPayrollAction(null); setPayrollBaseline(null); setRuleErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy || !rule.baseAmount} onClick={createSchemeAndRule}>{t('trainers.saveRate')}</Button></>}>
-          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
+        <FormModal open={payrollAction === 'assign'} title={t('trainers.assignRate')} size="sm" busy={busy} onRequestClose={() => { setPayrollAction(null); setError(null) }} footer={<><Button variant="secondary" onClick={() => setPayrollAction(null)}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy || !rateAssignment.rateId} onClick={assignExistingRate}>{t(rateAssignment.confirmed ? 'trainers.confirmReplaceRate' : 'common.save')}</Button></>}>
+          {error && <Banner tone="danger" onClose={() => setError(null)}>{error}</Banner>}
           <div className="ops-form-stack">
-            <Select id={RULE_FIELD_IDS.schemeId} label={t('trainers.scheme')} value={rule.schemeId} error={ruleErrors.schemeId} onChange={(event) => updateRule('schemeId', event.target.value)}><option value="">{t('trainers.createScheme')}</option>{payroll.schemes.map((scheme) => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}</Select>
-            <Select id={RULE_FIELD_IDS.sessionType} label={t('trainers.sessionType')} value={rule.sessionType} error={ruleErrors.sessionType} onChange={(event) => updateRule('sessionType', event.target.value)}><option value="group">{t('trainers.typeGroup')}</option><option value="individual">{t('trainers.typeIndividual')}</option><option value="split">{t('trainers.typeSplit')}</option></Select>
-            <Input id={RULE_FIELD_IDS.baseAmount} label={t('trainers.baseAmount')} value={rule.baseAmount} error={ruleErrors.baseAmount} onChange={(event) => updateRule('baseAmount', event.target.value)} />
-            {rule.sessionType === 'group' && <><Input id={RULE_FIELD_IDS.threshold} label={t('trainers.threshold')} value={rule.threshold} error={ruleErrors.threshold} onChange={(event) => updateRule('threshold', event.target.value)} /><Input id={RULE_FIELD_IDS.extraAmount} label={t('trainers.extraAmount')} value={rule.extraAmount} error={ruleErrors.extraAmount} onChange={(event) => updateRule('extraAmount', event.target.value)} /></>}
+            <Select id="trainer-payroll-rate" label={t('trainers.rateTitle')} value={rateAssignment.rateId} onChange={(event) => setRateAssignment((current) => ({ ...current, rateId: event.target.value, confirmed: false }))}><option value="">{t('trainers.selectRate')}</option>{payroll.rates.filter((rate) => rate.is_active).map((rate) => <option key={rate.id} value={rate.id}>{rate.name}</option>)}</Select>
+            <Select id="trainer-payroll-location" label={t('settings.field.location')} value={rateAssignment.location} onChange={(event) => setRateAssignment((current) => ({ ...current, location: event.target.value, confirmed: false }))}><option value="">{t('trainers.allLocations')}</option>{locations.map((location) => <option key={location.id || location.name} value={location.name}>{location.name}</option>)}</Select>
+            <DateField id="trainer-payroll-from" label={t('trainers.applyFrom')} value={rateAssignment.effectiveFrom} onChange={(value) => setRateAssignment((current) => ({ ...current, effectiveFrom: value, confirmed: false }))} />
+            {rateAssignment.confirmed && <p role="alert">{t('trainers.replaceWarning')}</p>}
           </div>
         </FormModal>
-
-        <FormModal open={payrollAction === 'period'} title={t('trainers.calculatePayroll')} size="sm" busy={busy} dirty={Boolean(payrollBaseline) && JSON.stringify(period) !== JSON.stringify(payrollBaseline)} onRequestClose={() => { if (payrollBaseline) setPeriod(payrollBaseline); setPayrollAction(null); setPayrollBaseline(null); setPeriodErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={busy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={busy} onClick={calculatePayroll}>{t('trainers.calculate')}</Button></>}>
-          {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
-          <div className="ops-form-stack">
-            <DateField id={PERIOD_FIELD_IDS.dateFrom} label={t('trainers.dateFrom')} value={period.dateFrom} error={periodErrors.dateFrom} onChange={(value) => updatePeriod('dateFrom', value)} />
-            <DateField id={PERIOD_FIELD_IDS.dateTo} label={t('trainers.dateTo')} value={period.dateTo} error={periodErrors.dateTo} onChange={(value) => updatePeriod('dateTo', value)} />
-            <Input id={PERIOD_FIELD_IDS.location} label={t('trainers.locationOptional')} value={period.location} error={periodErrors.location} onChange={(event) => updatePeriod('location', event.target.value)} />
-          </div>
-        </FormModal>
-
         <ListFeedback list={trainerList} emptyLabel={t('trainers.empty')} />
         <div className="ops-entity-desktop-table ops-trainer-list-scroll"><Table rows={rows} emptyLabel={t('trainers.empty')} columns={[
           { key: 'name', header: t('common.trainer'), render: (row) => <button type="button" className="ops-link-button" onClick={() => openTrainer(row)}><Avatar name={row.name} size={28} /><span className="strong">{row.name}</span></button> },

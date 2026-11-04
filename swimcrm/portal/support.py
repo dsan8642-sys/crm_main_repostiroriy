@@ -17,7 +17,7 @@ from accounts.social import normalize_instagram_username
 from analytics.debtors import debtors, upcoming
 from analytics.reports import income_by_group, income_by_trainer, income_for_period
 from attendance.models import AttendanceRecord, AttendanceStatus
-from attendance.services import attendance_payment, set_attendance
+from attendance.services import attendance_payment, set_attendance, unmarked_attendance_sessions
 from audit.models import AuditLogEntry, audit
 from billing.models import (Charge, Payment, PaymentMethod, PaymentSource, PaymentStatus,
                             ReceiptFile, normalize_payment_method)
@@ -50,7 +50,7 @@ from scheduling.services import (ScheduleConflict, check_trainer_conflict,
                                  session_roster_students, split_roster_student_ids,
                                  split_roster_students)
 from scheduling.services import sync_split_second_student
-from students.models import Student
+from students.models import ParticipantNote, Student
 from students.services import ensure_account_holder_participant, set_student_groups
 from subscriptions.models import LedgerReason, SessionLedgerEntry, Subscription, SubscriptionStatus
 from subscriptions.services import (can_assign_attendance, can_cancel_sale, create_subscription, freeze_subscription,
@@ -371,11 +371,12 @@ def _student_payload(student):
         "first_name": student.first_name,
         "last_name": student.last_name,
         "full_name": student.full_name,
+        "has_photo": bool(student.photo),
+        "photo_version": student.photo_updated_at.isoformat() if student.photo_updated_at else None,
         "birth_date": student.birth_date.isoformat() if student.birth_date else None,
         "email": student.email,
         "medical_info": student.medical_info,
         "contraindications": student.contraindications,
-        "admin_comments": student.admin_comments,
         "is_active": student.is_active,
         "is_account_holder": student.is_account_holder,
         "groups": groups,
@@ -806,6 +807,28 @@ def _attendance_payload(record):
     }
 
 
+def _unmarked_attendance_payload(session, student, record_id):
+    return {
+        "id": record_id,
+        "participant_id": student.id,
+        "participant": student.full_name,
+        "session_id": session.id,
+        "session_start_at": timezone.localtime(session.start_at).isoformat(),
+        "session_end_at": timezone.localtime(session.end_at).isoformat(),
+        "group": session.group.name if session.group_id else "Individual",
+        "trainer": str(session.trainer),
+        "location": session.location,
+        "status": None,
+        "comment": "",
+        "marked_at": None,
+        "deducts": False,
+        "financial_effects_enabled": False,
+        "payment_source": "none",
+        "payment_subscription_id": None,
+        "subscription_session_delta": 0,
+    }
+
+
 def _consent_payload(consent):
     return {
         "id": consent.id,
@@ -925,9 +948,10 @@ def _client_safe_detail_payload(account):
     }
 
 
-def _client_detail_payload(account):
+def _client_detail_payload(account, *, include_unmarked=False):
     participants = list(_student_queryset_for_parent(account).order_by("id"))
     participant_ids = [student.id for student in participants]
+    participants_with_notes = set(ParticipantNote.objects.filter(student_id__in=participant_ids).values_list("student_id", flat=True))
     subscriptions = list(Subscription.objects.filter(student_id__in=participant_ids).select_related(
         "student", "student__parent", "subscription_type").prefetch_related(
         "student__groups",
@@ -955,9 +979,9 @@ def _client_detail_payload(account):
         subscription, end_date_changes.get(str(subscription.id), []))
         for subscription in subscriptions]
 
-    return {
+    payload = {
         "account": _client_account_payload(account),
-        "participants": [{**_student_payload(student), "balance_minor": balance} for student in participants],
+        "participants": [{**_student_payload(student), "has_internal_notes": student.id in participants_with_notes, "balance_minor": balance} for student in participants],
         "subscriptions": subscription_rows,
         "charges": [_charge_payload(charge) for charge in charges],
         "payments": [_payment_payload(payment) for payment in payments],
@@ -971,6 +995,18 @@ def _client_detail_payload(account):
             "pending_payments": sum(1 for payment in payments if payment.status == PaymentStatus.PENDING),
         },
     }
+    if include_unmarked:
+        unmarked = unmarked_attendance_sessions(participants, limit=MAX_LIST_ROWS)
+        record_ids = {(session_id, student_id): record_id for session_id, student_id, record_id in AttendanceRecord.objects.filter(
+            session_id__in=[session.id for session, _ in unmarked],
+            student_id__in=participant_ids,
+            status__isnull=True,
+        ).values_list("session_id", "student_id", "id")}
+        payload["unmarked_attendance"] = [
+            _unmarked_attendance_payload(session, student, record_ids.get((session.id, student.id)))
+            for session, student in unmarked
+        ]
+    return payload
 
 
 def _participant_data(data):
@@ -1141,7 +1177,7 @@ def _apply_participant_data(participant, data):
         return participant
     for field in (
         "first_name", "last_name", "email", "medical_info", "contraindications",
-        "emergency_contact_name", "emergency_contact_phone", "admin_comments",
+        "emergency_contact_name", "emergency_contact_phone",
     ):
         if field in participant_data:
             setattr(participant, field, participant_data.get(field, "") or "")

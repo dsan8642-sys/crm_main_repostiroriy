@@ -304,3 +304,64 @@ class AdminPayrollApiRule(TestCase):
         self.assertEqual(period.json()["summary"]["calculations_count"], 1)
         self.assertEqual(period.json()["summary"]["total_amount_minor"], 14000)
         self.assertEqual(period.json()["calculations"][0]["extra_clients_count"], 2)
+
+    def test_shared_rate_backdating_location_and_recalculation(self):
+        other = f.make_trainer(username="rate_other")
+        session = create_session(
+            trainer=self.trainer, start_at=f.dt(2026, 7, 15, 17),
+            end_at=f.dt(2026, 7, 15, 18), location="Pool A",
+            max_participants=10, group=self.group, session_type=SessionType.GROUP,
+            actor=self.admin,
+        )
+        rate = self.client.post('/api/admin/payroll/rates/', data=json.dumps({
+            'name': 'Shared', 'session_type': 'group', 'base_amount_minor': 10000,
+            'min_clients_threshold': 0, 'extra_client_amount_minor': 0,
+        }), content_type='application/json')
+        self.assertEqual(rate.status_code, 201)
+        rate_id = rate.json()['id']
+        period = self.client.post('/api/admin/payroll/periods/', data=json.dumps({
+            'date_from': '2026-07-01', 'date_to': '2026-07-31',
+        }), content_type='application/json')
+        self.assertEqual(period.json()['summary']['calculations_count'], 0)
+        assignment = self.client.post('/api/admin/payroll/assign-rates/', data=json.dumps({
+            'rate_id': rate_id, 'trainer_ids': [self.trainer.id, other.id],
+            'effective_from': '2026-07-01', 'location': '',
+        }), content_type='application/json')
+        self.assertEqual(assignment.status_code, 201)
+        self.assertEqual(len(assignment.json()['assignments']), 2)
+        self.assertEqual(PayrollCalculation.objects.get(session=session).final_amount_minor, 10000)
+        specific = self.client.post('/api/admin/payroll/rates/', data=json.dumps({
+            'name': 'Pool A', 'session_type': 'group', 'base_amount_minor': 15000,
+            'min_clients_threshold': 0, 'extra_client_amount_minor': 0,
+        }), content_type='application/json')
+        self.client.post('/api/admin/payroll/assign-rates/', data=json.dumps({
+            'rate_id': specific.json()['id'], 'trainer_ids': [self.trainer.id],
+            'effective_from': '2026-07-01', 'location': 'Pool A',
+        }), content_type='application/json')
+        self.assertEqual(PayrollCalculation.objects.get(session=session).final_amount_minor, 15000)
+        edited = self.client.patch(f'/api/admin/payroll/rates/{specific.json()["id"]}/',
+            data=json.dumps({'base_amount_minor': 18000, 'effective_from': '2026-07-10'}),
+            content_type='application/json')
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(PayrollCalculation.objects.get(session=session).final_amount_minor, 18000)
+        changed_period = self.client.patch(f'/api/admin/payroll/periods/{period.json()["id"]}/',
+            data=json.dumps({'date_from': '2026-07-16', 'date_to': '2026-07-31'}),
+            content_type='application/json')
+        self.assertEqual(changed_period.status_code, 200)
+        self.assertEqual(changed_period.json()['summary']['calculations_count'], 0)
+        restored_period = self.client.patch(f'/api/admin/payroll/periods/{period.json()["id"]}/',
+            data=json.dumps({'date_from': '2026-07-01', 'date_to': '2026-07-31'}),
+            content_type='application/json')
+        self.assertEqual(restored_period.json()['summary']['total_amount_minor'], 18000)
+        payroll_period = PayrollCalculation.objects.get(session=session).period
+        payroll_period.status = 'approved'
+        payroll_period.save(update_fields=['status'])
+        later = self.client.patch(f'/api/admin/payroll/rates/{specific.json()["id"]}/',
+            data=json.dumps({'base_amount_minor': 20000, 'effective_from': '2026-07-14'}),
+            content_type='application/json')
+        self.assertEqual(later.status_code, 200)
+        self.assertEqual(PayrollCalculation.objects.get(session=session).final_amount_minor, 18000)
+        self.client.logout()
+        self.client.force_login(other.user)
+        denied = self.client.get('/api/admin/payroll/rates/')
+        self.assertIn(denied.status_code, (403, 404))

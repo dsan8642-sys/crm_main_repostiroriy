@@ -302,7 +302,7 @@ def admin_participant_subscriptions(request, participant_id):
         subscription_type_id = _positive_int(
             data.get("subscription_type_id"), "subscription_type_id")
         start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
-        due_date = _parse_date(data.get("due_date"), "due_date") or start_date
+        due_date = _parse_date(data.get("due_date"), "due_date") or timezone.localdate()
         key = _operation_key(data)
         payment_received, payment_method, payment_date = _payment_options(data)
         requested_price = (_required_int(data["price_minor"], "price_minor")
@@ -481,7 +481,7 @@ def admin_subscription_renew(request, subscription_id):
         else subscription.subscription_type_id
     )
     start_date = _parse_date(data.get("start_date"), "start_date") or timezone.localdate()
-    due_date = _parse_date(data.get("due_date"), "due_date") or start_date
+    due_date = _parse_date(data.get("due_date"), "due_date") or timezone.localdate()
     key = _operation_key(data)
     payment_received, payment_method, payment_date = _payment_options(data)
     requested_price = (_required_int(data["price_minor"], "price_minor")

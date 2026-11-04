@@ -1,0 +1,29 @@
+.participant-notes-trigger { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin-left: auto; border: 0; padding: 2px 0; background: none; color: var(--primary); font: inherit; font-size: calc(var(--fs-xs) + 2px); cursor: pointer; text-align: right; flex-wrap: wrap; justify-content: flex-end; }
+.participant-notes-trigger.has-notes { font-weight: 600; }
+.ops-attendance-card { position: relative; }
+@media (max-width: 767px) { .ops-attendance-card > .participant-notes-trigger { position: absolute; top: 14px; right: 16px; max-width: calc(100% - 104px); } }
+.participant-notes-trigger:focus-visible, .participant-note-actions button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.participant-notes-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(5, 19, 38, .5); }
+.participant-notes-panel { display: flex; flex-direction: column; width: min(100%, 540px); max-height: min(760px, calc(100dvh - 32px)); min-width: 0; background: var(--surface-card); color: var(--text-body); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
+.participant-notes-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border-subtle); }
+.participant-notes-panel > header div { display: grid; gap: 3px; min-width: 0; }
+.participant-notes-panel > header span { overflow-wrap: anywhere; }
+.participant-notes-panel > header button { border: 0; background: none; color: inherit; font: inherit; font-size: 26px; cursor: pointer; }
+.participant-notes-scroll { overflow: auto; padding: 16px 18px; min-height: 0; }
+.participant-notes-birth { margin: 0 0 8px; }
+.participant-notes-hint { margin: 0 0 16px; color: var(--text-muted); font-size: var(--fs-xs); }
+.participant-notes-empty { color: var(--text-muted); }
+.participant-notes-error { color: var(--red-600); }
+.participant-note { padding: 12px 0; border-top: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.participant-note p { white-space: pre-wrap; margin: 0 0 7px; }
+.participant-note small { color: var(--text-muted); }
+.participant-note-actions { display: flex; gap: 14px; margin-top: 7px; }
+.participant-note-actions button { border: 0; padding: 4px 0; background: none; color: var(--primary); font: inherit; cursor: pointer; }
+.participant-notes-compose { display: grid; gap: 7px; padding: 12px 18px 16px; border-top: 1px solid var(--border-subtle); }
+.participant-notes-compose label { font-weight: 600; }
+.participant-notes-compose textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px; font: inherit; color: inherit; background: var(--surface-card); }
+.participant-notes-compose > div { display: flex; justify-content: flex-end; gap: 8px; }
+.participant-notes-compose button { min-height: 40px; border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 6px 16px; background: var(--surface-card); color: var(--text-body); font: inherit; cursor: pointer; }
+.participant-notes-compose .participant-notes-save { background: var(--primary); border-color: var(--primary); color: var(--text-on-solid); }
+.participant-notes-compose button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 767px) { .participant-notes-overlay { align-items: flex-end; padding: 0; } .participant-notes-panel { width: 100%; max-height: 92dvh; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); } }

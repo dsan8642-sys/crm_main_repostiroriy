@@ -11,6 +11,8 @@ import { ScheduleColorPicker } from '../ScheduleColorPicker.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
 import { GuideScreen } from './GuideScreen.jsx'
+import { PayrollSettingsPanel } from './PayrollSettingsPanel.jsx'
+import { useSessionViewState } from '../uiLifecycle.jsx'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -67,10 +69,9 @@ const resources = [
   { tab: 'notifications', id: 'rules', title: 'settings.resource.rules', endpoint: '/api/admin/notifications/rules/', response: 'rules', detail: (id) => `/api/admin/notifications/rules/${id}/`, fields: [['event_type', 'settings.field.event', 'select', eventTypes], ['channel', 'settings.field.channel', 'select', channels], ['template_id', 'settings.field.template', 'select-ref', 'templates'], ['offset_minutes', 'settings.field.offsetMinutes', 'number'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'notifications', id: 'quietHours', title: 'settings.resource.quietHours', endpoint: '/api/admin/notifications/quiet-hours/', response: 'policies', detail: (id) => `/api/admin/notifications/quiet-hours/${id}/`, fields: [['channel', 'settings.field.channel', 'select', channels], ['starts_at', 'settings.field.from', 'time'], ['ends_at', 'settings.field.to', 'time'], ['timezone', 'settings.field.timezone'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'notifications', id: 'notificationTranslations', title: 'settings.resource.notificationTranslations', endpoint: '/api/admin/settings/notification-template-translations/', response: 'translations', detail: (id) => `/api/admin/settings/notification-template-translations/${id}/`, fields: [['template_id', 'settings.field.template', 'select-ref', 'templates'], ['language_code', 'settings.field.language', 'select-ref', 'languages', 'code'], ['subject', 'settings.field.subject'], ['body', 'settings.field.body', 'textarea']] },
-  { tab: 'payroll', id: 'schemes', title: 'settings.resource.schemes', endpoint: '/api/admin/payroll/schemes/', response: 'schemes', detail: (id) => `/api/admin/payroll/schemes/${id}/`, fields: [['name', 'settings.field.name'], ['location', 'settings.field.location'], ['is_active', 'settings.field.active', 'boolean']] },
-  { tab: 'payroll', id: 'payrollRules', title: 'settings.resource.payrollRules', endpoint: '/api/admin/payroll/rules/', response: 'rules', detail: (id) => `/api/admin/payroll/rules/${id}/`, fields: [['scheme_id', 'settings.field.scheme', 'select-ref', 'schemes'], ['session_type', 'settings.field.sessionType', 'select', sessionTypes], ['rule_type', 'settings.field.ruleType', 'select', sessionTypes], ['base_amount_minor', 'settings.field.baseAmountMinor', 'number'], ['currency', 'settings.field.currency'], ['min_clients_threshold', 'settings.field.minClients', 'number'], ['extra_client_amount_minor', 'settings.field.extraClientMinor', 'number'], ['is_active', 'settings.field.active', 'boolean']] },
-  { tab: 'payroll', id: 'assignments', title: 'settings.resource.assignments', endpoint: '/api/admin/payroll/assignments/', response: 'assignments', detail: (id) => `/api/admin/payroll/assignments/${id}/`, fields: [['trainer_id', 'settings.field.trainer', 'select-ref', 'trainers'], ['scheme_id', 'settings.field.scheme', 'select-ref', 'schemes'], ['effective_from', 'settings.field.effectiveFrom', 'date'], ['effective_to', 'settings.field.effectiveTo', 'date']] },
-  { tab: 'payroll', id: 'periods', title: 'settings.resource.periods', endpoint: '/api/admin/payroll/periods/', response: 'periods', readOnly: true },
+  { tab: 'payroll', id: 'payrollRates', title: 'settings.resource.payrollRules', panel: true, readOnly: true },
+  { tab: 'payroll', id: 'assignments', title: 'settings.resource.assignments', panel: true, readOnly: true },
+  { tab: 'payroll', id: 'periods', title: 'settings.resource.periods', panel: true, readOnly: true },
   { tab: 'localization', id: 'languages', title: 'settings.resource.languages', endpoint: '/api/admin/settings/languages/', response: 'languages', detail: (id) => `/api/admin/settings/languages/${id}/`, fields: [['code', 'settings.field.code'], ['name', 'settings.field.name'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'localization', id: 'dictionaryKeys', title: 'settings.resource.dictionaryKeys', endpoint: '/api/admin/settings/dictionary-keys/', response: 'keys', detail: (id) => `/api/admin/settings/dictionary-keys/${id}/`, fields: [['domain', 'settings.field.section'], ['code', 'settings.field.key'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'localization', id: 'dictionaryTranslations', title: 'settings.resource.dictionaryTranslations', endpoint: '/api/admin/settings/dictionary-translations/', response: 'translations', detail: (id) => `/api/admin/settings/dictionary-translations/${id}/`, fields: [['key_id', 'settings.field.key', 'select-ref', 'dictionaryKeys'], ['language_code', 'settings.field.language', 'select-ref', 'languages', 'code'], ['value', 'settings.field.body', 'textarea']] },
@@ -146,8 +147,13 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
   return function AdminSettingsScreen({ currentUser }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
-    const [tab, setTab] = useState('catalog')
-    const [resourceId, setResourceId] = useState('subscriptionTypes')
+    const [settingsView, setSettingsView] = useSessionViewState(`admin.${currentUser?.id || currentUser?.username || 'session'}.settings`, { tab: 'catalog', resourceId: 'subscriptionTypes', mobileLevel: 'categories' })
+    const tab = tabs.some(([value]) => value === settingsView.tab) ? settingsView.tab : 'catalog'
+    const resourceId = resources.some((item) => item.id === settingsView.resourceId) ? settingsView.resourceId : 'subscriptionTypes'
+    const mobileLevel = ['categories', 'resources', 'detail'].includes(settingsView.mobileLevel) ? settingsView.mobileLevel : 'categories'
+    const setTab = (value) => setSettingsView((current) => ({ ...current, tab: value }))
+    const setResourceId = (value) => setSettingsView((current) => ({ ...current, resourceId: value }))
+    const setMobileLevel = (value) => setSettingsView((current) => ({ ...current, mobileLevel: value }))
     const [data, setData] = useState(() => ({ trainers: adminData.trainers || [] }))
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
@@ -168,7 +174,6 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const [administratorErrors, setAdministratorErrors] = useState({})
     const [administratorModalError, setAdministratorModalError] = useState(null)
     const [accessAction, setAccessAction] = useState(null)
-    const [mobileLevel, setMobileLevel] = useState('categories')
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
     const tabResources = useMemo(() => resources.filter((item) => item.tab === tab), [tab])
@@ -484,10 +489,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
           } },
         ]} />
       </div>}
+      {tab === 'payroll' && <PayrollSettingsPanel section={resource.id === 'payrollRates' ? 'rates' : resource.id} Button={Button} />}
       {resource.panel && resource.id === 'importExport'
         ? <ImportExportPanel />
         : resource.panel && resource.id === 'reports'
-          ? <ReportsPanel />
+          ? <ReportsPanel currentUser={currentUser} />
           : resource.panel && resource.id.startsWith('guide-')
             ? <GuideScreen role="admin" embedded sectionId={resource.id.slice('guide-'.length)} />
           : !resource.panel && <Table rows={rows} emptyLabel={loading ? t('common.loading') : t('settings.empty')} columns={columns} />}

@@ -31,6 +31,40 @@ class PayrollScheme(models.Model):
         return self.name
 
 
+class PayrollRate(models.Model):
+    name = models.CharField(max_length=120)
+    session_type = models.CharField(max_length=16, choices=SessionType.choices)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class PayrollRateVersion(models.Model):
+    rate = models.ForeignKey(PayrollRate, on_delete=models.PROTECT, related_name="versions")
+    effective_from = models.DateField()
+    base_amount_minor = models.BigIntegerField()
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default=settings.DEFAULT_CURRENCY)
+    min_clients_threshold = models.PositiveIntegerField(null=True, blank=True)
+    extra_client_amount_minor = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["rate", "effective_from"], name="uniq_payroll_rate_version_date")]
+
+    @property
+    def rule_type(self):
+        return self.rate.session_type
+
+    def clean(self):
+        if self.base_amount_minor < 0 or (self.extra_client_amount_minor is not None and self.extra_client_amount_minor < 0):
+            raise ValidationError("payroll amounts cannot be negative")
+        if self.rate.session_type == PayrollRuleType.GROUP:
+            if self.min_clients_threshold is None or self.extra_client_amount_minor is None:
+                raise ValidationError("group rate requires threshold and extra amount")
+        elif self.min_clients_threshold not in (None, 0) or self.extra_client_amount_minor not in (None, 0):
+            raise ValidationError("fixed rate cannot have threshold or extra amount")
+
+
 class PayrollRule(models.Model):
     scheme = models.ForeignKey(PayrollScheme, on_delete=models.CASCADE, related_name="rules")
     session_type = models.CharField(max_length=16, choices=SessionType.choices)
@@ -85,8 +119,11 @@ class PayrollRule(models.Model):
 class TrainerPayrollAssignment(models.Model):
     trainer = models.ForeignKey("accounts.Trainer", on_delete=models.CASCADE,
                                 related_name="payroll_assignments")
-    scheme = models.ForeignKey(PayrollScheme, on_delete=models.PROTECT,
+    scheme = models.ForeignKey(PayrollScheme, null=True, blank=True, on_delete=models.PROTECT,
                                related_name="trainer_assignments")
+    rate = models.ForeignKey(PayrollRate, null=True, blank=True, on_delete=models.PROTECT,
+                             related_name="trainer_assignments")
+    location = models.CharField(max_length=120, blank=True)
     effective_from = models.DateField()
     effective_to = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
@@ -99,9 +136,11 @@ class TrainerPayrollAssignment(models.Model):
     def clean(self):
         if self.effective_to and self.effective_to < self.effective_from:
             raise ValidationError("effective_to cannot be before effective_from")
+        if bool(self.scheme_id) == bool(self.rate_id):
+            raise ValidationError("exactly one of scheme or rate is required")
 
     def __str__(self):
-        return f"{self.trainer} -> {self.scheme}"
+        return f"{self.trainer} -> {self.rate or self.scheme}"
 
 
 class PayrollPeriod(models.Model):
@@ -110,6 +149,7 @@ class PayrollPeriod(models.Model):
     location = models.CharField(max_length=120, blank=True)
     status = models.CharField(max_length=16, choices=PayrollPeriodStatus.choices,
                               default=PayrollPeriodStatus.DRAFT)
+    skipped_sessions = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -137,8 +177,10 @@ class PayrollCalculation(models.Model):
                                 related_name="payroll_calculations")
     session = models.ForeignKey("scheduling.Session", on_delete=models.PROTECT,
                                 related_name="payroll_calculations")
-    rule = models.ForeignKey(PayrollRule, on_delete=models.PROTECT,
+    rule = models.ForeignKey(PayrollRule, null=True, blank=True, on_delete=models.PROTECT,
                              related_name="calculations")
+    rate_version = models.ForeignKey(PayrollRateVersion, null=True, blank=True,
+                                      on_delete=models.PROTECT, related_name="calculations")
     attended_clients_count = models.PositiveIntegerField(default=0)
     base_amount_minor = models.BigIntegerField()
     extra_clients_count = models.PositiveIntegerField(default=0)

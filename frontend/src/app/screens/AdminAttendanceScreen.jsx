@@ -12,6 +12,7 @@ import { fieldErrorsFromApi, formErrorMessage } from '../formErrors.js'
 import { FormModal } from '../FormModal.jsx'
 import { ContextBackButton } from '../EntityListPrimitives.jsx'
 import { AttendanceSaveStatus } from '../TodayPrimitives.jsx'
+import { PhotoAvatar, photoUrl } from '../ParticipantPhoto.jsx'
 
 export function attendanceSessionDisplayStatus(session, now = Date.now()) {
   if (session?.is_cancelled || session?.isCancelled || session?.status === 'cancelled') return 'cancelled'
@@ -389,7 +390,7 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
               <article className="ops-attendance-member-card" key={row.id} style={{ borderBottom: index < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
                   <div className="ops-attendance-participant" style={{ flex: '1 1 170px' }}>
-                    <button type="button" className="ops-compact-card-title with-avatar" onClick={() => go?.('clientDetail', { clientId: row.client_id })}><Avatar name={row.full_name} size={28} /><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }} title={row.full_name}>{row.full_name}</strong></button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><PhotoAvatar Avatar={Avatar} Dialog={Dialog} name={row.full_name} src={photoUrl(row.id, row.photo_version)} size={40} avatarStyle={{ borderRadius: 12 }} /><button type="button" className="ops-compact-card-title" onClick={() => go?.('clientDetail', { clientId: row.client_id })}><strong style={{ display: '-webkit-box', overflow: 'hidden', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2 }} title={row.full_name}>{row.full_name}</strong></button></div>
                     {row.can_add_to_group && <span className="ops-one-off-action"><Button size="sm" variant="subtle" disabled={selectedStatus === 'cancelled' || busyId != null} onClick={() => setPromotePending(row)}>{t('attendance.oneOff')}</Button></span>}
                   </div>
                   {row.balance_minor > 0 ? <Badge tone="danger" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.debtAmount', { amount: (row.balance_minor / 100).toLocaleString(localeTag, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), currency: row.currency })}</Badge> : <Badge tone="success" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('attendance.noDebt')}</Badge>}
@@ -409,9 +410,9 @@ export function createAdminAttendanceScreen(components, icons, reloadRoleData, a
                 render: (row) => (
                   <div className="ops-attendance-participant">
                     <button type="button" className="ops-link-button" onClick={() => go?.('clientDetail', { clientId: row.client_id })}>
-                      <Avatar name={row.full_name} size={28} />
                       <span className="strong">{row.full_name}</span>
                     </button>
+                    <PhotoAvatar Avatar={Avatar} Dialog={Dialog} name={row.full_name} src={photoUrl(row.id, row.photo_version)} size={40} avatarStyle={{ borderRadius: 12 }} />
                     {row.can_add_to_group && <span className="ops-one-off-action"><Button size="sm" variant="subtle" disabled={selectedStatus === 'cancelled' || busyId != null} onClick={() => setPromotePending(row)}>{t('attendance.oneOff')}</Button></span>}
                   </div>
                 ),

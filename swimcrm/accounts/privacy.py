@@ -24,9 +24,15 @@ def anonymize_parent_account(parent, *, actor=None):
         receipt.save(update_fields=["file", "is_deleted", "deleted_at"])
 
     for student in parent.students.all():
+        student.internal_notes.all().delete()
+        if student.photo:
+            student.photo.delete(save=False)
+        student.photo = None
+        student.photo_updated_at = None
         student.first_name = "Удалён"
         student.last_name = f"Клиент #{student.id}"
         student.email = ""
+        student.birth_date = None
         student.medical_info = ""
         student.contraindications = ""
         student.emergency_contact_name = ""
@@ -34,8 +40,8 @@ def anonymize_parent_account(parent, *, actor=None):
         student.admin_comments = ""
         student.is_active = False
         student.save(update_fields=[
-            "first_name", "last_name", "email", "medical_info",
-            "contraindications", "emergency_contact_name",
+            "first_name", "last_name", "email", "birth_date", "medical_info",
+            "contraindications", "photo", "photo_updated_at", "emergency_contact_name",
             "emergency_contact_phone", "admin_comments", "is_active",
         ])
 

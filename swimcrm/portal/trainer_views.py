@@ -37,6 +37,11 @@ def trainer_sessions(request):
     elif request.GET.get("status") == "active":
         qs = qs.filter(is_cancelled=False)
     type_colors = session_type_color_keys()
+    if "page" in request.GET or "page_size" in request.GET:
+        return JsonResponse(paginated_payload(
+            request, qs, key="sessions",
+            serializer=lambda session: _role_session_payload(session, type_color_keys=type_colors),
+        ))
     return JsonResponse({"sessions": [
         _role_session_payload(session, type_color_keys=type_colors)
         for session in qs[:300]
@@ -130,11 +135,18 @@ def trainer_session_detail(request, session_id):
         pk=session_id,
     )
     attendance = {record.student_id: record for record in session.attendance.all() if record.status is not None}
+    roster = list(split_roster_students(session) if session.session_type == SessionType.SPLIT else _session_roster(session))
+    note_student_ids = set(ParticipantNote.objects.filter(student_id__in=[student.id for student in roster]).values_list("student_id", flat=True))
     return JsonResponse({
         "session": _role_session_payload(session),
         "students": [{
             "id": student.id,
             "full_name": student.full_name,
+            "birth_date": student.birth_date.isoformat() if student.birth_date else None,
+            "has_internal_notes": student.id in note_student_ids,
+            "can_write_notes": student.is_active and student.parent.user.is_active and not session.is_cancelled,
+            "has_photo": bool(student.photo),
+            "photo_version": student.photo_updated_at.isoformat() if student.photo_updated_at else None,
             "groups": _student_group_payloads(student),
             "group": _legacy_group_payload(_student_group_payloads(student)),
             "attendance": {
@@ -142,11 +154,7 @@ def trainer_session_detail(request, session_id):
                 "comment": attendance[student.id].comment,
                 "marked_at": timezone.localtime(attendance[student.id].marked_at).isoformat(),
             } if student.id in attendance else None,
-        } for student in (
-            split_roster_students(session)
-            if session.session_type == SessionType.SPLIT
-            else _session_roster(session)
-        )],
+        } for student in roster],
     })
 
 

@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 /**
  * SwimCRM Avatar — initials chip for children, parents and trainers.
- * No photos in the product; colour is derived deterministically from the name
+ * Colour is derived deterministically from the name
  * so the same person keeps the same hue. `kind` tints the ring.
  */
 const PALETTE = [
@@ -27,8 +27,10 @@ function initials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export function Avatar({ name = '', size = 32, kind, style }) {
+export function Avatar({ name = '', size = 32, kind, style, src }) {
   const [bg, fg] = hueFor(name);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
   return (
     <span
       title={name}
@@ -49,10 +51,11 @@ export function Avatar({ name = '', size = 32, kind, style }) {
         lineHeight: 1,
         letterSpacing: '0.01em',
         userSelect: 'none',
+        overflow: 'hidden',
         ...style,
       }}
     >
-      {initials(name)}
+      {src && !failed ? <img src={src} alt="" onError={() => setFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials(name)}
     </span>
   );
 }

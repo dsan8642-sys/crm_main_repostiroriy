@@ -27,6 +27,8 @@ class Student(models.Model):
     emergency_contact_phone = models.CharField(max_length=32, blank=True)
 
     is_active = models.BooleanField(default=True)
+    photo = models.FileField(upload_to="participant-photos/%Y/%m/", null=True, blank=True)
+    photo_updated_at = models.DateTimeField(null=True, blank=True)
     admin_comments = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -79,6 +81,19 @@ class Student(models.Model):
 
     def __str__(self):
         return self.full_name
+
+
+class ParticipantNote(models.Model):
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="internal_notes")
+    author = models.ForeignKey("accounts.User", null=True, blank=True, on_delete=models.SET_NULL)
+    body = models.TextField()
+    imported = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
 
 
 class GroupMembership(models.Model):

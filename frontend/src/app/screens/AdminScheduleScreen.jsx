@@ -159,7 +159,7 @@ async function loadParticipantOptions(query, requestOptions = {}) {
 export function createAdminScheduleScreen(components, icons, reloadRoleData, adminData = {}) {
   const { Button, Badge, Banner, Dialog, Input, Checkbox } = components
   const I = icons
-  return function ApiAdminSchedule({ go, back, sessionId, initialTab, initialParticipantId, createSession: createSessionMode }) {
+  return function ApiAdminSchedule({ go, back, sessionId, initialTab, initialParticipantId, createSession: createSessionMode, scheduleRoute = {}, replaceScheduleQuery }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminTranslator(locale), [locale])
     const localeTag = adminLocaleTag(locale)
@@ -235,13 +235,22 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
     const [copyFieldErrors, setCopyFieldErrors] = useState({})
     const [busy, setBusy] = useState(false)
     const [actionPanel, setActionPanel] = useState(null)
-    const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
-    const [focusDate, setFocusDate] = useState(localToday())
+    const displayMode = ['calendar', 'list'].includes(scheduleRoute.display) ? scheduleRoute.display : ['calendar', 'list'].includes(initialTab) ? initialTab : 'calendar'
+    const viewMode = ['week', 'month'].includes(scheduleRoute.mode) ? scheduleRoute.mode : ['week', 'month'].includes(initialTab) ? initialTab : DEFAULT_SCHEDULE_VIEW
+    const focusDate = validIsoDate(scheduleRoute.date) ? scheduleRoute.date : localToday()
+    const setDisplayMode = (value) => replaceScheduleQuery?.({ display: value })
+    const setViewMode = (value) => replaceScheduleQuery?.({ mode: value })
+    const setFocusDate = (value) => replaceScheduleQuery?.({ date: value })
     const [filtersOpen, setFiltersOpen] = useState(false)
     const filtersPresence = usePresence(filtersOpen)
-    const [filters, setFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
-    const [draftFilters, setDraftFilters] = useState({ ...EMPTY_SCHEDULE_FILTERS })
+    const filters = useMemo(() => ({
+      sessionType: scheduleRoute.sessionType || '',
+      trainerId: scheduleRoute.trainerId || '',
+      groupId: scheduleRoute.groupId || '',
+      location: scheduleRoute.location || '',
+      status: ['planned', 'cancelled'].includes(scheduleRoute.status) ? scheduleRoute.status : '',
+    }), [scheduleRoute])
+    const [draftFilters, setDraftFilters] = useState(filters)
     const filterPopoverRef = useRef(null)
     const [rangeRefresh, setRangeRefresh] = useState(0)
     const createRouteHandledRef = useRef(null)
@@ -291,11 +300,6 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
         document.removeEventListener('keydown', onKeyDown)
       }
     }, [filters, filtersOpen])
-
-    useEffect(() => {
-      if (['week', 'month'].includes(initialTab)) setViewMode(initialTab)
-      if (['calendar', 'list'].includes(initialTab)) setDisplayMode(initialTab)
-    }, [initialTab])
 
     useEffect(() => {
       if (!['individual', 'split'].includes(createSessionMode)) return
@@ -951,7 +955,7 @@ export function createAdminScheduleScreen(components, icons, reloadRoleData, adm
                 </div>
                 <div className="ops-filter-actions">
                   <Button size="sm" variant="subtle" data-testid="admin-schedule-filter-reset" onClick={() => setDraftFilters({ ...EMPTY_SCHEDULE_FILTERS })}>{t('schedule.reset')}</Button>
-                  <Button size="sm" variant="primary" data-testid="admin-schedule-filter-apply" onClick={() => { setFilters({ ...draftFilters }); setFiltersOpen(false) }}>{t('schedule.apply')}</Button>
+                  <Button size="sm" variant="primary" data-testid="admin-schedule-filter-apply" onClick={() => { replaceScheduleQuery?.(draftFilters); setFiltersOpen(false) }}>{t('schedule.apply')}</Button>
                 </div>
               </div>
             )}

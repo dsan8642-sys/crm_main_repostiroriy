@@ -1,13 +1,49 @@
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from catalog.models import Group
+from audit.models import audit
 
-from .models import GroupMembership, Student
+from .models import GroupMembership, ParticipantNote, Student
 
 
 MAX_STUDENT_GROUPS = 3
+
+
+def validate_note_body(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError({"body": "Введите текст заметки."})
+    body = value.strip()
+    if len(body) > 4000:
+        raise ValidationError({"body": "Заметка не может быть длиннее 4000 символов."})
+    return body
+
+
+@transaction.atomic
+def create_participant_note(student, body, actor):
+    note = ParticipantNote.objects.create(student=student, body=validate_note_body(body), author=actor)
+    audit(actor, "participant.note_created", note, {"participant_id": student.id})
+    return note
+
+
+@transaction.atomic
+def edit_participant_note(note, body, actor, *, is_admin=False):
+    if not is_admin and note.author_id != actor.id:
+        raise PermissionDenied("Редактировать заметку может её автор.")
+    note.body = validate_note_body(body)
+    note.edited_at = timezone.now()
+    note.save(update_fields=["body", "updated_at", "edited_at"])
+    audit(actor, "participant.note_updated", note, {"participant_id": note.student_id})
+    return note
+
+
+@transaction.atomic
+def delete_participant_note(note, actor, *, is_admin=False):
+    if not is_admin and note.author_id != actor.id:
+        raise PermissionDenied("Удалить заметку может её автор.")
+    audit(actor, "participant.note_deleted", note, {"participant_id": note.student_id})
+    note.delete()
 
 
 def _account_holder_names(account):

@@ -51,7 +51,7 @@ def _client_row(student):
         "emergency_contact_name": student.emergency_contact_name,
         "emergency_contact_phone": student.emergency_contact_phone,
         "is_active": _bool(student.is_active),
-        "admin_comments": student.admin_comments,
+        "admin_comments": "\n\n".join(student.internal_notes.values_list("body", flat=True)) or student.admin_comments,
         "subscription_type_name": subscription.subscription_type.name if subscription else "",
     }
 

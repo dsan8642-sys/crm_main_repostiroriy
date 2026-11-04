@@ -27,9 +27,12 @@ import { ToastNotice } from '../ToastProvider.jsx'
 import { AccessCodeCard } from '../AccessControls.jsx'
 import { validIsoDate } from '../scheduleContracts.js'
 import { FormModal } from '../FormModal.jsx'
+import { useSessionViewState } from '../uiLifecycle.jsx'
 import { ActionPopover, ContextBackButton } from '../EntityListPrimitives.jsx'
 import { GroupMultiSelect } from '../GroupMultiSelect.jsx'
 import { usePresence } from '../usePresence.js'
+import { ParticipantPhotoEditor, PhotoAvatar, photoUrl } from '../ParticipantPhoto.jsx'
+import { ParticipantNotes } from '../ParticipantNotes.jsx'
 
 const PARTICIPANT_FIELD_IDS = {
   firstName: 'admin-client-participant-first-name',
@@ -75,7 +78,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
 
   return function ApiAdminClientDetail({
     go, back, clientId, initialTab, initialParticipantId, initialFinanceAction,
-    initialSubscriptionId, prefillAmount,
+    initialSubscriptionId, prefillAmount, currentUser,
   }) {
     const { locale } = useLocale()
     const t = useMemo(() => adminFinanceTranslator(locale), [locale])
@@ -107,8 +110,17 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const [attendanceSource, setAttendanceSource] = useState('subscription')
     const [attendanceSubscriptionId, setAttendanceSubscriptionId] = useState('')
     const [attendanceError, setAttendanceError] = useState(null)
-    const [attendancePaymentFilter, setAttendancePaymentFilter] = useState([])
-    const [attendanceStatusFilter, setAttendanceStatusFilter] = useState([])
+    const [attendanceFilterView, setAttendanceFilterView] = useSessionViewState(
+      `admin.${currentUser?.id || currentUser?.username || 'session'}.client.${fallbackClientId || 'none'}.attendance`,
+      { payment: [], status: [] },
+    )
+    const attendancePaymentFilter = useMemo(() => Array.isArray(attendanceFilterView.payment)
+      ? attendanceFilterView.payment.filter((value) => ['account', 'subscription', 'none'].includes(value)) : [], [attendanceFilterView.payment])
+    const attendanceStatusFilter = useMemo(() => Array.isArray(attendanceFilterView.status)
+      ? attendanceFilterView.status.filter((value) => ['present', 'absent', 'rescheduled', 'unmarked'].includes(value)) : [], [attendanceFilterView.status])
+    const includeUnmarked = attendanceStatusFilter.includes('unmarked')
+    const setAttendancePaymentFilter = (payment) => setAttendanceFilterView((current) => ({ ...current, payment }))
+    const setAttendanceStatusFilter = (status) => setAttendanceFilterView((current) => ({ ...current, status }))
     const [attendanceFiltersOpen, setAttendanceFiltersOpen] = useState(false)
     const attendanceFilterPresence = usePresence(attendanceFiltersOpen)
     const [mobilePaymentView, setMobilePaymentView] = useState('topups')
@@ -120,6 +132,8 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const [participantForm, setParticipantForm] = useState({ firstName: '', lastName: '', birthDate: '', email: '', groupIds: [], isActive: true })
     const [participantBaseline, setParticipantBaseline] = useState(null)
     const [participantFieldErrors, setParticipantFieldErrors] = useState({})
+    const [photoPending, setPhotoPending] = useState(false)
+    const [photoBusy, setPhotoBusy] = useState(false)
     const [paymentForm, setPaymentForm] = useState({
       participantId: '',
       amount: '',
@@ -160,7 +174,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       let alive = true
       setLoading(true)
       setError(null)
-      api.get(`/api/admin/clients/${fallbackClientId}/`)
+      api.get(`/api/admin/clients/${fallbackClientId}/${includeUnmarked ? '?include_unmarked=1' : ''}`)
         .then((payload) => {
           if (alive) setDetail(payload)
         })
@@ -173,7 +187,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       return () => {
         alive = false
       }
-    }, [fallbackClientId, refreshKey])
+    }, [fallbackClientId, refreshKey, includeUnmarked])
 
     const account = detail?.account || {}
     const participants = detail?.participants || []
@@ -207,12 +221,15 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     const selectedAttendance = useMemo(() => attendance.filter(
       (row) => String(row.participant_id ?? row.participant?.id ?? '') === selectedParticipantId,
     ), [attendance, selectedParticipantId])
-    const filteredAttendance = selectedAttendance.filter((row) => (
+    const unmarkedAttendance = includeUnmarked ? (detail?.unmarked_attendance || []).filter(
+      (row) => String(row.participant_id) === selectedParticipantId,
+    ) : []
+    const filteredAttendance = [...selectedAttendance, ...unmarkedAttendance].filter((row) => (
       (!attendancePaymentFilter.length || attendancePaymentFilter.includes(row.payment_source || 'none'))
       && (!attendanceStatusFilter.length || attendanceStatusFilter.includes(
-        row.status === 'excused' ? 'absent' : row.status,
+        row.status === 'excused' ? 'absent' : row.status ?? 'unmarked',
       ))
-    ))
+    )).sort((a, b) => Date.parse(b.session_start_at) - Date.parse(a.session_start_at))
     const editableAttendance = filteredAttendance.filter((row) => row.deducts)
     const selectedHistoricalAttendance = selectedAttendance.some(
       (row) => attendanceIds.includes(row.id) && row.financial_effects_enabled === false,
@@ -624,6 +641,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     }
 
     function openParticipantEdit(participant) {
+      setPhotoPending(false); setPhotoBusy(false)
       setEditingParticipant(participant)
       setParticipantFieldErrors({})
       const next = { firstName: participant.first_name || '', lastName: participant.last_name || '', birthDate: participant.birth_date || '', email: participant.email || '', groupIds: (participant.groups || []).map((group) => String(group.id)), isActive: participant.is_active }
@@ -632,6 +650,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
     }
 
     function openParticipantCreate() {
+      setPhotoPending(false); setPhotoBusy(false)
       const next = { firstName: '', lastName: '', birthDate: '', email: '', groupIds: [], isActive: true }
       setTab('participants')
       setParticipantForm(next)
@@ -770,7 +789,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         const salePriceMinor = nonnegativeMoneyMajorToMinor(financeForm.salePrice)
         if (salePriceMinor === null || salePriceMinor > catalogPriceMinor) nextErrors.salePrice = t('finance.salePriceError')
         if (!validIsoDate(financeForm.startDate)) nextErrors.startDate = t('finance.startDateError')
-        if (!validIsoDate(financeForm.dueDate)) nextErrors.dueDate = t('finance.dueDateError')
         if (financeForm.paymentReceived && !financeForm.paymentMethod) nextErrors.paymentMethod = t('finance.paymentMethodError')
         if (financeForm.paymentReceived && !validIsoDate(financeForm.paymentDate)) nextErrors.paymentDate = t('finance.paymentDateError')
       }
@@ -805,7 +823,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             subscription_type_id: financeForm.subscriptionTypeId,
             price_minor: nonnegativeMoneyMajorToMinor(financeForm.salePrice),
             start_date: financeForm.startDate,
-            due_date: financeForm.dueDate,
             idempotency_key: financeForm.subscriptionIdempotencyKey,
             ...subscriptionPaymentFields({ received: financeForm.paymentReceived, method: financeForm.paymentMethod, date: financeForm.paymentDate }),
           })
@@ -816,7 +833,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             subscription_type_id: financeForm.subscriptionTypeId,
             price_minor: nonnegativeMoneyMajorToMinor(financeForm.salePrice),
             start_date: financeForm.startDate,
-            due_date: financeForm.dueDate,
             idempotency_key: financeForm.subscriptionIdempotencyKey,
             ...subscriptionPaymentFields({ received: financeForm.paymentReceived, method: financeForm.paymentMethod, date: financeForm.paymentDate }),
           })
@@ -849,7 +865,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
       setMessage(null)
       setActionBusy('export')
       try {
-        const result = await downloadFile(`/api/admin/privacy/clients/${fallbackClientId}/export/`, `client-${fallbackClientId}-data.json`)
+        const result = await downloadFile(`/api/admin/privacy/clients/${fallbackClientId}/export/`, `client-${fallbackClientId}-data.zip`)
         setMessage(t('client.exportReady', { name: result.name }))
       } catch (err) {
         setError(apiErrorMessage(err, t('client.exportError')))
@@ -959,6 +975,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 ? <label><span>{t('common.participant')}</span><select data-testid="admin-client-participant-select" value={selectedParticipantId} onChange={(event) => selectParticipant(event.target.value)}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.full_name}</option>)}</select></label>
                 : <span>{t('common.participant')}: {selectedParticipant.full_name}</span>}
             </div>}
+            {selectedParticipant && <ParticipantNotes participantId={selectedParticipant.id} name={selectedParticipant.full_name} birthDate={selectedParticipant.birth_date} hasNotes={selectedParticipant.has_internal_notes} readOnly={accountArchived || !selectedParticipant.is_active} endpoint={`/api/admin/participants/${selectedParticipant.id}/notes/`} />}
             <p className="page-desc ops-client-contact-summary"><span>{account.phone || '—'}</span><span>{account.email || '—'}</span></p>
             {!contactsHidden && <div className="ops-contact-links" aria-label={t('client.contactAria')}>
               <ContactLink href={contactPhoneDigits ? `https://t.me/+${contactPhoneDigits}` : null} label="Telegram" disabledHint={phoneContactHint} />
@@ -1047,7 +1064,6 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                   </Select>
                   <Input id={FINANCE_FIELD_IDS.salePrice} label={t('finance.salePrice', { currency: subscriptionTypes.find((type) => String(type.typeId) === String(financeForm.subscriptionTypeId))?.currency || 'PLN' })} value={financeForm.salePrice} error={financeFieldErrors.salePrice} onChange={(event) => updateFinanceForm('salePrice', event.target.value)} inputMode="decimal" />
                   <DateField id={FINANCE_FIELD_IDS.startDate} label={t('field.startDate')} value={financeForm.startDate} error={financeFieldErrors.startDate} onChange={(value) => updateFinanceForm('startDate', value)} />
-                  <DateField id={FINANCE_FIELD_IDS.dueDate} label={t('field.dueDate')} value={financeForm.dueDate} error={financeFieldErrors.dueDate} onChange={(value) => updateFinanceForm('dueDate', value)} />
                   <p className="ops-grid-full muted" style={{ margin: 0 }}>{t('finance.autoChargeHint')}</p>
                   <Checkbox id={FINANCE_FIELD_IDS.paymentReceived} label={t('finance.subscriptionPaymentReceived')} checked={financeForm.paymentReceived} disabled={nonnegativeMoneyMajorToMinor(financeForm.salePrice) === 0} onChange={(event) => updateFinanceForm('paymentReceived', event.target.checked)} />
                   {financeForm.paymentReceived && <>
@@ -1140,22 +1156,25 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
         <div key={tab} className="ops-client-section ops-motion-fade">
         {tab === 'participants' && (
           <div>
-          <FormModal open={Boolean(editingParticipant)} title={t(editingParticipant?.id ? 'client.editParticipant' : 'client.addFamilyMember')} size="lg" busy={actionBusy != null} dirty={Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline)} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button><Button variant="primary" disabled={actionBusy != null} onClick={saveParticipant}>{t(editingParticipant?.id ? 'common.save' : 'client.addFamilyMember')}</Button></>}>
+          <FormModal open={Boolean(editingParticipant)} title={t(editingParticipant?.id ? 'client.editParticipant' : 'client.addFamilyMember')} size="lg" busy={actionBusy != null || photoBusy} dirty={photoPending || (Boolean(participantBaseline) && JSON.stringify(participantForm) !== JSON.stringify(participantBaseline))} onRequestClose={() => { if (participantBaseline) setParticipantForm(participantBaseline); setEditingParticipant(null); setParticipantBaseline(null); setParticipantFieldErrors({}); setPhotoPending(false); setPhotoBusy(false); setError(null) }} footer={({ requestClose }) => <><Button variant="secondary" disabled={actionBusy != null || photoBusy} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button>{!accountArchived && <Button variant="primary" disabled={actionBusy != null || photoBusy} onClick={saveParticipant}>{t(editingParticipant?.id ? 'common.save' : 'client.addFamilyMember')}</Button>}</>}>
             {error && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setError(null)}>{error}</Banner>}
             <div className="ops-form-grid">
+              {!accountArchived && <>
               <Input id={PARTICIPANT_FIELD_IDS.firstName} label={t('field.firstName')} value={participantForm.firstName} error={participantFieldErrors.firstName} onChange={(event) => updateParticipantForm('firstName', event.target.value)} />
               <Input id={PARTICIPANT_FIELD_IDS.lastName} label={t('field.lastName')} value={participantForm.lastName} error={participantFieldErrors.lastName} onChange={(event) => updateParticipantForm('lastName', event.target.value)} />
               <DateField id={PARTICIPANT_FIELD_IDS.birthDate} label={t('field.birthDate')} value={participantForm.birthDate} error={participantFieldErrors.birthDate} onChange={(value) => updateParticipantForm('birthDate', value)} />
               <Input id={PARTICIPANT_FIELD_IDS.email} label="Email" value={participantForm.email} error={participantFieldErrors.email} onChange={(event) => updateParticipantForm('email', event.target.value)} />
               <GroupMultiSelect id={PARTICIPANT_FIELD_IDS.groupIds} groups={groups} value={participantForm.groupIds} error={participantFieldErrors.groupIds} onChange={(value) => updateParticipantForm('groupIds', value)} />
               <Checkbox id={PARTICIPANT_FIELD_IDS.isActive} label={t('field.accountActive')} checked={participantForm.isActive} error={participantFieldErrors.isActive} onChange={(event) => updateParticipantForm('isActive', event.target.checked)} />
+              </>}
+              {editingParticipant?.id && <ParticipantPhotoEditor student={editingParticipant} Avatar={Avatar} Dialog={Dialog} onPendingChange={setPhotoPending} onBusyChange={setPhotoBusy} onChanged={() => setRefreshKey((key) => key + 1)} />}
             </div>
           </FormModal>
           <Table
             rows={participants}
             emptyLabel={t('client.noParticipants')}
             columns={[
-              { key: 'full_name', header: t('common.participant'), render: (row) => <button type="button" className="ops-link-button" disabled={accountArchived} onClick={() => openParticipantEdit(row)}><Avatar name={row.full_name} size={28} /><span className="strong">{row.full_name}</span></button> },
+              { key: 'full_name', header: t('common.participant'), render: (row) => <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><PhotoAvatar Avatar={Avatar} Dialog={Dialog} name={row.full_name} src={photoUrl(row.id, row.photo_version)} size={28} /><button type="button" className="ops-link-button" onClick={() => openParticipantEdit(row)}><span className="strong">{row.full_name}</span></button></div> },
               { key: 'birth_date', header: t('field.birthDate'), muted: true, render: (row) => row.birth_date || '-' },
               { key: 'email', header: 'Email', muted: true, render: (row) => row.email || '-' },
               { key: 'groups', header: t('common.groups'), render: (row) => (row.groups || []).map((group) => group.name).join(', ') || t('clients.individual') },
@@ -1272,12 +1291,12 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
                 { id: 'source', label: t('finance.paymentSource'), values: attendancePaymentFilter, change: setAttendancePaymentFilter,
                   options: [['account', t('finance.fromAccount')], ['subscription', t('finance.fromSubscription')], ['none', t('finance.sourceNotSpecified')]] },
                 { id: 'status', label: t('common.status'), values: attendanceStatusFilter, change: setAttendanceStatusFilter,
-                  options: [['present', t('attendance.present')], ['absent', t('attendance.absent')], ['rescheduled', t('attendance.rescheduled')]] },
+                  options: [['present', t('attendance.present')], ['absent', t('attendance.absent')], ['rescheduled', t('attendance.rescheduled')], ['unmarked', t('attendance.unmarked')]] },
               ].map(({ id, label, values, change, options }) => {
                 const selectedLabel = options.filter(([value]) => values.includes(value)).map(([, text]) => text).join(', ') || t('finance.allVisits')
                 return <div key={id} className="ops-attendance-filter">
                   <span>{label}</span>
-                  <details id={`admin-client-attendance-filter-${id}`}>
+                  <details id={`admin-client-attendance-filter-${id}`} name="admin-client-attendance-filter">
                     <summary aria-label={`${label}: ${selectedLabel}`} title={selectedLabel}>{selectedLabel}</summary>
                     <div className="ops-attendance-filter-options" role="group" aria-label={label}>
                       <Button size="sm" variant="subtle" disabled={actionBusy != null} onClick={() => change([])}>{t('finance.allVisits')}</Button>
@@ -1308,6 +1327,7 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
             </section>}
           <Table
             rows={filteredAttendance}
+            rowKey={(row) => row.id ?? `unmarked-${row.session_id}-${row.participant_id}`}
             emptyLabel={t('client.noAttendance')}
             columns={[
               ...(attendanceEditing ? [{ key: 'select', header: t('finance.attendanceSelection'), width: 60, render: (row) => row.deducts ? <Checkbox aria-label={t('finance.selectVisit', { date: formatLocalShortDate(row.session_start_at) })} checked={attendanceIds.includes(row.id)} disabled={actionBusy != null} onChange={() => setAttendanceIds((ids) => ids.includes(row.id) ? ids.filter((id) => id !== row.id) : [...ids, row.id])} /> : null }] : []),
@@ -1315,7 +1335,9 @@ export function createAdminClientDetailScreen(components, icons, reloadRoleData,
               { key: 'session_start_at', header: t('field.session'), render: (row) => <button type="button" className="ops-link-button" onClick={() => go?.('attendance', { sessionId: row.session_id })}>{formatLocalShortDate(row.session_start_at)} {formatTime(row.session_start_at)}-{formatTime(row.session_end_at)}</button> },
               { key: 'group', header: t('common.group'), muted: true },
               { key: 'trainer', header: t('common.trainer'), muted: true },
-              { key: 'status', header: t('common.status'), width: 120, render: (row) => <StatusPill status={row.status} size="sm" /> },
+              { key: 'status', header: t('common.status'), width: 120, render: (row) => row.status
+                ? <StatusPill status={row.status} size="sm" />
+                : <StatusPill label={t('attendance.unmarked')} tone="neutral" size="sm" /> },
               { key: 'payment_source', header: t('finance.paymentSource'), render: (row) => {
                 if (row.payment_source !== 'subscription') return row.payment_source === 'account' ? t('finance.fromAccount') : '—'
                 const label = subscriptionLabel(subscriptions.find((item) => String(item.id) === String(row.payment_subscription_id)))

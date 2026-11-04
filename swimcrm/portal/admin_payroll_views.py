@@ -2,9 +2,106 @@ from .support import *
 from .admin_support import _admin_required
 from .pagination import paginated_payload
 
-from payroll.models import (PayrollPeriod, PayrollRule, PayrollScheme,
+from datetime import date
+
+from payroll.models import (PayrollPeriod, PayrollRate, PayrollRateVersion, PayrollRule, PayrollScheme,
                             TrainerPayrollAssignment)
-from payroll.services import calculate_payroll_period, payroll_totals_by_trainer
+from payroll.services import assign_rate, calculate_payroll_period, payroll_totals_by_trainer, recalculate_open_periods
+
+
+def _rate_payload(rate):
+    versions = list(rate.versions.order_by("-effective_from"))
+    current = next((v for v in versions if v.effective_from <= timezone.localdate()), versions[0] if versions else None)
+    return {"id": rate.id, "name": rate.name, "session_type": rate.session_type,
+            "is_active": rate.is_active,
+            "base_amount_minor": current.base_amount_minor if current else None,
+            "currency": current.currency if current else "PLN",
+            "min_clients_threshold": current.min_clients_threshold if current else None,
+            "extra_client_amount_minor": current.extra_client_amount_minor if current else None,
+            "versions": [{"effective_from": v.effective_from.isoformat(),
+                          "base_amount_minor": v.base_amount_minor, "currency": v.currency,
+                          "min_clients_threshold": v.min_clients_threshold,
+                          "extra_client_amount_minor": v.extra_client_amount_minor} for v in versions]}
+
+
+def _rate_version(rate, data, effective_from):
+    version, _ = PayrollRateVersion.objects.get_or_create(rate=rate, effective_from=effective_from,
+        defaults={"base_amount_minor": 0})
+    version.base_amount_minor = _required_int(data.get("base_amount_minor"), "base_amount_minor")
+    version.currency = data.get("currency") or "PLN"
+    version.min_clients_threshold = (_required_int(data["min_clients_threshold"], "min_clients_threshold")
+        if data.get("min_clients_threshold") not in (None, "") else None)
+    version.extra_client_amount_minor = (_required_int(data["extra_client_amount_minor"], "extra_client_amount_minor")
+        if data.get("extra_client_amount_minor") not in (None, "") else None)
+    version.full_clean()
+    version.save()
+
+
+@require_http_methods(["GET", "POST"])
+def admin_payroll_rates(request):
+    user = _admin_required(request)
+    if request.method == "GET":
+        return JsonResponse({"rates": [_rate_payload(rate) for rate in PayrollRate.objects.prefetch_related("versions").order_by("name", "id")]})
+    data = _json_body(request)
+    with transaction.atomic():
+        rate = PayrollRate(name=data.get("name", ""), session_type=data.get("session_type", ""))
+        rate.full_clean()
+        rate.save()
+        _rate_version(rate, data, date(1900, 1, 1))
+    return JsonResponse(_rate_payload(rate), status=201)
+
+
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def admin_payroll_rate_detail(request, rate_id):
+    user = _admin_required(request)
+    rate = get_object_or_404(PayrollRate, pk=rate_id)
+    if request.method == "GET":
+        return JsonResponse(_rate_payload(rate))
+    if request.method == "DELETE":
+        rate.is_active = False
+        rate.save(update_fields=["is_active"])
+        return JsonResponse(_rate_payload(rate))
+    data = _json_body(request)
+    with transaction.atomic():
+        if "session_type" in data and data["session_type"] != rate.session_type:
+            raise ValidationError({"session_type": "Тип ставки нельзя изменить"})
+        if "name" in data:
+            rate.name = data["name"]
+            rate.full_clean()
+            rate.save(update_fields=["name"])
+        amount_fields = {"base_amount_minor", "currency", "min_clients_threshold", "extra_client_amount_minor"}
+        if amount_fields.intersection(data):
+            effective_from = _parse_date(data.get("effective_from"), "effective_from")
+            if effective_from is None:
+                raise ValidationError({"effective_from": "Дата начала обязательна"})
+            previous = rate.versions.filter(effective_from__lte=effective_from).order_by("-effective_from").first()
+            merged = {key: getattr(previous, key) for key in amount_fields} if previous else {}
+            merged.update(data)
+            _rate_version(rate, merged, effective_from)
+            recalculate_open_periods(from_date=effective_from, actor=user)
+    return JsonResponse(_rate_payload(rate))
+
+
+@require_http_methods(["POST"])
+def admin_payroll_assign_rates(request):
+    user = _admin_required(request)
+    data = _json_body(request)
+    rate = get_object_or_404(PayrollRate, pk=data.get("rate_id"))
+    trainer_ids = data.get("trainer_ids")
+    if not isinstance(trainer_ids, list) or not trainer_ids or any(type(value) is not int for value in trainer_ids):
+        raise ValidationError({"trainer_ids": "Выберите тренеров"})
+    active_ids = set(Trainer.objects.filter(pk__in=trainer_ids, is_active=True, user__is_active=True).values_list("id", flat=True))
+    if set(trainer_ids) != active_ids:
+        raise ValidationError({"trainer_ids": "Выберите действующих тренеров"})
+    effective_from = _parse_date(data.get("effective_from"), "effective_from")
+    if effective_from is None:
+        raise ValidationError({"effective_from": "Дата начала обязательна"})
+    location = data.get("location") or ""
+    if not isinstance(location, str) or len(location) > 120:
+        raise ValidationError({"location": "Некорректный филиал"})
+    changed = assign_rate(rate=rate, trainer_ids=trainer_ids, effective_from=effective_from,
+                          location=location, actor=user)
+    return JsonResponse({"assignments": [_payroll_assignment_payload(item) for item in changed]}, status=201)
 
 
 def _payroll_scheme_payload(scheme):
@@ -38,7 +135,11 @@ def _payroll_assignment_payload(assignment):
         "trainer_id": assignment.trainer_id,
         "trainer": str(assignment.trainer),
         "scheme_id": assignment.scheme_id,
-        "scheme": assignment.scheme.name,
+        "scheme": assignment.scheme.name if assignment.scheme_id else None,
+        "rate_id": assignment.rate_id,
+        "rate": assignment.rate.name if assignment.rate_id else None,
+        "session_type": assignment.rate.session_type if assignment.rate_id else None,
+        "location": assignment.location,
         "effective_from": assignment.effective_from.isoformat(),
         "effective_to": assignment.effective_to.isoformat() if assignment.effective_to else None,
     }
@@ -59,6 +160,7 @@ def _payroll_calculation_payload(calc):
         "extra_amount_minor": calc.extra_amount_minor,
         "final_amount_minor": calc.final_amount_minor,
         "currency": calc.currency,
+        "rate_id": calc.rate_version.rate_id if calc.rate_version_id else None,
     }
 
 
@@ -69,11 +171,12 @@ def _payroll_period_payload(period, include_lines=False):
         "date_to": period.date_to.isoformat(),
         "location": period.location,
         "status": period.status,
+        "skipped_sessions": period.skipped_sessions,
         "totals_by_trainer": payroll_totals_by_trainer(period),
     }
     if include_lines:
         calculations = period.calculations.select_related(
-            "trainer__user", "session", "rule").order_by("session__start_at", "id")
+            "trainer__user", "session", "rule", "rate_version").order_by("session__start_at", "id")
         payload["calculations"] = [_payroll_calculation_payload(calc) for calc in calculations]
     return payload
 
@@ -201,7 +304,7 @@ def admin_payroll_assignments(request):
         assignment = _apply_payroll_assignment_data(TrainerPayrollAssignment(), _json_body(request))
         return JsonResponse(_payroll_assignment_payload(assignment), status=201)
     qs = TrainerPayrollAssignment.objects.select_related(
-        "trainer__user", "scheme").order_by("trainer_id", "-effective_from")
+        "trainer__user", "scheme", "rate").filter(rate__isnull=False).order_by("trainer_id", "-effective_from")
     if request.GET.get("trainer_id"):
         qs = qs.filter(trainer_id=request.GET["trainer_id"])
     return JsonResponse(paginated_payload(
@@ -237,14 +340,32 @@ def admin_payroll_periods(request):
             "calculations_count": summary.calculations_count,
             "total_amount_minor": summary.total_amount_minor,
             "currency": summary.currency,
+            "skipped": summary.skipped,
         }
         return JsonResponse(payload, status=201)
     qs = PayrollPeriod.objects.order_by("-date_from", "-id")
     return JsonResponse({"periods": [_payroll_period_payload(period) for period in qs[:100]]})
 
 
-@require_GET
+@require_http_methods(["GET", "PATCH"])
 def admin_payroll_period_detail(request, period_id):
     _admin_required(request)
     period = get_object_or_404(PayrollPeriod, pk=period_id)
+    if request.method == "PATCH":
+        if period.status in {"approved", "exported"}:
+            raise ValidationError("Утверждённый расчёт нельзя изменять")
+        data = _json_body(request)
+        with transaction.atomic():
+            period.date_from = _parse_date(data.get("date_from"), "date_from")
+            period.date_to = _parse_date(data.get("date_to"), "date_to")
+            period.location = data.get("location") or ""
+            period.full_clean()
+            period.save()
+            summary = calculate_payroll_period(date_from=period.date_from, date_to=period.date_to,
+                                               location=period.location, actor=request.user)
+        payload = _payroll_period_payload(period, include_lines=True)
+        payload["summary"] = {"calculations_count": summary.calculations_count,
+                              "total_amount_minor": summary.total_amount_minor,
+                              "currency": summary.currency, "skipped": summary.skipped}
+        return JsonResponse(payload)
     return JsonResponse(_payroll_period_payload(period, include_lines=True))

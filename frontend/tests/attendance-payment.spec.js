@@ -14,8 +14,9 @@ async function clickAccountAction(page, testId) {
   await page.getByTestId(testId).click()
 }
 
-async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false, withCharges = false, expiredAndRemaining = false, wideSubscription = false, changedSubscriptionBalance = null, saleType = false } = {}) {
+async function mockAttendance(page, { multiple = false, historyOnly = false, mixedAttendance = false, withOldSubscription = false, family = false, withCharges = false, expiredAndRemaining = false, wideSubscription = false, changedSubscriptionBalance = null, saleType = false, photo = false, unmarkedRows = null } = {}) {
   const participant = { id: 11, client_id: 101, first_name: 'Anna', last_name: 'Test', full_name: 'Anna Test', is_active: true }
+  if (photo) participant.photo_version = 'initial'
   const subscription = { id: 77, participant_id: 11, type: 'Test pass', status: 'active', start_date: '2026-06-10', effective_end_date: '2026-07-10', remaining_sessions: 1, can_assign_attendance: true, ledger: [], charges: [], freezes: [] }
   if (wideSubscription) {
     subscription.type = 'Абонемент на индивидуальные тренировки'
@@ -75,11 +76,18 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
     const request = route.request()
     const path = new URL(request.url()).pathname
     let payload = {}
+    if (path === '/api/admin/participants/11/photo/') {
+      if (request.method() === 'GET') return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64') })
+      if (request.method() === 'POST') { participant.photo_version = 'updated'; changes.push({ photoUpload: request.headers()['content-type']?.startsWith('multipart/form-data') }); payload = { has_photo: true, photo_version: 'updated' } }
+      if (request.method() === 'DELETE') { participant.photo_version = null; changes.push({ photoDelete: true }); payload = { has_photo: false, photo_version: null } }
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) })
+    }
     if (path === '/api/me/') payload = { id: 1, username: 'admin', role: 'admin' }
     else if (path === '/api/health/') payload = { status: 'ok' }
     else if (path === '/api/admin/reference/') payload = { trainers: [], groups: [], subscription_types: saleType ? [{ id: 1, name: 'Test pass', price_minor: 28000, currency: 'PLN', duration_days: 30, sessions_count: 4, is_unlimited: false, is_individual: false, is_active: true }] : [], participants: detail.participants, choices: {} }
     else if (path === '/api/admin/clients/') payload = { clients: [participant] }
-    else if (path === '/api/admin/clients/101/') payload = detail
+    else if (path === '/api/admin/clients/101/') payload = unmarkedRows && new URL(request.url()).searchParams.get('include_unmarked') === '1'
+      ? { ...detail, unmarked_attendance: unmarkedRows } : detail
     else if (path === '/api/admin/subscriptions/77/cancel-sale/' && request.method() === 'POST') {
       changes.push({ action: 'cancel-sale', subscription_id: 77 })
       subscription.status = 'cancelled'
@@ -124,6 +132,27 @@ async function mockAttendance(page, { multiple = false, historyOnly = false, mix
   return changes
 }
 
+test('admin crops, replaces, previews and removes participant photo', async ({ page }, testInfo) => {
+  const changes = await mockAttendance(page, { photo: true })
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=participants')
+  await page.getByRole('button', { name: 'Anna Test', exact: true }).click()
+  const editor = page.getByRole('region', { name: 'Фотография пловца' })
+  await expect(editor.getByRole('button', { name: /Увеличить фото/ })).toBeVisible()
+  await editor.getByRole('button', { name: /Увеличить фото/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Anna Test' })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Anna Test' }).getByRole('button', { name: 'Закрыть' }).click()
+  await editor.locator('input[type=file]').setInputFiles({ name: 'source.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64') })
+  await expect(editor.getByLabel('Предпросмотр обрезанного фото')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.screenshot({ path: testInfo.outputPath('participant-photo-crop.png'), animations: 'disabled' })
+  await editor.getByLabel('Увеличение').fill('1.5')
+  await editor.getByRole('button', { name: 'Сохранить фото' }).click()
+  await expect.poll(() => changes.find((item) => item.photoUpload)?.photoUpload).toBe(true)
+  await editor.getByRole('button', { name: 'Удалить фото' }).click()
+  await expect.poll(() => changes.some((item) => item.photoDelete)).toBe(true)
+  await expect(editor.getByRole('button', { name: /Увеличить фото/ })).toHaveCount(0)
+})
+
 test('visit source can be changed in both directions with hidden selection and a negative warning', async ({ page }) => {
   const changes = await mockAttendance(page, { withCharges: true })
   await page.goto('/?role=admin&view=clientDetail&client=101&tab=attendance')
@@ -145,7 +174,7 @@ test('visit source can be changed in both directions with hidden selection and a
   await page.screenshot({ path: `../.local-run/attendance-payment-${test.info().project.name}.png`, fullPage: true, animations: 'disabled' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   await page.getByTestId('admin-client-attendance-save').click()
-  await expect.poll(() => changes[0]).toEqual({ attendance_ids: [1, 2], source: 'subscription', subscription_id: 77 })
+  await expect.poll(() => changes[0]).toEqual({ attendance_ids: [2, 1], source: 'subscription', subscription_id: 77 })
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await expect(page.getByText('С абонемента: Test pass · с 10.06.2026', { exact: true })).toHaveCount(2)
   await expect(paymentPanel).toHaveCount(0)
@@ -160,7 +189,7 @@ test('visit source can be changed in both directions with hidden selection and a
   await page.getByRole('checkbox', { name: /Выбрать посещение:/ }).first().check()
   await page.locator('#admin-client-attendance-source').selectOption('account')
   await page.getByTestId('admin-client-attendance-save').click()
-  await expect.poll(() => changes[1]).toEqual({ attendance_ids: [1], source: 'account' })
+  await expect.poll(() => changes[1]).toEqual({ attendance_ids: [2], source: 'account' })
   await expect(page.locator('tbody').getByText('Со счёта', { exact: true })).toHaveCount(1)
   await expect(page.locator('tbody tr').first().locator('td').last()).toContainText('−65,00')
   await page.getByTestId('admin-client-tab-payments').click()
@@ -193,7 +222,7 @@ test('the sole eligible subscription is automatic while old empty ones remain in
   await expect(page.getByText('Test pass · с 10.06.2026', { exact: true })).toBeVisible()
   await page.getByRole('checkbox', { name: /Выбрать посещение:/ }).first().check()
   await page.getByTestId('admin-client-attendance-save').click()
-  await expect.poll(() => changes[0]).toEqual({ attendance_ids: [1], source: 'subscription', subscription_id: 77 })
+  await expect.poll(() => changes[0]).toEqual({ attendance_ids: [2], source: 'subscription', subscription_id: 77 })
   await page.getByTestId('admin-client-tab-subscriptions').click()
   await expect(page.locator('tbody tr')).toHaveCount(2)
 })
@@ -220,7 +249,7 @@ test('historical visits remain selectable and warn before enabling billing', asy
   await expect(page.getByText('У выбранных посещений отключён финансовый учёт.', { exact: false })).toBeVisible()
   await expect(page.getByTestId('admin-client-attendance-save')).toBeEnabled()
   await page.getByTestId('admin-client-attendance-save').click()
-  await expect.poll(() => changes[0]).toEqual({ attendance_ids: [1], source: 'subscription', subscription_id: 77 })
+  await expect.poll(() => changes[0]).toEqual({ attendance_ids: [2], source: 'subscription', subscription_id: 77 })
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await expect(page.getByText('С абонемента: Test pass · с 10.06.2026', { exact: true })).toHaveCount(1)
 })
@@ -310,6 +339,71 @@ test('visit source and status filters combine and clear selection before changin
   await expect(panel).toHaveCSS('animation-name', 'none')
   await filters.click()
   await expect(panel).toHaveCount(0)
+})
+
+test('unmarked visits appear only with the explicit status and open the attendance screen', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0))
+  const unmarkedRows = [7, 8].map((day, index) => ({
+    id: index ? 99 : null, participant_id: 11, participant: 'Anna Test', session_id: 30 + index,
+    session_start_at: `2026-06-0${day}T17:00:00+02:00`, session_end_at: `2026-06-0${day}T18:00:00+02:00`,
+    group: 'Test group', trainer: 'Test trainer', status: null, deducts: false,
+    payment_source: 'none', payment_subscription_id: null, subscription_session_delta: 0,
+  }))
+  await mockAttendance(page, { unmarkedRows })
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=attendance')
+  const rows = page.locator('tbody tr').filter({ hasText: 'Anna Test' })
+  await expect(rows).toHaveCount(2)
+  await expect(page.getByText('Без отметки')).toHaveCount(0)
+
+  await page.getByTestId('admin-client-attendance-filters').click()
+  const status = page.locator('#admin-client-attendance-filter-status')
+  const source = page.locator('#admin-client-attendance-filter-source')
+  await status.locator('summary').click()
+  await status.getByRole('checkbox', { name: 'Без отметки' }).check()
+  await expect(rows).toHaveCount(2)
+  await expect(rows.first()).toContainText('Без отметки')
+  await expect(page.getByTestId('admin-client-attendance-edit')).toBeDisabled()
+  await status.getByRole('checkbox', { name: 'Был', exact: true }).check()
+  await expect(rows).toHaveCount(4)
+
+  await source.locator('summary').click()
+  await source.getByRole('checkbox', { name: 'Со счёта', exact: true }).check()
+  await expect(rows).toHaveCount(2)
+  await source.getByRole('checkbox', { name: 'Со счёта', exact: true }).uncheck()
+  await source.getByRole('checkbox', { name: 'Не указан', exact: true }).check()
+  await expect(rows).toHaveCount(2)
+  await source.getByRole('checkbox', { name: 'Не указан', exact: true }).uncheck()
+  await expect(rows).toHaveCount(4)
+
+  await source.locator('summary').click()
+  await page.getByTestId('admin-client-attendance-filters').click()
+  await rows.filter({ hasText: 'Без отметки' }).first().locator('.ops-link-button').click()
+  await expect(page).toHaveURL(/view=attendance.*session=3[01]/)
+  unmarkedRows.pop()
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=attendance')
+  await expect(rows).toHaveCount(3)
+  await expect(rows.filter({ hasText: 'Без отметки' })).toHaveCount(1)
+})
+
+test('client attendance filters survive leaving and reopening the client card', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width || 0))
+  await mockAttendance(page, { mixedAttendance: true })
+  await page.goto('/?role=admin&view=clientDetail&client=101&tab=attendance')
+  await page.getByTestId('admin-client-attendance-filters').click()
+  const source = page.locator('#admin-client-attendance-filter-source')
+  await source.locator('summary').click()
+  await source.getByRole('checkbox', { name: 'Со счёта', exact: true }).check()
+  await expect(page.locator('tbody tr').filter({ hasText: 'Anna Test' })).toHaveCount(2)
+  if ((page.viewportSize()?.width || 0) === 1440) {
+    await page.getByTestId('nav-admin-clients').first().click()
+    await page.goBack()
+  } else {
+    await page.goto('/?role=admin&view=clients')
+    await page.goto('/?role=admin&view=clientDetail&client=101&tab=attendance')
+  }
+  await expect(page.locator('tbody tr').filter({ hasText: 'Anna Test' })).toHaveCount(2)
+  await page.getByTestId('admin-client-attendance-filters').click()
+  await expect(source.locator('summary')).toHaveText('Со счёта')
 })
 
 test('subscription start and end can be edited independently', async ({ page }) => {
@@ -462,6 +556,7 @@ test('selling a pass can select another family member with a group', async ({ pa
   page.on('pageerror', (error) => pageErrors.push(error.message))
   await page.goto('/?role=admin&view=clientDetail&client=101&participant=11')
   await page.getByTestId('admin-client-action-sell-subscription').click()
+  await expect(page.locator('#admin-client-finance-due-date')).toHaveCount(0)
   await page.locator('#admin-client-finance-participant').click()
   await page.locator('.ops-search-select-list').getByRole('option', { name: /Boris Test/ }).click()
   await expect(page.getByTestId('form-modal')).toBeVisible()
@@ -483,6 +578,7 @@ test('sale price on a narrow screen is capped at catalog price and sent in minor
   await price.fill('200,50')
   await page.getByTestId('admin-client-finance-save').click()
   await expect.poll(() => changes[0]?.price_minor).toBe(20050)
+  expect(changes[0]).not.toHaveProperty('due_date')
 })
 
 test('client page adds a family member from the account actions', async ({ page }) => {

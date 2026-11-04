@@ -2,7 +2,8 @@
 enforce capacity + no double-enrollment with row locking against races."""
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Exists, OuterRef, Q, Sum
+from django.utils import timezone
 
 from audit.models import audit
 from billing.models import Charge
@@ -10,11 +11,45 @@ from students.models import Student
 from subscriptions.models import (LedgerReason, SessionLedgerEntry,
                                   Subscription, SubscriptionStatus)
 from subscriptions.services import can_assign_attendance
-from scheduling.models import Session, SessionType
+from scheduling.models import Session, SessionParticipantStatus, SessionType
 from scheduling.services import split_roster_student_ids
 
 from .models import (AttendancePaymentSource, AttendanceRecord, AttendanceStatus,
                      DEDUCTING_STATUSES)
+
+
+def unmarked_attendance_sessions(students, *, limit):
+    """Completed sessions whose current roster has a student but no attendance status."""
+    rows = []
+    now = timezone.now()
+    for student in students:
+        if not student.is_active or not student.parent_id or not student.parent.user.is_active:
+            continue
+        roster = Q(individual_student_id=student.id) | Q(
+            participants__student_id=student.id,
+            participants__status=SessionParticipantStatus.ACTIVE,
+        ) | Q(attendance__student_id=student.id)
+        for membership in student.group_memberships.all():
+            group_roster = Q(
+                group_id=membership.group_id,
+                individual_student__isnull=True,
+                requires_booking=False,
+            )
+            if membership.effective_from:
+                group_roster &= Q(start_at__gte=membership.effective_from)
+            roster |= group_roster
+        marked = AttendanceRecord.objects.filter(
+            session_id=OuterRef("pk"), student_id=student.id,
+            status__isnull=False,
+        )
+        sessions = Session.objects.filter(
+            roster, is_cancelled=False, end_at__lte=now,
+        ).annotate(has_mark=Exists(marked)).filter(has_mark=False).select_related(
+            "group", "trainer", "trainer__user",
+        ).distinct().order_by("-start_at", "-id")[:limit]
+        rows.extend((session, student) for session in sessions)
+    rows.sort(key=lambda row: (row[0].start_at, row[0].id), reverse=True)
+    return rows[:limit]
 
 
 def _deductible_subscription(student, when):

@@ -1,6 +1,6 @@
 # SwimCRM API contract
 
-Last updated: 2026-10-16
+Last updated: 2026-11-03
 
 This document is the human-readable companion to:
 
@@ -22,6 +22,48 @@ contract. The authenticated compatibility endpoint returns the same schema.
 - Money: backend stores minor units in `amount_minor`, for example `24000` = `240,00 PLN`.
 - Public terminology is `client` and `participant`.
 - Internal legacy model names may still contain `ParentAccount` or `Student`.
+
+## Participant photos
+
+`POST /api/admin/participants/{participant_id}/photo/` accepts `multipart/form-data`
+with a `photo` JPEG, exactly 512×512 pixels and at most 1 MiB. Only admins can
+upload, replace or `DELETE` a photo. The server re-encodes it without metadata;
+the response includes `has_photo` and `photo_version`.
+
+`GET /api/admin/participants/{participant_id}/photo/` is admin-only. Trainers
+may use `GET /api/trainer/sessions/{session_id}/participants/{participant_id}/photo/`
+only for a session assigned to them and a participant on that session's roster.
+Both return a private JPEG with `Cache-Control: private, no-store` or 404 when
+the photo is absent. Client accounts have no photo endpoint. Admin participant
+payloads and trainer session roster rows include `has_photo` and `photo_version`;
+client payloads do not.
+
+`GET /api/admin/privacy/clients/{client_id}/export/` returns a ZIP containing
+`client-data.json` and `photos/participant-{id}.jpg` for participants with photos.
+Anonymization removes photo files; archiving keeps them.
+
+## Internal participant notes
+
+`GET|POST /api/admin/participants/{participant_id}/notes/` and
+`PATCH|DELETE /api/admin/participants/{participant_id}/notes/{note_id}/` are
+admin-only. Trainers use the same methods under
+`/api/trainer/sessions/{session_id}/participants/{participant_id}/notes/` and
+its `{note_id}/` child. The trainer must be assigned to that session and the
+participant must be on its roster. An assigned trainer may read notes from a
+past session; a cancelled session permits reading but not changes.
+
+POST and PATCH accept `{"body":"..."}` with 1–4000 nonblank characters.
+GET returns `{"notes":[...]}`; each note contains `id`, `body`, `author`,
+`imported`, `created_at`, `updated_at`, `edited` and `can_manage`. Trainers
+may change or delete only their own notes; admins may manage all notes.
+Responses use `Cache-Control: private, no-store`. Client APIs never return
+note text. Trainer session roster entries include `birth_date` (ISO date or
+null), `has_internal_notes` and `can_write_notes`; admin participant payloads
+include `has_internal_notes`.
+The old `admin_comments` field is migrated into an imported note and is no
+longer accepted by the participant update API. Anonymization deletes notes and
+clears the participant's birth date. Audit events record actions without note
+text. The admin privacy export includes notes in `internal_notes`.
 
 ## Family money balance
 
@@ -46,6 +88,13 @@ same account pool; debtor results contain one row per indebted family.
 | Client | `/api/client/` |
 | Trainer | `/api/trainer/` |
 | Admin | `/api/admin/` |
+
+`GET /api/trainer/sessions/` сохраняет прежний ответ `{ "sessions": [...] }`
+без параметров пагинации. Если передать `page` или `page_size`, ответ также
+содержит `pagination` (`page`, `page_size`, `total`, `pages`, `has_next`,
+`has_previous`); размер страницы — от 1 до 200. Мобильный список тренера
+запрашивает `date_from`, `status=active`, `page` и `page_size` и подгружает
+следующую страницу по кнопке.
 
 ## Local appearance editor
 
@@ -150,11 +199,11 @@ reactivated or already active. An unsupported code returns a JSON `400` error.
 - `GET|POST /api/admin/settings/notification-template-translations/`
 - `GET|PATCH|PUT|DELETE /api/admin/settings/notification-template-translations/<id>/`
 
-Notification templates/rules, quiet hours, and payroll schemes/rules/assignments
+Notification templates/rules, quiet hours, and payroll rates/assignments
 are managed through their dedicated `/api/admin/notifications/` and
-`/api/admin/payroll/` endpoints. All settings writes still pass through Django
-model validation, and none of them can touch payment confirmation, ledger,
-attendance mutation, payroll period calculation, audit logs, or receipt files.
+`/api/admin/payroll/` endpoints. All settings writes pass through Django
+validation. Payroll calculation uses its dedicated payroll endpoint; settings
+catalog writes cannot mutate payments, ledger, attendance or receipt files.
 
 Settings query validation:
 
@@ -277,7 +326,6 @@ Creates a client account and an account-holder participant with `is_account_hold
   "subscription_type_id": 1,
   "price_minor": 20000,
   "start_date": "2026-07-06",
-  "due_date": "2026-07-06",
   "idempotency_key": "subscription-sale-unique-attempt",
   "payment_received": true,
   "payment_method": "cash",
@@ -287,7 +335,9 @@ Creates a client account and an account-holder participant with `is_account_hold
 
 Always creates the subscription charge for `price_minor` (defaults to the
 catalog price). The final sale price must be between zero and the catalog
-price. When `payment_received` is true, the server also creates one immediately
+price. If `due_date` is omitted, the charge is due on the day of sale, even
+when `start_date` is later. An explicit `due_date` remains supported by the API.
+When `payment_received` is true, the server also creates one immediately
 confirmed payment for exactly that price and currency; payment is unavailable
 for a zero-price sale. `payment_method` and `payment_date` are then required. The
 same optional fields are accepted by
@@ -390,6 +440,14 @@ is the total Split price: an uncovered present client is charged
 добавляются компенсирующие записи. Снятая отметка не показывается как
 посещение в клиентской истории и сводках.
 
+`GET /api/admin/clients/{client_id}/?include_unmarked=1` дополнительно возвращает
+`unmarked_attendance` для завершившихся неотменённых занятий с участником в
+доступном составе и без статуса посещаемости (включая отсутствующую запись и
+`status: null`). Обычный `attendance` и сводки по-прежнему содержат только
+отмеченные посещения. Без параметра дополнительного массива нет. В карточке
+администратора неотмеченные строки появляются только при выборе статуса
+«Без отметки»; источник оплаты для них — `none`.
+
 ### Check Trainer Conflict
 
 `POST /api/admin/schedule/check-conflict/`
@@ -453,70 +511,38 @@ service.
 All report date boundaries are inclusive Warsaw calendar dates. Report XLSX
 routes require the same administrator authorization as their JSON counterparts.
 
-### Configure Payroll Rules
+### Trainer payroll rates
 
-`POST /api/admin/payroll/schemes/`
-
-```json
-{
-  "name": "Default payroll",
-  "location": "Pool A"
-}
-```
-
-`POST /api/admin/payroll/rules/`
+An administrator creates a reusable rate with `POST /api/admin/payroll/rates/`:
 
 ```json
-{
-  "scheme_id": 1,
-  "session_type": "group",
-  "rule_type": "group",
-  "base_amount_minor": 10000,
-  "currency": "PLN",
-  "min_clients_threshold": 2,
-  "extra_client_amount_minor": 1500
-}
+{"name":"Group standard","session_type":"group","base_amount_minor":10000,"currency":"PLN","min_clients_threshold":2,"extra_client_amount_minor":1500}
 ```
 
-For `individual` and `split`, use fixed rules:
+`GET /api/admin/payroll/rates/` lists rates and dated versions. To change an
+existing rate for every assigned trainer from a chosen date, send `PATCH
+/api/admin/payroll/rates/{rate_id}/` with `effective_from` and changed amount
+fields. `DELETE` archives a rate for new assignments. Historical calculations
+retain their amounts.
+
+`POST /api/admin/payroll/assign-rates/` assigns one rate to one or more trainers:
 
 ```json
-{
-  "scheme_id": 1,
-  "session_type": "split",
-  "rule_type": "split",
-  "base_amount_minor": 9000,
-  "currency": "PLN"
-}
+{"rate_id":1,"trainer_ids":[2,3],"location":"Pool A","effective_from":"2026-07-01"}
 ```
 
-Assign a scheme to a trainer:
+An empty location means all locations; a location-specific assignment wins at
+that location. Existing assignments for the same trainer, session type and
+location end before the new effective date. `GET /api/admin/payroll/assignments/`
+returns the effective ranges. Legacy scheme and rule endpoints remain for old
+records but are not used by the new interface.
 
-`POST /api/admin/payroll/assignments/`
-
-```json
-{
-  "trainer_id": 1,
-  "scheme_id": 1,
-  "effective_from": "2026-07-01"
-}
-```
-
-Calculate a payroll period:
-
-`POST /api/admin/payroll/periods/`
-
-```json
-{
-  "date_from": "2026-07-01",
-  "date_to": "2026-07-31",
-  "location": "Pool A"
-}
-```
-
-Payroll calculations are produced by Django and are reproducible for the same
-period. Schemes and rules are managed through the admin payroll endpoints, but
-payroll calculation results remain Django-owned.
+`POST /api/admin/payroll/periods/` calculates the inclusive `date_from` / `date_to`
+range, optionally scoped by `location`. `PATCH /api/admin/payroll/periods/{id}/`
+changes the range and recalculates an unapproved period. The response includes
+`calculations`, totals and `skipped_sessions` with session IDs and reasons.
+Changing a rate or assignment automatically recalculates affected unapproved
+periods. Approved/exported periods remain frozen.
 
 ## Frontend Support Endpoints
 

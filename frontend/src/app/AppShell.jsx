@@ -51,6 +51,12 @@ function routeState() {
     participantId: params.get('participant'), balanceAmount: params.get('amount'),
     createClient: params.get('createClient'), createSession: params.get('createSession'), financeAction: params.get('financeAction'),
     subscriptionId: params.get('subscription'),
+    schedule: {
+      sessionType: params.get('sfType') || '', trainerId: params.get('sfTrainer') || '',
+      groupId: params.get('sfGroup') || '', location: params.get('sfLocation') || '',
+      status: params.get('sfStatus') || '', date: params.get('sfDate') || '',
+      mode: params.get('sfMode') || '', display: params.get('sfDisplay') || '',
+    },
   }
 }
 
@@ -95,6 +101,7 @@ function routeForRole(role, route = routeState()) {
     createSession: sameRole ? route.createSession : null,
     financeAction: sameRole ? route.financeAction : null,
     subscriptionId: sameRole ? route.subscriptionId : null,
+    schedule: sameRole && route.view === 'schedule' ? route.schedule : {},
   }
 }
 
@@ -121,6 +128,14 @@ function routeUrl(role, view, params = {}) {
     createSession: role === 'admin' ? params.createSession : null,
     financeAction: role === 'admin' ? params.financeAction : null,
     subscription: role === 'admin' ? params.subscriptionId : null,
+    sfType: role === 'admin' && view === 'schedule' ? params.schedule?.sessionType : null,
+    sfTrainer: role === 'admin' && view === 'schedule' ? params.schedule?.trainerId : null,
+    sfGroup: role === 'admin' && view === 'schedule' ? params.schedule?.groupId : null,
+    sfLocation: role === 'admin' && view === 'schedule' ? params.schedule?.location : null,
+    sfStatus: role === 'admin' && view === 'schedule' ? params.schedule?.status : null,
+    sfDate: view === 'schedule' ? params.schedule?.date : null,
+    sfMode: view === 'schedule' ? params.schedule?.mode : null,
+    sfDisplay: view === 'schedule' ? params.schedule?.display : null,
   }
   Object.entries(values).forEach(([key, value]) => {
     if (value) query.set(key, value)
@@ -151,6 +166,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
   const [selectedCreateSession, setSelectedCreateSession] = useState(initialRoute.createSession)
   const [selectedFinanceAction, setSelectedFinanceAction] = useState(initialRoute.financeAction)
   const [selectedSubscriptionId, setSelectedSubscriptionId] = useState(initialRoute.subscriptionId)
+  const [scheduleRoute, setScheduleRoute] = useState(initialRoute.schedule)
   const [searchQuery, setSearchQuery] = useState('')
   const [remoteClientSearch, setRemoteClientSearch] = useState({ query: '', rows: [] })
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
@@ -403,6 +419,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     setSelectedCreateSession(route.createSession)
     setSelectedFinanceAction(route.financeAction)
     setSelectedSubscriptionId(route.subscriptionId)
+    setScheduleRoute(route.schedule)
     if (route.kid) setKid(route.kid)
     const canonicalUrl = routeUrl(initialRole, route.view, route)
     const historyState = { ...currentHistoryStateRef.current, swimcrm: true }
@@ -473,6 +490,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
       setSelectedCreateSession(route.createSession || null)
       setSelectedFinanceAction(route.financeAction || null)
       setSelectedSubscriptionId(route.subscriptionId || null)
+      setScheduleRoute(route.schedule || {})
       if (route.kid) setKid(route.kid)
       setSearchQuery('')
       if (scrollToTop) window.requestAnimationFrame(() => window.scrollTo(0, 0))
@@ -489,6 +507,16 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
     window.history[replace ? 'replaceState' : 'pushState'](historyState, '', nextUrl)
     currentHistoryStateRef.current = historyState
     currentUrlRef.current = window.location.href
+  }
+
+  function replaceScheduleQuery(patch) {
+    if (view !== 'schedule') return
+    const current = routeState()
+    const schedule = { ...current.schedule, ...patch }
+    const nextUrl = routeUrl(role, view, { ...current, schedule })
+    window.history.replaceState(currentHistoryStateRef.current, '', nextUrl)
+    currentUrlRef.current = window.location.href
+    setScheduleRoute(schedule)
   }
 
   function commitNavigation(nextView, params = {}) {
@@ -873,7 +901,7 @@ export function AppShell({ design, health, apiState, initialRole, currentUser, r
               </div>
             </div>
           ) : Screen ? (
-            <Screen key={role === 'admin' && view === 'clientDetail' ? `admin-client-${selectedClientId || 'none'}` : `${role}-${view}`} go={navigate} back={contextBack} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} initialParticipantId={selectedParticipantId} createClient={selectedCreateClient} createSession={selectedCreateSession} initialFinanceAction={selectedFinanceAction} initialSubscriptionId={selectedSubscriptionId} prefillAmount={selectedBalanceAmount} currentUser={currentUser} />
+            <Screen key={role === 'admin' && view === 'clientDetail' ? `admin-client-${selectedClientId || 'none'}` : `${role}-${view}`} go={navigate} back={contextBack} kid={activeKid} setKid={changeKid} clientId={selectedClientId} sessionId={selectedSessionId} trainerSessionId={selectedTrainerSessionId} groupId={selectedGroupId} initialTab={selectedTab} initialParticipantId={selectedParticipantId} createClient={selectedCreateClient} createSession={selectedCreateSession} initialFinanceAction={selectedFinanceAction} initialSubscriptionId={selectedSubscriptionId} prefillAmount={selectedBalanceAmount} currentUser={currentUser} scheduleRoute={scheduleRoute} replaceScheduleQuery={replaceScheduleQuery} />
           ) : (
             <div className="page">
               <div className="card card-pad">{t('shell.screenMissing')}</div>

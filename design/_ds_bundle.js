@@ -1,4 +1,4 @@
-/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"0ca32dca41bc","components/data/Avatar.jsx":"671d0dab0cb2","components/data/Badge.jsx":"81ff738aa46a","components/data/Money.jsx":"85eddda66503","components/data/StatusPill.jsx":"7a47cce4c3f6","components/data/Table.jsx":"0739116ccae8","components/forms/Button.jsx":"daec87b574df","components/forms/Checkbox.jsx":"1dec073e20db","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"f9aababef51a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"63fc8b0831ed","components/forms/Switch.jsx":"3fbe898249dc","components/forms/Textarea.jsx":"0870c4205f77","components/feedback/Banner.jsx":"3cd502ece8b4","components/feedback/Dialog.jsx":"a8ef0da8c4ba","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"99d130d777c8"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
+/* @ds-bundle: {"format":4,"namespace":"SwimCRMDesignSystem_546643","components":[{"name":"Avatar","sourcePath":"components/data/Avatar.jsx"},{"name":"Badge","sourcePath":"components/data/Badge.jsx"},{"name":"Money","sourcePath":"components/data/Money.jsx"},{"name":"STATUS","sourcePath":"components/data/StatusPill.jsx"},{"name":"StatusPill","sourcePath":"components/data/StatusPill.jsx"},{"name":"Table","sourcePath":"components/data/Table.jsx"},{"name":"Banner","sourcePath":"components/feedback/Banner.jsx"},{"name":"Dialog","sourcePath":"components/feedback/Dialog.jsx"},{"name":"EmptyState","sourcePath":"components/feedback/EmptyState.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"Button","sourcePath":"components/forms/Button.jsx"},{"name":"Checkbox","sourcePath":"components/forms/Checkbox.jsx"},{"name":"IconButton","sourcePath":"components/forms/IconButton.jsx"},{"name":"Input","sourcePath":"components/forms/Input.jsx"},{"name":"Radio","sourcePath":"components/forms/Radio.jsx"},{"name":"Select","sourcePath":"components/forms/Select.jsx"},{"name":"Switch","sourcePath":"components/forms/Switch.jsx"},{"name":"Textarea","sourcePath":"components/forms/Textarea.jsx"},{"name":"SidebarNav","sourcePath":"components/navigation/SidebarNav.jsx"},{"name":"Tabs","sourcePath":"components/navigation/Tabs.jsx"}],"sourceHashes":{"assets/icons.jsx":"0ca32dca41bc","components/data/Avatar.jsx":"3d19535d228d","components/data/Badge.jsx":"81ff738aa46a","components/data/Money.jsx":"85eddda66503","components/data/StatusPill.jsx":"7a47cce4c3f6","components/data/Table.jsx":"0739116ccae8","components/forms/Button.jsx":"daec87b574df","components/forms/Checkbox.jsx":"1dec073e20db","components/forms/IconButton.jsx":"616567f2a33c","components/forms/Input.jsx":"f9aababef51a","components/forms/Radio.jsx":"5ad05167f384","components/forms/Select.jsx":"63fc8b0831ed","components/forms/Switch.jsx":"3fbe898249dc","components/forms/Textarea.jsx":"0870c4205f77","components/feedback/Banner.jsx":"3cd502ece8b4","components/feedback/Dialog.jsx":"a8ef0da8c4ba","components/feedback/EmptyState.jsx":"151a7f51c963","components/feedback/Toast.jsx":"c7482bdd87c5","components/navigation/SidebarNav.jsx":"dbbf326806fb","components/navigation/Tabs.jsx":"99d130d777c8"},"inlinedExternals":[],"unexposedExports":[{"name":"labelStyle","sourcePath":"components/forms/Input.jsx"},{"name":"tdBase","sourcePath":"components/data/Table.jsx"},{"name":"thBase","sourcePath":"components/data/Table.jsx"}]} */
 
 (() => {
 const __ds_ns = (window.SwimCRMDesignSystem_546643 = window.SwimCRMDesignSystem_546643 || {});
@@ -85,6 +85,7 @@ try { (() => {
 
 // components/data/Avatar.jsx
 try { (() => {
+import React, { useEffect, useState } from "react";
 const PALETTE = [
   ["#d6ecfb", "#0f5285"],
   // blue
@@ -110,8 +111,10 @@ function initials(name) {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
-function Avatar({ name = "", size = 32, kind, style }) {
+function Avatar({ name = "", size = 32, kind, style, src }) {
   const [bg, fg] = hueFor(name);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
   return /* @__PURE__ */ React.createElement(
     "span",
     {
@@ -133,10 +136,11 @@ function Avatar({ name = "", size = 32, kind, style }) {
         lineHeight: 1,
         letterSpacing: "0.01em",
         userSelect: "none",
+        overflow: "hidden",
         ...style
       }
     },
-    initials(name)
+    src && !failed ? /* @__PURE__ */ React.createElement("img", { src, alt: "", onError: () => setFailed(true), style: { width: "100%", height: "100%", objectFit: "cover" } }) : initials(name)
   );
 }
 __ds_scope.Avatar = Avatar;

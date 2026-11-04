@@ -3,7 +3,7 @@ import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { asMoneyMajor, formatDate, formatShortDate, formatTime, mapClientAttendanceRows, mapClientChargeRows, mapClientPaymentRows } from '../../mappers.js'
 import { CalendarNavigation, ScheduleCalendar, ScheduleList, ScheduleViewSwitcher } from '../ScheduleCalendar.jsx'
 import { normalizeScheduleColorKey } from '../schedulePalette.js'
-import { calendarRange, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday, sessionIsoDate } from '../scheduleContracts.js'
+import { calendarRange, dateToIso, DEFAULT_SCHEDULE_VIEW, localToday, sessionIsoDate, validIsoDate } from '../scheduleContracts.js'
 import { BusyBanner } from '../runtime.jsx'
 import { ToastNotice } from '../ToastProvider.jsx'
 import { useUnsavedChanges } from '../uiLifecycle.jsx'
@@ -130,7 +130,7 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     )
   }
 
-  function Schedule({ kid, setKid, initialTab }) {
+  function Schedule({ kid, setKid, initialTab, scheduleRoute = {}, replaceScheduleQuery }) {
     const { locale, t } = useLocale()
     const child = (parentData.children || []).find((item) => item.id === kid)
     const normalize = (session) => session.startAt ? session : ({
@@ -161,9 +161,12 @@ export function createClientScreens(components, icons, reloadRoleData, parentDat
     })
     const [rows, setRows] = useState(() => (parentData.schedule?.[kid] || []).map(normalize))
     const [selectedId, setSelectedId] = useState(initialTab || null)
-    const [displayMode, setDisplayMode] = useState('calendar')
-    const [viewMode, setViewMode] = useState(DEFAULT_SCHEDULE_VIEW)
-    const [focusDate, setFocusDate] = useState(localToday())
+    const displayMode = ['calendar', 'list'].includes(scheduleRoute.display) ? scheduleRoute.display : 'calendar'
+    const viewMode = ['week', 'month'].includes(scheduleRoute.mode) ? scheduleRoute.mode : DEFAULT_SCHEDULE_VIEW
+    const focusDate = validIsoDate(scheduleRoute.date) ? scheduleRoute.date : localToday()
+    const setDisplayMode = (value) => replaceScheduleQuery?.({ display: value })
+    const setViewMode = (value) => replaceScheduleQuery?.({ mode: value })
+    const setFocusDate = (value) => replaceScheduleQuery?.({ date: value })
     const [error, setError] = useState(null)
     const [bookingBusy, setBookingBusy] = useState(false)
     const range = useMemo(() => calendarRange(focusDate, viewMode), [focusDate, viewMode])

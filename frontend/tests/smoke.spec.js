@@ -1181,6 +1181,7 @@ test('shared logout stays single-shot for admin, trainer and client', async ({ p
     await actions[nextRole](logout)
     const confirmation = page.getByTestId('navigation-discard-dialog')
     await expect(confirmation).toBeVisible()
+    expect(await confirmation.evaluate((dialog) => getComputedStyle(dialog).backgroundColor)).toMatch(/^rgb\(\d+, \d+, \d+\)$/)
     expect(logoutPosts.filter((item) => item === nextRole)).toHaveLength(0)
     if (nextRole === 'admin') {
       await confirmation.getByTestId('navigation-discard-stay').click()
@@ -1512,7 +1513,8 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
     },
     '/api/admin/payroll/schemes/': { schemes: [{ id: 1, name: 'Основные ставки', location: '', is_active: true }] },
     '/api/admin/payroll/rules/': { rules: [{ id: 1, scheme_id: 1, session_type: 'group', rule_type: 'group', base_amount_minor: 5000, currency: 'PLN', min_clients_threshold: 4, extra_client_amount_minor: 500, is_active: true }] },
-    '/api/admin/payroll/assignments/': { assignments: [{ id: 1, trainer_id: 1, scheme_id: 1, scheme: 'Основные ставки', effective_from: '2026-01-01', effective_to: null }] },
+    '/api/admin/payroll/rates/': { rates: [{ id: 1, name: 'Основные ставки', session_type: 'group', base_amount_minor: 5000, currency: 'PLN', is_active: true }] },
+    '/api/admin/payroll/assignments/': { assignments: [{ id: 1, trainer_id: 1, rate_id: 1, rate: 'Основные ставки', effective_from: '2026-01-01', effective_to: null }] },
     '/api/admin/payroll/periods/': { periods: [] },
     '/api/admin/notifications/logs/': { logs: [] },
     '/api/admin/notifications/templates/': { templates: [] },
@@ -2089,7 +2091,7 @@ test('trainer can open every menu screen without runtime errors', async ({ page 
   await expect(page.locator('.ops-sidebar')).toBeVisible()
   await expect(page.locator('h1.page-title')).toBeVisible()
   await page.goto('/?role=trainer&view=schedule')
-  if ((page.viewportSize()?.width || 0) <= 767) {
+  if ((page.viewportSize()?.width || 0) <= 800) {
     const agenda = page.getByTestId('trainer-mobile-schedule-agenda')
     await expect(agenda).toBeVisible()
     await expect(agenda.locator('.ops-agenda-day')).toHaveCount(1)

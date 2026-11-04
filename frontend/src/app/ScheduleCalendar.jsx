@@ -13,7 +13,7 @@ import { uiLocaleTag } from '../localeContracts.js'
 
 const VIEW_KEYS = { week: 'calendar.week', month: 'calendar.month' }
 
-export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
+export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons, testIdPrefix = 'schedule-view' }) {
   const { t } = useLocale()
   const CalendarIcon = icons?.Calendar
   const ListIcon = icons?.List
@@ -23,7 +23,7 @@ export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
         type="button"
         className={displayMode === 'calendar' ? 'on' : ''}
         aria-pressed={displayMode === 'calendar'}
-        data-testid="schedule-view-calendar"
+        data-testid={`${testIdPrefix}-calendar`}
         onClick={() => setDisplayMode('calendar')}
       >
         {CalendarIcon && <CalendarIcon size={15} />}<span>{t('calendar.calendar')}</span>
@@ -32,7 +32,7 @@ export function ScheduleViewSwitcher({ displayMode, setDisplayMode, icons }) {
         type="button"
         className={displayMode === 'list' ? 'on' : ''}
         aria-pressed={displayMode === 'list'}
-        data-testid="schedule-view-list"
+        data-testid={`${testIdPrefix}-list`}
         onClick={() => setDisplayMode('list')}
       >
         {ListIcon && <ListIcon className="ops-view-switcher-icon" size={18} aria-hidden="true" />}<span>{t('calendar.list')}</span>
@@ -47,6 +47,9 @@ export function CalendarNavigation({
   viewMode,
   setViewMode,
   mobileArrows = false,
+  activityDates,
+  activityLoading = false,
+  activityError = false,
 }) {
   const { locale, t } = useLocale()
   const localeTag = uiLocaleTag(locale)
@@ -99,7 +102,8 @@ export function CalendarNavigation({
         <div className="ops-mobile-date-strip" role="group" aria-label={t('calendar.weekdays')}>
           {weekDates.map((date) => {
             const parsed = dateFromIso(date)
-            return <button key={date} ref={date === focusDate ? selectedDateRef : null} type="button" data-testid={`schedule-day-${date}`} className={date === focusDate ? 'is-selected' : ''} aria-pressed={date === focusDate} aria-label={parsed.toLocaleDateString(localeTag, { dateStyle: 'full' })} onClick={() => setFocusDate(date)}><span>{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</span><strong>{parsed.getDate()}</strong></button>
+            const activityLabel = activityDates ? t(activityError ? 'calendar.activityUnavailable' : activityLoading ? 'calendar.activityLoading' : activityDates.has(date) ? 'calendar.hasSessions' : 'calendar.noSessions') : null
+            return <button key={date} ref={date === focusDate ? selectedDateRef : null} type="button" data-testid={`schedule-day-${date}`} className={date === focusDate ? 'is-selected' : ''} aria-pressed={date === focusDate} aria-label={`${parsed.toLocaleDateString(localeTag, { dateStyle: 'full' })}${activityLabel ? `. ${activityLabel}` : ''}`} onClick={() => setFocusDate(date)}><span>{parsed.toLocaleDateString(localeTag, { weekday: 'short' })}</span><strong>{parsed.getDate()}</strong>{activityDates && <i className={`ops-trainer-day-marker${!activityLoading && !activityError && activityDates.has(date) ? ' is-active' : ''}`} aria-hidden="true" />}</button>
           })}
         </div>
         <button type="button" className="ops-calendar-period-arrow" aria-label={t('calendar.nextPeriod', undefined, { period: t(VIEW_KEYS[viewMode === 'month' ? 'month' : 'week']) })} onClick={() => changeWeek(1)}>›</button>
@@ -406,7 +410,7 @@ export function ScheduleList({
     <div className={groupByDate ? 'ops-agenda-list' : 'ops-card-list'} data-testid={testId}>
       {groupByDate
         ? groups.map(([date, rows]) => (
-          <section className="ops-agenda-day" key={date}>
+          <section className="ops-agenda-day" key={date} data-date={date}>
             <h2 className="ops-agenda-day-title">{formatDate(date)}</h2>
             <div className="ops-agenda-day-sessions">{rows.map((session) => renderSession(session, date))}</div>
           </section>

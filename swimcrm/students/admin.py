@@ -57,7 +57,6 @@ class StudentAdmin(AuditAdminMixin, admin.ModelAdmin):
         ("Медицинская информация (критично)", {
             "fields": ("medical_info", "contraindications",
                        "emergency_contact_name", "emergency_contact_phone")}),
-        ("Служебное", {"fields": ("admin_comments",)}),
     )
 
     @admin.display(description="Телефон")
