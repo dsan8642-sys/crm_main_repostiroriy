@@ -9,7 +9,8 @@ from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from accounts.models import Consent, ConsentType, ParentAccount, Role
+from accounts.models import AdminOTPDevice, ClientPortalSettings, Consent, ConsentType, ParentAccount, Role
+from accounts.otp import generate_totp_secret, totp_code
 from attendance.models import AttendanceRecord, AttendanceStatus
 from attendance.services import set_attendance
 from audit.models import AuditLogEntry
@@ -102,6 +103,34 @@ class ClientPortalApiRule(TestCase):
         self.other_student = f.make_student(parent=self.other_parent, group=self.group, first="Ева", last="Новак")
         self.client.force_login(self.parent.user)
 
+    def test_client_portal_history_date_is_admin_managed(self):
+        endpoint = "/api/admin/settings/client-portal/"
+        self.assertEqual(self.client.get(endpoint).status_code, 403)
+        self.client.force_login(f.make_admin())
+        response = self.client.get(endpoint)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["history_from"])
+        missing = self.client.patch(endpoint, data="{}", content_type="application/json")
+        self.assertEqual(missing.status_code, 400)
+        saved = self.client.patch(
+            endpoint, data=json.dumps({"history_from": "2026-11-01"}),
+            content_type="application/json",
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()["history_from"], "2026-11-01")
+        invalid = self.client.patch(
+            endpoint, data=json.dumps({"history_from": "not-a-date"}),
+            content_type="application/json",
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(ClientPortalSettings.objects.get(pk=1).history_from, date(2026, 11, 1))
+        cleared = self.client.patch(
+            endpoint, data=json.dumps({"history_from": ""}),
+            content_type="application/json",
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["history_from"])
+
     def test_client_overview_only_contains_own_students(self):
         create_subscription(
             student=self.student, subscription_type=f.make_sub_type(sessions=8),
@@ -162,6 +191,61 @@ class ClientPortalApiRule(TestCase):
         response = self.client.get("/api/client/attendance/", {"student_id": self.student.id})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["attendance"], [])
+
+    def test_client_history_cutoff_hides_old_rows_but_keeps_current_balance(self):
+        cutoff = date(2026, 11, 1)
+        ClientPortalSettings.objects.create(pk=1, history_from=cutoff)
+        Charge.objects.create(
+            student=self.student, description="Migrated charge", amount_minor=10000,
+            currency="PLN", due_date=cutoff - timedelta(days=1),
+            created_at=f.dt(2026, 10, 20, 12),
+        )
+        visible_charge = Charge.objects.create(
+            student=self.student, description="New charge", amount_minor=20000,
+            currency="PLN", due_date=cutoff, created_at=f.dt(2026, 11, 1, 12),
+        )
+        old_payment = Payment.objects.create(
+            student=self.student, amount_minor=5000, currency="PLN",
+            paid_at=cutoff - timedelta(days=1), status=PaymentStatus.CONFIRMED,
+            created_at=f.dt(2026, 10, 20, 12),
+        )
+        visible_payment = Payment.objects.create(
+            student=self.student, amount_minor=3000, currency="PLN",
+            paid_at=cutoff, status=PaymentStatus.CONFIRMED,
+            created_at=f.dt(2026, 11, 1, 12),
+        )
+        for day in (20, 2):
+            session = create_session(
+                trainer=self.trainer, group=self.group,
+                start_at=f.dt(2026, 10 if day == 20 else 11, day, 12),
+                duration_minutes=60, location="A", max_participants=10,
+            )
+            set_attendance(session_id=session.id, student=self.student, status=AttendanceStatus.PRESENT)
+
+        old_notice = NotificationLog.objects.create(
+            recipient=self.parent, event_type=EventType.SESSION_REMINDER,
+            channel=Channel.EMAIL, status=DeliveryStatus.SENT,
+            sent_at=f.dt(2026, 10, 20, 12),
+        )
+        visible_notice = NotificationLog.objects.create(
+            recipient=self.parent, event_type=EventType.SESSION_REMINDER,
+            channel=Channel.EMAIL, status=DeliveryStatus.DELIVERED,
+            sent_at=f.dt(2026, 11, 2, 12),
+        )
+
+        self.assertEqual([row["id"] for row in self.client.get("/api/client/charges/").json()["charges"]], [visible_charge.id])
+        self.assertEqual([row["id"] for row in self.client.get("/api/client/payments/").json()["payments"]], [visible_payment.id])
+        self.assertEqual([row["id"] for row in self.client.get("/api/client/payment-history/").json()["payments"]], [visible_payment.id])
+        attendance = self.client.get("/api/client/attendance/").json()["attendance"]
+        self.assertEqual(len(attendance), 1)
+        schedule = self.client.get("/api/client/schedule/", {"date_from": "2026-10-01"}).json()["sessions"]
+        self.assertEqual(len(schedule), 1)
+        notifications = self.client.get("/api/client/notifications/").json()["notifications"]
+        self.assertEqual([row["id"] for row in notifications], [visible_notice.id])
+        overview = self.client.get("/api/client/overview/").json()
+        self.assertEqual(overview["account"]["balance_minor"], 22000)
+        self.assertNotEqual(old_payment.id, visible_payment.id)
+        self.assertNotEqual(old_notice.id, visible_notice.id)
 
     def test_client_schedule_contains_sessions_from_every_membership_group(self):
         second_group = f.make_group("Вторая группа")
@@ -405,6 +489,15 @@ class ClientPortalApiRule(TestCase):
         # Closing a streaming response emits request_finished and closes the
         # PostgreSQL connection. Finish database-backed assertions first.
         self.client.force_login(admin)
+        secret = generate_totp_secret()
+        AdminOTPDevice.objects.create(user=admin, secret=secret, is_confirmed=True, enforced=True)
+        pending_download = self.client.get(f"/api/documents/{receipt_id}/download/")
+        self.assertEqual(pending_download.status_code, 403)
+        self.assertEqual(pending_download.json()["code"], "mfa_required")
+        verified = self.client.post("/api/auth/mfa/verify/", data=json.dumps({
+            "code": totp_code(secret),
+        }), content_type="application/json")
+        self.assertEqual(verified.status_code, 200)
         admin_payments = self.client.get("/api/admin/payments/").json()["payments"]
         self.assertEqual(admin_payments[0]["receipt"]["original_name"], "profile-document.pdf")
         admin_download = self.client.get(f"/api/documents/{receipt_id}/download/")

@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
+from django.utils import timezone
 
 from attendance.models import DEDUCTING_STATUSES
 from audit.models import audit
@@ -54,6 +55,43 @@ def _amounts(rule, attended_count):
         extra_amount = extra_clients * (rule.extra_client_amount_minor or 0)
         return extra_clients, extra_amount, rule.base_amount_minor + extra_amount
     return 0, 0, rule.base_amount_minor
+
+
+def preview_payroll(*, date_from, date_to, trainer_id=None):
+    """Calculate completed sessions without writing payroll periods."""
+    from analytics.reports import _session_period_bounds
+
+    start, end = _session_period_bounds(date_from, date_to)
+    sessions = (Session.objects.filter(
+        is_cancelled=False, start_at__gte=start, start_at__lt=end,
+        end_at__lte=timezone.now(),
+    ).select_related("trainer__user", "substitute_trainer__user", "group",
+                     "individual_student", "session_type_config")
+        .prefetch_related("participants__student")
+        .annotate(attended_clients_count=Count(
+            "attendance", filter=Q(attendance__status__in=DEDUCTING_STATUSES), distinct=True))
+        .order_by("start_at", "id"))
+    if trainer_id:
+        sessions = sessions.filter(
+            Q(substitute_trainer_id=trainer_id) |
+            Q(substitute_trainer__isnull=True, trainer_id=trainer_id))
+    rows = []
+    for session in sessions:
+        trainer = session.effective_trainer
+        local_start = timezone.localtime(session.start_at)
+        assignment = _assignment_for(trainer, local_start.date(), session.session_type, session.location)
+        rule = _rule_for(assignment, session.session_type, local_start.date()) if assignment else None
+        total = _amounts(rule, session.attended_clients_count or 0)[2] if rule else None
+        participants = [str(session.individual_student)] if session.individual_student_id else []
+        participants += [str(item.student) for item in session.participants.all() if item.status == "active"]
+        rows.append({
+            "session_id": session.id, "trainer_id": trainer.id, "trainer": str(trainer),
+            "date": local_start.date().isoformat(),
+            "training": session.session_type_config.label if session.session_type_config_id else session.get_session_type_display(),
+            "group_or_client": str(session.group) if session.group_id else ", ".join(dict.fromkeys(participants)),
+            "amount_minor": total, "currency": rule.currency if rule else None,
+        })
+    return rows
 
 
 @transaction.atomic

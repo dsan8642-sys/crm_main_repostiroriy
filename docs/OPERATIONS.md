@@ -404,9 +404,12 @@ credentials, Celery URLs, and runtime/backup paths before running
 
 ## Admin 2FA
 
-Production defaults to `ADMIN_2FA_REQUIRED=1` when `DEBUG=0`.
+Administrator 2FA is optional until an administrator confirms TOTP enrollment in CRM.
+After enrollment it is required for that account in both CRM and Django admin.
+Enrollment is available in Settings → Control. Console reset keeps the account
+protected and permits re-enrollment in CRM after password verification.
 
-Setup:
+Console setup (for existing operational procedures):
 
 ```powershell
 python manage.py setup_admin_otp admin

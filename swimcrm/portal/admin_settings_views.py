@@ -1,10 +1,12 @@
 from django.core.exceptions import ValidationError
+from datetime import date
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from localization.models import DictionaryKey, DictionaryTranslation, Language
+from accounts.models import ClientPortalSettings
 from notifications.models import NotificationTemplateTranslation
 from scheduling.models import Location, SessionType, SessionTypeConfig
 
@@ -27,6 +29,39 @@ from .settings_serializers import (
     notification_translation_payload,
     session_type_payload,
 )
+
+
+@require_http_methods(["GET", "PATCH"])
+def admin_settings_client_portal(request):
+    actor = require_admin_settings(request)
+    settings_row, _ = ClientPortalSettings.objects.get_or_create(pk=1)
+    if request.method == "PATCH":
+        data = _json_body(request)
+        if "history_from" not in data:
+            raise ValidationError({"history_from": "Это поле обязательно."})
+        raw_date = data.get("history_from")
+        if raw_date in (None, ""):
+            new_date = None
+        elif isinstance(raw_date, str):
+            try:
+                new_date = date.fromisoformat(raw_date)
+            except ValueError as exc:
+                raise ValidationError({"history_from": "Введите дату в формате ГГГГ-ММ-ДД."}) from exc
+            if new_date.isoformat() != raw_date:
+                raise ValidationError({"history_from": "Введите дату в формате ГГГГ-ММ-ДД."})
+        else:
+            raise ValidationError({"history_from": "Введите дату в формате ГГГГ-ММ-ДД."})
+        old_date = settings_row.history_from
+        settings_row.history_from = new_date
+        settings_row.save(update_fields=["history_from", "updated_at"])
+        if old_date != new_date:
+            audit_admin_settings(actor, settings_row, "updated", {
+                "history_from": new_date.isoformat() if new_date else None,
+            })
+    return JsonResponse({
+        "history_from": settings_row.history_from.isoformat() if settings_row.history_from else None,
+        "updated_at": settings_row.updated_at.isoformat() if settings_row.updated_at else None,
+    })
 
 def _optional_int_query(request, name):
     raw = request.GET.get(name)
@@ -309,6 +344,7 @@ def admin_settings_notification_template_translation_detail(request, translation
 
 
 __all__ = [
+    "admin_settings_client_portal",
     "admin_settings_locations", "admin_settings_location_detail",
     "admin_settings_session_types", "admin_settings_session_type_detail",
     "admin_settings_restore_split", "admin_settings_restore_system_type",

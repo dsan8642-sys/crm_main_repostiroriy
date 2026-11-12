@@ -89,6 +89,7 @@ test('admin reports share the current-month period, filter trainers, show income
   await page.getByTestId('nav-admin-settings').first().click()
   await page.getByTestId('admin-settings-category-reports').first().click()
 
+  await page.getByRole('button', { name: /Выбрать даты|Обрати дати|Wybierz daty|Choose dates/ }).click()
   await expect(page.locator('#admin-reports-date-from')).toHaveValue(expectedPeriod.from)
   await expect(page.locator('#admin-reports-date-to')).toHaveValue(expectedPeriod.to)
   await expect(page.getByRole('row', { name: /Anna Active/ }).getByRole('cell')).toHaveText(['Anna Active', '2', '1', '1', '4'])
@@ -140,6 +141,7 @@ test('mobile reports reopen with the selected period and currency', async ({ pag
   })
   await page.goto('/?role=admin&view=settings')
   await page.locator('.ops-settings-mobile-nav').getByTestId('admin-settings-category-reports').click()
+  await page.getByRole('button', { name: /Выбрать даты|Обрати дати|Wybierz daty|Choose dates/ }).click()
   await page.locator('#admin-reports-date-from').fill('2026-09-01')
   await page.locator('.ops-reports-panel [role="tab"]').nth(1).click()
   await page.locator('#admin-report-currency').selectOption('EUR')

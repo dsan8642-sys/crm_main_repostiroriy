@@ -12,6 +12,7 @@ from django.views.decorators.http import require_http_methods
 from html import escape
 
 from .middleware import OTP_SESSION_KEY
+from .services import mark_admin_mfa_verified
 from .models import AdminOTPDevice
 from .otp import matching_totp_counter
 
@@ -27,7 +28,7 @@ def admin_otp(request):
     device = getattr(user, "admin_otp_device", None)
     if device is None or not device.is_confirmed:
         return HttpResponse(
-            "2FA для администратора не настроена. Выполните команду setup_admin_otp.",
+            "2FA для администратора не настроена. Повторно привяжите устройство в CRM.",
             status=403,
         )
 
@@ -52,7 +53,10 @@ def admin_otp(request):
                 device.save(update_fields=["last_used_at", "last_used_counter"])
 
         if counter is not None:
-            request.session[OTP_SESSION_KEY] = timezone.now().isoformat()
+            if not device.enforced:
+                device.enforced = True
+                device.save(update_fields=["enforced"])
+            mark_admin_mfa_verified(request, device)
             AxesProxyHandler.reset_attempts(
                 username=credentials["username"], ip_address=request.axes_ip_address
             )

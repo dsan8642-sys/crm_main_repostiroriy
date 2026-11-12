@@ -50,7 +50,9 @@ def _integer(value, *, positive=False, nonnegative=False):
     return parsed
 
 
-def preview_trainers(headers, rows, mapping=None):
+def preview_trainers(headers, rows, mapping=None, mode="create_only"):
+    if mode not in REFERENCE_IMPORT_MODES:
+        raise ValidationError("Некорректный режим импорта тренеров")
     canonical = prepare_rows("trainers", headers, rows, mapping)["rows"]
     result = []
     seen = set()
@@ -67,15 +69,42 @@ def preview_trainers(headers, rows, mapping=None):
                 row.errors.append("Некорректный email")
         key = username.casefold()
         existing = User.objects.filter(username__iexact=username).first() if username else None
+        raw_id = data.get("record_id")
+        by_id = None
+        if raw_id not in (None, ""):
+            try:
+                by_id = Trainer.objects.select_related("user").filter(pk=int(raw_id)).first()
+            except (TypeError, ValueError):
+                row.errors.append("Некорректный Internal ID тренера")
+        if by_id and by_id.user.username.casefold() != key:
+            row.errors.append("ID тренера и username относятся к разным записям")
+        if by_id and existing and existing.id != by_id.user_id:
+            row.errors.append("ID тренера и username относятся к разным записям")
         if key in seen:
             row.errors.append("Повторяющийся username в файле")
         elif existing:
             if existing.role != Role.TRAINER or not hasattr(existing, "trainer_profile"):
                 row.errors.append("Username уже принадлежит не тренеру")
             else:
-                row.status = DUPLICATE
-                row.resolved = {"trainer_id": existing.trainer_profile.id}
-                row.warnings.append("Тренер уже существует; строка будет пропущена")
+                trainer = existing.trainer_profile
+                current = {"first_name": existing.first_name, "last_name": existing.last_name,
+                           "email": existing.email, "phone": trainer.phone,
+                           "is_active": trainer.is_active}
+                try:
+                    values = {key: (_bool(data[key]) if key == "is_active" else str(data[key]).strip())
+                              for key in current if key in data}
+                except ValidationError as exc:
+                    row.errors.extend(exc.messages)
+                    values = {}
+                changes = {key: {"old": current[key], "new": value}
+                           for key, value in values.items() if current[key] != value}
+                row.resolved = {"trainer_id": trainer.id, "changes": changes}
+                row.status = UPDATE if changes and mode in {"update_existing", "upsert"} else DUPLICATE
+                row.warnings.append("Тренер будет обновлён" if row.status == UPDATE else "Тренер уже существует; строка будет пропущена")
+        elif by_id and not existing:
+            row.errors.append("ID тренера и username относятся к разным записям")
+        elif not existing and mode == "update_existing":
+            row.status = SKIPPED
         seen.add(key)
         if row.errors:
             row.status = ERROR
@@ -192,15 +221,31 @@ def preview_groups(headers, rows, mapping=None, mode="create_only"):
 
 
 @transaction.atomic
-def commit_trainers(preview_rows, *, actor=None):
+def commit_trainers(preview_rows, *, actor=None, mode="create_only"):
     created_ids = []
+    updated_ids = []
     errors = []
     for row in preview_rows:
-        if row.status != NEW:
+        if row.status not in {NEW, UPDATE}:
             continue
         data = row.data
         try:
             with transaction.atomic():
+                if row.status == UPDATE:
+                    trainer = Trainer.objects.select_for_update().select_related("user").get(pk=row.resolved["trainer_id"])
+                    if trainer.user.username.casefold() != str(data.get("username") or "").strip().casefold():
+                        raise ValidationError("Тренер изменился после предпросмотра")
+                    for key, change in row.resolved["changes"].items():
+                        current = getattr(trainer if key in {"phone", "is_active"} else trainer.user, key)
+                        if current != change["old"]:
+                            raise ValidationError("Тренер изменился после предпросмотра")
+                        setattr(trainer if key in {"phone", "is_active"} else trainer.user, key, change["new"])
+                    trainer.user.full_clean()
+                    trainer.full_clean()
+                    trainer.user.save()
+                    trainer.save()
+                    updated_ids.append(trainer.id)
+                    continue
                 user = User.objects.create_user(
                     username=str(data.get("username") or "").strip(),
                     role=Role.TRAINER,
@@ -223,8 +268,9 @@ def commit_trainers(preview_rows, *, actor=None):
         except (ValidationError, ValueError) as exc:
             messages = exc.messages if hasattr(exc, "messages") else [str(exc)]
             errors.append(f"Строка {row.index}: {'; '.join(messages)}")
-    return {"created": len(created_ids), "skipped": len(preview_rows) - len(created_ids),
-            "created_ids": created_ids, "errors": errors}
+    return {"created": len(created_ids), "updated": len(updated_ids),
+            "skipped": len(preview_rows) - len(created_ids) - len(updated_ids),
+            "created_ids": created_ids, "updated_ids": updated_ids, "errors": errors}
 
 
 @transaction.atomic

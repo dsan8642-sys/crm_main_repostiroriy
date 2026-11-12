@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
+from uuid import uuid4
 
 from accounts.models import AdminOTPDevice, User
 from accounts.otp import generate_totp_secret, matching_totp_counter, provisioning_uri
@@ -29,9 +30,15 @@ class Command(BaseCommand):
             device.confirmed_at = None
             device.last_used_at = None
             device.last_used_counter = None
+            device.enforced = True
+            device.generation = uuid4()
             device.save(update_fields=[
-                "secret", "is_confirmed", "confirmed_at", "last_used_at", "last_used_counter"
+                "secret", "is_confirmed", "confirmed_at", "last_used_at", "last_used_counter", "enforced", "generation"
             ])
+            self.stdout.write(self.style.SUCCESS(
+                "Устройство сброшено. Администратор должен повторно привязать 2FA в CRM."
+            ))
+            return
 
         if options.get("code"):
             counter = matching_totp_counter(
@@ -43,8 +50,10 @@ class Command(BaseCommand):
             device.confirmed_at = timezone.now()
             device.last_used_at = device.confirmed_at
             device.last_used_counter = counter
+            device.enforced = True
+            device.generation = uuid4()
             device.save(update_fields=[
-                "is_confirmed", "confirmed_at", "last_used_at", "last_used_counter"
+                "is_confirmed", "confirmed_at", "last_used_at", "last_used_counter", "enforced", "generation"
             ])
             self.stdout.write(self.style.SUCCESS("2FA подтверждена"))
             return

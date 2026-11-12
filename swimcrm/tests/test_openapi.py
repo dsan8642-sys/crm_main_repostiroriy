@@ -10,10 +10,26 @@ class OpenApiContractTest(TestCase):
         schema = response.json()
         self.assertEqual(schema["openapi"], "3.1.0")
         self.assertIn("/api/admin/clients/", schema["paths"])
+        self.assertIn("/api/auth/mfa/setup/", schema["paths"])
+        login_response = schema["paths"]["/api/auth/login/"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+        self.assertEqual(login_response["properties"]["offer_mfa_setup"], {"type": "boolean"})
+        self.assertIn("403", schema["paths"]["/api/documents/{document_id}/download/"]["get"]["responses"])
+        self.assertEqual(schema["paths"]["/api/auth/mfa/verify/"]["post"]["requestBody"]["content"]["application/json"]["schema"]["required"], ["code"])
         self.assertIn("get", schema["paths"]["/api/admin/clients/"])
         self.assertIn("post", schema["paths"]["/api/admin/clients/"])
         self.assertIn("/api/client/charges/", schema["paths"])
         self.assertIn("/api/client/payment-history/", schema["paths"])
+        client_portal_settings = schema["paths"]["/api/admin/settings/client-portal/"]
+        self.assertIn("get", client_portal_settings)
+        self.assertEqual(
+            client_portal_settings["patch"]["requestBody"]["content"]["application/json"]["schema"]
+            ["properties"]["history_from"]["anyOf"],
+            [
+                {"type": "string", "format": "date"},
+                {"type": "string", "enum": [""]},
+                {"type": "null"},
+            ],
+        )
         list_parameters = {
             item["name"]
             for item in schema["paths"]["/api/client/charges/"]["get"]["parameters"]

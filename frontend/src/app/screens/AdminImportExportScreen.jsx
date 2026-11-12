@@ -95,7 +95,7 @@ function useImportTab(kind, effectMode, reloadRoleData, t) {
       form.set('file', targetFile)
       form.set('mapping', JSON.stringify(cleanMapping(targetMapping)))
       if (kind === 'attendance') form.set('effect_mode', effectMode)
-      if (kind === 'groups') form.set('import_mode', importMode)
+      if (['groups', 'trainers', 'clients'].includes(kind)) form.set('import_mode', importMode)
       applyPreview(await api.postForm(`/api/admin/import/${kind}/preview/`, form))
     } catch (err) {
       const nextErrors = fieldErrorsFromApi(err, {
@@ -345,6 +345,9 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
     { key: 'match', header: t('import.relationsChanges'), render: (row) => {
       const changes = Object.entries(row.resolved?.changes || {})
         .map(([field, value]) => `${field}: ${value.old ?? '∅'} → ${value.new ?? '∅'}`)
+      if (changes.some((change) => change.startsWith('parent_')) && row.resolved?.affected_family_members?.length > 1) {
+        changes.push(t('import.familyAffected', { ids: row.resolved.affected_family_members.join(', ') }))
+      }
       return changes.join(' · ') || row.resolved?.matching_reason || row.resolved?.group_reason || '—'
     } },
     { key: 'issues', header: t('import.issues'), render: (row) => [
@@ -369,7 +372,7 @@ function ImportWorkspace({ state, dataset, components, financial, possibleDuplic
       <div className="eyebrow">{t(dataset.label)}: CSV / XLSX</div>
       <p className="muted" style={{ margin: '6px 0 12px' }}>{t(dataset.help)}</p>
       {state.kind === 'attendance' && financial.controls}
-      {state.kind === 'groups' && <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+      {['groups', 'trainers', 'clients'].includes(state.kind) && <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
         <span className="eyebrow">{t('import.conflictMode')}</span>
         <select id={`admin-import-${state.kind}-mode`} value={state.importMode} disabled={Boolean(state.file)} aria-invalid={Boolean(state.fieldErrors.importMode)} aria-describedby={state.fieldErrors.importMode ? `admin-import-${state.kind}-mode-error` : undefined}
           onChange={(event) => { state.setImportMode(event.target.value); state.setFieldErrors((current) => clearFieldError(current, 'importMode')) }}>

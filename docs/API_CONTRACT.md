@@ -65,7 +65,29 @@ longer accepted by the participant update API. Anonymization deletes notes and
 clears the participant's birth date. Audit events record actions without note
 text. The admin privacy export includes notes in `internal_notes`.
 
+## Salary preview
+
+`GET /api/admin/payroll/preview/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
+returns a read-only preview of completed, non-cancelled sessions, with `rows`,
+per-trainer `trainers`, currency-keyed `totals` and a `sessions` count. An
+optional `trainer_id` restricts the preview to the effective trainer. A row
+with `amount_minor: null` has no applicable rate. Previewing does not alter
+saved or approved payroll periods.
+
 ## Family money balance
+
+Administrators configure the global client history start date in **Settings →
+Control → Client portal history**. `GET /api/admin/settings/client-portal/`
+returns `history_from` (ISO date or `null`); `PATCH` accepts the same field as
+an ISO date, `null`, or an empty string to disable the cutoff. The server applies
+the cutoff to attendance and past schedule queries by session date, charges by
+creation date, payments by payment date, and sent notifications by send/delivery
+date before pagination or serialization. A `null` date preserves full history.
+The migration imports the previous `CLIENT_PORTAL_HISTORY_FROM` environment
+value, if present. Current family
+balance and subscription state still include older transactions; the overview
+shows the latest payment only if it is on or after the cutoff. Admin APIs are
+not filtered.
 
 `GET /api/client/overview/` includes `account.balance_minor`; each participant's
 `balance_minor` repeats this same family amount for older clients. Monetary
@@ -247,9 +269,14 @@ Imports use a server-owned two-phase batch:
   corrections, counts, created/updated IDs, rollback strategy, and sanitized
   row report. The initiating administrator can download that report at
   `GET /api/admin/import/batches/<batch_id>/report/csv|xlsx/`.
-- `groups` preview additionally accepts
+- `groups`, `trainers`, and `clients` preview additionally accept
   `import_mode=create_only|update_existing|upsert`. The default is
-  `create_only`; update rows include an old-to-new diff.
+  `create_only`; update rows include an old-to-new diff. Client family contact
+  changes list affected participant IDs. Payments and attendance remain
+  create-only.
+- Export returns the requested CSV/XLSX file if it fits the import limits;
+  larger exports return a ZIP of numbered, independently importable files.
+  Header-only files can be previewed but have no rows to commit.
 - Client and group batches have explicit, dependency-aware rollback endpoints.
   Group rollback deletes only unchanged records created by that batch and
   restores updated groups only when their post-import snapshot is unchanged.
@@ -596,3 +623,27 @@ financial deduction. `subscription_session_delta` is the net session ledger
 movement for the visit (0 for account billing and unlimited coverage).
 Subscription `end_date_changes` also includes
 `previous_start` and `current_start` for date corrections.
+# Доступ администратора и TOTP
+
+`POST /api/auth/login/` возвращает `mfa_required: true` для администратора,
+подключившего TOTP. До подтверждения кода `/api/admin/*` и загрузка документов
+через `/api/documents/*` возвращают
+`403` и `code: mfa_required`; `/api/me/` сообщает `mfa_required` для экрана входа.
+При первом входе нового администратора после принятия приглашения ответ также
+содержит `offer_mfa_setup: true`: CRM предлагает добровольную привязку TOTP,
+которую можно отложить. При последующих входах флаг равен `false`.
+`GET /api/auth/mfa/status/` показывает состояние привязки,
+`POST /api/auth/mfa/setup/` с `current_password` выдаёт секрет и URI только для
+первичной или повторной после консольного сброса привязки, а
+`POST /api/auth/mfa/verify/` с `code` подтверждает привязку или вход. Ответ
+с секретом запрещено кешировать. Тот же подтверждённый сеанс открывает Django admin.
+
+Главный администратор создаёт учётную запись через
+`POST /api/admin/system/administrators/` (имя, логин, необязательный email и `current_password`).
+Ответ один раз содержит `activation_token` и `expires_at`. До активации запись
+неактивна и не имеет пригодного пароля. Новый администратор использует
+`POST /api/auth/activate/` с кодом и собственным новым паролем. Код действует
+72 часа, хранится в виде хеша и не допускает повторного использования.
+`POST /api/admin/system/administrators/<id>/reissue-invite/` выдаёт новый код,
+а `.../revoke-invite/` отзывает действующий; оба требуют главного администратора
+и его текущий пароль.

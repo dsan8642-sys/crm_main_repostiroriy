@@ -103,6 +103,12 @@ cd C:\H2O_content\H2O_CRM_V5\swimcrm
 
 ## Продакшн: безопасность (раздел 6)
 
+Перед открытием клиентских кабинетов задайте дату начала истории в
+«Настройки → Управление → История клиентского кабинета». Если дата не задана,
+клиентские списки показывают полную историю. При обновлении существующей
+установки миграция перенесёт значение `CLIENT_PORTAL_HISTORY_FROM`, если оно
+было задано в окружении backend.
+
 Защиты, зависящие от TLS, включаются автоматически при `DEBUG=0` (HSTS на год, secure-cookies,
 `SECURE_SSL_REDIRECT`, заголовки). В dev (`DEBUG=1`) они инертны. Обязательный чеклист прода
 (проверяется `manage.py check --deploy`; в dev-окружении без env будут security warnings, production-like env ниже проходит чисто):
@@ -128,8 +134,9 @@ TRUST_PROXY_SSL_HEADER=1           # только если за TLS-термин
 `AXES_COOLOFF_MINUTES` (30). Разблокировать вручную: `.\.venv\Scripts\python.exe manage.py
 axes_reset` (или `axes_reset_ip` / `axes_reset_username`). Попытки видны в админке (Axes → Access attempts).
 
-2FA админа — встроенная TOTP-проверка перед входом в `/admin/`. В dev выключена по умолчанию,
-в production (`DEBUG=0`) включается автоматически (`ADMIN_2FA_REQUIRED=1`). Настройка:
+Администратор подключает TOTP в CRM через «Настройки → Контроль». После подтверждения
+код обязателен при каждом новом входе в CRM и `/admin/`, в том числе в production.
+Восстановление выполняется только через консоль. Консольная настройка:
 
 ```powershell
 .\.venv\Scripts\python.exe manage.py setup_admin_otp admin

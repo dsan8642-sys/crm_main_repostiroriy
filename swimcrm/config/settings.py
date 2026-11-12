@@ -280,5 +280,4 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
 
-# ---- Admin 2FA ----
-ADMIN_2FA_REQUIRED = os.environ.get("ADMIN_2FA_REQUIRED", "0" if DEBUG else "1") == "1"
+# Admin 2FA is enforced per account after TOTP enrollment, including in production.

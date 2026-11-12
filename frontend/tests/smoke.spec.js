@@ -2002,7 +2002,6 @@ test('admin critical screens render with API-backed data', async ({ page }) => {
   expect(submittedSettings).toEqual([expect.objectContaining({ code: 'pool-b', name: 'Бассейн B', address: 'Варшава' })])
   if (compactClients) {
     await page.locator('.ops-settings-mobile-back button').first().click()
-    await page.locator('.ops-settings-mobile-nav > .ops-context-back').click()
     await page.getByTestId('admin-settings-category-control').last().click()
   } else {
     await page.getByTestId('admin-settings-category-control').first().click()

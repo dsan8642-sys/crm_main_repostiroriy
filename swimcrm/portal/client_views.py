@@ -8,6 +8,14 @@ from .pagination import (
 )
 from scheduling.services import booking_deadline, change_client_booking, change_client_waitlist
 from attendance.services import _deductible_subscription
+from accounts.models import ClientPortalSettings
+
+
+def _client_visible_history(qs, field, *, date_only=False):
+    cutoff = ClientPortalSettings.objects.filter(pk=1).values_list("history_from", flat=True).first()
+    if cutoff and not date_only:
+        cutoff = timezone.make_aware(datetime.combine(cutoff, time.min))
+    return qs.filter(**{f"{field}__gte": cutoff}) if cutoff else qs
 
 
 @require_http_methods(["GET", "POST"])
@@ -114,7 +122,9 @@ def client_overview(request):
     payload = []
     type_colors = session_type_color_keys()
     balance = family_balance(account)
-    latest_payment = Payment.objects.filter(student__parent=account).order_by("-paid_at", "-id").first()
+    latest_payment = _client_visible_history(
+        Payment.objects.filter(student__parent=account), "paid_at", date_only=True,
+    ).order_by("-paid_at", "-id").first()
     for student in students:
         subscriptions = list(student.subscriptions.select_related("subscription_type").exclude(
             status=SubscriptionStatus.CANCELLED).order_by("-start_date", "-id"))
@@ -159,6 +169,9 @@ def client_schedule(request):
     account = _client_account_from_request(request)
     student = _participant_for_client_request(request, account)
     date_from = _parse_date(request.GET.get("date_from"), "date_from") or timezone.localdate()
+    history_from = ClientPortalSettings.objects.filter(pk=1).values_list("history_from", flat=True).first()
+    if history_from:
+        date_from = max(date_from, history_from)
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     type_colors = session_type_color_keys()
     return JsonResponse({
@@ -238,7 +251,10 @@ def client_session_waitlist(request, session_id):
 def client_attendance(request):
     account = _client_account_from_request(request)
     student = _participant_for_client_request(request, account)
-    qs = AttendanceRecord.objects.filter(student=student, status__isnull=False).select_related(
+    qs = _client_visible_history(
+        AttendanceRecord.objects.filter(student=student, status__isnull=False),
+        "session__start_at",
+    ).select_related(
         "student", "session", "session__group", "session__trainer__user")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
@@ -341,11 +357,15 @@ def _client_payment_history_payload(payment):
 def client_payments(request):
     account = _client_account_from_request(request)
     student = _financial_participant_for_client_request(request, account)
-    charges = Charge.objects.filter(student__parent=account).select_related(
+    charges = _client_visible_history(
+        Charge.objects.filter(student__parent=account), "created_at",
+    ).select_related(
         "student", "created_by", "reversal", "reversal__created_by"
     ).order_by("-due_date", "-id")
     allocations = {row.charge.id: row for row in family_charge_statuses(account)}
-    payments = Payment.objects.filter(student__parent=account).select_related(
+    payments = _client_visible_history(
+        Payment.objects.filter(student__parent=account), "paid_at", date_only=True,
+    ).select_related(
         "student", "student__parent__user", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor").order_by("-paid_at", "-id")
     return JsonResponse({
@@ -362,7 +382,9 @@ def client_payments(request):
 def client_charges(request):
     account = _client_account_from_request(request)
     student = _financial_participant_for_client_request(request, account)
-    qs = Charge.objects.filter(student__parent=account).select_related(
+    qs = _client_visible_history(
+        Charge.objects.filter(student__parent=account), "created_at",
+    ).select_related(
         "student", "created_by", "reversal", "reversal__created_by")
     allocations = {row.charge.id: row for row in family_charge_statuses(account)}
     unpaid = [row for row in allocations.values() if row.paid_minor < row.charge.amount_minor]
@@ -406,7 +428,9 @@ def client_charges(request):
 def client_payment_history(request):
     account = _client_account_from_request(request)
     student = _financial_participant_for_client_request(request, account)
-    qs = Payment.objects.filter(student__parent=account).select_related(
+    qs = _client_visible_history(
+        Payment.objects.filter(student__parent=account), "paid_at", date_only=True,
+    ).select_related(
         "student", "student__parent__user", "confirmed_by").prefetch_related(
         "receipts", "events", "events__actor")
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
@@ -450,6 +474,13 @@ def client_notifications(request):
     rows = NotificationLog.objects.filter(
         recipient=account, status__in=[DeliveryStatus.SENT, DeliveryStatus.DELIVERED]
     ).order_by("-created_at", "-id")
+    history_from = ClientPortalSettings.objects.filter(pk=1).values_list("history_from", flat=True).first()
+    if history_from:
+        cutoff = timezone.make_aware(datetime.combine(history_from, time.min))
+        rows = rows.filter(
+            Q(sent_at__gte=cutoff)
+            | Q(sent_at__isnull=True, delivered_at__gte=cutoff)
+        )
 
     def serialize(log):
         return {

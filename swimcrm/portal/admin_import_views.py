@@ -124,6 +124,11 @@ def _preview_rows(kind, headers, rows, overrides=None, import_mode="create_only"
     if kind == ImportKind.GROUPS:
         preview_rows = reference_importer.preview_groups(
             headers, effective_rows, mode=import_mode)
+    elif kind == ImportKind.CLIENTS:
+        preview_rows = clients_importer.preview(headers, effective_rows, {}, mode=import_mode)
+    elif kind == ImportKind.TRAINERS:
+        preview_rows = reference_importer.preview_trainers(
+            headers, effective_rows, mode=import_mode)
     else:
         preview_rows = IMPORTERS[kind](headers, effective_rows)
     return effective_rows, preview_rows
@@ -135,9 +140,9 @@ def _prepare_upload(file, kind, mapping=None):
         headers, rows = clients_importer.parse_source(raw, file.name)
     except ValidationError as exc:
         raise ValidationError({"file": exc}) from exc
-    if not headers or not rows:
+    if not headers:
         raise _field_validation_error(
-            "file", "Файл импорта пуст или не содержит строк данных.",
+            "file", "Файл импорта не содержит заголовков.",
             code="empty")
     if any(not header for header in headers) or len(headers) != len(set(headers)):
         raise _field_validation_error(
@@ -184,6 +189,8 @@ def _create_preview_batch(
             "required_missing": required_missing or [],
             "source_samples": source_samples or {},
             "import_mode": import_mode,
+            "preview_snapshot": {str(row.index): {"status": row.status,
+                "resolved": row.resolved} for row in preview_rows},
         },
         preview_expires_at=now + PREVIEW_TTL,
         rows_total=len(preview_rows),
@@ -197,7 +204,7 @@ def _create_preview_batch(
         "headers": source_headers,
         "mapping": mapping or {},
         "metadata": metadata or {},
-        "own_export": bool(metadata),
+        "own_export": (metadata or {}).get("source_system") == "swimcrm",
         "file_hash": file_hash,
         "duplicate_file": duplicate_file,
         "unused_headers": unused_headers or [],
@@ -277,16 +284,27 @@ def _selected_rows(preview_rows, selected_indices, overrides=None):
     return [row for row in preview_rows if row.index in selected_indices]
 
 
+def _assert_preview_unchanged(batch, preview_rows, selected_indices):
+    snapshot = batch.input_data.get("preview_snapshot") or {}
+    for row in preview_rows:
+        if row.index not in selected_indices:
+            continue
+        before = snapshot.get(str(row.index))
+        if before and (before["status"] != row.status or before["resolved"] != row.resolved):
+            raise ValidationError(
+                f"Строка {row.index} изменилась после предпросмотра; загрузите файл заново")
+
+
 def _report_rows(preview_rows, selected_indices, overrides=None, created_ids=None,
                  commit_errors=None, updated_ids=None):
     selected_indices = set(selected_indices)
     created_ids = iter(created_ids or [])
     updated_ids = iter(updated_ids or [])
-    error_rows = {
-        int(match.group(1))
-        for message in (commit_errors or [])
-        if (match := re.search(r"Строка (\d+)", str(message)))
-    }
+    errors_by_row = {}
+    for message in commit_errors or []:
+        if match := re.search(r"Строка (\d+)", str(message)):
+            errors_by_row.setdefault(int(match.group(1)), []).append(str(message))
+    error_rows = set(errors_by_row)
     report = []
     for row in preview_rows:
         selected = row.index in selected_indices
@@ -300,8 +318,8 @@ def _report_rows(preview_rows, selected_indices, overrides=None, created_ids=Non
                            else (next(created_ids, "") if created else "")),
             "matched_client_id": row.resolved.get("student_id", ""),
             "source_data": row.data,
-            "applied_changes": (overrides or {}).get(str(row.index), {}),
-            "errors": row.errors,
+            "applied_changes": row.resolved.get("changes", {}) if updated else (overrides or {}).get(str(row.index), {}),
+            "errors": [*row.errors, *errors_by_row.get(row.index, [])],
             "warnings": row.warnings,
         })
     return report
@@ -352,10 +370,13 @@ def admin_import_clients_preview(request):
     actor = _admin_required(request)
     file = _uploaded_file(request)
     mapping = _mapping_from_request(request)
+    import_mode = request.POST.get("import_mode") or "create_only"
+    if import_mode not in clients_importer.IMPORT_MODES:
+        raise _field_validation_error("import_mode", "Выберите допустимый режим импорта клиентов.", code="invalid_choice")
     raw, source_headers, canonical_headers, prepared = _prepare_upload(
         file, ImportKind.CLIENTS, mapping)
     rows, preview_rows = _preview_rows(
-        ImportKind.CLIENTS, canonical_headers, prepared["rows"])
+        ImportKind.CLIENTS, canonical_headers, prepared["rows"], import_mode=import_mode)
     return _create_preview_batch(
         actor=actor,
         kind=ImportKind.CLIENTS,
@@ -370,6 +391,7 @@ def admin_import_clients_preview(request):
         unused_headers=prepared["unused_headers"],
         required_missing=prepared["required_missing"],
         source_samples=prepared["source_samples"],
+        import_mode=import_mode,
     )
 
 
@@ -382,7 +404,8 @@ def admin_import_clients_commit(request):
         batch_id=batch_id, actor=actor, kind=ImportKind.CLIENTS)
     staged = dict(batch.input_data)
     rows = _apply_overrides(rows, staged.get("row_overrides"))
-    preview_rows = clients_importer.preview(headers, rows, {})
+    preview_rows = clients_importer.preview(headers, rows, {}, mode=staged.get("import_mode", "create_only"))
+    _assert_preview_unchanged(batch, preview_rows, selected_indices)
     selected_rows = _selected_rows(
         preview_rows, selected_indices, staged.get("row_overrides"))
     batch = clients_importer.commit(
@@ -390,6 +413,7 @@ def admin_import_clients_commit(request):
         actor=actor,
         source_name=batch.source_name,
         batch=batch,
+        mode=staged.get("import_mode", "create_only"),
     )
     batch.result = {
         **batch.result,
@@ -402,7 +426,8 @@ def admin_import_clients_commit(request):
         "rollback_strategy": ROLLBACK_STRATEGIES[ImportKind.CLIENTS],
         "report_rows": _report_rows(
             preview_rows, selected_indices, staged.get("row_overrides"),
-            batch.created_student_ids),
+            batch.created_student_ids, batch.result.get("errors"),
+            batch.result.get("updated_ids")),
     }
     batch.save(update_fields=["result"])
     return JsonResponse({
@@ -575,11 +600,7 @@ def _reference_preview(request, kind):
     file = _uploaded_file(request)
     mapping = _mapping_from_request(request)
     import_mode = request.POST.get("import_mode") or "create_only"
-    if kind != ImportKind.GROUPS and import_mode != "create_only":
-        raise _field_validation_error(
-            "import_mode", "Для этого типа доступен только режим создания.",
-            code="invalid_choice")
-    if kind == ImportKind.GROUPS and import_mode not in reference_importer.REFERENCE_IMPORT_MODES:
+    if import_mode not in reference_importer.REFERENCE_IMPORT_MODES:
         raise _field_validation_error(
             "import_mode", "Выберите допустимый режим импорта групп.",
             code="invalid_choice")
@@ -612,10 +633,10 @@ def _reference_commit(request, kind, commit_function):
     import_mode = batch.input_data.get("import_mode", "create_only")
     rows, preview_rows = _preview_rows(
         kind, headers, rows, batch.input_data.get("row_overrides"), import_mode)
+    _assert_preview_unchanged(batch, preview_rows, selected_indices)
     selected_rows = _selected_rows(
         preview_rows, selected_indices, batch.input_data.get("row_overrides"))
-    summary = (commit_function(selected_rows, actor=actor, mode=import_mode)
-               if kind == ImportKind.GROUPS else commit_function(selected_rows, actor=actor))
+    summary = commit_function(selected_rows, actor=actor, mode=import_mode)
     _complete_batch(
         batch, summary, summary["created"] + summary.get("updated", 0),
         report_rows=_report_rows(
@@ -760,6 +781,10 @@ def admin_import_row_update(request, kind, batch_id, row_index):
     batch.save(update_fields=["input_data"])
     effective_rows, preview_rows = _preview_rows(
         kind, headers, rows, overrides, payload.get("import_mode", "create_only"))
+    payload["preview_snapshot"] = {str(row.index): {"status": row.status,
+        "resolved": row.resolved} for row in preview_rows}
+    batch.input_data = payload
+    batch.save(update_fields=["input_data"])
     duplicate_file = bool(payload.get("file_hash") and ImportBatch.objects.filter(
         kind=kind, status=ImportBatchStatus.COMMITTED,
         result__file_hash=payload.get("file_hash")).exists())
@@ -816,6 +841,10 @@ def admin_import_rows_bulk(request, kind, batch_id):
     batch.save(update_fields=["input_data"])
     effective_rows, preview_rows = _preview_rows(
         kind, headers, rows, overrides, payload.get("import_mode", "create_only"))
+    payload["preview_snapshot"] = {str(row.index): {"status": row.status,
+        "resolved": row.resolved} for row in preview_rows}
+    batch.input_data = payload
+    batch.save(update_fields=["input_data"])
     serialized = _row_payloads(kind, effective_rows, preview_rows, overrides)
     return JsonResponse({"batch_id": batch.id, "rows": serialized,
                          "counts": _status_counts(serialized)})

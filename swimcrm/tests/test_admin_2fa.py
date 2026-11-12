@@ -30,7 +30,7 @@ class AdminOtpMiddlewareRule(TestCase):
         self.admin = f.make_admin(username="otp_admin")
         self.secret = generate_totp_secret()
         AdminOTPDevice.objects.create(
-            user=self.admin, secret=self.secret, is_confirmed=True)
+            user=self.admin, secret=self.secret, is_confirmed=True, enforced=True)
 
     def test_admin_requires_otp_before_admin_index(self):
         self.client.force_login(self.admin)
@@ -76,6 +76,7 @@ class AdminOtpProductionFlow(TestCase):
             user=self.admin,
             secret=self.secret,
             is_confirmed=True,
+            enforced=True,
         )
 
     def test_admin_login_requires_otp_before_admin_access(self):
@@ -117,6 +118,7 @@ class AdminOtpProductionFlow(TestCase):
 
     def test_admin_without_confirmed_otp_device_is_blocked(self):
         self.admin.admin_otp_device.delete()
+        AdminOTPDevice.objects.create(user=self.admin, secret=self.secret, enforced=True)
         login_response = self.client.post("/admin/login/?next=/admin/", {
             "username": "prod_otp_admin",
             "password": "Str0ngPass!123",

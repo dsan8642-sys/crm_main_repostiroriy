@@ -6,7 +6,32 @@ from datetime import date
 
 from payroll.models import (PayrollPeriod, PayrollRate, PayrollRateVersion, PayrollRule, PayrollScheme,
                             TrainerPayrollAssignment)
-from payroll.services import assign_rate, calculate_payroll_period, payroll_totals_by_trainer, recalculate_open_periods
+from payroll.services import assign_rate, calculate_payroll_period, payroll_totals_by_trainer, recalculate_open_periods, preview_payroll
+
+
+@require_GET
+def admin_payroll_preview(request):
+    _admin_required(request)
+    date_from = _parse_date(request.GET.get("date_from"), "date_from")
+    date_to = _parse_date(request.GET.get("date_to"), "date_to")
+    if not date_from or not date_to or date_to < date_from:
+        raise ValidationError("Укажите корректный период.")
+    raw_trainer = request.GET.get("trainer_id")
+    trainer_id = _required_int(raw_trainer, "trainer_id") if raw_trainer else None
+    if trainer_id:
+        get_object_or_404(Trainer, pk=trainer_id)
+    rows = preview_payroll(date_from=date_from, date_to=date_to, trainer_id=trainer_id)
+    totals, trainers = {}, {}
+    for row in rows:
+        trainer = trainers.setdefault(row["trainer_id"], {"trainer_id": row["trainer_id"], "trainer": row["trainer"], "sessions": 0, "missing": 0, "totals": {}})
+        trainer["sessions"] += 1
+        if row["amount_minor"] is None:
+            trainer["missing"] += 1
+        else:
+            currency = row["currency"]
+            totals[currency] = totals.get(currency, 0) + row["amount_minor"]
+            trainer["totals"][currency] = trainer["totals"].get(currency, 0) + row["amount_minor"]
+    return JsonResponse({"rows": rows, "trainers": list(trainers.values()), "totals": totals, "sessions": len(rows)})
 
 
 def _rate_payload(rate):

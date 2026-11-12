@@ -1,6 +1,7 @@
 ﻿from .support import *
 
 from .openapi import build_openapi_schema
+from accounts.services import admin_mfa_required, admin_mfa_verified
 
 
 @require_GET
@@ -20,6 +21,7 @@ def me(request):
         "internal_role": user.role,
         "is_staff": user.is_staff,
         "can_manage_administrators": user.is_superuser,
+        "mfa_required": admin_mfa_required(user) and not admin_mfa_verified(request),
     })
 
 

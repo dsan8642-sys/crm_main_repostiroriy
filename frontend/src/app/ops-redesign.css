@@ -3033,6 +3033,12 @@ button.ops-detail-row:hover { color: var(--primary-hover); }
     gap: 8px;
   }
 
+  .ops-settings-mobile-resources {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 4px 16px;
+  }
+
   .ops-settings-mobile-back {
     display: flex;
     align-items: center;

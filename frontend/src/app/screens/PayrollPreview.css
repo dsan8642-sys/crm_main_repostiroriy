@@ -1,0 +1,4 @@
+.payroll-preview-table { overflow-x: auto; }
+.payroll-preview-table table { width: 100%; border-collapse: collapse; text-align: left; }
+.payroll-preview-table th, .payroll-preview-table td { padding: 10px; border-bottom: 1px solid var(--border-default); }
+.payroll-preview-table th { white-space: nowrap; }

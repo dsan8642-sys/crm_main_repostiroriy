@@ -11,6 +11,8 @@
   align-items: end;
 }
 
+.ops-report-period-buttons { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+
 .ops-report-toolbar {
   display: flex;
   align-items: end;
@@ -28,6 +30,14 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 12px 0;
+}
+
+.ops-report-kpis--income {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (min-width: 701px) {
+  .ops-report-kpis--income .kpi-value { font-size: clamp(25px, 2.3vw, 36px); }
 }
 
 .ops-report-kpi {
@@ -141,7 +151,8 @@
     grid-template-columns: 1fr;
   }
 
-  .ops-report-kpis {
+  .ops-report-kpis,
+  .ops-report-kpis--income {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

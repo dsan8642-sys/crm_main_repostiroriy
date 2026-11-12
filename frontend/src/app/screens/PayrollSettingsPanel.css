@@ -1,0 +1,15 @@
+.payroll-rate-list { margin-top: 16px; container-type: inline-size; }
+.payroll-rate-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, .75fr) 220px;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.payroll-rate-row > strong, .payroll-rate-row > span { min-width: 0; overflow-wrap: anywhere; }
+.payroll-rate-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+@container (max-width: 540px) {
+  .payroll-rate-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .payroll-rate-actions { justify-content: flex-start; flex-wrap: wrap; }
+}

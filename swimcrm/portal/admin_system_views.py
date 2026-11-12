@@ -1,9 +1,12 @@
 from django.contrib.auth import password_validation, update_session_auth_hash
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from datetime import timedelta
+import hashlib
+import secrets
 
 from audit.models import AuditLogEntry
-from accounts.models import AdminOTPDevice, Role, User
+from accounts.models import AdminOTPDevice, Role, User, AccountActivation, AccessPurpose
 from dataio.models import ImportBatch
 
 from .support import *
@@ -83,14 +86,21 @@ def admin_security_status(request):
         "is_superuser": user.is_superuser,
         "otp_configured": user.id in otp_by_user,
         "otp_confirmed": bool(otp_by_user.get(user.id) and otp_by_user[user.id].is_confirmed),
+        "invitation_pending": user.role == Role.ADMIN and not user.is_active and not user.has_usable_password(),
     } for user in users]})
 
 
-def _require_current_admin_password(actor, data):
+def _require_current_admin_password(request, actor, data):
+    from accounts.services import clear_login_failures, login_limited, record_login_failure
+    limit_identity = f"admin-access:{actor.pk}"
+    if login_limited(request, limit_identity):
+        raise PermissionDenied("Слишком много попыток. Попробуйте позже.")
     current_password = str(data.get("current_password") or "")
     if not current_password or not actor.check_password(current_password):
+        record_login_failure(request, limit_identity)
         raise ValidationError({"current_password": ValidationError(
             "Текущий пароль указан неверно.", code="invalid")})
+    clear_login_failures(request, limit_identity)
 
 
 def _primary_admin_required(request):
@@ -100,15 +110,29 @@ def _primary_admin_required(request):
     return actor
 
 
+def _issue_admin_invitation(actor, user):
+    now = timezone.now()
+    AccountActivation.objects.filter(
+        user=user, purpose=AccessPurpose.ADMIN_INVITE, used_at__isnull=True,
+    ).update(used_at=now)
+    code = secrets.token_urlsafe(32)
+    expires_at = now + timedelta(hours=72)
+    AccountActivation.objects.create(
+        user=user, purpose=AccessPurpose.ADMIN_INVITE,
+        token_hash=hashlib.sha256(code.encode()).hexdigest(),
+        expires_at=expires_at, created_by=actor,
+    )
+    audit(actor, "admin.invitation.issued", user, {"expires_at": expires_at.isoformat()})
+    return {"activation_token": code, "expires_at": expires_at.isoformat()}
+
+
 @require_POST
-@transaction.atomic
 def admin_administrator_create(request):
     actor = _primary_admin_required(request)
     data = _json_body(request)
-    _require_current_admin_password(actor, data)
+    _require_current_admin_password(request, actor, data)
     full_name = " ".join(str(data.get("full_name") or "").split())
     username = str(data.get("username") or "").strip()
-    password = str(data.get("password") or "")
     email = str(data.get("email") or "").strip()
     if not full_name:
         raise ValidationError({"full_name": ValidationError("Укажите имя администратора.", code="required")})
@@ -123,38 +147,57 @@ def admin_administrator_create(request):
             User._meta.get_field("email").run_validators(email)
     except ValidationError as exc:
         raise ValidationError({"email": exc}) from exc
-    try:
-        password_validation.validate_password(password)
-    except ValidationError as exc:
-        raise ValidationError({"password": exc}) from exc
     if User.objects.filter(username__iexact=username).exists():
         raise ValidationError({"username": ValidationError("Этот логин уже используется.", code="duplicate")})
     first_name, *rest = full_name.split(" ", 1)
-    user = User.objects.create_user(
-        username=username,
-        email=email,
-        password=password,
-        first_name=first_name,
-        last_name=rest[0] if rest else "",
-        role=Role.ADMIN,
-    )
-    audit(actor, "admin.access.created", user, {"username": user.username, "full_name": full_name})
-    return JsonResponse({"id": user.id, "username": user.username, "full_name": user.get_full_name()}, status=201)
+    with transaction.atomic():
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            first_name=first_name,
+            last_name=rest[0] if rest else "",
+            role=Role.ADMIN,
+            is_active=False,
+        )
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        invitation = _issue_admin_invitation(actor, user)
+        audit(actor, "admin.access.created", user, {"username": user.username, "full_name": full_name})
+    return JsonResponse({"id": user.id, "username": user.username, "full_name": user.get_full_name(), **invitation}, status=201)
 
 
 @require_POST
-@transaction.atomic
 def admin_administrator_access(request, user_id, action):
     actor = _primary_admin_required(request)
     data = _json_body(request)
-    _require_current_admin_password(actor, data)
-    if action not in {"revoke", "restore"}:
+    _require_current_admin_password(request, actor, data)
+    if action not in {"revoke", "restore", "reissue-invite", "revoke-invite"}:
         raise ValidationError({"action": ValidationError("Неизвестное действие.", code="invalid")})
     user = get_object_or_404(User, pk=user_id, role=Role.ADMIN)
     if user.pk == actor.pk:
         raise ValidationError({"user": ValidationError("Нельзя отозвать собственный доступ.", code="self")})
     if user.is_superuser:
         raise ValidationError({"user": ValidationError("Доступ главного администратора нельзя изменить здесь.", code="protected")})
+    if action in {"reissue-invite", "revoke-invite"}:
+        with transaction.atomic():
+            list(AccountActivation.objects.select_for_update().filter(
+                user=user, purpose=AccessPurpose.ADMIN_INVITE, used_at__isnull=True,
+            ))
+            user = User.objects.select_for_update().get(pk=user.pk)
+            if user.is_active or user.has_usable_password():
+                raise ValidationError({"user": ValidationError("Приглашение уже принято.", code="activated")})
+            if action == "reissue-invite":
+                invitation = _issue_admin_invitation(actor, user)
+            else:
+                AccountActivation.objects.filter(
+                    user=user, purpose=AccessPurpose.ADMIN_INVITE, used_at__isnull=True,
+                ).update(used_at=timezone.now())
+                audit(actor, "admin.invitation.revoked", user, {})
+        if action == "reissue-invite":
+            return JsonResponse({"id": user.id, **invitation})
+        return JsonResponse({"id": user.id, "revoked": True})
+    if not user.has_usable_password():
+        raise ValidationError({"user": ValidationError("Сначала примите приглашение.", code="pending_invitation")})
     is_active = action == "restore"
     changed = user.is_active != is_active
     if changed:
@@ -176,13 +219,7 @@ def admin_credentials(request):
         })
 
     data = _json_body(request)
-    current_password = str(data.get("current_password") or "")
-    if not current_password or not user.check_password(current_password):
-        raise ValidationError({
-            "current_password": ValidationError(
-                "Текущий пароль указан неверно.", code="invalid",
-            ),
-        })
+    _require_current_admin_password(request, user, data)
 
     old_username = user.username
     new_username = str(data.get("username") or old_username).strip()

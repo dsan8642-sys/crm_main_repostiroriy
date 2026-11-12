@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { PayrollPreview, payrollPeriodRange } from './PayrollPreview.jsx'
 import { adminTranslator } from '../../adminLocales.js'
 import { api, apiErrorMessage, downloadFile } from '../../api.js'
 import { useLocale } from '../../i18n.jsx'
@@ -91,15 +92,23 @@ export function createAdminReportsPanel(components) {
       subtab: 'sessions', dateFrom: initialRange.dateFrom, dateTo: initialRange.dateTo,
       trainerId: '', currency: '', incomePage: 1,
     })
-    const subtab = reportView.subtab === 'income' ? 'income' : 'sessions'
+    const subtab = ['income', 'payroll'].includes(reportView.subtab) ? reportView.subtab : 'sessions'
     const dateFrom = typeof reportView.dateFrom === 'string' ? reportView.dateFrom : initialRange.dateFrom
     const dateTo = typeof reportView.dateTo === 'string' ? reportView.dateTo : initialRange.dateTo
+    const presets = ['month', 'last', 'week', 'custom']
+    const preset = reportView.preset === 'custom' ? 'custom' : (presets.slice(0, 3).find((item) => payrollPeriodRange(item).join('|') === [dateFrom, dateTo].join('|')) || 'custom')
+    const presetLabels = ({ ru: ['Этот месяц', 'Прошлый месяц', 'Предыдущая неделя', 'Выбрать даты'], uk: ['Цей місяць', 'Минулий місяць', 'Попередній тиждень', 'Обрати дати'], pl: ['Ten miesiąc', 'Poprzedni miesiąc', 'Poprzedni tydzień', 'Wybierz daty'], en: ['This month', 'Last month', 'Previous week', 'Choose dates'] })[locale] || ['Этот месяц', 'Прошлый месяц', 'Предыдущая неделя', 'Выбрать даты']
     const trainerId = String(reportView.trainerId || '')
     const currency = String(reportView.currency || '')
     const incomePage = Math.max(1, Number(reportView.incomePage) || 1)
     const setSubtab = (value) => setReportView((current) => ({ ...current, subtab: value }))
     const setDateFrom = (value) => setReportView((current) => ({ ...current, dateFrom: value, incomePage: 1 }))
     const setDateTo = (value) => setReportView((current) => ({ ...current, dateTo: value, incomePage: 1 }))
+    const setPreset = (value) => setReportView((current) => {
+      if (value === 'custom') return { ...current, preset: value }
+      const [from, to] = payrollPeriodRange(value)
+      return { ...current, preset: value, dateFrom: from, dateTo: to, incomePage: 1 }
+    })
     const setTrainerId = (value) => setReportView((current) => ({ ...current, trainerId: value }))
     const setCurrency = (value) => setReportView((current) => ({ ...current, currency: value, incomePage: 1 }))
     const setIncomePage = (value) => setReportView((current) => ({ ...current, incomePage: typeof value === 'function' ? value(current.incomePage) : value }))
@@ -213,8 +222,11 @@ export function createAdminReportsPanel(components) {
       </div>
 
       <div className="card card-pad ops-report-filters">
+        <div className="ops-report-period-buttons">{presets.map((item, index) => <Button key={item} variant={preset === item ? 'primary' : 'secondary'} aria-pressed={preset === item} onClick={() => setPreset(item)}>{presetLabels[index]}</Button>)}</div>
+        {preset === 'custom' && <>
         <DateField id="admin-reports-date-from" label={t('reports.periodFrom')} value={dateFrom} onChange={setDateFrom} />
         <DateField id="admin-reports-date-to" label={t('reports.periodTo')} value={dateTo} onChange={setDateTo} />
+        </>}
       </div>
 
       <Tabs
@@ -223,10 +235,11 @@ export function createAdminReportsPanel(components) {
         items={[
           { value: 'sessions', label: t('reports.sessions') },
           { value: 'income', label: t('reports.income') },
+          { value: 'payroll', label: ({ ru: 'Зарплата', uk: 'Зарплата', pl: 'Wynagrodzenia', en: 'Payroll' })[locale] || 'Зарплата' },
         ]}
       />
 
-      {subtab === 'sessions' ? <section aria-label={t('reports.sessionReport')}>
+      {subtab === 'payroll' ? <PayrollPreview report dateFrom={dateFrom} dateTo={dateTo} Button={Button} /> : subtab === 'sessions' ? <section aria-label={t('reports.sessionReport')}>
         <div className="ops-report-toolbar">
           <Select id="admin-report-trainer" label={t('common.trainer')} value={trainerId} onChange={(event) => setTrainerId(event.target.value)}>
             <option value="">{t('reports.allTrainers')}</option>
@@ -254,7 +267,7 @@ export function createAdminReportsPanel(components) {
           <Button variant="secondary" disabled={downloading || incomeLoading} onClick={() => exportReport('income')}>{t('reports.download')}</Button>
         </div>
         {incomeError && <Banner tone="danger" onClose={() => setIncomeError(null)}>{incomeError}</Banner>}
-        <div className="ops-report-kpis" aria-live="polite">
+        <div className="ops-report-kpis ops-report-kpis--income" aria-live="polite">
           <Kpi label={t('reports.total')} value={incomeReport?.total || '—'} />
           <Kpi label={t('reports.cash')} value={incomeReport?.cash || '—'} />
           <Kpi label={t('reports.cashless')} value={incomeReport?.non_cash || '—'} />

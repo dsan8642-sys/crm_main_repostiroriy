@@ -13,6 +13,8 @@ import { ContextBackButton } from '../EntityListPrimitives.jsx'
 import { GuideScreen } from './GuideScreen.jsx'
 import { PayrollSettingsPanel } from './PayrollSettingsPanel.jsx'
 import { useSessionViewState } from '../uiLifecycle.jsx'
+import { MfaEnrollment } from '../Mfa.jsx'
+import { AccessCodeCard } from '../AccessControls.jsx'
 import {
   clearFieldError,
   fieldErrorsFromApi,
@@ -76,6 +78,7 @@ const resources = [
   { tab: 'localization', id: 'dictionaryKeys', title: 'settings.resource.dictionaryKeys', endpoint: '/api/admin/settings/dictionary-keys/', response: 'keys', detail: (id) => `/api/admin/settings/dictionary-keys/${id}/`, fields: [['domain', 'settings.field.section'], ['code', 'settings.field.key'], ['is_active', 'settings.field.active', 'boolean']] },
   { tab: 'localization', id: 'dictionaryTranslations', title: 'settings.resource.dictionaryTranslations', endpoint: '/api/admin/settings/dictionary-translations/', response: 'translations', detail: (id) => `/api/admin/settings/dictionary-translations/${id}/`, fields: [['key_id', 'settings.field.key', 'select-ref', 'dictionaryKeys'], ['language_code', 'settings.field.language', 'select-ref', 'languages', 'code'], ['value', 'settings.field.body', 'textarea']] },
   { tab: 'control', id: 'credentials', title: 'settings.resource.credentials', panel: true, readOnly: true },
+  { tab: 'control', id: 'clientPortal', title: 'settings.resource.clientPortal', panel: true, readOnly: true },
   // `panel` opts out of the CRUD-table shape: no endpoint to load, custom body.
   { tab: 'control', id: 'importExport', title: 'settings.resource.importExport', panel: true, readOnly: true },
   { tab: 'control', id: 'audit', title: 'settings.resource.audit', endpoint: '/api/admin/system/audit/', response: 'entries', readOnly: true },
@@ -136,7 +139,7 @@ function credentialValues(username = '') {
 }
 
 function administratorValues() {
-  return { fullName: '', username: '', email: '', password: '', confirmPassword: '', currentPassword: '' }
+  return { fullName: '', username: '', email: '', currentPassword: '' }
 }
 
 export function createAdminSettingsScreen(components, reloadRoleData, icons, adminData = {}) {
@@ -174,6 +177,11 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     const [administratorErrors, setAdministratorErrors] = useState({})
     const [administratorModalError, setAdministratorModalError] = useState(null)
     const [accessAction, setAccessAction] = useState(null)
+    const [newInvitation, setNewInvitation] = useState(null)
+    const [clientPortalSettings, setClientPortalSettings] = useState({ history_from: '' })
+    const [clientPortalLoading, setClientPortalLoading] = useState(false)
+    const [clientPortalError, setClientPortalError] = useState(null)
+    const [clientPortalMessage, setClientPortalMessage] = useState(null)
 
     const resource = resources.find((item) => item.id === resourceId) || resources[0]
     const tabResources = useMemo(() => resources.filter((item) => item.tab === tab), [tab])
@@ -207,6 +215,16 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     }
 
     useEffect(() => { load() }, [t])
+    useEffect(() => {
+      if (resourceId !== 'clientPortal') return
+      let active = true
+      setClientPortalLoading(true)
+      api.get('/api/admin/settings/client-portal/')
+        .then((result) => { if (active) setClientPortalSettings({ history_from: result.history_from || '' }) })
+        .catch((err) => { if (active) setClientPortalError(apiErrorMessage(err, t('common.loadError'))) })
+        .finally(() => { if (active) setClientPortalLoading(false) })
+      return () => { active = false }
+    }, [resourceId, t])
     useEffect(() => {
       if (!tabResources.some((item) => item.id === resourceId)) setResourceId(tabResources[0]?.id || 'subscriptionTypes')
     }, [tab, tabResources, resourceId])
@@ -369,22 +387,16 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
     }
 
     async function saveAdministrator() {
-      if (administrator.password !== administrator.confirmPassword) {
-        const nextErrors = { password: t('settings.passwordsMismatch'), confirmPassword: t('settings.repeatPasswordError') }
-        setAdministratorErrors(nextErrors)
-        focusFirstFieldError(nextErrors, ADMINISTRATOR_FIELD_IDS)
-        return
-      }
       setLoading(true); setAdministratorModalError(null); setAdministratorErrors({})
       try {
-        await api.post('/api/admin/system/administrators/', {
+        const invitation = await api.post('/api/admin/system/administrators/', {
           full_name: administrator.fullName,
           username: administrator.username,
           email: administrator.email,
-          password: administrator.password,
           current_password: administrator.currentPassword,
         })
         closeAdministrator()
+        setNewInvitation(invitation)
         setMessage(t('settings.administratorCreated'))
         await load('security')
       } catch (err) {
@@ -399,9 +411,10 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
       if (!accessAction?.currentPassword) return
       setLoading(true)
       try {
-        await api.post(`/api/admin/system/administrators/${accessAction.row.id}/${accessAction.type}/`, {
+        const result = await api.post(`/api/admin/system/administrators/${accessAction.row.id}/${accessAction.type}/`, {
           current_password: accessAction.currentPassword,
         })
+        if (result.activation_token) setNewInvitation({ ...result, username: accessAction.row.username })
         setAccessAction(null)
         setMessage(t('settings.accessUpdated'))
         await load('security')
@@ -453,17 +466,20 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         </div>
       </nav>
       <div className="ops-settings-mobile-nav">
-        {mobileLevel === 'categories' && <div className="ops-settings-mobile-list" aria-label={t('settings.categoriesAria')}>
-          {tabs.map(([value, label]) => <button key={value} type="button" data-testid={`admin-settings-category-${value}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => { selectTab(value); setMobileLevel(value === 'reports' ? 'detail' : 'resources') }}><strong>{t(label)}</strong><span aria-hidden="true">›</span></button>)}
+        {mobileLevel !== 'detail' && <div className="ops-settings-mobile-list" aria-label={t('settings.categoriesAria')}>
+          {tabs.map(([value, label]) => <React.Fragment key={value}>
+            <button type="button" data-testid={`admin-settings-category-${value}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} aria-expanded={value === 'reports' ? undefined : mobileLevel === 'resources' && tab === value} onClick={() => {
+              if (value === 'reports') { selectTab(value); setMobileLevel('detail') }
+              else if (mobileLevel === 'resources' && tab === value) setMobileLevel('categories')
+              else { selectTab(value); setMobileLevel('resources') }
+            }}><strong>{t(label)}</strong><span aria-hidden="true">{mobileLevel === 'resources' && tab === value ? '⌄' : '›'}</span></button>
+            {mobileLevel === 'resources' && tab === value && <div className="ops-settings-mobile-resources" aria-label={t(label)}>
+              {tabResources.map((item) => <button key={item.id} type="button" data-testid={`admin-settings-resource-${item.id}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong>{resourceHints[item.id] && <small>{t(resourceHints[item.id])}</small>}</span><span aria-hidden="true">›</span></button>)}
+            </div>}
+          </React.Fragment>)}
         </div>}
-        {mobileLevel === 'resources' && <>
-          <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</ContextBackButton>
-          <div className="ops-settings-mobile-list" aria-label={t(tabs.find(([value]) => value === tab)?.[1])}>
-            {tabResources.map((item) => <button key={item.id} type="button" data-testid={`admin-settings-resource-${item.id}`} className="ops-settings-mobile-item ops-action-card" style={{ flexDirection: 'row', textAlign: 'left' }} onClick={() => selectResource(item)}><span><strong>{t(item.title)}</strong>{resourceHints[item.id] && <small>{t(resourceHints[item.id])}</small>}</span><span aria-hidden="true">›</span></button>)}
-          </div>
-        </>}
         {mobileLevel === 'detail' && <div className="ops-settings-mobile-back">
-          <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel('resources')}>{t(tabs.find(([value]) => value === tab)?.[1])}</ContextBackButton>
+          <ContextBackButton icon={<icons.ArrowLeft size={14} />} onClick={() => setMobileLevel(tab === 'reports' ? 'categories' : 'resources')}>{t(tabs.find(([value]) => value === tab)?.[1])}</ContextBackButton>
           <button type="button" onClick={() => setMobileLevel('categories')}>{t('settings.categories')}</button>
         </div>}
       </div>
@@ -474,20 +490,51 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
         <Button variant="primary" disabled={loading} onClick={openCredentials}>{t('settings.editCredentials')}</Button>
       </div>}
       {resource.id === 'security' && <div className="card card-pad ops-edit-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        {newInvitation && <div style={{ marginBottom: 16 }}>
+          <h4>{t('settings.inviteTitle', { username: newInvitation.username })}</h4>
+          <p>{t('settings.inviteDescription', { expires: newInvitation.expires_at })}</p>
+          <AccessCodeCard key={newInvitation.activation_token} Button={Button} info={{ login: newInvitation.username, activation_code: newInvitation.activation_token, expires_at: newInvitation.expires_at }} onClose={() => setNewInvitation(null)} />
+        </div>}
+        {administrators.find((row) => row.id === currentUser?.id)?.otp_confirmed
+          ? <p>{t('mfa.enabled')}</p>
+          : <MfaEnrollment Button={Button} onComplete={() => load('security')} />}
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <p className="page-desc" style={{ margin: 0 }}>{t('settings.administratorsDescription')}</p>
           {currentUser?.can_manage_administrators && <Button variant="primary" disabled={loading} onClick={openAdministrator}>{t('settings.addAdministrator')}</Button>}
         </div>
         <Table rows={administrators} emptyLabel={loading ? t('common.loading') : t('settings.empty')} columns={[
           { key: 'full_name', header: t('settings.administrator'), render: (row) => <span className="strong">{row.full_name}</span> },
           { key: 'username', header: t('settings.newLogin'), muted: true },
-          { key: 'status', header: t('common.status'), render: (row) => row.is_superuser ? <Badge tone="info">{t('settings.primaryAdministrator')}</Badge> : <Badge tone={row.is_active ? 'success' : 'danger'}>{t(row.is_active ? 'settings.accessEnabled' : 'settings.accessRevoked')}</Badge> },
+          { key: 'status', header: t('common.status'), render: (row) => row.invitation_pending ? <Badge tone="info">{t('settings.invitePending')}</Badge> : row.is_superuser ? <Badge tone="info">{t('settings.primaryAdministrator')}</Badge> : <Badge tone={row.is_active ? 'success' : 'danger'}>{t(row.is_active ? 'settings.accessEnabled' : 'settings.accessRevoked')}</Badge> },
           { key: 'actions', header: '', width: 160, render: (row) => {
             if (!currentUser?.can_manage_administrators || row.is_superuser || row.id === currentUser?.id) return null
+            if (row.invitation_pending) return <><Button size="sm" variant="primary" disabled={loading} onClick={() => setAccessAction({ row, type: 'reissue-invite', currentPassword: '', error: null })}>{t('settings.inviteReissue')}</Button><Button size="sm" variant="subtle" disabled={loading} onClick={() => setAccessAction({ row, type: 'revoke-invite', currentPassword: '', error: null })}>{t('settings.inviteRevoke')}</Button></>
             const type = row.is_active ? 'revoke' : 'restore'
             return <Button size="sm" variant={type === 'revoke' ? 'subtle' : 'primary'} disabled={loading} onClick={() => setAccessAction({ row, type, currentPassword: '', error: null })}>{t(type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess')}</Button>
           } },
         ]} />
+      </div>}
+      {resource.id === 'clientPortal' && <div className="card card-pad ops-edit-panel" data-testid="client-portal-history-settings">
+        <p className="page-desc">{t('settings.clientPortalHistoryDescription')}</p>
+        {clientPortalError && <Banner tone="danger" style={{ marginBottom: 12 }} onClose={() => setClientPortalError(null)}>{clientPortalError}</Banner>}
+        {clientPortalMessage && <ToastNotice id="client-portal-history-result" message={clientPortalMessage} tone="success" />}
+        <DateField id="admin-client-portal-history-from" label={t('settings.clientPortalHistoryFrom')} value={clientPortalSettings.history_from} onChange={(value) => setClientPortalSettings((current) => ({ ...current, history_from: value }))} />
+        <div className="ops-button-row" style={{ marginTop: 14 }}>
+          <Button variant="primary" disabled={clientPortalLoading} onClick={async () => {
+            setClientPortalLoading(true)
+            setClientPortalError(null)
+            setClientPortalMessage(null)
+            try {
+              const result = await api.patch('/api/admin/settings/client-portal/', { history_from: clientPortalSettings.history_from || null })
+              setClientPortalSettings({ history_from: result.history_from || '' })
+              setClientPortalMessage(t('settings.clientPortalHistorySaved'))
+            } catch (err) {
+              setClientPortalError(apiErrorMessage(err, t('common.loadError')))
+            } finally {
+              setClientPortalLoading(false)
+            }
+          }}>{t('common.save')}</Button>
+        </div>
       </div>}
       {tab === 'payroll' && <PayrollSettingsPanel section={resource.id === 'payrollRates' ? 'rates' : resource.id} Button={Button} />}
       {resource.panel && resource.id === 'importExport'
@@ -575,21 +622,19 @@ export function createAdminSettingsScreen(components, reloadRoleData, icons, adm
           <Input id={ADMINISTRATOR_FIELD_IDS.fullName} label={t('settings.fullName')} value={administrator.fullName} error={administratorErrors.fullName} onChange={(event) => updateAdministratorField('fullName', event.target.value)} autoComplete="name" />
           <Input id={ADMINISTRATOR_FIELD_IDS.username} label={t('settings.newLogin')} value={administrator.username} error={administratorErrors.username} onChange={(event) => updateAdministratorField('username', event.target.value)} autoComplete="username" />
           <Input id={ADMINISTRATOR_FIELD_IDS.email} label={t('settings.emailOptional')} type="email" value={administrator.email} error={administratorErrors.email} onChange={(event) => updateAdministratorField('email', event.target.value)} autoComplete="email" />
-          <Input id={ADMINISTRATOR_FIELD_IDS.password} label={t('settings.password')} type="password" value={administrator.password} error={administratorErrors.password} onChange={(event) => updateAdministratorField('password', event.target.value)} autoComplete="new-password" />
-          <Input id={ADMINISTRATOR_FIELD_IDS.confirmPassword} label={t('settings.repeatPassword')} type="password" value={administrator.confirmPassword} error={administratorErrors.confirmPassword} onChange={(event) => updateAdministratorField('confirmPassword', event.target.value)} autoComplete="new-password" />
           <Input id={ADMINISTRATOR_FIELD_IDS.currentPassword} label={t('settings.currentPassword')} type="password" value={administrator.currentPassword} error={administratorErrors.currentPassword} onChange={(event) => updateAdministratorField('currentPassword', event.target.value)} autoComplete="current-password" />
         </div></fieldset>
       </FormModal>
       <FormModal
         open={Boolean(accessAction)}
-        title={t('settings.accessActionTitle', { action: t(accessAction?.type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess') })}
+        title={t('settings.accessActionTitle', { action: t(accessAction?.type === 'reissue-invite' ? 'settings.inviteReissue' : accessAction?.type === 'revoke-invite' ? 'settings.inviteRevoke' : accessAction?.type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess') })}
         description={t('settings.accessActionDescription', { name: accessAction?.row?.full_name || '' })}
         size="sm"
         busy={loading}
         dirty={Boolean(accessAction?.currentPassword)}
         onRequestClose={() => setAccessAction(null)}
         footer={({ requestClose }) => <>
-          <Button variant={accessAction?.type === 'revoke' ? 'danger' : 'primary'} disabled={loading || !accessAction?.currentPassword} onClick={saveAccessAction}>{t(accessAction?.type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess')}</Button>
+          <Button variant={accessAction?.type === 'revoke' || accessAction?.type === 'revoke-invite' ? 'danger' : 'primary'} disabled={loading || !accessAction?.currentPassword} onClick={saveAccessAction}>{t(accessAction?.type === 'reissue-invite' ? 'settings.inviteReissue' : accessAction?.type === 'revoke-invite' ? 'settings.inviteRevoke' : accessAction?.type === 'revoke' ? 'settings.revokeAccess' : 'settings.restoreAccess')}</Button>
           <Button variant="secondary" disabled={loading} onClick={() => requestClose('cancel')}>{t('common.cancel')}</Button>
         </>}
       >

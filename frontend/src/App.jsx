@@ -19,6 +19,8 @@ import {
   mapTrainerPortalData,
 } from './mappers.js'
 import { LoginScreen } from './app/Auth.jsx'
+import { MfaChallenge, MfaEnrollment } from './app/Mfa.jsx'
+import { adminTranslator } from './adminLocales.js'
 import { ROLE_META } from './app/runtime.jsx'
 import { useLocale } from './i18n.jsx'
 import { uiLocaleTag } from './localeContracts.js'
@@ -121,7 +123,7 @@ function localizedComponents(source) {
 }
 
 export default function App() {
-  const { bindLocaleIdentity, clearLocaleIdentity, t } = useLocale()
+  const { bindLocaleIdentity, clearLocaleIdentity, locale, t } = useLocale()
   const tRef = useRef(t)
   tRef.current = t
   const [design, setDesign] = useState(null)
@@ -131,6 +133,8 @@ export default function App() {
   const [initialRole, setInitialRole] = useState('admin')
   const [currentUser, setCurrentUser] = useState(null)
   const [authRequired, setAuthRequired] = useState(null)
+  const [mfaPending, setMfaPending] = useState(false)
+  const [mfaOffer, setMfaOffer] = useState(false)
   const [bootstrapError, setBootstrapError] = useState(null)
   const authEpochRef = useRef(0)
   const currentUserRef = useRef(null)
@@ -146,6 +150,8 @@ export default function App() {
     setCurrentUser(null)
     clearLocaleIdentity()
     setAuthRequired(null)
+    setMfaPending(false)
+    setMfaOffer(false)
     if (resetRoute) window.history.replaceState({}, '', window.location.pathname)
     return authEpochRef.current
   }, [clearLocaleIdentity])
@@ -237,6 +243,12 @@ export default function App() {
       setCurrentUser(me)
       setInitialRole(role)
       bindLocaleIdentity({ userId: me.id ?? me.username, role })
+      if (me.mfa_required) {
+        setMfaPending(true)
+        setAuthRequired(false)
+        return true
+      }
+      setMfaPending(false)
       const loaded = await loadRoleData(role, { authEpoch })
       if (!loaded || authEpoch !== authEpochRef.current) return false
       setAuthRequired(false)
@@ -265,6 +277,12 @@ export default function App() {
     setCurrentUser(payload.user)
     setInitialRole(role)
     bindLocaleIdentity({ userId: payload.user.id ?? payload.user.username, role })
+    if (payload.mfa_required) {
+      setMfaPending(true)
+      setAuthRequired(false)
+      return
+    }
+    setMfaOffer(Boolean(payload.offer_mfa_setup))
     const loaded = await loadRoleData(role, { authEpoch })
     if (!loaded || authEpoch !== authEpochRef.current) return
     setAuthRequired(false)
@@ -356,7 +374,17 @@ export default function App() {
     return <LoginScreen design={design} apiState={apiState} onLogin={handleProductionLogin} />
   }
 
+  const Button = design.components.Button
+  if (mfaPending) {
+    return <MfaChallenge Button={Button} onVerified={() => revalidateAuthentication({ purgeFirst: true })} onLogout={handleProductionLogout} />
+  }
+
   return (
+    <>
+    {mfaOffer && <aside role="dialog" aria-modal="false" aria-label={adminTranslator(locale)('mfa.enrollTitle')} style={{ position: 'fixed', zIndex: 1000, right: 12, bottom: 12, width: 'min(440px, calc(100vw - 24px))', maxHeight: 'calc(100vh - 24px)', overflow: 'auto', boxShadow: '0 12px 36px rgba(0,0,0,.25)' }}>
+      <MfaEnrollment Button={Button} onComplete={() => setMfaOffer(false)} />
+      <Button variant="secondary" type="button" onClick={() => setMfaOffer(false)} style={{ margin: 12 }}>{adminTranslator(locale)('mfa.later')}</Button>
+    </aside>}
     <ChunkErrorBoundary t={t}>
       <Suspense fallback={<div className="card card-pad" role="status">{t('shell.loadingRole')}</div>}>
         <LazyAppShell
@@ -370,5 +398,6 @@ export default function App() {
         />
       </Suspense>
     </ChunkErrorBoundary>
+    </>
   )
 }

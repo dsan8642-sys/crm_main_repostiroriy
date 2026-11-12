@@ -1,6 +1,8 @@
 import io
 import json
+import zipfile
 from datetime import date
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -50,6 +52,88 @@ class ExportImportContractRegressionTest(TestCase):
         self.assertEqual(own_row["data"].get("email"), student.email)
         self.assertEqual(own_row["status"], "duplicate")
         self.assertEqual(own_row["errors"], ["Дубликат (email/ФИО+телефон уже есть)"])
+
+    def test_client_export_update_and_repeat_are_idempotent(self):
+        student = f.make_student(first="Ирина", last="Тест", email="update@example.test")
+        filename, content = exports.export_entity("clients", "csv")
+        content = content.replace(b"update@example.test", b"updated@example.test")
+        def preview():
+            return self.client.post("/api/admin/import/clients/preview/", {
+                "file": SimpleUploadedFile(filename, content), "import_mode": "upsert",
+            })
+        response = preview()
+        self.assertEqual(response.status_code, 200, response.content)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["status"], "update")
+        self.assertIn("email", row["resolved"]["changes"])
+        result = self.client.post("/api/admin/import/clients/commit/", data=json.dumps({
+            "batch_id": response.json()["batch_id"], "selected_indices": [row["index"]],
+        }), content_type="application/json")
+        self.assertEqual(result.status_code, 201, result.content)
+        student.refresh_from_db()
+        self.assertEqual(student.email, "updated@example.test")
+        self.assertEqual(preview().json()["rows"][0]["status"], "duplicate")
+
+    def test_trainer_export_update(self):
+        trainer = f.make_trainer(username="trainer_update")
+        filename, content = exports.export_entity("trainers", "csv")
+        content = content.replace(b"trainer_update", b"trainer_update")
+        headers, rows = parse_source(content, filename)
+        source = next(key for key in headers if key.startswith("phone ["))
+        rows[0][source] = "+48555123456"
+        import csv
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=headers)
+        writer.writeheader(); writer.writerows(rows)
+        response = self.client.post("/api/admin/import/trainers/preview/", {
+            "file": SimpleUploadedFile(filename, output.getvalue().encode()), "import_mode": "update_existing",
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["status"], "update")
+        result = self.client.post("/api/admin/import/trainers/commit/", data=json.dumps({
+            "batch_id": response.json()["batch_id"], "selected_indices": [row["index"]],
+        }), content_type="application/json")
+        self.assertEqual(result.status_code, 201, result.content)
+        trainer.refresh_from_db()
+        self.assertEqual(trainer.phone, "+48555123456")
+
+    def test_large_export_is_split_into_importable_files(self):
+        with patch("dataio.exports.entity_dataset", return_value=(
+            "Клиенты", ["first_name [Имя]"], [["Тест"]] * 5001)):
+            filename, content = exports.export_entity("clients", "csv")
+        self.assertTrue(filename.endswith(".zip"))
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self.assertEqual(len(archive.namelist()), 2)
+            for name in archive.namelist():
+                headers, rows = parse_source(archive.read(name), name)
+                self.assertEqual(headers, ["first_name [Имя]"])
+                self.assertLessEqual(len(rows), 5000)
+
+    def test_header_only_export_can_be_previewed(self):
+        filename, content = exports.export_entity("clients", "csv")
+        response = self.client.post("/api/admin/import/clients/preview/", {
+            "file": SimpleUploadedFile(filename, content),
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["rows"], [])
+
+    def test_client_update_rejects_stale_preview(self):
+        student = f.make_student(first="Ирина", last="Тест", email="stale@example.test")
+        filename, content = exports.export_entity("clients", "csv")
+        content = content.replace(b"stale@example.test", b"target@example.test")
+        response = self.client.post("/api/admin/import/clients/preview/", {
+            "file": SimpleUploadedFile(filename, content), "import_mode": "upsert",
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        student.medical_info = "Changed after preview"
+        student.save(update_fields=["medical_info"])
+        result = self.client.post("/api/admin/import/clients/commit/", data=json.dumps({
+            "batch_id": response.json()["batch_id"], "selected_indices": [2],
+        }), content_type="application/json")
+        self.assertEqual(result.status_code, 400, result.content)
+        student.refresh_from_db()
+        self.assertEqual(student.email, "stale@example.test")
 
     def test_every_standard_export_has_an_import_preview_route(self):
         missing = []

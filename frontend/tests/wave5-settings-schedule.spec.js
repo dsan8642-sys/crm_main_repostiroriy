@@ -22,6 +22,7 @@ const EMPTY_ADMIN_COLLECTIONS = {
 }
 
 async function mockAdmin(page, { clients = [], trainers = [], sessions = [], scheduleRequests = [] } = {}) {
+  let historyFrom = null
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -45,6 +46,14 @@ async function mockAdmin(page, { clients = [], trainers = [], sessions = [], sch
     }
     if (path === '/api/admin/trainers/') return json(route, { trainers, pagination: { page: 1, page_size: 50, total: trainers.length, pages: 1, has_next: false } })
     if (path === '/api/admin/payroll/rates/') return json(route, { rates: [{ id: 7, name: 'Групповая стандарт', session_type: 'group', base_amount_minor: 10000, currency: 'PLN', is_active: true }] })
+    if (path === '/api/admin/payroll/preview/') return json(route, {
+      rows: [{ session_id: 1, trainer_id: 8, trainer: 'Marek Nowak', date: '2026-07-10', training: 'Group', group_or_client: 'Delfiny', amount_minor: 10000, currency: 'PLN' }],
+      trainers: [{ trainer_id: 8, trainer: 'Marek Nowak', sessions: 1, missing: 0, totals: { PLN: 10000 } }], totals: { PLN: 10000 }, sessions: 1,
+    })
+    if (path === '/api/admin/settings/client-portal/') {
+      if (request.method() === 'PATCH') historyFrom = request.postDataJSON().history_from
+      return json(route, { history_from: historyFrom, updated_at: null })
+    }
     if (path === '/api/admin/schedule/sessions/') {
       scheduleRequests.push(url)
       return json(route, { sessions, pagination: { page: 1, page_size: 200, total: sessions.length, pages: 1, has_next: false, has_previous: false } })
@@ -54,6 +63,27 @@ async function mockAdmin(page, { clients = [], trainers = [], sessions = [], sch
     return json(route, EMPTY_ADMIN_COLLECTIONS)
   })
 }
+
+test('client portal history start date is configurable in Settings', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width), 'desktop and phone settings')
+  await mockAdmin(page)
+  await page.goto('/?role=admin&view=settings')
+  if (page.viewportSize()?.width === 390) {
+    await page.locator('.ops-settings-mobile-nav').getByTestId('admin-settings-category-control').click()
+    await page.locator('.ops-settings-mobile-nav').getByTestId('admin-settings-resource-clientPortal').click()
+  } else {
+    await page.locator('.ops-settings-desktop-nav').getByTestId('admin-settings-category-control').click()
+    await page.locator('.ops-settings-desktop-nav').getByTestId('admin-settings-resource-clientPortal').click()
+  }
+  const panel = page.getByTestId('client-portal-history-settings')
+  await expect(panel).toBeVisible()
+  const date = panel.getByRole('textbox', { name: /Показывать историю начиная с|Показувати історію починаючи з|Pokazuj historię od|Show history from/ })
+  await date.fill('2026-11-01')
+  await panel.getByRole('button', { name: /Сохранить|Зберегти|Zapisz|Save/ }).click()
+  await expect(page.getByText(/Дата начала истории сохранена|Дату початку історії збережено|Data początku historii została zapisana|History start date saved/)).toBeVisible()
+  expect(await date.inputValue()).toBe('2026-11-01')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+})
 
 test('payroll settings separates rates, assignments and calculation dates', async ({ page }) => {
   test.skip(![390, 1440].includes(page.viewportSize()?.width), 'desktop and phone')
@@ -74,9 +104,27 @@ test('payroll settings separates rates, assignments and calculation dates', asyn
   if (page.viewportSize()?.width === 390) await page.locator('.ops-settings-mobile-back .ops-context-back').click()
   const nav = page.viewportSize()?.width === 390 ? page.locator('.ops-settings-mobile-nav') : page.locator('.ops-settings-desktop-nav')
   await nav.getByTestId('admin-settings-resource-periods').click()
+  await page.locator('.ops-edit-panel details > summary').click()
   await page.getByRole('button', { name: /Рассчитать период|Розрахувати період|Oblicz okres|Calculate period/ }).click()
   await expect(page.getByLabel(/Период расчёта: с|Період розрахунку: з|Okres rozliczenia: od|Calculation period: from/)).toBeVisible()
   await expect(page.getByLabel(/Период расчёта: по|Період розрахунку: по|Okres rozliczenia: do|Calculation period: to/)).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+})
+
+test('payroll preview selects a trainer and shows totals', async ({ page }) => {
+  test.skip(![390, 1440].includes(page.viewportSize()?.width), 'desktop and phone')
+  await mockAdmin(page, { trainers: [{ id: 8, full_name: 'Marek Nowak', is_active: true }] })
+  await page.goto('/?role=admin&view=settings')
+  const nav = page.locator(page.viewportSize()?.width === 390 ? '.ops-settings-mobile-nav' : '.ops-settings-desktop-nav')
+  await nav.getByTestId('admin-settings-category-payroll').click()
+  await nav.getByTestId('admin-settings-resource-periods').click()
+  await page.getByLabel(/Тренер|Trener|Trainer/).last().selectOption('8')
+  await page.getByRole('button', { name: /Рассчитать зарплату|Розрахувати зарплату|Oblicz wynagrodzenie|Calculate salary/ }).click()
+  await expect(page.getByText('100.00 PLN').first()).toBeVisible()
+  await expect(page.getByText('Delfiny')).toBeVisible()
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: /Скачать CSV|Завантажити CSV|Pobierz CSV|Download CSV/ }).click()
+  expect((await download).suggestedFilename()).toBe('payroll.csv')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
 })
 
@@ -115,7 +163,7 @@ test('desktop Settings keeps categories and resources beside their detail', asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
 })
 
-test('Wave 5 mobile Settings is an unambiguous Category to Resource to Detail hierarchy', async ({ page }) => {
+test('mobile Settings expands categories inline and opens a resource', async ({ page }) => {
   test.skip(page.viewportSize()?.width !== 390, 'phone hierarchy')
   await mockAdmin(page)
   await page.goto('/?role=admin&view=settings')
@@ -127,7 +175,8 @@ test('Wave 5 mobile Settings is an unambiguous Category to Resource to Detail hi
   expect((await categories.getByTestId('admin-settings-category-catalog').boundingBox()).height).toBeLessThanOrEqual(60)
   await categories.getByTestId('admin-settings-category-catalog').click()
 
-  await expect(page.locator('.ops-settings-mobile-nav .ops-context-back')).toBeVisible()
+  await expect(categories.getByTestId('admin-settings-category-catalog')).toHaveAttribute('aria-expanded', 'true')
+  await expect(categories.getByTestId('admin-settings-category-notifications')).toBeVisible()
   await expect(page.getByTestId('admin-settings-resource-subscriptionTypes').last()).toBeVisible()
   await expect(page.locator('.ops-settings-page-refresh')).toBeHidden()
   await page.getByTestId('admin-settings-resource-subscriptionTypes').last().click()

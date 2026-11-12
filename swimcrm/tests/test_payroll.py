@@ -56,6 +56,89 @@ class PayrollCalculationRule(TestCase):
     def _student(self, suffix, group=None):
         return f.make_student(group=group, first=f"Student{suffix}", email=f"s{suffix}@example.test")
 
+    def test_preview_is_filtered_and_does_not_modify_periods(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+        from payroll.models import PayrollPeriod
+
+        session = create_session(trainer=self.trainer, group=self.group,
+            start_at=f.dt(2026, 7, 10, 17), end_at=f.dt(2026, 7, 10, 18),
+            location="Pool A", max_participants=10, session_type=SessionType.GROUP)
+        self.client.force_login(self.admin)
+        with patch('payroll.services.timezone.now', return_value=session.end_at + timedelta(hours=1)):
+            response = self.client.get('/api/admin/payroll/preview/', {
+                'date_from': '2026-07-01', 'date_to': '2026-07-31', 'trainer_id': self.trainer.id,
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['totals'], {'PLN': 10000})
+        self.assertEqual(response.json()['rows'][0]['session_id'], session.id)
+        self.assertFalse(PayrollPeriod.objects.exists())
+        self.assertFalse(PayrollCalculation.objects.exists())
+
+    def test_preview_skips_future_and_cancelled_and_reports_missing_rates(self):
+        from unittest.mock import patch
+        other = f.make_trainer(username='preview_no_rate')
+        first = create_session(trainer=self.trainer, group=self.group,
+            start_at=f.dt(2026, 7, 10, 10), end_at=f.dt(2026, 7, 10, 11),
+            location='Pool A', max_participants=10, session_type=SessionType.GROUP)
+        first.substitute_trainer = other
+        first.save(update_fields=['substitute_trainer'])
+        future = create_session(trainer=self.trainer, group=self.group,
+            start_at=f.dt(2026, 7, 11, 10), end_at=f.dt(2026, 7, 11, 11),
+            location='Pool A', max_participants=10, session_type=SessionType.GROUP)
+        cancelled = create_session(trainer=self.trainer, group=self.group,
+            start_at=f.dt(2026, 7, 10, 14), end_at=f.dt(2026, 7, 10, 15),
+            location='Pool A', max_participants=10, session_type=SessionType.GROUP)
+        cancelled.is_cancelled = True
+        cancelled.save(update_fields=['is_cancelled'])
+        self.client.force_login(self.admin)
+        with patch('payroll.services.timezone.now', return_value=f.dt(2026, 7, 10, 20)):
+            response = self.client.get('/api/admin/payroll/preview/', {'date_from': '2026-07-01', 'date_to': '2026-07-31'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['sessions'], 1)
+        self.assertEqual(response.json()['rows'][0]['trainer_id'], other.id)
+        self.assertIsNone(response.json()['rows'][0]['amount_minor'])
+        self.assertEqual(response.json()['trainers'][0]['missing'], 1)
+        self.assertNotEqual(future.id, first.id)
+
+    def test_preview_keeps_approved_calculations_unchanged_and_requires_admin(self):
+        from unittest.mock import patch
+        from payroll.models import PayrollPeriodStatus
+        session = create_session(trainer=self.trainer, group=self.group,
+            start_at=f.dt(2026, 7, 10, 10), end_at=f.dt(2026, 7, 10, 11),
+            location='Pool A', max_participants=10, session_type=SessionType.GROUP)
+        summary = calculate_payroll_period(date_from=date(2026, 7, 1), date_to=date(2026, 7, 31))
+        summary.period.status = PayrollPeriodStatus.APPROVED
+        summary.period.save(update_fields=['status'])
+        before = list(PayrollCalculation.objects.values_list('id', 'final_amount_minor'))
+        params = {'date_from': '2026-07-01', 'date_to': '2026-07-31'}
+        self.assertEqual(self.client.get('/api/admin/payroll/preview/', params).status_code, 403)
+        self.client.force_login(self.admin)
+        with patch('payroll.services.timezone.now', return_value=f.dt(2026, 7, 20, 12)):
+            response = self.client.get('/api/admin/payroll/preview/', params)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(PayrollCalculation.objects.values_list('id', 'final_amount_minor')), before)
+        summary.period.refresh_from_db()
+        self.assertEqual(summary.period.status, PayrollPeriodStatus.APPROVED)
+
+    def test_preview_sums_currencies_separately(self):
+        from unittest.mock import patch
+        other = f.make_trainer(username='preview_euro')
+        scheme = PayrollScheme.objects.create(name='Euro')
+        TrainerPayrollAssignment.objects.create(trainer=other, scheme=scheme, effective_from=date(2026, 7, 1))
+        PayrollRule.objects.create(scheme=scheme, session_type=SessionType.GROUP,
+            rule_type=SessionType.GROUP, base_amount_minor=3000, currency='EUR',
+            min_clients_threshold=0, extra_client_amount_minor=0)
+        for idx, trainer in enumerate([self.trainer, other]):
+            create_session(trainer=trainer, group=self.group,
+                start_at=f.dt(2026, 7, 10, 10 + idx * 2), end_at=f.dt(2026, 7, 10, 11 + idx * 2),
+                location='Pool A', max_participants=10, session_type=SessionType.GROUP)
+        self.client.force_login(self.admin)
+        with patch('payroll.services.timezone.now', return_value=f.dt(2026, 7, 20, 12)):
+            response = self.client.get('/api/admin/payroll/preview/', {'date_from': '2026-07-01', 'date_to': '2026-07-31'})
+        self.assertEqual(response.json()['totals'], {'PLN': 10000, 'EUR': 3000})
+        self.assertEqual(response.json()['sessions'], 2)
+
     def test_calculates_group_extra_clients_and_fixed_individual_split(self):
         group_session = create_session(
             trainer=self.trainer,

@@ -312,7 +312,9 @@ def admin_export(request, entity, fmt):
             "fmt", "Формат должен быть CSV или XLSX.",
             code="invalid_choice")
     filename, content = export_entity(entity, fmt)
-    content_type = "text/csv; charset=utf-8" if fmt == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    content_type = ("application/zip" if filename.endswith(".zip") else
+                    "text/csv; charset=utf-8" if fmt == "csv" else
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     response = HttpResponse(content, content_type=content_type)
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response

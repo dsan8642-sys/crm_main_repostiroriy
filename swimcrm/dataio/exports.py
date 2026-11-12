@@ -1,4 +1,6 @@
 """Versioned, round-trip-oriented exports for the five admin datasets."""
+import io
+import zipfile
 from django.utils import timezone
 
 from accounts.models import Trainer
@@ -187,6 +189,26 @@ def export_entity(name, fmt="xlsx"):
     if fmt not in {"csv", "xlsx"}:
         raise ValueError(f"Неизвестный формат: {fmt}")
     title, headers, rows = entity_dataset(name)
-    if fmt == "csv":
-        return f"{name}.csv", rows_to_csv(headers, rows)
-    return f"{name}.xlsx", rows_to_xlsx(title, headers, rows)
+    render = (lambda part: rows_to_csv(headers, part)) if fmt == "csv" else (
+        lambda part: rows_to_xlsx(title, headers, part))
+    content = render(rows)
+    if len(rows) <= 5000 and len(content) <= 5 * 1024 * 1024:
+        return f"{name}.{fmt}", content
+    parts = []
+    def add_block(block):
+        candidate = render(block)
+        if len(candidate) <= 5 * 1024 * 1024:
+            parts.append(candidate)
+        elif len(block) == 1:
+            raise ValueError("Одна строка превышает лимит импорта 5 МБ")
+        else:
+            half = len(block) // 2
+            add_block(block[:half])
+            add_block(block[half:])
+    for start in range(0, len(rows), 5000):
+        add_block(rows[start:start + 5000])
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for index, part in enumerate(parts, 1):
+            archive.writestr(f"{name}-part-{index:03d}.{fmt}", part)
+    return f"{name}-{fmt}-parts.zip", output.getvalue()

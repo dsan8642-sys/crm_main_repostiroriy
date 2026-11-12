@@ -12,6 +12,7 @@ OpenAPI. При расхождении документа с кодом исто
 | Правило или данные | разделы 4, 6–7; нужный пункт `DECISIONS.md` | `swimcrm/<domain>/services.py`, `models.py`, тесты |
 | Отмена продажи абонемента | разделы 4, 6–7; `docs/API_CONTRACT.md` | `subscriptions/services.py` → `portal/admin_subscription_views.py` → карточка клиента; отмена начисления зачисляет платёж на счёт семьи |
 | API | разделы 4, 6–7; `docs/API_CONTRACT.md` по необходимости | `swimcrm/portal/urls.py`, нужный `*_views.py`, `openapi.py` |
+| Вход, 2FA и приглашение администратора | `docs/API_CONTRACT.md`, `docs/OPERATIONS.md` | `accounts/services.py`, `accounts/middleware.py`, `portal/auth_views.py`, `portal/admin_system_views.py`, `frontend/src/app/Mfa.jsx` |
 | Экран или навигация | разделы 3, 5–6 | `frontend/src/app/runtime.jsx`, нужный экран, `AppShell.jsx` |
 | Фото пловца | карточка клиента и посещаемость | `students/models.py`, `portal/participant_photo_views.py`, `frontend/src/app/ParticipantPhoto.jsx` |
 | Общий дизайн | разделы 2, 5–6; `docs/DESIGN_SYSTEM.md` | `design/`, затем скрипты синхронизации |
@@ -130,7 +131,7 @@ SPA использует query-параметры, а не отдельный ro
 | `payments` | Платежи | `/api/admin/payments/` |
 | `debtors` | Должники | `/api/admin/debtors/` |
 | `subscriptions` | Абонементы; срок оплаты начисления при продаже/продлении по умолчанию — день оформления | `/api/admin/subscriptions/` |
-| `settings` | Настройки и операции: категории и пункты слева на десктопе, пошаговый выбор на телефоне (`AdminSettingsScreen.jsx`); зарплата — ставки, массовые назначения и расчёты в `PayrollSettingsPanel.jsx`; «Инструкции» → сабкатегории «Клиенты», «Расписание», «Группы», «Тренеры»; отчёты и их мобильная раскладка — `AdminReportsPanel.jsx`/`.css` | `/api/admin/settings/*`, reports, import, payroll, notifications, system |
+| `settings` | Настройки и операции: категории и пункты слева на десктопе, раскрывающиеся категории на телефоне (`AdminSettingsScreen.jsx`); начало истории клиентского кабинета настраивается в «Управление → История клиентского кабинета» через `/api/admin/settings/client-portal/`; зарплата — ставки, массовые назначения и расчёты в `PayrollSettingsPanel.jsx`; «Инструкции» → сабкатегории «Клиенты», «Расписание», «Группы», «Тренеры»; отчёты и их мобильная раскладка — `AdminReportsPanel.jsx`/`.css` | `/api/admin/settings/*`, reports, import, payroll, notifications, system |
 
 В карточке клиента подсветка выбранного раздела расходится от точки нажатия
 (с клавиатуры — от центра), предыдущая плавно гаснет; содержимое появляется плавно. Мобильные
@@ -187,6 +188,10 @@ SPA использует query-параметры, а не отдельный ro
 | `subscription` | Доступность и остаток последнего выданного абонемента без журнала движений | `/api/client/overview/` |
 | `payments` | Платежи и пополнение | `/api/client/payments/`, `/api/client/charges/` |
 | `history` | Посещения (компактный список на телефоне) и отправленные сообщения | `/api/client/attendance/`, `/api/client/notifications/` |
+
+Клиентские списки истории фильтруются на сервере по дате из «Настройки →
+Управление → История клиентского кабинета»; текущий баланс, действующие
+абонементы и будущие занятия продолжают учитывать полные данные аккаунта.
 | `profile` | Просмотр профиля и участников; редактирование по кнопке | `/api/client/profile/` |
 | `help` | Инструкция по работе после входа | статический экран |
 | `consents` | Контекстный экран согласий | `/api/client/consents/` |
@@ -209,12 +214,17 @@ SPA использует query-параметры, а не отдельный ro
 | `billing` | Начисления и платежи привязаны к участнику для аудита; `family_balance(s)` и `family_charge_statuses` объединяют деньги по `ParentAccount`, сохраняя личные абонементы и посещаемость |
 | `notifications` | Шаблоны, правила, отправку, повтор и quiet hours; `deliver` повторно проверяет согласие канала и не ставит неудачные production email в повторную очередь; внешние провайдеры требуют HTTPS в production |
 | `payroll` | Переиспользуемые ставки с версиями по датам, назначения тренерам по филиалам и расчётные периоды; старые схемы сохраняются для миграции и истории |
+
 | `localization` | Языки и серверный словарь переводов |
 | `audit` | Неизменяемый журнал значимых действий |
 | `analytics` | Агрегации и аналитические данные |
 | `dataio` | Preview/commit/rollback импорта и экспорт |
 | `portal` | HTTP API для admin, trainer и client поверх доменных модулей |
 | `tests` | Интеграционные, контрактные и бизнес-тесты backend |
+
+Предварительный расчёт зарплаты тренера и сводка зарплат школы используют
+`GET /api/admin/payroll/preview/` и общий `preview_payroll` в `payroll/services.py`;
+просмотр не изменяет сохранённые периоды.
 
 Для изменения правила сначала ищите соответствующий `services.py`, затем
 `models.py` и тесты. Не размещайте новое бизнес-правило только во view.
@@ -258,7 +268,7 @@ SPA использует query-параметры, а не отдельный ro
 | Пункт меню/URL | `frontend/src/app/runtime.jsx`, `AppShell.jsx` | navigation tests и все роли |
 | Общий компонент/стиль | `design/` | sync script, обе runtime-копии, build |
 | Локализация | frontend locale-файлы или `localization/` | RU/UK/PL, fallback и layout |
-| Импорт/экспорт | `dataio/` и `portal/admin_import_views.py` | preview, idempotency, rollback, round-trip |
+| Импорт/экспорт | `dataio/` и `portal/admin_import_views.py`; полный backup в `scripts/backup-pg.ps1` и `scripts/media-backup.py` | preview, режимы создания/обновления клиентов, групп и тренеров, round-trip; полное восстановление требует dump и media archive |
 | Release/production | `scripts/` и `docs/OPERATIONS.md` | независимая сумма архива из CI, backup, безопасная временная БД restore, manifest, readback |
 
 ## 7. Данные и запрос

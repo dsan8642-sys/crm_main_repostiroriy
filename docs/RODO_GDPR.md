@@ -45,7 +45,7 @@ anonymize_parent_account(parent, actor=<ADMIN_USER>)
 
 ## Доступы
 
-- Администратор: полный доступ, в production требуется 2FA.
+- Администратор: полный доступ; после добровольной привязки TOTP требуется 2FA при каждом новом входе в CRM и Django admin.
 - Тренер: только свои занятия/группы через API.
 - Клиент: только свой аккаунт и привязанные профили участников через API.
 - Массовые рассылки проходят через consent-aware уведомления.
@@ -69,7 +69,7 @@ anonymize_parent_account(parent, actor=<ADMIN_USER>)
 - `ALLOWED_HOSTS` только реальные домены
 - HTTPS/TLS и secure cookies
 - `TRUST_PROXY_SSL_HEADER=1`, только если reverse-proxy гарантированно выставляет header
-- `ADMIN_2FA_REQUIRED=1`
+- Привязанный TOTP обязателен для конкретной учётной записи; сброс через консоль не снимает требование.
 - регулярный PostgreSQL backup
 - регулярная проверка восстановления backup
 - `run_due_jobs` через Celery beat или cron

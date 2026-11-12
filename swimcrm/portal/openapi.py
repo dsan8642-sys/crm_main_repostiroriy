@@ -208,7 +208,41 @@ def build_openapi_schema():
                     },
                 },
             }
+            auth_bodies = {
+                "/api/auth/mfa/setup/": ["current_password"],
+                "/api/auth/mfa/verify/": ["code"],
+                "/api/admin/system/administrators/": ["full_name", "username", "current_password"],
+                "/api/auth/activate/": ["activation_token", "password"],
+            }
+            if method == "POST" and path in auth_bodies:
+                fields = auth_bodies[path]
+                operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {
+                    "type": "object", "required": fields,
+                    "properties": {field: {"type": "string"} for field in fields},
+                }}}}
+            if method == "POST" and path == "/api/auth/login/":
+                operation["responses"]["200"]["content"] = {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "mfa_required": {"type": "boolean"},
+                        "offer_mfa_setup": {"type": "boolean"},
+                    },
+                }}}
+            if method == "POST" and path.startswith("/api/admin/system/administrators/{user_id}/"):
+                operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": {
+                    "type": "object", "required": ["current_password"],
+                    "properties": {"current_password": {"type": "string"}},
+                }}}}
+            if path.startswith(("/api/admin/", "/api/documents/")):
+                operation["responses"]["403"] = {"description": "Administrator TOTP required when enrolled; code mfa_required"}
             operation_parameters = list(parameters)
+            if method == "GET" and path == "/api/admin/payroll/preview/":
+                operation["description"] = "Read-only salary preview for completed sessions; no payroll period is created or changed."
+                operation_parameters.extend([
+                    {"name": "date_from", "in": "query", "required": True, "schema": {"type": "string", "format": "date"}},
+                    {"name": "date_to", "in": "query", "required": True, "schema": {"type": "string", "format": "date"}},
+                    _query_parameter("trainer_id", value_type="integer", minimum=1),
+                ])
             if method == "GET" and path in LIST_QUERY_POLICIES:
                 operation_parameters.extend(BASE_LIST_PARAMETERS)
                 operation_parameters.extend(LIST_QUERY_POLICIES[path])
@@ -375,6 +409,24 @@ def build_openapi_schema():
                             "default_capacity": {"type": ["integer", "null"], "minimum": 1},
                             "default_duration_minutes": {"type": "integer", "minimum": 15},
                             "default_price_minor": {"type": ["integer", "null"], "minimum": 0},
+                        },
+                    }}},
+                }
+            if method == "PATCH" and path == "/api/admin/settings/client-portal/":
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "required": ["history_from"],
+                        "properties": {
+                            "history_from": {
+                                "anyOf": [
+                                    {"type": "string", "format": "date"},
+                                    {"type": "string", "enum": [""]},
+                                    {"type": "null"},
+                                ],
+                                "description": "Set the first client-visible history date; null or an empty string disables the cutoff.",
+                            },
                         },
                     }}},
                 }

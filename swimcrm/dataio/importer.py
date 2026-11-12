@@ -27,7 +27,8 @@ MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_ROWS = 5000
 MAX_IMPORT_COLUMNS = 50
 
-NEW, DUPLICATE, ERROR = "new", "duplicate", "error"
+NEW, UPDATE, DUPLICATE, SKIPPED, ERROR = "new", "update", "duplicate", "skipped", "error"
+IMPORT_MODES = {"create_only", "update_existing", "upsert"}
 
 
 def _split_group_cell(value):
@@ -186,13 +187,13 @@ def _dedup_key(data):
             data.get("parent_phone") or data.get("phone", ""))
 
 
-def preview(headers, rows, mapping):
+def preview(headers, rows, mapping, mode="create_only"):
     """Validate + classify each row (new / duplicate / error). No DB writes."""
+    if mode not in IMPORT_MODES:
+        raise ValidationError("Некорректный режим импорта клиентов")
     rows = prepare_rows("clients", headers, rows, mapping)["rows"]
     seen = set()
     seen_record_ids = set()
-    existing_emails = set(e.lower() for e in
-                          Student.objects.exclude(email="").values_list("email", flat=True))
     result = []
     for i, row in enumerate(rows, start=2):  # row 1 = header
         data = dict(row)
@@ -217,13 +218,91 @@ def preview(headers, rows, mapping):
                 pr.status = ERROR
                 pr.errors.append("Некорректный email")
         key = _dedup_key(data)
-        is_dup = (data.get("email", "").lower() in existing_emails) or (key in seen)
+        existing = None
+        if data.get("email"):
+            existing = Student.objects.filter(email__iexact=data["email"]).first()
+        elif data.get("parent_phone") and (data.get("first_name") or data.get("last_name")):
+            candidates = Student.objects.filter(
+                parent__phone=data["parent_phone"], first_name__iexact=data.get("first_name", ""),
+                last_name__iexact=data.get("last_name", ""))
+            if candidates.count() == 1:
+                existing = candidates.first()
+            elif candidates.count() > 1:
+                pr.status = ERROR
+                pr.errors.append("Несколько клиентов совпадают по ФИО и телефону; требуется ручная проверка")
+        by_id = None
+        if record_id:
+            try:
+                by_id = Student.objects.select_related("parent").filter(pk=int(record_id)).first()
+            except (TypeError, ValueError):
+                pr.status = ERROR
+                pr.errors.append("Некорректный Internal ID клиента")
+        if by_id and existing and by_id.id != existing.id:
+            pr.status = ERROR
+            pr.errors.append("ID и контакты относятся к разным клиентам")
+        if by_id and data.get("parent_record_id") and str(by_id.parent_id) != str(data["parent_record_id"]):
+            pr.status = ERROR
+            pr.errors.append("ID семьи не совпадает с клиентом")
+        if by_id and not data.get("parent_record_id") and not data.get("email") and not data.get("parent_phone"):
+            pr.status = ERROR
+            pr.errors.append("Для обновления по ID нужен второй идентификатор клиента или семьи")
+        existing = by_id or existing
+        if existing and data.get("parent_phone") and data["parent_phone"] != existing.parent.phone:
+            if ParentAccount.objects.filter(phone=data["parent_phone"]).exclude(pk=existing.parent_id).exists():
+                pr.status = ERROR
+                pr.errors.append("Телефон уже принадлежит другой семье")
+        is_dup = bool(existing) or (key in seen)
         if pr.status != ERROR and is_dup:
-            pr.status = DUPLICATE
-            pr.errors.append("Дубликат (email/ФИО+телефон уже есть)")
+            if existing and mode in {"update_existing", "upsert"}:
+                student_values = {key: str(data[key]).strip() for key in (
+                    "first_name", "last_name", "email", "medical_info", "contraindications",
+                    "emergency_contact_name", "emergency_contact_phone") if key in data}
+                if "birth_date" in data:
+                    try:
+                        student_values["birth_date"] = (date.fromisoformat(str(data["birth_date"]).strip()).isoformat()
+                                                        if data["birth_date"] else "")
+                    except ValueError:
+                        pr.errors.append("Некорректная дата рождения")
+                for flag in ("is_active", "is_account_holder"):
+                    if flag in data:
+                        try:
+                            student_values[flag] = _parse_import_bool(data[flag])
+                        except ValidationError as exc:
+                            pr.errors.extend(exc.messages)
+                parent_values = {key: str(data[key]).strip() for key in (
+                    "parent_phone", "parent_email", "parent_instagram_username", "preferred_language") if key in data}
+                changes = {}
+                for field, value in student_values.items():
+                    old = getattr(existing, field)
+                    old = old.isoformat() if field == "birth_date" and old else ("" if old is None else old)
+                    if old != value:
+                        changes[field] = {"old": old, "new": value}
+                for field, value in parent_values.items():
+                    attr = field.removeprefix("parent_")
+                    if str(getattr(existing.parent, attr)) != value:
+                        changes[field] = {"old": str(getattr(existing.parent, attr)), "new": value}
+                pr.resolved["student_id"] = existing.id
+                pr.resolved["changes"] = changes
+                pr.resolved["affected_family_members"] = list(existing.parent.students.values_list("id", flat=True))
+                pr.status = UPDATE if changes else DUPLICATE
+                if pr.errors:
+                    pr.status = ERROR
+            else:
+                pr.status = DUPLICATE
+                pr.errors.append("Дубликат (email/ФИО+телефон уже есть)")
+        elif pr.status == NEW and mode == "update_existing":
+            pr.status = SKIPPED
         try:
             resolved_groups, _created = _resolve_groups(data)
             pr.resolved["group_ids"] = [group.id for group in resolved_groups]
+            if (existing and pr.status in {UPDATE, DUPLICATE} and mode in {"update_existing", "upsert"}
+                    and any(key in data for key in ("group_id", "group_name", "group_ids", "group_names"))):
+                old_groups = sorted(existing.groups.values_list("id", flat=True))
+                new_groups = sorted(group.id for group in resolved_groups)
+                if old_groups != new_groups:
+                    pr.resolved.setdefault("changes", {})["group_ids"] = {
+                        "old": old_groups, "new": new_groups}
+                    pr.status = UPDATE
         except ValidationError as exc:
             pr.status = ERROR
             pr.errors.extend(exc.messages)
@@ -232,9 +311,18 @@ def preview(headers, rows, mapping):
     return result
 
 
+def _parse_import_bool(value):
+    key = str(value).strip().casefold()
+    if key in {"true", "1", "yes", "да", "tak"}:
+        return True
+    if key in {"false", "0", "no", "нет", "nie"}:
+        return False
+    raise ValidationError(f"Некорректное boolean-значение: {value}")
+
+
 @transaction.atomic
 def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=False,
-           create_subscriptions=True, batch=None):
+           create_subscriptions=True, batch=None, mode="create_only"):
     """Apply NEW rows atomically. ERROR/DUPLICATE rows are skipped.
     Records an ImportBatch so the whole import can be rolled back later."""
     if batch is None:
@@ -250,7 +338,39 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Fa
         batch.created_by = actor
         batch.source_name = source_name or batch.source_name
     created_students, created_groups, created_parents, created_subscriptions = [], [], [], []
+    updated_students = []
+    errors = []
     for pr in preview_rows:
+        if pr.status == UPDATE and mode in {"update_existing", "upsert"}:
+            try:
+                with transaction.atomic():
+                    student = Student.objects.select_for_update().select_related("parent").get(pk=pr.resolved["student_id"])
+                    parent = ParentAccount.objects.select_for_update().get(pk=student.parent_id)
+                    for field, change in pr.resolved["changes"].items():
+                        if field == "group_ids":
+                            if sorted(student.groups.values_list("id", flat=True)) != change["old"]:
+                                raise ValidationError("Группы изменились после предпросмотра")
+                            continue
+                        owner = parent if field.startswith("parent_") else student
+                        attr = field.removeprefix("parent_") if owner is parent else field
+                        current = getattr(owner, attr)
+                        current = current.isoformat() if field == "birth_date" and current else ("" if current is None else current)
+                        if current != change["old"] and not (owner is parent and current == change["new"]):
+                            raise ValidationError("Данные изменились после предпросмотра")
+                        value = change["new"]
+                        if field == "birth_date":
+                            value = date.fromisoformat(value) if value else None
+                        setattr(owner, attr, value)
+                    parent.full_clean()
+                    student.full_clean()
+                    parent.save()
+                    student.save()
+                    if "group_ids" in pr.resolved["changes"]:
+                        set_student_groups(student, pr.resolved["changes"]["group_ids"]["new"])
+                    updated_students.append(student.id)
+            except ValidationError as exc:
+                errors.append(f"Строка {pr.index}: {'; '.join(exc.messages)}")
+            continue
         if pr.status != NEW:
             continue
         d = pr.data
@@ -362,7 +482,7 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Fa
     batch.created_group_ids = created_groups
     batch.created_parent_ids = created_parents
     batch.created_subscription_ids = created_subscriptions
-    batch.rows_imported = len(created_students)
+    batch.rows_imported = len(created_students) + len(updated_students)
     batch.status = ImportBatchStatus.COMMITTED
     batch.committed_at = timezone.now()
     batch.input_data = {}
@@ -370,6 +490,9 @@ def commit(preview_rows, *, actor=None, source_name="", create_missing_groups=Fa
     batch.result = {
         "rows_total": batch.rows_total,
         "rows_imported": batch.rows_imported,
+        "created_ids": created_students,
+        "updated_ids": updated_students,
+        "errors": errors,
     }
     batch.save()
     return batch
@@ -379,7 +502,9 @@ def rollback_preview(batch: ImportBatch):
     """Return blockers without changing data; a rollback may never delete later work."""
     student_ids = list(batch.created_student_ids or [])
     known_subscription_ids = set(batch.created_subscription_ids or [])
-    blockers = []
+    blockers = ([{"updated_students": batch.result.get("updated_ids"),
+                  "reason": "Обновлённые записи требуют ручного исправления"}]
+                if batch.result.get("updated_ids") else [])
     for student in Student.objects.filter(id__in=student_ids):
         counts = {
             "attendance": student.attendance.count(),

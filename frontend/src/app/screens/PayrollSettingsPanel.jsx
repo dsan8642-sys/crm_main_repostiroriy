@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { api, apiErrorMessage, fetchAllPages } from '../../api.js'
 import { useLocale } from '../../i18n.jsx'
+import { PayrollPreview } from './PayrollPreview.jsx'
+import './PayrollSettingsPanel.css'
 
 const today = () => new Date().toLocaleDateString('en-CA')
 const labels = {
@@ -89,12 +91,12 @@ export function PayrollSettingsPanel({ section, Button }) {
     {error && <p role="alert" className="text-danger">{error}</p>}
     {section === 'rates' && <>
       <Button variant="primary" type="button" onClick={() => startRate()}>{tr('create')}</Button>
-      {rates.map((rate) => <div className="ops-detail-row" key={rate.id}>
+      <div className="payroll-rate-list">{rates.map((rate) => <div className="payroll-rate-row" key={rate.id}>
         <strong>{rate.name} · {types[rate.session_type]}{!rate.is_active ? ` · ${tr('archived')}` : ''}</strong>
         <span>{amount(rate.base_amount_minor, rate.currency)}{rate.session_type === 'group' ? ` + ${amount(rate.extra_client_amount_minor, rate.currency)} ${tr('after')} ${rate.min_clients_threshold}` : ''}</span>
-        {rate.is_active && <><Button size="sm" variant="secondary" type="button" onClick={() => startRate(rate)}>{tr('edit')}</Button>
-          <Button size="sm" variant="subtle" type="button" onClick={async () => { if (!window.confirm(`${tr('archive')} «${rate.name}»?`)) return; try { await api.delete(`/api/admin/payroll/rates/${rate.id}/`); await load() } catch (err) { setError(apiErrorMessage(err)) } }}>{tr('archive')}</Button></>}
-      </div>)}
+        <div className="payroll-rate-actions">{rate.is_active && <><Button size="sm" variant="secondary" type="button" onClick={() => startRate(rate)}>{tr('edit')}</Button>
+          <Button size="sm" variant="subtle" type="button" onClick={async () => { if (!window.confirm(`${tr('archive')} «${rate.name}»?`)) return; try { await api.delete(`/api/admin/payroll/rates/${rate.id}/`); await load() } catch (err) { setError(apiErrorMessage(err)) } }}>{tr('archive')}</Button></>}</div>
+      </div>)}</div>
     </>}
     {section === 'assignments' && <>
       <Button variant="primary" type="button" onClick={() => startAssignment()}>{tr('assign')}</Button>
@@ -103,6 +105,8 @@ export function PayrollSettingsPanel({ section, Button }) {
       </div>)}
     </>}
     {section === 'periods' && <>
+      <PayrollPreview trainers={trainers} Button={Button} />
+      <details><summary>{tr('result')}</summary>
       <Button variant="primary" type="button" onClick={() => startPeriod()}>{tr('calculate')}</Button>
       {periods.map((item) => <div className="ops-detail-row" key={item.id}>
         <strong>{item.date_from} — {item.date_to} · {item.location || tr('allLocations')}</strong>
@@ -114,6 +118,7 @@ export function PayrollSettingsPanel({ section, Button }) {
         {(result.calculations || []).map((line) => <div key={line.id}>{line.trainer} · {line.session_start_at?.slice(0, 10)} · {amount(line.final_amount_minor, line.currency)}</div>)}
         {(result.skipped_sessions || result.summary?.skipped || []).map((line) => <div key={`skip-${line.session_id}`}>#{line.session_id}: {tr('missing')}</div>)}
       </div>}
+      </details>
     </>}
     {form && <form onSubmit={save} className="ops-form-stack" style={{ marginTop: 16 }}>
       {form.kind === 'rate' && <>
