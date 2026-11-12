@@ -363,6 +363,21 @@ class NotificationSchedulerRule(TestCase):
             EmailBackend().send(parent=parent, subject="Test", body="Message")
         send.assert_called_once()
 
+    @override_settings(DEBUG=False, EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend")
+    def test_production_email_delivery_failure_is_not_retried(self):
+        parent = self._parent_with_consent()
+        student = Student.objects.create(parent=parent, first_name="Test", last_name="K")
+        Charge.objects.create(student=student, description="A", amount_minor=1000,
+                              currency="PLN", due_date=date.today() - timedelta(days=1))
+        self._rule(offset_minutes=0)
+        with patch("notifications.backends.send_mail", side_effect=OSError("temporary failure")) as send:
+            run_scheduler()
+            deliver_pending()
+        log = NotificationLog.objects.get()
+        self.assertEqual(log.status, DeliveryStatus.FAILED)
+        self.assertEqual(log.retries, 1)
+        send.assert_called_once()
+
     def test_live_notification_providers_require_https_in_production(self):
         parent = self._parent_with_consent(ctype=ConsentType.SMS)
         parent.telegram_chat_id = "12345"

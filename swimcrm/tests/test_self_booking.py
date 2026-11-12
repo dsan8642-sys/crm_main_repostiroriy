@@ -340,7 +340,7 @@ class SelfBookingTest(TestCase):
             language_code='uk', subject='Заняття', body='{student}, {date}.')
         self.assertFalse(self.admin_client.get(url).json()['templates'][0]['missing_uk_translation'])
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_cancel_restore_and_edit_notify_booked_and_waiting_each_time(self):
         self.post(self.admin_client, f"/api/admin/groups/{self.group.id}/", {"self_booking_enabled": True})
         template = NotificationTemplate.objects.create(event_type=EventType.SCHEDULE_CHANGE,
