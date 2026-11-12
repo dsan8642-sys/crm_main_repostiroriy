@@ -18,6 +18,9 @@ if (-not $User) { $User = "postgres" }
 if (-not $HostName) { $HostName = "127.0.0.1" }
 if (-not $Port) { $Port = "5432" }
 if ($Password) { $env:PGPASSWORD = $Password }
+$mediaRoot = $env:MEDIA_ROOT
+if (-not $mediaRoot) { throw "MEDIA_ROOT is required for a complete backup" }
+Assert-ProductionPathOutsideRepo -Name "MEDIA_ROOT" -Value $mediaRoot -RepoRoot $RepoRoot
 
 Assert-ProductionPathOutsideRepo -Name "BACKUP_DIR" -Value $OutDir -RepoRoot $RepoRoot
 Assert-ProductionValue -Name "POSTGRES_DB" -Value $DbName
@@ -55,6 +58,15 @@ if ($LASTEXITCODE -ne 0) {
 $sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
 $hashFile = "$file.sha256"
 Set-Content -LiteralPath $hashFile -Value "$sha256  $(Split-Path -Leaf $file)" -NoNewline -Encoding ascii
+
+$python = Join-Path $RepoRoot "swimcrm\.venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $python)) { throw "Python runtime not found: $python" }
+$mediaFile = "$file.media.zip"
+& $python (Join-Path $PSScriptRoot "media-backup.py") create $mediaFile --media-root $mediaRoot
+if ($LASTEXITCODE -ne 0) { throw "Media backup failed with exit code $LASTEXITCODE" }
+& $python (Join-Path $PSScriptRoot "media-backup.py") verify $mediaFile
+if ($LASTEXITCODE -ne 0) { throw "Media backup verification failed with exit code $LASTEXITCODE" }
 Write-Host "PostgreSQL backup written: $file"
 Write-Host "Backup dump SHA-256: $sha256"
 Write-Host "Backup checksum file: $hashFile"
+Write-Host "Media backup written: $mediaFile"

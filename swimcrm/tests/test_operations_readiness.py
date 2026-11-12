@@ -1,7 +1,10 @@
 import tempfile
 import json
+import hashlib
 import importlib.util
+import os
 import re
+import shutil
 import subprocess
 from datetime import timedelta
 from pathlib import Path
@@ -964,6 +967,58 @@ class TargetHostReleaseInstallerRule(SimpleTestCase):
         self.assertIn("tracked_file_count", script)
         self.assertIn("tracked_file_list_sha256", script)
         self.assertIn("install-release-on-target-host.ps1", wrapper)
+
+    def test_tampered_archive_and_manifest_cannot_bypass_ci_checksum(self):
+        powershell = shutil.which("pwsh")
+        if not powershell:
+            self.skipTest("PowerShell 7 is required")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "release.zip"
+            trusted_hash = hashlib.sha256(b"approved archive").hexdigest()
+            archive.write_bytes(b"tampered archive")
+            manifest = root / "release.manifest.json"
+            manifest.write_text(json.dumps({
+                "archive": str(archive), "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "commit_sha": "a" * 40, "short_sha": "a" * 12,
+            }), encoding="utf-8")
+            command = [powershell, "-NoProfile", "-File",
+                       str(REPO_ROOT / "scripts" / "install-release-on-target-host.ps1"),
+                       "-Manifest", str(manifest), "-ReleaseDir", str(root / "installed"), "-RunInstall"]
+            missing = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("ExpectedArchiveSha256", missing.stdout + missing.stderr)
+            changed = subprocess.run(command + ["-ExpectedArchiveSha256", trusted_hash],
+                                     capture_output=True, text=True)
+            self.assertNotEqual(changed.returncode, 0)
+            self.assertIn("does not match the independent CI value", changed.stdout + changed.stderr)
+            self.assertFalse((root / "installed").exists())
+            matching = subprocess.run(command + ["-ExpectedArchiveSha256", hashlib.sha256(archive.read_bytes()).hexdigest()],
+                                      capture_output=True, text=True)
+            self.assertIn("Independent CI archive SHA-256 verified", matching.stdout + matching.stderr)
+
+
+class RestoreVerifierSafetyRule(SimpleTestCase):
+    def test_restore_verifier_never_preemptively_drops_a_database(self):
+        script = (REPO_ROOT / "scripts" / "verify-pg-restore.ps1").read_text(encoding="utf-8-sig")
+        wrapper = (REPO_ROOT / "scripts" / "verify-pg-restore.cmd").read_text(encoding="utf-8-sig")
+        self.assertIn("[guid]::NewGuid()", script)
+        self.assertIn("TempDb must not match POSTGRES_DB", script)
+        self.assertLess(script.index("& $createdb -w"), script.index("& $dropdb -w"))
+        self.assertIn("finally {", script)
+        self.assertNotIn('set "TEMP_DB=swimcrm_restore_check"', wrapper)
+
+        powershell = shutil.which("pwsh")
+        if not powershell:
+            self.skipTest("PowerShell 7 is required for the execution check")
+        environment = dict(os.environ, POSTGRES_DB="swimcrm")
+        blocked = subprocess.run([
+            powershell, "-NoProfile", "-File",
+            str(REPO_ROOT / "scripts" / "verify-pg-restore.ps1"),
+            "-BackupFile", "does-not-exist.dump", "-TempDb", "swimcrm",
+        ], capture_output=True, text=True, env=environment)
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("TempDb must not match POSTGRES_DB", blocked.stdout + blocked.stderr)
 
 
 class TargetHostReleaseInstallVerifierRule(SimpleTestCase):

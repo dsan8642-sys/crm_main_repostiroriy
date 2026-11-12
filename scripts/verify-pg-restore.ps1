@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$BackupFile,
-    [string]$TempDb = "swimcrm_restore_check",
+    [string]$TempDb = "",
     [string]$User = $env:POSTGRES_USER,
     [string]$Password = $env:POSTGRES_PASSWORD,
     [string]$HostName = $env:POSTGRES_HOST,
@@ -21,6 +21,16 @@ if ($Password) { $env:PGPASSWORD = $Password }
 
 Assert-ProductionValue -Name "POSTGRES_USER" -Value $User
 Assert-ProductionPassword -Name "POSTGRES_PASSWORD" -Value $Password
+
+if ([string]::IsNullOrWhiteSpace($TempDb)) {
+    $TempDb = "swimcrm_restore_$([guid]::NewGuid().ToString('N'))"
+}
+if ($TempDb -notmatch '^[a-zA-Z_][a-zA-Z0-9_]{0,62}$') {
+    throw "TempDb must be a valid PostgreSQL database name of at most 63 characters."
+}
+if ($env:POSTGRES_DB -and $TempDb.Equals($env:POSTGRES_DB, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "TempDb must not match POSTGRES_DB."
+}
 
 $dropdb = Join-Path $PgBin "dropdb.exe"
 $createdb = Join-Path $PgBin "createdb.exe"
@@ -59,34 +69,46 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "Backup dump catalog verification passed."
 
-& $dropdb -w -h $HostName -p $Port -U $User --if-exists $TempDb
+$mediaFile = "$BackupFile.media.zip"
+if (-not (Test-Path -LiteralPath $mediaFile)) { throw "Media backup not found: $mediaFile" }
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$python = Join-Path $repoRoot "swimcrm\.venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $python)) { throw "Python runtime not found: $python" }
+& $python (Join-Path $PSScriptRoot "media-backup.py") verify $mediaFile
+if ($LASTEXITCODE -ne 0) { throw "Media restore verification failed with exit code $LASTEXITCODE" }
+
 & $createdb -w -h $HostName -p $Port -U $User $TempDb
 if ($LASTEXITCODE -ne 0) {
-    throw "createdb failed with exit code $LASTEXITCODE"
+    throw "createdb failed (the temporary database may already exist); no database was dropped."
 }
-
-& $pgRestore -w -h $HostName -p $Port -U $User -d $TempDb --clean --if-exists $BackupFile
-if ($LASTEXITCODE -ne 0) {
-    throw "pg_restore failed with exit code $LASTEXITCODE"
-}
-
-& $psql -w -h $HostName -p $Port -U $User -d $TempDb -c "select count(*) as django_migrations from django_migrations;"
-if ($LASTEXITCODE -ne 0) {
-    throw "restore verification query failed with exit code $LASTEXITCODE"
-}
-
-& $psql -w -h $HostName -p $Port -U $User -d $TempDb -c "select conname, contype from pg_constraint where conname = 'excl_trainer_time_overlap';"
-if ($LASTEXITCODE -ne 0) {
-    throw "restore constraint verification failed with exit code $LASTEXITCODE"
-}
-
-Write-Host "Restore verification OK in temp database: $TempDb"
-if (-not $KeepTempDb) {
-    & $dropdb -w -h $HostName -p $Port -U $User --if-exists $TempDb
+Write-Host "Temporary restore database created: $TempDb"
+try {
+    & $pgRestore -w -h $HostName -p $Port -U $User -d $TempDb --clean --if-exists $BackupFile
     if ($LASTEXITCODE -ne 0) {
-        throw "cleanup dropdb failed with exit code $LASTEXITCODE"
+        throw "pg_restore failed with exit code $LASTEXITCODE"
     }
-    Write-Host "Temp database dropped: $TempDb"
-} else {
-    Write-Host "Temp database kept: $TempDb"
+
+    & $psql -w -h $HostName -p $Port -U $User -d $TempDb -c "select count(*) as django_migrations from django_migrations;"
+    if ($LASTEXITCODE -ne 0) {
+        throw "restore verification query failed with exit code $LASTEXITCODE"
+    }
+
+    & $psql -w -h $HostName -p $Port -U $User -d $TempDb -c "select conname, contype from pg_constraint where conname = 'excl_trainer_time_overlap';"
+    if ($LASTEXITCODE -ne 0) {
+        throw "restore constraint verification failed with exit code $LASTEXITCODE"
+    }
+
+    Write-Host "Restore verification OK in temp database: $TempDb"
+}
+finally {
+    if ($KeepTempDb) {
+        Write-Host "Temp database kept for inspection: $TempDb"
+    }
+    else {
+        & $dropdb -w -h $HostName -p $Port -U $User $TempDb
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cleanup failed; inspect temporary database $TempDb."
+        }
+        Write-Host "Temp database dropped: $TempDb"
+    }
 }

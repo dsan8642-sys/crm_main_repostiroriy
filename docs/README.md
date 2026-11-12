@@ -20,6 +20,7 @@
 | [`OPERATIONS.md`](OPERATIONS.md) | Фоновые задачи, release, backup и restore |
 | [`RODO_GDPR.md`](RODO_GDPR.md) | Работа с персональными данными |
 | [`RELEASE_CANDIDATE_READINESS.md`](RELEASE_CANDIDATE_READINESS.md) | Границы локальной и production-готовности |
+| [`DEFERRED_SECURITY_WORK.md`](DEFERRED_SECURITY_WORK.md) | Отложенные решения по безопасности и интеграциям |
 
 Машинным источником API остаются `swimcrm/portal/urls.py` и
 `swimcrm/portal/openapi.py`. Фактическая схема данных определяется Django

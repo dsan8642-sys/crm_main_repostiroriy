@@ -71,7 +71,7 @@ $operatorChecklist = @(
         id = "capture_github_actions_release_check_url"
         title = "Capture the GitHub Actions release-check run URL and artifact name."
         command = "Open the release-check workflow run for commit $commitSha."
-        expected_evidence = "GitHub Actions run URL, passing release-check job, and artifact swimcrm-release-source-$commitSha."
+        expected_evidence = "GitHub Actions run URL, passing release-check job, artifact swimcrm-release-$commitSha, and the independent archive SHA-256 from the run summary."
         stop_if_missing = $true
     },
     [ordered]@{
@@ -84,8 +84,8 @@ $operatorChecklist = @(
     [ordered]@{
         id = "install_release_archive_on_target_host"
         title = "Install the verified release archive on the target host."
-        command = "scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-$shortSha.manifest.json -InstallRoot <release-root> -RunInstall"
-        expected_evidence = "Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Release source archive manifest verified; Release source archive contents verified; Release source archive tracked file list verified; tracked_file_count; tracked_file_list_sha256; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed."
+        command = "scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-$shortSha.manifest.json -InstallRoot <release-root> -ExpectedArchiveSha256 <sha256-from-ci-run> -RunInstall"
+        expected_evidence = "Independent CI archive SHA-256 verified; Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed."
         stop_if_missing = $true
     },
     [ordered]@{

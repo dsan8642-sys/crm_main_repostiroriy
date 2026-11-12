@@ -17,11 +17,17 @@ if not exist "%BACKUP_FILE%" (
 )
 
 set "TEMP_DB=%~2"
-if "%TEMP_DB%"=="" set "TEMP_DB=swimcrm_restore_check"
-
 if "%KEEP_TEMP_DB%"=="1" (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-pg-restore.ps1" -BackupFile "%BACKUP_FILE%" -TempDb "%TEMP_DB%" -KeepTempDb
+  if "%TEMP_DB%"=="" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-pg-restore.ps1" -BackupFile "%BACKUP_FILE%" -KeepTempDb
+  ) else (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-pg-restore.ps1" -BackupFile "%BACKUP_FILE%" -TempDb "%TEMP_DB%" -KeepTempDb
+  )
 ) else (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-pg-restore.ps1" -BackupFile "%BACKUP_FILE%" -TempDb "%TEMP_DB%"
+  if "%TEMP_DB%"=="" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-pg-restore.ps1" -BackupFile "%BACKUP_FILE%"
+  ) else (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-pg-restore.ps1" -BackupFile "%BACKUP_FILE%" -TempDb "%TEMP_DB%"
+  )
 )
 exit /b %ERRORLEVEL%

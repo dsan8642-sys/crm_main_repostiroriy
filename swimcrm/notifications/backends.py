@@ -5,6 +5,7 @@ providers when configured, with dry-run mode for local/dev environments.
 """
 import json
 from urllib import error, request
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -14,6 +15,13 @@ from .models import Channel, validate_sms_template
 
 class DeliveryError(Exception):
     pass
+
+
+class _HttpsRedirectHandler(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl).scheme.lower() != "https":
+            raise DeliveryError("Notification provider redirected to an insecure URL")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class BaseBackend:
@@ -30,6 +38,13 @@ class EmailBackend(BaseBackend):
         to = parent.email or parent.user.email
         if not to:
             raise DeliveryError("recipient has no email")
+        if not settings.DEBUG and settings.EMAIL_BACKEND in {
+            "django.core.mail.backends.console.EmailBackend",
+            "django.core.mail.backends.locmem.EmailBackend",
+            "django.core.mail.backends.filebased.EmailBackend",
+            "django.core.mail.backends.dummy.EmailBackend",
+        }:
+            raise DeliveryError("Email provider is not configured")
         count = send_mail(
             subject or "Notification",
             body,
@@ -97,6 +112,8 @@ class SmsBackend(BaseBackend):
 
 
 def _post_json(url, payload, headers=None):
+    if not settings.DEBUG and urlsplit(url).scheme.lower() != "https":
+        raise DeliveryError("Notification provider requires HTTPS in production")
     req = request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -108,7 +125,8 @@ def _post_json(url, payload, headers=None):
         },
     )
     try:
-        with request.urlopen(req, timeout=15) as response:
+        opener = request.build_opener(_HttpsRedirectHandler()) if not settings.DEBUG else None
+        with (opener.open(req, timeout=15) if opener else request.urlopen(req, timeout=15)) as response:
             body = response.read().decode("utf-8")
             return json.loads(body) if body else {}
     except error.HTTPError as exc:

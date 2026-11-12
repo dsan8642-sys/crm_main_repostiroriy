@@ -154,12 +154,14 @@ Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "run_target_h
     "Restore verification OK"
 )
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "install_release_archive_on_target_host" -Fragments @(
+    "Independent CI archive SHA-256 verified",
     "Target-host release install completed",
     "Target-host release install verified",
     "Release archive extracted on target host",
-    "Release source archive tracked file list verified",
-    "tracked_file_count",
-    "tracked_file_list_sha256",
+    "Immutable release artifact verified",
+    "artifact_file_count",
+    "artifact_file_list_sha256",
+    "frontend_dist_file_count",
     "Backend dependencies installed",
     "Frontend dependencies installed",
     "Django migrations check passed"
@@ -173,6 +175,9 @@ if ([string]$installItem.command -notmatch "install-release-on-target-host\.cmd"
 }
 if ([string]$installItem.command -notmatch [regex]::Escape("-RunInstall")) {
     throw "Release handoff install_release_archive_on_target_host command must include -RunInstall."
+}
+if ([string]$installItem.command -notmatch [regex]::Escape("-ExpectedArchiveSha256")) {
+    throw "Release handoff install_release_archive_on_target_host command must include -ExpectedArchiveSha256."
 }
 Assert-ChecklistEvidenceContains -Checklist $operatorChecklist -Id "fill_docs_production_cutover_evidence_json" -Fragments @(
     "Release source archive contents verified",

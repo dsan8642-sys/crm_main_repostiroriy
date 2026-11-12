@@ -66,6 +66,9 @@ def validate(path=WORKFLOW):
             "immutable release artifact verifier",
             errors,
         )
+        _require(release, r"Get-FileHash -LiteralPath \$archive -Algorithm SHA256",
+                 "independent archive checksum", errors)
+        _require(release, r"GITHUB_STEP_SUMMARY", "trusted CI checksum summary", errors)
         _require(
             release,
             r"git rev-parse --short=12 HEAD",
@@ -138,6 +141,20 @@ def validate(path=WORKFLOW):
             "verify-release-artifact.ps1",
             "actions/upload-artifact@v4",
             "verified immutable artifact before upload",
+            errors,
+        )
+        _require_order(
+            release,
+            "verify-release-artifact.ps1",
+            "Get-FileHash -LiteralPath $archive -Algorithm SHA256",
+            "artifact verification before CI checksum publication",
+            errors,
+        )
+        _require_order(
+            release,
+            "Get-FileHash -LiteralPath $archive -Algorithm SHA256",
+            "actions/upload-artifact@v4",
+            "independent checksum before artifact upload",
             errors,
         )
         _require_order(

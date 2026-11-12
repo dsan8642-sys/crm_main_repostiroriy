@@ -286,6 +286,12 @@ Treat `status=critical` as an incident signal. In particular, investigate
 immediately when due notifications are older than 60 minutes or expected
 Celery beat jobs are missing.
 
+In production, the console email backend is treated as unconfigured: email
+delivery fails without printing the message body, and failed email is not
+resent automatically after mail is configured. A real `EMAIL_BACKEND` remains
+an operator setting until CRM integration is implemented. Live Telegram and
+SMS provider URLs must use HTTPS; development HTTP remains available.
+
 ## Release checklist
 
 Before creating a production package:
@@ -358,9 +364,14 @@ Before creating a production package:
   contents verified`, `Release source archive tracked file list verified`,
   `tracked_file_count`, `tracked_file_list_sha256`, `commit_sha`, and
   `archive_sha256` into the cutover evidence;
-- on the target host, copy the release `.zip` and `.manifest.json` together and
-  install from the verified archive with
-  `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<sha>.manifest.json -InstallRoot <release-root> -RunInstall`;
+- on the target host, download the deployment `.zip` and `.manifest.json` from
+  the approved GitHub Actions `swimcrm-release-<full-sha>` artifact. The local
+  source archive is for review and is not interchangeable with this bundle.
+  Read the deployment ZIP SHA-256 from that run's summary (not from the
+  transferred manifest); install with
+  `scripts\install-release-on-target-host.cmd -Manifest releases\swimcrm-release-<sha>.manifest.json -InstallRoot <release-root> -ExpectedArchiveSha256 <sha256-from-ci-run> -RunInstall`;
+- the installer rejects a missing or mismatched independent CI checksum before
+  extracting files or installing dependencies;
 - the target-host installer supports manifests created on another machine: if
   the manifest contains the build machine's absolute archive path, the verifier
   falls back to the sibling `.zip` next to the manifest;
@@ -424,6 +435,17 @@ C:\SwimCRMRuntime\staticfiles
 C:\SwimCRMRuntime\uploads
 ```
 
+Before a production release, inspect the actual `BACKUP_DIR` used by the
+scheduled backup process and the ACL of that directory and its `.dump`,
+`.sha256`, and `.media.zip` files. On the host, use read-only checks such as
+`Get-Acl -LiteralPath <actual-backup-directory>` and
+`icacls <actual-backup-directory>`; inspect inherited permissions too. Only
+the backup service account, designated operators, and system administrators
+should be able to read or change backups. Confirm the directory is outside
+the source tree and public web roots and is not an open network share. Record
+the actual path and access review in release evidence. This is an operator
+check, not an automatic deployment gate.
+
 Do not package `backups/`, `receipts/`, `swimcrm/receipts/`,
 `swimcrm/db.sqlite3`, `releases/`, frontend `dist/`, `node_modules/`, backend
 `.venv/`, or old project archives into production source releases.
@@ -457,6 +479,16 @@ Retention:
 
 ## PostgreSQL backup
 
+The five CSV/XLSX exports are for selected business records and are not a full
+CRM backup. A complete backup consists of the PostgreSQL dump and its paired
+`.dump.media.zip` archive (including participant photos and receipt uploads),
+each with a `.sha256` sidecar. Set `MEDIA_ROOT` to the production uploads
+directory before running the backup wrapper. Keep all four files together.
+The restore verifier checks the dump and extracts the media archive into a
+temporary directory to verify every file checksum. For an actual recovery,
+restore the verified media archive into `MEDIA_ROOT` while application writers
+are stopped, along with the database restore described below.
+
 Create a custom-format backup:
 
 ```powershell
@@ -486,8 +518,11 @@ does not set database password defaults itself:
 scripts\verify-pg-restore.cmd C:\SwimCRMRuntime\backups\swimcrm-YYYYMMDD-HHMMSS.dump
 ```
 
-The restore check creates `swimcrm_restore_check`, verifies `django_migrations`
-and `excl_trainer_time_overlap`, then drops the temporary database. Set
+The restore check creates a new uniquely named database, verifies
+`django_migrations` and `excl_trainer_time_overlap`, then drops only the
+database it created. An explicitly named existing database is never
+overwritten, and `TempDb` cannot equal `POSTGRES_DB`. The generated name is
+printed for troubleshooting. Set
 `KEEP_TEMP_DB=1` for `verify-pg-restore.cmd` or pass `-KeepTempDb` to the
 PowerShell script if the restored DB must be inspected manually.
 

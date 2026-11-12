@@ -207,7 +207,7 @@ SPA использует query-параметры, а не отдельный ro
 | `attendance` | Посещения и их влияние на абонементы/начисления; `change_attendance_payment` атомарно меняет источник списания и по явному выбору включает учёт исторических посещений; для выбора абонемента `subscriptions.services.can_assign_attendance` проверяет: срок не истёк ИЛИ есть занятия; `set_attendance` сохраняет ручной выбор при изменениях отметки |
 | `subscriptions` | Типы и экземпляры абонементов, остатки, даты окончания, продление и заморозку |
 | `billing` | Начисления и платежи привязаны к участнику для аудита; `family_balance(s)` и `family_charge_statuses` объединяют деньги по `ParentAccount`, сохраняя личные абонементы и посещаемость |
-| `notifications` | Шаблоны, правила, отправку, повтор и quiet hours; `deliver` повторно проверяет согласие канала непосредственно перед вызовом внешнего backend |
+| `notifications` | Шаблоны, правила, отправку, повтор и quiet hours; `deliver` повторно проверяет согласие канала и не ставит неудачные production email в повторную очередь; внешние провайдеры требуют HTTPS в production |
 | `payroll` | Переиспользуемые ставки с версиями по датам, назначения тренерам по филиалам и расчётные периоды; старые схемы сохраняются для миграции и истории |
 | `localization` | Языки и серверный словарь переводов |
 | `audit` | Неизменяемый журнал значимых действий |
@@ -259,7 +259,7 @@ SPA использует query-параметры, а не отдельный ro
 | Общий компонент/стиль | `design/` | sync script, обе runtime-копии, build |
 | Локализация | frontend locale-файлы или `localization/` | RU/UK/PL, fallback и layout |
 | Импорт/экспорт | `dataio/` и `portal/admin_import_views.py` | preview, idempotency, rollback, round-trip |
-| Release/production | `scripts/` и `docs/OPERATIONS.md` | backup, restore, manifest, readback |
+| Release/production | `scripts/` и `docs/OPERATIONS.md` | независимая сумма архива из CI, backup, безопасная временная БД restore, manifest, readback |
 
 ## 7. Данные и запрос
 

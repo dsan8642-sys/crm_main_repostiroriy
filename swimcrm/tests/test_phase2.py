@@ -1,6 +1,8 @@
 import io
 import json
+from contextlib import redirect_stdout
 from datetime import date, datetime, time, timedelta
+from unittest.mock import patch
 
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -26,7 +28,7 @@ from dataio.importer import NEW, DUPLICATE, ERROR
 from dataio.models import ImportBatch
 from localization.models import DictionaryKey, DictionaryTranslation
 from localization.services import translate
-from notifications.backends import SmsBackend, TelegramBackend
+from notifications.backends import DeliveryError, EmailBackend, SmsBackend, TelegramBackend, _HttpsRedirectHandler
 from notifications.models import (Channel, DeliveryStatus, EventType,
                                   NotificationLog, NotificationRule,
                                   NotificationTemplate,
@@ -334,6 +336,49 @@ class NotificationSchedulerRule(TestCase):
         c.grant()
         return parent
 
+    @override_settings(DEBUG=False, EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_unconfigured_production_email_fails_without_logging_or_later_retry(self):
+        parent = self._parent_with_consent()
+        student = Student.objects.create(parent=parent, first_name="PrivateName", last_name="K")
+        Charge.objects.create(student=student, description="A", amount_minor=1000,
+                              currency="PLN", due_date=date.today() - timedelta(days=1))
+        self._rule(offset_minutes=0)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            run_scheduler()
+        log = NotificationLog.objects.get()
+        self.assertEqual(log.status, DeliveryStatus.FAILED)
+        self.assertEqual(log.retries, 1)
+        self.assertNotIn("PrivateName", output.getvalue())
+        with override_settings(EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend"):
+            deliver_pending()
+        log.refresh_from_db()
+        self.assertEqual(log.status, DeliveryStatus.FAILED)
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(DEBUG=False, EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend")
+    def test_configured_production_email_still_sends(self):
+        parent = self._parent_with_consent()
+        with patch("notifications.backends.send_mail", return_value=1) as send:
+            EmailBackend().send(parent=parent, subject="Test", body="Message")
+        send.assert_called_once()
+
+    def test_live_notification_providers_require_https_in_production(self):
+        parent = self._parent_with_consent(ctype=ConsentType.SMS)
+        parent.telegram_chat_id = "12345"
+        parent.save(update_fields=["telegram_chat_id"])
+        with override_settings(DEBUG=False, SMS_DRY_RUN=False, SMS_PROVIDER_URL="http://sms.example.test/send",
+                               SMS_API_KEY="secret", TELEGRAM_DRY_RUN=False, TELEGRAM_API_URL="http://telegram.example.test",
+                               TELEGRAM_BOT_TOKEN="secret"):
+            with patch("notifications.backends.request.urlopen") as send:
+                with self.assertRaises(DeliveryError):
+                    SmsBackend().send(parent=parent, subject="", body="Test message")
+                with self.assertRaises(DeliveryError):
+                    TelegramBackend().send(parent=parent, subject="", body="Test message")
+                send.assert_not_called()
+        with self.assertRaises(DeliveryError):
+            _HttpsRedirectHandler().redirect_request(None, None, 302, "", {}, "http://unsafe.example.test")
+
     def test_no_consent_no_send(self):
         parent = f.make_parent()  # no consent
         st = Student.objects.create(parent=parent, first_name="Ян", last_name="К")
@@ -344,7 +389,7 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(res["enqueued"], 0)
         self.assertEqual(NotificationLog.objects.count(), 0)
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_due_reminder_sent_once(self):
         parent = self._parent_with_consent()
         st = Student.objects.create(parent=parent, first_name="Ян", last_name="К")
@@ -360,7 +405,7 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(res2["enqueued"], 0)
         self.assertEqual(NotificationLog.objects.filter(status=DeliveryStatus.SENT).count(), 1)
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_notification_uses_parent_preferred_language_translation(self):
         parent = self._parent_with_consent()
         parent.preferred_language = "pl"
@@ -384,7 +429,7 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(log.subject, "Platnosc")
         self.assertIn("prosimy o platnosc", log.body)
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_ukrainian_notification_translation(self):
         parent = self._parent_with_consent()
         parent.preferred_language = "uk"
@@ -403,7 +448,7 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(log.language_code, "uk")
         self.assertIn("оплатіть", log.body)
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_offset_defers_send(self):
         parent = self._parent_with_consent()
         st = Student.objects.create(parent=parent, first_name="Ян", last_name="К")
@@ -413,6 +458,7 @@ class NotificationSchedulerRule(TestCase):
         res = run_scheduler()
         self.assertEqual(res["enqueued"], 0)  # not due yet
 
+    @override_settings(DEBUG=True)
     def test_delivery_failure_retries_then_failed(self):
         # consent present but no email -> EmailBackend raises -> retries accumulate
         parent = self._parent_with_consent(email="")
@@ -495,7 +541,7 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(TelegramBackend.sent_messages[0][0], "123456")
         self.assertTrue(log.provider_message_id.startswith("telegram:dry:"))
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_quiet_hours_defer_and_resume_at_allowed_time(self):
         parent = self._parent_with_consent()
         st = Student.objects.create(parent=parent, first_name="Jan", last_name="K")
@@ -527,7 +573,7 @@ class NotificationSchedulerRule(TestCase):
         self.assertEqual(log.status, DeliveryStatus.SENT)
         self.assertEqual(len(mail.outbox), 1)
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", SMS_DRY_RUN=True)
+    @override_settings(DEBUG=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", SMS_DRY_RUN=True)
     def test_quiet_hours_are_channel_specific(self):
         SmsBackend.sent_messages.clear()
         parent = self._parent_with_consent()

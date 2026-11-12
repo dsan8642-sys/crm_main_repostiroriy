@@ -5,6 +5,7 @@ param(
     [string]$InstallRoot = $(if ($env:SWIMCRM_RELEASE_ROOT) { $env:SWIMCRM_RELEASE_ROOT } else { "" }),
     [string]$ReleaseDir = "",
     [string]$Python = $(if ($env:PYTHON) { $env:PYTHON } else { "python.exe" }),
+    [string]$ExpectedArchiveSha256 = "",
     [switch]$RunInstall
 )
 
@@ -152,6 +153,15 @@ if (-not $RunInstall) {
     Write-Host "Plan only. Re-run with -RunInstall to install the release on the target host."
     return
 }
+
+if ($ExpectedArchiveSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+    throw "ExpectedArchiveSha256 must be copied from the trusted CI run before installation."
+}
+$actualArchiveSha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+if (-not $actualArchiveSha256.Equals($ExpectedArchiveSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Release archive SHA-256 does not match the independent CI value."
+}
+Write-Host "Independent CI archive SHA-256 verified: $actualArchiveSha256"
 
 Invoke-Step "Verify release source archive" {
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File $archiveVerifier $manifestPath

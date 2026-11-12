@@ -46,9 +46,9 @@ EVIDENCE_ITEMS = [
     },
     {
         "id": "target_host_release_install",
-        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -RunInstall",
+        "command": "scripts\\install-release-on-target-host.cmd -Manifest releases\\swimcrm-release-<short-sha>.manifest.json -InstallRoot <release-root> -ExpectedArchiveSha256 <sha256-from-ci-run> -RunInstall",
         "summary": "Extract the verified release archive on the target host, install backend/frontend dependencies, and verify migrations.",
-        "output_excerpt": "Must include: Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed.",
+        "output_excerpt": "Must include: Independent CI archive SHA-256 verified; Target-host release install completed; Target-host release install verified; Release archive extracted on target host; Immutable release artifact verified; artifact_file_count; artifact_file_list_sha256; frontend_dist_file_count; Backend dependencies installed; Frontend dependencies installed; Django migrations check passed.",
     },
     {
         "id": "production_env_preflight",

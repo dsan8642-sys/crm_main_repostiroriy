@@ -1,5 +1,7 @@
 import os
+import hashlib
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -41,4 +43,18 @@ def create_postgres_backup(out_dir=None):
         "-f", str(backup_file),
     ]
     subprocess.run(cmd, env=env, check=True)
+    checksum = hashlib.sha256()
+    with backup_file.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            checksum.update(chunk)
+    Path(f"{backup_file}.sha256").write_text(
+        f"{checksum.hexdigest()}  {backup_file.name}", encoding="ascii")
+    media_root = os.environ.get("MEDIA_ROOT")
+    if not media_root:
+        raise ImproperlyConfigured("MEDIA_ROOT is required for a complete backup")
+    media_script = settings.BASE_DIR.parent / "scripts" / "media-backup.py"
+    media_archive = Path(f"{backup_file}.media.zip")
+    subprocess.run([sys.executable, str(media_script), "create", str(media_archive),
+                    "--media-root", media_root], check=True)
+    subprocess.run([sys.executable, str(media_script), "verify", str(media_archive)], check=True)
     return backup_file

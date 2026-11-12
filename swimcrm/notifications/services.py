@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from django.db.models import Q
 from django.db import IntegrityError, transaction
+from django.conf import settings
 from django.utils import timezone
 
 from accounts.models import ConsentType
@@ -185,7 +186,7 @@ def deliver(log: NotificationLog, template: NotificationTemplate):
     except (DeliveryError, Exception) as exc:  # noqa: BLE001 - record any failure
         log.retries += 1
         log.error = str(exc)
-        log.status = DeliveryStatus.FAILED if log.retries >= MAX_RETRIES else DeliveryStatus.QUEUED
+        log.status = DeliveryStatus.FAILED if (log.channel == Channel.EMAIL and not settings.DEBUG) or log.retries >= MAX_RETRIES else DeliveryStatus.QUEUED
     log.save(update_fields=[
         "status", "sent_at", "last_attempt_at", "error", "retries",
         "subject", "body", "provider_message_id", "language_code",

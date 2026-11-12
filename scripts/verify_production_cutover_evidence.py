@@ -87,6 +87,7 @@ REQUIRED_OUTPUT_FRAGMENTS = {
         "postgres-backend-check",
     ],
     "target_host_release_install": [
+        "Independent CI archive SHA-256 verified",
         "Target-host release install completed",
         "Target-host release install verified",
         "Release archive extracted on target host",
