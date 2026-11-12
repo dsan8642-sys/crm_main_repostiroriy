@@ -213,6 +213,7 @@ test('group editor saves a default location and group sessions reapply all group
   await expect.poll(() => groupBodies.length).toBe(1)
   expect(groupBodies[0].default_trainer_id).toBe('2')
   expect(groupBodies[0].default_location_id).toBe('12')
+  await expect(groupModal).toHaveCount(0)
 
   await page.goto('/?role=admin&view=schedule')
   await page.getByTestId('admin-schedule-create-group').click()
